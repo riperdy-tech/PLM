@@ -27,6 +27,7 @@ from ..domain.value_objects import tri_from_optional
 from ..normalization.canonical import text_fingerprint
 from ..normalization.youtube import QUARANTINE_REASON_CODES, NormalizedObservationDraft
 from .models import (
+    classifications,
     collection_runs,
     entities,
     entity_identities,
@@ -39,7 +40,8 @@ from .models import (
 
 __all__ = [
     "add_run_cost", "count_quarantined", "finish_collection_run",
-    "insert_normalized_observation", "insert_seed_evidence", "load_entity",
+    "insert_classification", "insert_normalized_observation", "insert_seed_evidence",
+    "latest_classifications_for", "load_classification", "load_entity",
     "load_observations", "load_queries", "load_run", "load_seed_evidence",
     "quarantine_record", "resolve_entity", "start_collection_run", "upsert_query",
     "upsert_source",
@@ -376,3 +378,59 @@ def load_seed_evidence(session: Session, query_id: str) -> list[str]:
         .where(seed_evidence.c.query_id == query_id)
         .order_by(seed_evidence.c.created_at)
     ).scalars()]
+
+
+def insert_classification(
+    session: Session,
+    *,
+    observation_id: str | None,
+    entity_id: str | None,
+    content_fingerprint: str,
+    taxonomy_version: str,
+    classifier_model: str,
+    classifier_version: str,
+    classification_prompt_version: str,
+    classification_schema_version: str,
+    dimensions: Mapping[str, Any],
+    confidence: float,
+    unmapped_terms: Sequence[str],
+) -> str:
+    """§29: every classification names the taxonomy, model, prompt and schema versions."""
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("classification confidence must be within 0–1")
+    classification_id = _new_id()
+    session.execute(sa.insert(classifications).values(
+        id=classification_id, observation_id=observation_id, entity_id=entity_id,
+        content_fingerprint=content_fingerprint, taxonomy_version=taxonomy_version,
+        classifier_model=classifier_model, classifier_version=classifier_version,
+        classification_prompt_version=classification_prompt_version,
+        classification_schema_version=classification_schema_version,
+        dimensions_json=dict(dimensions), confidence=confidence,
+        unmapped_terms=list(unmapped_terms),
+    ))
+    return classification_id
+
+
+def load_classification(
+    session: Session, *, content_fingerprint: str, taxonomy_version: str,
+) -> Mapping[str, Any] | None:
+    row = session.execute(
+        sa.select(classifications).where(
+            classifications.c.content_fingerprint == content_fingerprint,
+            classifications.c.taxonomy_version == taxonomy_version,
+        )
+    ).mappings().one_or_none()
+    return dict(row) if row is not None else None
+
+
+def latest_classifications_for(
+    session: Session, *, taxonomy_version: str, limit: int = 500,
+) -> list[Mapping[str, Any]]:
+    """Newest-first classification rows for one taxonomy version — the scorer's input."""
+    statement = (
+        sa.select(classifications)
+        .where(classifications.c.taxonomy_version == taxonomy_version)
+        .order_by(classifications.c.created_at.desc())
+        .limit(limit)
+    )
+    return [dict(row) for row in session.execute(statement).mappings()]
