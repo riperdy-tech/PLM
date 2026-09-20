@@ -65,7 +65,7 @@ def slug_token(text: str, *, max_length: int = 48) -> str:
     return slug[:max_length].rstrip("_")
 
 
-def tri_from_optional(value: int | float | None) -> Tri:
+def tri_from_optional(value: float | None) -> Tri:
     """`NULL` from the database becomes `Tri.unknown()`, never `0` (Review Focus 1)."""
     return Tri.unknown() if value is None else Tri.known(value)
 
