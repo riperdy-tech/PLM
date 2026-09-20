@@ -658,12 +658,13 @@ def load_arms(session: Session, *, status: ArmStatus | None = None) -> list[Mapp
 def insert_score(
     session: Session, *, arm_id: str, score: OpportunityScore, computed_at: datetime,
     components: Mapping[str, Any], evidence: Mapping[str, Any],
-    feature_version: str, normalization_version: str,
 ) -> str:
     """§20: evidence and versions travel with the number, always.
 
-    The row id is derived from the row's stable identity (arm + computation instant),
-    never minted — a replay in a fresh schema reproduces the same score rows.
+    The versions are read off the score object — the object the computation returned —
+    so a row cannot claim a version the computation never used (review fix 2). The row
+    id is derived from the row's stable identity (arm + computation instant), never
+    minted: a replay in a fresh schema reproduces the same score rows.
     """
     score_id = deterministic_id("score", arm_id, computed_at.isoformat())
     session.execute(sa.insert(scores).values(
@@ -671,7 +672,8 @@ def insert_score(
         market_opportunity_score=score.market_opportunity_score,
         confidence=score.confidence, components_json=dict(components),
         evidence_json=dict(evidence), score_version=score.score_version,
-        feature_version=feature_version, normalization_version=normalization_version,
+        feature_version=score.feature_version,
+        normalization_version=score.normalization_version,
     ))
     return score_id
 

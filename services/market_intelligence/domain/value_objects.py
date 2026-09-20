@@ -102,15 +102,26 @@ class ScoreComponents:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSummary:
-    """§20 `evidence` object; counts are observations, not entity counts."""
+    """§20 `evidence` object; counts are observations, not entity counts.
+
+    `observation_ids` is the **full** input set behind a score (§30 reconstruction):
+    the frozen C1 wire exposes only the first five as `top_observation_ids`, but a
+    stored score whose evidence stopped at five could not be recomputed when more
+    observations had fed it (review fix 2).
+    """
 
     observation_count: int
     source_count: int
-    top_observation_ids: tuple[str, ...]
+    observation_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if self.observation_count < 0 or self.source_count < 0:
             raise ValueError("evidence counts cannot be negative")
+
+    @property
+    def top_observation_ids(self) -> tuple[str, ...]:
+        """The wired view: the first five ids in deterministic input order."""
+        return self.observation_ids[:5]
 
 
 @dataclass(frozen=True, slots=True)

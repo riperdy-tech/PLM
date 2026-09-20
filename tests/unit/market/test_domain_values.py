@@ -54,7 +54,10 @@ def test_score_components_reject_out_of_range_values() -> None:
 
 def test_evidence_summary_counts_are_non_negative_and_top_ids_are_strings() -> None:
     with pytest.raises(ValueError):
-        EvidenceSummary(observation_count=-1, source_count=1, top_observation_ids=())
+        EvidenceSummary(observation_count=-1, source_count=1, observation_ids=())
+    summary = EvidenceSummary(observation_count=7, source_count=1,
+                              observation_ids=tuple(f"r{index}" for index in range(7)))
+    assert summary.top_observation_ids == ("r0", "r1", "r2", "r3", "r4")
 
 
 def test_normalized_observation_keeps_unknown_metrics_unknown() -> None:
@@ -75,7 +78,8 @@ def test_opportunity_score_enforces_bounds() -> None:
             arm_id="a", market_opportunity_score=101.0, confidence=0.5,
             components=ScoreComponents.from_mapping({c.value: 50.0 for c in ScoringComponent}),
             evidence=EvidenceSummary(1, 1, ()), as_of=datetime(2026, 9, 20, tzinfo=UTC),
-            score_version="p1-v1",
+            score_version="p1-v1", feature_version="p1-features-v1",
+            normalization_version="p1-norm-v1",
         )
 
 

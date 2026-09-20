@@ -461,10 +461,7 @@ def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> 
         taxonomy_confidence={fp: confidence.get(fp, 0.0) for fp in grouped},
     )
     scores = score_all_arms(features, as_of=now, settings=settings)
-    written = persist_scores(
-        session, scores, computed_at=now, feature_version=settings.feature_version,
-        normalization_version=settings.normalization_version,
-    )
+    written = persist_scores(session, scores, computed_at=now)
     return {"job": "market.opportunity_scoring", "arms": len(arms), "scores": written}
 
 

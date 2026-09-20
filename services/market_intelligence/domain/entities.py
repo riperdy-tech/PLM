@@ -61,7 +61,12 @@ class MarketEntity:
 
 @dataclass(frozen=True, slots=True)
 class OpportunityScore:
-    """§20's object, minus the wire mapping (api/schemas.py owns serialisation)."""
+    """§20's object, minus the wire mapping (api/schemas.py owns serialisation).
+
+    The three versions ride on the object itself: they are the versions of the
+    computation that produced this number, so persistence cannot disagree with it
+    (review fix 2 — they used to arrive as independent `persist_scores` arguments).
+    """
 
     arm_id: str
     market_opportunity_score: float
@@ -70,6 +75,8 @@ class OpportunityScore:
     evidence: EvidenceSummary
     as_of: datetime
     score_version: str
+    feature_version: str
+    normalization_version: str
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.market_opportunity_score <= 100.0:

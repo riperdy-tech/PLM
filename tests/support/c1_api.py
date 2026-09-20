@@ -72,8 +72,7 @@ def seed_market(session: Session) -> None:
         taxonomy_confidence={"seam-fixture": 0.8},
     )
     persist_scores(session, score_all_arms(features, as_of=AS_OF, settings=settings),
-                   computed_at=AS_OF, feature_version="p1-features-v1",
-                   normalization_version="p1-norm-v1")
+                   computed_at=AS_OF)
 
 
 def _market_engine() -> sa.Engine:

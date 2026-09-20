@@ -63,11 +63,13 @@ def _features(market_session, *, views: int, subscribers: int, fingerprint: str,
                                 arm_ids=arm_ids)
 
 
-def _score_with(features, components, *, weights=None):
+def _score_with(features, components, *, weights=None, score_version=None,
+                feature_version=None, normalization_version=None):
     return score_arm(
         features, components, as_of=AS_OF, weights=weights or default_weights(),
-        score_version=SETTINGS.score_version, feature_version=SETTINGS.feature_version,
-        normalization_version=SETTINGS.normalization_version,
+        score_version=score_version or SETTINGS.score_version,
+        feature_version=feature_version or SETTINGS.feature_version,
+        normalization_version=normalization_version or SETTINGS.normalization_version,
     )
 
 
@@ -118,9 +120,7 @@ def test_scores_persist_with_their_versions_and_read_back(market_session) -> Non
     assert (arm_id, created) == ("rnb_late_night_drive", True)
 
     scores = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
-    written = persist_scores(market_session, scores, computed_at=AS_OF,
-                             feature_version="p1-features-v1",
-                             normalization_version="p1-norm-v1")
+    written = persist_scores(market_session, scores, computed_at=AS_OF)
     assert written == 1
     latest = repositories.latest_scores(market_session, limit=10)
     assert latest[0]["arm_id"] == "rnb_late_night_drive"
@@ -128,6 +128,82 @@ def test_scores_persist_with_their_versions_and_read_back(market_session) -> Non
     assert latest[0]["market_opportunity_score"] == pytest.approx(
         scores["b"].market_opportunity_score
     )
+
+
+def test_the_stored_versions_are_the_versions_of_the_computation(market_session) -> None:
+    """Review fix 2: versions must travel on the score object.
+
+    They used to reach the row only through independent `persist_scores` arguments, so
+    a caller could store a row claiming versions the computation never ran with. The
+    score is now constructed with the versions of the run, and persistence writes the
+    score's own versions — there is no second version argument to disagree with.
+    """
+    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b",
+                         arm_ids={"b": "rnb_late_night_drive"})
+    profile = TaxonomyProfile(genre="rnb", use_case="late_night_drive")
+    repositories.upsert_arm(
+        market_session,
+        ArmDraft(arm_id="rnb_late_night_drive", fingerprint="b", profile=profile,
+                 support_count=3),
+        brand_id="neon_seoul",
+    )
+    components = compute_component_scores(features, settings=SETTINGS)
+    score = _score_with(features["b"], components["b"], score_version="p1-v9",
+                        feature_version="p1-features-v9", normalization_version="p1-norm-v9")
+    assert score.feature_version == "p1-features-v9"
+    assert score.normalization_version == "p1-norm-v9"
+
+    persist_scores(market_session, {"b": score}, computed_at=AS_OF)
+    row = repositories.scores_for_arm(market_session, "rnb_late_night_drive")[0]
+    assert row["score_version"] == "p1-v9"
+    assert row["feature_version"] == "p1-features-v9"
+    assert row["normalization_version"] == "p1-norm-v9"
+
+
+def test_a_persisted_score_reconstructs_from_its_recorded_inputs(market_session) -> None:
+    """Review fix 2: a stored score must be recomputable from what it recorded.
+
+    §30/AC-08: same observation set + versions ⇒ same score. The evidence used to cap
+    at five observation ids, so a score fed by more sightings could not be rebuilt; the
+    row now carries the full input set and the test recomputes through the production
+    feature/scoring path and demands the identical value back.
+    """
+    _store_channel_points(market_session, "slow_mega", subscribers=10_000_000,
+                          published_days_ago=1200,
+                          points=((75, 2_000_000), (65, 2_000_500), (55, 2_001_000),
+                                  (40, 2_001_500), (25, 2_002_000), (15, 2_002_500),
+                                  (5, 2_003_000)))  # seven sightings > the old five-id cap
+    _store_channel(market_session, "fast_small", subscribers=20_000, published_days_ago=60,
+                   views=(1_000, 5_000, 12_000, 17_000, 21_000))
+
+    original = _scores_from_stored(market_session)
+    persist_scores(market_session, original, computed_at=AS_OF)
+
+    tokens = ("slow_mega", "fast_small")
+    entity_ids = [repositories.deterministic_id("entity", token) for token in tokens]
+    observations = repositories.observations_for_entities(market_session, entity_ids)
+    by_raw_id = {observation.raw_observation_id: observation for observation in observations}
+
+    grouped = {}
+    for token in tokens:
+        row = repositories.scores_for_arm(market_session, token)[0]
+        recorded = list(row["evidence_json"]["observation_ids"])
+        assert len(recorded) == (7 if token == "slow_mega" else 5)
+        grouped[token] = tuple(
+            replace(by_raw_id[raw_id], observed_at=_as_utc(by_raw_id[raw_id].observed_at),
+                    published_at=(None if by_raw_id[raw_id].published_at is None
+                                  else _as_utc(by_raw_id[raw_id].published_at)))
+            for raw_id in recorded
+        )
+
+    features = compute_arm_features(grouped, as_of=AS_OF, settings=SETTINGS)
+    recomputed = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
+    for token in tokens:
+        row = repositories.scores_for_arm(market_session, token)[0]
+        assert recomputed[token].market_opportunity_score == row["market_opportunity_score"]
+        assert recomputed[token].score_version == row["score_version"]
+        assert recomputed[token].feature_version == row["feature_version"]
+        assert recomputed[token].normalization_version == row["normalization_version"]
 
 
 def test_arm_identity_survives_a_recompute(market_session) -> None:
@@ -210,9 +286,17 @@ def test_production_fit_still_contributes_when_evidence_exists(market_session) -
 def _store_channel(session, token: str, *, subscribers: int, published_days_ago: int,
                    views: tuple[int, ...]) -> None:
     """Store one channel's real observation series through the production write path."""
+    _store_channel_points(session, token, subscribers=subscribers,
+                          published_days_ago=published_days_ago,
+                          points=tuple(zip((55, 40, 25, 15, 5), views)))
+
+
+def _store_channel_points(session, token: str, *, subscribers: int, published_days_ago: int,
+                          points: tuple[tuple[int, int], ...]) -> None:
+    """As `_store_channel`, but each sighting names its own (days_ago, views)."""
     entity_id = repositories.deterministic_id("entity", token)
     source_id = repositories.deterministic_id("source", token)
-    for index, (days_ago, view_count) in enumerate(zip((55, 40, 25, 15, 5), views)):
+    for index, (days_ago, view_count) in enumerate(points):
         repositories.insert_normalized_observation(session, NormalizedObservationDraft(
             entity_id=entity_id, source_id=source_id,
             raw_observation_id=repositories.deterministic_id("raw", token, str(index)),
@@ -269,6 +353,8 @@ def _canonical(scores: dict) -> str:
                 },
                 "as_of": score.as_of.isoformat(),
                 "score_version": score.score_version,
+                "feature_version": score.feature_version,
+                "normalization_version": score.normalization_version,
             }
             for arm, score in sorted(scores.items())
         },

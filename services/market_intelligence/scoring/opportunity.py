@@ -221,10 +221,12 @@ def score_arm(
         evidence=EvidenceSummary(
             observation_count=features.observation_count,
             source_count=features.source_count,
-            top_observation_ids=features.observation_ids[:5],
+            observation_ids=features.observation_ids,
         ),
         as_of=as_of,
         score_version=score_version,
+        feature_version=feature_version,
+        normalization_version=normalization_version,
     )
 
 
@@ -249,10 +251,13 @@ def persist_scores(
     scores: Mapping[str, OpportunityScore],
     *,
     computed_at: datetime,
-    feature_version: str,
-    normalization_version: str,
 ) -> int:
-    """Append one score row per arm per computation instant (§3.1/§20)."""
+    """Append one score row per arm per computation instant (§3.1/§20).
+
+    Every persisted value comes off the score object — including all three versions
+    and the full input set (review fix 2): the row's claim about how it was produced
+    cannot drift from the computation that produced it.
+    """
     from ..storage.repositories import insert_score
 
     written = 0
@@ -263,8 +268,8 @@ def persist_scores(
                         for component, value in score.components.as_mapping().items()},
             evidence={"observation_count": score.evidence.observation_count,
                       "source_count": score.evidence.source_count,
-                      "top_observation_ids": list(score.evidence.top_observation_ids)},
-            feature_version=feature_version, normalization_version=normalization_version,
+                      "top_observation_ids": list(score.evidence.top_observation_ids),
+                      "observation_ids": list(score.evidence.observation_ids)},
         )
         written += 1
     return written

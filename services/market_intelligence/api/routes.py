@@ -106,7 +106,7 @@ def build_router(*, session_factory: SessionFactory | None,
             arm=_arm(row), score=float(row["market_opportunity_score"]),
             component_scores=_components(row["components_json"]),
             confidence=float(row["confidence"]),
-            evidence_summary=EvidenceOut(**row["evidence_json"]),
+            evidence_summary=_evidence(row["evidence_json"]),
             observation_counts=int(row["evidence_json"].get("observation_count", 0)),
             source_counts=int(row["evidence_json"].get("source_count", 0)),
             last_updated=_instant(row["computed_at"]),
@@ -200,8 +200,22 @@ def _opportunity(row) -> OpportunityOut:
         confidence=float(row["confidence"]),
         as_of=_instant(row["as_of"]), taxonomy=TaxonomyOut(**_taxonomy_payload(taxonomy)),
         components=_components(row["components_json"]),
-        evidence=EvidenceOut(**row["evidence_json"]),
+        evidence=_evidence(row["evidence_json"]),
         score_version=row["score_version"],
+    )
+
+
+def _evidence(stored: Mapping[str, Any]) -> EvidenceOut:
+    """The frozen wire view of stored evidence.
+
+    Stored rows now carry the full input set (`observation_ids`) and a score basis
+    (`basis_weight`) besides the three registry fields; `EvidenceOut` forbids extras,
+    so the wire takes exactly its own keys and nothing else (registry C1).
+    """
+    return EvidenceOut(
+        observation_count=int(stored.get("observation_count", 0)),
+        source_count=int(stored.get("source_count", 0)),
+        top_observation_ids=list(stored.get("top_observation_ids", [])),
     )
 
 
