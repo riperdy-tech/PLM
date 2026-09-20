@@ -48,6 +48,9 @@ from .domain.enums import (
 )
 from .domain.value_objects import fingerprint
 from .features.arm_features import compute_arm_features
+from .observability.logging import log_run_summary
+from .observability.metrics import record_run_metrics
+from .observability.run_summary import summarize_run
 from .scoring.opportunity import persist_scores, score_all_arms
 from .storage import repositories
 from .storage.models import observations, raw_observations
@@ -89,6 +92,7 @@ def run_daily(now: datetime | None = None, *, session_factory: SessionFactory | 
         steps["discovery"] = _run_due_collection(session, now=moment, settings=resolved,
                                                  connector=connector,
                                                  connector_factory=connector_factory)
+        steps["costs"] = _emit_run_costs(session, steps["discovery"])
         session.commit()
     with _session(session_factory) as session:
         steps["classification"] = _classify_pending(session, now=moment, settings=resolved)
@@ -133,6 +137,7 @@ def run_collect(*, refresh: bool = False, limit: int = 25) -> dict[str, Any]:
     with _session() as session:
         result = _run_due_collection(session, now=now, settings=settings, trigger=trigger,
                                      limit=limit)
+        result["costs"] = _emit_run_costs(session, result)
         session.commit()
     return result
 
@@ -209,12 +214,16 @@ def _execute_step(job: str, session: Session, *, payload: dict[str, Any], now: d
         source_id = _ensure_source(session)
         return {"job": job, "new_queries": _install_seeds(session, source_id=source_id)}
     if job == "market.youtube_discovery":
-        return _run_due_collection(session, now=now, settings=settings, connector=connector,
-                                   connector_factory=connector_factory)
+        result = _run_due_collection(session, now=now, settings=settings, connector=connector,
+                                     connector_factory=connector_factory)
+        _add_run_costs(session, result)
+        return result
     if job == "market.youtube_refresh":
-        return _run_due_collection(session, now=now, settings=settings, connector=connector,
-                                   connector_factory=connector_factory,
-                                   query_ids=payload.get("query_ids"), trigger=job)
+        result = _run_due_collection(session, now=now, settings=settings, connector=connector,
+                                     connector_factory=connector_factory,
+                                     query_ids=payload.get("query_ids"), trigger=job)
+        _add_run_costs(session, result)
+        return result
     if job == "market.taxonomy_classification":
         return _classify_pending(session, now=now, settings=settings,
                                  full=bool(payload.get("full")))
@@ -399,6 +408,39 @@ def _counters_from_db(session: Session, run_id: str, *, requests: int) -> Collec
         quarantined_count=repositories.count_quarantined(session, run_id),
         status=CollectionRunStatus.PARTIAL,
     )
+
+
+def _emit_run_costs(session: Session, result: dict[str, Any]) -> dict[str, Any] | None:
+    """§42/AC-14: one structured line per run with its six counters and their units.
+
+    Every entry point that starts a collection run routes through here, so a run
+    can never end without reporting `api_calls`, `api_quota_units`, `llm_calls`,
+    `llm_tokens`, `llm_cost_estimate` (USD) and `storage_bytes`. A run that stored
+    nothing reports a real `0` — these are aggregates of stored rows, not guesses.
+    """
+    run_id = result.get("run_id")
+    if not isinstance(run_id, str):
+        return None
+    summary = summarize_run(session, run_id)
+    log_run_summary(summary)
+    record_run_metrics(summary)
+    return {
+        "run_id": run_id, "status": summary.status,
+        "api_calls": summary.api_calls,
+        "api_quota_units": summary.quota_units,
+        "api_quota_units_unit": summary.quota_units_unit,
+        "llm_calls": summary.llm_calls, "llm_tokens": summary.llm_tokens,
+        "llm_cost_estimate": summary.llm_cost_estimate,
+        "llm_cost_estimate_currency": summary.cost_currency,
+        "storage_bytes": summary.storage_bytes, "score_changes": summary.score_changes,
+    }
+
+
+def _add_run_costs(session: Session, result: dict[str, Any]) -> None:
+    """Attach the counters to a step's result dict (Temporal activities return JSON)."""
+    costs = _emit_run_costs(session, result)
+    if costs is not None:
+        result["costs"] = costs
 
 
 # ---------------------------------------------------------------------------
