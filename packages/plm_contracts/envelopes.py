@@ -3,7 +3,9 @@
 * :class:`Envelope` — P9 §89 metric API semantics: every response carries ``as_of``,
   ``source_freshness``, ``quality_status``, ``metric_version`` and ``currency`` (``None``
   where not applicable — never a guessed default); aggregated metrics add
-  ``observation_count``.
+  ``observation_count`` (optional: ``None`` means the count is not carried, ``0`` is a
+  legitimate *verified* count — a window that has not been observed yet is ``NOT_READY``
+  in the payload, never a fabricated count).
 * :class:`Page` — cursor pagination for collection APIs (P1 §25, P9 §141).
 
 Reconciliation (W0.3): P1's ``as_of`` / ``score_version`` and P9's collection parameters
@@ -45,7 +47,7 @@ class Envelope[T](BaseModel):
     quality_status: QualityStatus
     metric_version: str = Field(min_length=1)
     currency: CurrencyCode | None
-    observation_count: int | None = Field(default=None, ge=1)
+    observation_count: int | None = Field(default=None, ge=0)
     data: T
 
 

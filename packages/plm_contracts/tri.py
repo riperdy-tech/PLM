@@ -20,6 +20,9 @@ guarantees this type provides:
   states never compare equal to each other.
 * Raw numbers, booleans and numeric casts are refused: use the explicit, named
   :meth:`Tri.unwrap` (raises :class:`TriStateError`) or :meth:`Tri.unwrap_or`.
+* A boolean cannot arrive as a number: ``Tri[int]`` refuses
+  ``{"state": "known", "value": true}`` instead of letting pydantic's lax mode mint a
+  ``1``; a boolean remains valid where the declared payload type is ``bool``.
 * JSON serialises to a tagged object (``{"state": ..., "value": ...}``) that no
   consumer can confuse with a bare number; ``{"state": "unknown", "value": 0}`` is
   rejected outright.
@@ -277,6 +280,7 @@ class Tri[T]:
         if isinstance(value, Tri):
             if value.state is TriState.KNOWN:
                 inner = handler(value._value)
+                _refuse_bool_coercion(value._value, inner)
                 if inner is None:
                     raise TriStateError("a known Tri must carry a non-None value")
                 return Tri.known(inner)
@@ -286,6 +290,7 @@ class Tri[T]:
             if not has_value:
                 raise TriStateError("a 'known' Tri payload must carry a 'value' key")
             inner = handler(raw_value)
+            _refuse_bool_coercion(raw_value, inner)
             if inner is None:
                 raise TriStateError("a 'known' Tri must carry a non-None value")
             return Tri.known(inner)
@@ -294,6 +299,21 @@ class Tri[T]:
     @staticmethod
     def _serialize_tri(value: Tri[Any]) -> dict[str, Any]:
         return value.to_json_value()
+
+
+def _refuse_bool_coercion(raw: object, validated: object) -> None:
+    """Refuse pydantic's lax bool-to-number coercion inside a ``known`` payload.
+
+    ``Tri[int]`` fed ``{"state": "known", "value": true}`` would otherwise validate to
+    ``1``: ``bool`` is a subclass of ``int`` in Python and pydantic's lax mode exploits
+    that, minting a measured value out of a non-numeric one. A boolean stays valid
+    exactly where the declared payload type is ``bool``.
+    """
+    if isinstance(raw, bool) and not isinstance(validated, bool):
+        raise TriCoercionError(
+            "a known Tri payload cannot carry a boolean where a number is expected: "
+            f"{raw!r} would be silently coerced to {validated!r}"
+        )
 
 
 def _parse_payload(raw: object) -> tuple[TriState, object, bool]:

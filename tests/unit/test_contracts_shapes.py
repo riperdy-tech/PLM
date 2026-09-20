@@ -103,17 +103,22 @@ class TestEnvelope:
                 data=1.0,
             )
 
-    def test_observation_count_must_be_a_real_count(self) -> None:
+    def test_observation_count_of_zero_is_a_real_count(self) -> None:
+        # P9 §58: ZERO is a first-class value. A fresh aggregate with no source rows must
+        # still be able to carry the count — rejecting 0 would force omission ("not
+        # applicable") or a fabricated count, the exact collapses this contract prevents.
         envelope = Envelope[int](
             as_of=AS_OF,
             source_freshness=SourceFreshness.FRESH,
             quality_status=QualityStatus.VALID,
             metric_version="revenue_v2",
             currency="KRW",
-            observation_count=240,
-            data=1,
+            observation_count=0,
+            data=0,
         )
-        assert envelope.observation_count == 240
+        assert envelope.observation_count == 0
+
+    def test_negative_observation_counts_are_still_refused(self) -> None:
         with pytest.raises(ValidationError):
             Envelope[int](
                 as_of=AS_OF,
@@ -121,9 +126,33 @@ class TestEnvelope:
                 quality_status=QualityStatus.VALID,
                 metric_version="revenue_v2",
                 currency="KRW",
-                observation_count=0,
+                observation_count=-1,
                 data=1,
             )
+
+    def test_an_absent_observation_count_is_distinguishable_from_a_zero_count(self) -> None:
+        absent = Envelope[int](
+            as_of=AS_OF,
+            source_freshness=SourceFreshness.FRESH,
+            quality_status=QualityStatus.VALID,
+            metric_version="revenue_v2",
+            currency="KRW",
+            data=1,
+        )
+        verified_zero = Envelope[int](
+            as_of=AS_OF,
+            source_freshness=SourceFreshness.FRESH,
+            quality_status=QualityStatus.VALID,
+            metric_version="revenue_v2",
+            currency="KRW",
+            observation_count=0,
+            data=1,
+        )
+        assert absent.observation_count is None
+        assert verified_zero.observation_count == 0
+        assert absent != verified_zero
+        assert '"observation_count":null' in absent.model_dump_json()
+        assert '"observation_count":0' in verified_zero.model_dump_json()
 
     def test_round_trips_json(self) -> None:
         envelope = Envelope[float](

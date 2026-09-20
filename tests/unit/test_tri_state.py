@@ -19,6 +19,18 @@ class _Cost(BaseModel):
     metric: Tri[float]
 
 
+class _Observation(BaseModel):
+    """An integer-typed holder: bool-to-int is exactly where pydantic's lax mode bites."""
+
+    count: Tri[int]
+
+
+class _Flag(BaseModel):
+    """A boolean-typed holder: here a boolean *is* the declared type and must stay valid."""
+
+    flag: Tri[bool]
+
+
 class TestStatesAreDistinct:
     def test_unknown_is_not_equal_to_verified_zero(self) -> None:
         assert Tri.unknown() != Tri.known(0)
@@ -151,3 +163,28 @@ class TestPayloadValidationRefusesCollapse:
     def test_unknown_payload_without_value_is_accepted(self) -> None:
         assert _Cost(metric={"state": "unknown"}).metric.is_unknown
         assert _Cost(metric={"state": "not_ready"}).metric.is_not_ready
+
+
+class TestABooleanNeverArrivesAsANumber:
+    """Pydantic's lax mode turns ``True`` into ``1``; the contract must refuse that loudly.
+
+    A raw boolean is refused at the payload boundary (``_Cost(metric=True)`` fails), but
+    without this guard it re-enters inside a ``known`` payload, where bool-to-int/float
+    coercion silently mints a measured ``1`` out of a non-numeric value.
+    """
+
+    def test_a_known_payload_cannot_smuggle_a_boolean_as_an_int(self) -> None:
+        with pytest.raises(ValidationError):
+            _Observation(count={"state": "known", "value": True})
+
+    def test_a_known_payload_cannot_smuggle_a_boolean_as_a_float(self) -> None:
+        with pytest.raises(ValidationError):
+            _Cost(metric={"state": "known", "value": True})
+
+    def test_a_boolean_tri_instance_is_not_laundered_through_an_int_field(self) -> None:
+        with pytest.raises(ValidationError):
+            _Observation(count=Tri.known(True))
+
+    def test_a_boolean_is_still_a_valid_known_value_when_the_type_is_bool(self) -> None:
+        assert _Flag(flag={"state": "known", "value": True}).flag.unwrap() is True
+        assert _Flag(flag=Tri.known(False)).flag.unwrap() is False
