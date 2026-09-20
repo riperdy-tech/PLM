@@ -41,7 +41,17 @@ class RetirementConfig(_Frozen):
 
 
 class PolicyConfig(_Frozen):
-    """§49's row as a validated value object; persisted rows are immutable (§92)."""
+    """§49's row as a validated value object; persisted rows are immutable (§92).
+
+    Deliberate omission (recorded by the P2.15 gap audit): §15's cap list also names
+    `visual_world`, and this config has no such field. `ar_allocation_policy` (migration
+    `0008_ar_initial`, frozen) has no column to persist it, and a share that is not
+    persisted and versioned would be a code constant wearing a config's name — §15 forbids
+    hard-coding, §92 forbids silently changing a stored policy. Adding it is a new
+    migration plus a new policy version, not a patch; the walk already buckets an unset
+    dimension under "unknown" whenever a cap does exist (`constraints.py`), so this is a
+    persistence-boundary omission, not an unhandled data case.
+    """
 
     name: str = "default"
     version: str = "p2-v1"

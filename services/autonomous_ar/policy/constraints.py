@@ -13,9 +13,17 @@ selections than slots — so `sum(shares) <= ceiling` is structural.
 
 Refusals are auditable exactly once per arm (§58: "otherwise record rejection reason and
 continue"): the first pass that turns a candidate away records the reason code and the detail;
-later passes retry the candidate without duplicating the record. The exact-arm cap is kept as
-§15's guard even though `selected_ids` already enforces the stronger rule that an arm holds at
-most one slot, so that cap can never be approached by this walk.
+later passes retry the candidate without duplicating the record.
+
+§15's exact-arm cap is kept as an arithmetic guard, and its reach is deliberately narrow:
+through this walk's contract (one sample per arm, `selected_ids` dedupe) an arm can never
+hold more than one slot — stricter than any `max_exact_arm_share` can demand — so the cap
+is **structurally inert for every legitimate caller**. It fires only when a caller
+violates the one-sample-per-arm contract with a duplicated candidate *and* the intervening
+caps allow it (an arm's duplicates share its cluster, so cluster concurrency binds first
+otherwise: pinned by `test_exact_arm_cap_fires_only_on_a_duplicated_candidate`); a test
+claiming the cap "binds" on a real portfolio would in fact be testing the dedupe, which
+`test_walk_never_gives_one_arm_two_slots` pins instead.
 """
 
 from __future__ import annotations

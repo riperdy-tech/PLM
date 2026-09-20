@@ -1,4 +1,3 @@
-import math
 from datetime import UTC, datetime
 
 import pytest
@@ -49,7 +48,9 @@ def _ranked(count: int, *, genre: str | None = None, use_case: str | None = None
     return samples, arms
 
 
-def test_walk_honours_the_exact_arm_cap() -> None:
+def test_walk_never_gives_one_arm_two_slots() -> None:
+    """The rule this walk really enforces (and the one §15's exact-arm cap is inert
+    against): a full ten-slot cycle draws ten distinct arms, never one arm twice."""
     samples, arms = _ranked(10)
     portfolio = apply_portfolio_constraints(
         samples, classes={arm_id: AllocationType.EXPLOIT for arm_id in arms},
@@ -126,7 +127,31 @@ def test_the_walk_is_deterministic_for_the_same_inputs() -> None:
     first = apply_portfolio_constraints(samples, **args)
     second = apply_portfolio_constraints(list(samples), **args)
     assert first == second
-    assert math.floor(DEFAULT_POLICY.max_exact_arm_share * 6) <= 3
+
+
+def test_exact_arm_cap_fires_only_on_a_duplicated_candidate() -> None:
+    """The §15 exact-arm guard's arithmetic is live, but the only construction that reaches
+    it breaks the one-sample-per-arm contract: six duplicate pass-1 candidates of one
+    baseline arm against `floor(0.5 × 10) = 5` slots. The first five accept, the sixth is
+    refused naming `exact_arm_share`. Two knobs are relaxed to get there, and that is part
+    of the finding: cluster concurrency (2) and cluster share (6) otherwise bind first,
+    because an arm's duplicates all live in the same cluster — so for legitimate inputs
+    this cap is redundant thrice over, and its arithmetic is the last line of defence
+    against a caller bug rather than a portfolio rule."""
+    samples, arms = _ranked(10)
+    duplicated = [samples[0]] * 6 + samples[1:]
+    policy = PolicyConfig(baseline_fraction=0.6,  # reserved = ceil(0.6 × 10) = 6
+                          max_concurrent_experiments_per_cluster=10)
+    portfolio = apply_portfolio_constraints(
+        duplicated, classes={arm_id: AllocationType.EXPLOIT for arm_id in arms},
+        arms=arms, states={arm_id: ArmLifecycleStatus.ACTIVE for arm_id in arms},
+        policy=policy, slot_count=10,
+        quota={AllocationType.EXPLOIT: 10, AllocationType.ADJACENT_EXPLORE: 0,
+               AllocationType.RADICAL_EXPLORE: 0},
+        baselines=("arm-00",), clusters={arm_id: arm_id for arm_id in arms},
+    )
+    assert len([s for s in portfolio.selections if s.arm_id == "arm-00"]) == 5
+    assert any("exact_arm_share" in rejection.detail for rejection in portfolio.rejections)
 
 
 _CAP_CASES = [
