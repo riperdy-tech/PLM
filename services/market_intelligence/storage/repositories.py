@@ -66,9 +66,10 @@ __all__ = [
     "insert_classification", "insert_normalized_observation", "insert_score",
     "insert_seed_evidence", "latest_classifications_for", "latest_scores", "load_arms",
     "load_classification", "load_entity", "load_observations", "load_queries", "load_run",
-    "load_seed_evidence", "observations_for_entities", "quarantine_record", "resolve_entity",
-    "scores_for_arm", "start_collection_run", "sum_run_quota_units", "update_query_schedule",
-    "upsert_arm", "upsert_query", "upsert_source",
+    "load_seed_evidence", "observation_classification_inputs", "observations_for_entities",
+    "quarantine_record", "resolve_entity", "scores_for_arm", "start_collection_run",
+    "sum_run_quota_units", "update_query_schedule", "upsert_arm", "upsert_query",
+    "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -352,6 +353,26 @@ def observations_for_entities(
     if since is not None:
         statement = statement.where(observations.c.observed_at >= since)
     return _rows_to_observations(session.execute(statement).mappings())
+
+
+def observation_classification_inputs(
+    session: Session, *, since: datetime | None = None, limit: int = 1000,
+) -> list[Mapping[str, Any]]:
+    """Observation rows with the text a classifier needs — id, entity, title, description.
+
+    The classification cache keys on content, but §16's arms need the observation id the
+    content came from; `load_observations` cannot supply it (it returns Tri-valued domain
+    records), so this read exists for `cli._classify_pending`.
+    """
+    statement = (
+        sa.select(observations.c.id, observations.c.entity_id, observations.c.text_title,
+                  observations.c.text_description)
+        .order_by(observations.c.observed_at)
+        .limit(limit)
+    )
+    if since is not None:
+        statement = statement.where(observations.c.observed_at >= since)
+    return [dict(row) for row in session.execute(statement).mappings()]
 
 
 def _rows_to_observations(rows: Iterable[Mapping[str, Any]]) -> list[NormalizedObservation]:

@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 STUB_CASES = [
-    ("market", "collect", "PHASE-P1"),
     ("ar", "cycle", "PHASE-P2"),
     ("experiments", "run", "PHASE-P3"),
     ("music", "generate", "PHASE-P4"),
@@ -70,7 +69,15 @@ def test_stub_commands_exit_nonzero_with_the_phase_message(
 
 
 def test_stub_cases_cover_every_registered_group() -> None:
-    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP)
+    # P1's market group is implemented (P1.11), so it is no longer a stub case.
+    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {"market"}
+
+
+def test_market_commands_are_implemented_not_stubs() -> None:
+    for command in ("collect", "score", "report", "run-daily", "serve", "smoke-live"):
+        result = runner.invoke(app, ["market", command, "--help"])
+        assert result.exit_code == 0, _output(result)
+        assert "not implemented until" not in _output(result)
 
 
 def test_doctor_reports_clean_fail_for_dead_dependencies(
