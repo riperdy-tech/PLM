@@ -96,6 +96,7 @@ collection_runs = sa.Table(
     sa.Column("software_version", sa.Text, nullable=False),
     sa.Column("cost_api_calls", sa.Integer, nullable=False, server_default="0"),
     sa.Column("cost_api_quota_units", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("cost_llm_calls", sa.Integer, nullable=False, server_default="0"),
     sa.Column("cost_llm_tokens", sa.Integer, nullable=False, server_default="0"),
     sa.Column("cost_llm_cost_estimate", sa.Float, nullable=False, server_default="0"),
     sa.Column("cost_storage_bytes", sa.BigInteger, nullable=False, server_default="0"),
@@ -277,6 +278,8 @@ snapshots = sa.Table(
     sa.Column("as_of", _ts, nullable=False, unique=True),
     sa.Column("artifact_uri", sa.Text, nullable=False),
     sa.Column("artifact_hash", sa.Text, nullable=False),
+    sa.Column("sections_json", _json, nullable=False),
+    sa.Column("evidence_classes_json", _json, nullable=False),
     sa.Column("created_at", _ts, nullable=False, server_default=sa.func.now()),
 )
 

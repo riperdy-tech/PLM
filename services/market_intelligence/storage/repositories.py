@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..domain.entities import (
     CollectionRunCounters,
+    MarketChangeEventDraft,
     NormalizedObservation,
     OpportunityScore,
     QuarantinedRecord,
@@ -47,6 +48,7 @@ from ..normalization.youtube import (
 )
 from .models import (
     arms,
+    change_events,
     classifications,
     collection_runs,
     entities,
@@ -56,6 +58,7 @@ from .models import (
     queries,
     scores,
     seed_evidence,
+    snapshots,
     sources,
 )
 
@@ -64,10 +67,11 @@ if TYPE_CHECKING:  # `taxonomy.arms` imports domain/validators only — no runti
 
 __all__ = [
     "add_run_cost", "count_quarantined", "deterministic_id", "finish_collection_run",
-    "insert_classification", "insert_normalized_observation", "insert_score",
-    "insert_seed_evidence", "latest_classifications_for", "latest_scores", "load_arms",
-    "load_classification", "load_entity", "load_observations", "load_queries", "load_run",
-    "load_seed_evidence", "observation_classification_inputs", "observations_for_entities",
+    "insert_change_event", "insert_classification", "insert_normalized_observation",
+    "insert_score", "insert_seed_evidence", "insert_snapshot", "latest_classifications_for",
+    "latest_scores", "load_arms", "load_classification", "load_entity", "load_observations",
+    "load_queries", "load_run", "load_seed_evidence", "load_snapshot",
+    "observation_classification_inputs", "observations_for_entities", "previous_snapshot",
     "quarantine_record", "resolve_entity", "scores_for_arm", "start_collection_run",
     "sum_run_quota_units", "update_query_schedule", "upsert_arm", "upsert_query",
     "upsert_source",
@@ -181,6 +185,7 @@ def add_run_cost(
     *,
     api_calls: int = 0,
     api_quota_units: int = 0,
+    llm_calls: int = 0,
     llm_tokens: int = 0,
     llm_cost_estimate: float = 0.0,
     storage_bytes: int = 0,
@@ -189,13 +194,17 @@ def add_run_cost(
 
     `api_quota_units` is the provider's *billing* unit (a `search.list` costs 100,
     a list call 1) as charged by the run's `QuotaBudget`; it is what the scheduler's
-    per-day ceiling reads. `api_calls` stays the count of HTTP calls.
+    per-day ceiling reads. `api_calls` stays the count of HTTP calls; `llm_calls` is
+    the number of classifier/LLM invocations (`llm_tokens` alone cannot say how many
+    calls ran), and `llm_cost_estimate` is a provider-cost estimate in USD.
     """
-    if min(api_calls, api_quota_units, llm_tokens, storage_bytes) < 0 or llm_cost_estimate < 0:
+    if (min(api_calls, api_quota_units, llm_calls, llm_tokens, storage_bytes) < 0
+            or llm_cost_estimate < 0):
         raise ValueError("costs cannot be negative")
     session.execute(sa.update(collection_runs).where(collection_runs.c.id == run_id).values(
         cost_api_calls=collection_runs.c.cost_api_calls + api_calls,
         cost_api_quota_units=collection_runs.c.cost_api_quota_units + api_quota_units,
+        cost_llm_calls=collection_runs.c.cost_llm_calls + llm_calls,
         cost_llm_tokens=collection_runs.c.cost_llm_tokens + llm_tokens,
         cost_llm_cost_estimate=collection_runs.c.cost_llm_cost_estimate + llm_cost_estimate,
         cost_storage_bytes=collection_runs.c.cost_storage_bytes + storage_bytes,
@@ -743,3 +752,80 @@ def scores_for_arm(session: Session, arm_id: str) -> list[Mapping[str, Any]]:
     return [dict(row) for row in session.execute(
         sa.select(scores).where(scores.c.arm_id == arm_id).order_by(scores.c.computed_at.desc())
     ).mappings()]
+
+
+# ---------------------------------------------------------------------------
+# §31/§32: snapshots and change events
+
+
+def insert_snapshot(
+    session: Session, *, as_of: datetime, artifact_uri: str, artifact_hash: str,
+    sections: Mapping[str, Any], evidence_classes: Mapping[str, str],
+) -> str:
+    """One row per `as_of` (unique): the artifact URI is where the body lives, and
+    the body itself is copied here so change detection never re-fetches an artifact.
+
+    The row id is derived from `as_of` (uuid5), so replaying the same report run is
+    idempotent — a second identical insert returns the existing row id.
+    """
+    snapshot_id = deterministic_id("snapshot", as_of.isoformat())
+    try:
+        with session.begin_nested():
+            session.execute(sa.insert(snapshots).values(
+                id=snapshot_id, as_of=as_of, artifact_uri=artifact_uri,
+                artifact_hash=artifact_hash, sections_json=dict(sections),
+                evidence_classes_json=dict(evidence_classes),
+            ))
+    except IntegrityError:
+        existing = session.execute(
+            sa.select(snapshots.c.id).where(snapshots.c.id == snapshot_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return str(existing)
+    return snapshot_id
+
+
+def previous_snapshot(session: Session) -> Mapping[str, Any] | None:
+    """The most recent stored snapshot — what §32 compares the current report against."""
+    row = session.execute(
+        sa.select(snapshots).order_by(snapshots.c.as_of.desc()).limit(1)
+    ).mappings().one_or_none()
+    return dict(row) if row is not None else None
+
+
+def load_snapshot(session: Session, as_of: datetime) -> Mapping[str, Any] | None:
+    """The snapshot stored for exactly `as_of`, or `None` when the date has no report."""
+    row = session.execute(
+        sa.select(snapshots).where(snapshots.c.as_of == as_of)
+    ).mappings().one_or_none()
+    return dict(row) if row is not None else None
+
+
+def insert_change_event(
+    session: Session, draft: MarketChangeEventDraft, *, detected_at: datetime,
+) -> str:
+    """§32: the stored event is exactly the draft the report rendered (§report coherence)."""
+    event_id = deterministic_id(
+        "change_event", draft.event_type.value, draft.arm_id or "", detected_at.isoformat(),
+        str(draft.current_value),
+    )
+    delta = None
+    if draft.previous_value is not None and draft.current_value is not None:
+        delta = draft.current_value - draft.previous_value
+    try:
+        with session.begin_nested():
+            session.execute(sa.insert(change_events).values(
+                id=event_id, event_type=draft.event_type.value, arm_id=draft.arm_id,
+                detected_at=detected_at, previous_value=draft.previous_value,
+                current_value=draft.current_value, delta=delta,
+                detail_json=dict(draft.detail),
+            ))
+    except IntegrityError:
+        existing = session.execute(
+            sa.select(change_events.c.id).where(change_events.c.id == event_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return str(existing)
+    return event_id

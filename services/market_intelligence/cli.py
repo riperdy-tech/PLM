@@ -147,15 +147,29 @@ def run_score() -> dict[str, Any]:
 
 
 def run_report(as_of: str | None = None) -> str:
-    """Write the §31 report — implemented by P1.12's `reports` module."""
-    try:
-        # The module does not exist until P1.12; the ImportError path below is the contract.
-        from .reports import write_report  # type: ignore[import-not-found]  # lands in P1.12
-    except ImportError as exc:  # pragma: no cover - until P1.12 lands
-        raise SystemExit(
-            "market report is not implemented until PHASE-P1.12 (the reports module)"
-        ) from exc
-    return str(write_report(as_of=as_of))
+    """§31: build, persist and store the daily snapshot; return the markdown report.
+
+    Both forms are produced: the machine-readable JSON artifact is what the
+    `market_snapshots` row points at (content-addressed under `market/reports/`),
+    the markdown form is stored beside it and returned for the CLI to print.
+    """
+    from plm_platform.storage import to_uri
+
+    from .reports.exports import render_markdown, store_markdown, store_report
+    from .reports.market_snapshot import build_snapshot, persist_snapshot
+
+    settings = _settings()
+    moment = _parse_now(as_of) if as_of else datetime.now(UTC)
+    platform = settings.platform
+    with _session() as session:
+        snapshot = build_snapshot(session, as_of=moment, settings=settings)
+        machine = store_report(snapshot, settings=platform)
+        store_markdown(snapshot, settings=platform)
+        persist_snapshot(session, snapshot,
+                         artifact_uri=to_uri(machine.key, settings=platform),
+                         artifact_hash=machine.digest)
+        session.commit()
+    return render_markdown(snapshot)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8081) -> None:

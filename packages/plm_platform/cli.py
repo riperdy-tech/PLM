@@ -391,7 +391,7 @@ def report(as_of: str = "") -> None:
     """Write the daily market snapshot and report (P1)."""
     from market_intelligence.cli import run_report
 
-    run_report(as_of=as_of or None)
+    typer.echo(run_report(as_of=as_of or None))
 
 
 @market_app.command("run-daily")
