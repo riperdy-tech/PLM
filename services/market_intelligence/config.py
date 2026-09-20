@@ -51,6 +51,10 @@ class MarketSettings:
     change_growth_threshold: float = 15.0
     confidence_sample_target: int = 25
     confidence_source_target: int = 2
+    # Review ruling: an arm whose measured basis is below this share of the total
+    # weight is returned but not ranked in the opportunities list (insufficient
+    # coverage), so a two-component guess never masquerades as a full-basis score.
+    min_rank_basis_weight: float = 0.40
     llm_cost_estimate_per_1k_tokens: float = 0.0
 
 

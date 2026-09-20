@@ -79,7 +79,7 @@ def test_opportunity_score_enforces_bounds() -> None:
             components=ScoreComponents.from_mapping({c.value: 50.0 for c in ScoringComponent}),
             evidence=EvidenceSummary(1, 1, ()), as_of=datetime(2026, 9, 20, tzinfo=UTC),
             score_version="p1-v1", feature_version="p1-features-v1",
-            normalization_version="p1-norm-v1",
+            normalization_version="p1-norm-v1", basis_weight=1.0,
         )
 
 
@@ -89,3 +89,11 @@ def test_market_settings_defaults_are_versioned_and_config_driven() -> None:
     assert settings.default_brand_id == "neon_seoul"
     assert settings.freshness_fresh_hours == 48.0
     assert settings.quota_units_per_run > 0
+
+
+def test_minimum_ranking_coverage_is_configuration() -> None:
+    """Review fix 7: the coverage floor for ranking is a knob, not a literal."""
+    assert load_market_settings(platform=None).min_rank_basis_weight == 0.40
+    assert load_market_settings(
+        platform=None, min_rank_basis_weight=0.75
+    ).min_rank_basis_weight == 0.75

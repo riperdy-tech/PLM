@@ -105,3 +105,30 @@ def test_revision_0005_follows_the_naming_rule_and_chains_to_0004() -> None:
 def test_revision_0005_upgrade_and_downgrade_are_callable() -> None:
     module = _load_0005()
     assert callable(module.upgrade) and callable(module.downgrade)
+
+
+MIGRATION_0006 = (
+    REPO_ROOT / "migrations" / "versions" / "market"
+    / "market_0006_score_basis_weight.py"
+)
+
+
+def _load_0006():
+    spec = importlib.util.spec_from_file_location("market_0006", MIGRATION_0006)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_revision_0006_follows_the_naming_rule_and_chains_to_0005() -> None:
+    module = _load_0006()
+    assert MIGRATION_0006.name == "market_0006_score_basis_weight.py"
+    assert module.revision == "0006_market_score_basis_weight"
+    assert len(module.revision) <= 32
+    assert module.down_revision == "0005_market_quota_units"
+
+
+def test_revision_0006_upgrade_and_downgrade_are_callable() -> None:
+    module = _load_0006()
+    assert callable(module.upgrade) and callable(module.downgrade)

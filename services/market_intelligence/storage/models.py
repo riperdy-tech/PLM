@@ -225,6 +225,11 @@ scores = sa.Table(
     sa.Column("as_of", _ts, nullable=False),
     sa.Column("market_opportunity_score", sa.Float, nullable=False),
     sa.Column("confidence", sa.Float, nullable=False),
+    # Review ruling: the sum of the component weights actually measured. Coverage
+    # must be visible, not inferred: two arms scored from two components and from
+    # six both produce smooth 0-100 numbers, and nothing else says how thin the
+    # basis was. Zero is "no basis recorded" — the safe direction (never ranked).
+    sa.Column("basis_weight", sa.Float, nullable=False, server_default="0"),
     sa.Column("components_json", _json, nullable=False),
     sa.Column("evidence_json", _json, nullable=False),
     sa.Column("score_version", sa.Text, nullable=False),

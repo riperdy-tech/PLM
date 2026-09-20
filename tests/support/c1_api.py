@@ -10,7 +10,7 @@ factory — conftest fixtures do not cross test trees, so the fixture wrappers a
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
@@ -127,12 +127,16 @@ class SyncASGIClient:
 
 
 @contextmanager
-def open_c1_client() -> Iterator[SyncASGIClient]:
-    """The real app over a seeded SQLite `market` schema, authenticated."""
+def open_c1_client(seed: Callable[[Session], None] | None = None) -> Iterator[SyncASGIClient]:
+    """The real app over a seeded SQLite `market` schema, authenticated.
+
+    `seed` replaces the default `seed_market` fixture when a test needs extra rows
+    (e.g. an under-covered arm beside the fully covered one).
+    """
     engine = _market_engine()
     factory = sessionmaker(bind=engine)
     with factory() as session:
-        seed_market(session)
+        (seed or seed_market)(session)
         session.commit()
     platform = load_settings(env=PLATFORM_ENV)
     app = create_app(session_factory=factory,

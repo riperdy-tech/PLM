@@ -223,6 +223,7 @@ def score_arm(
         arm_id=features.arm_id,
         market_opportunity_score=score,
         confidence=features.confidence,
+        basis_weight=total_weight,
         components=components,
         evidence=EvidenceSummary(
             observation_count=features.observation_count,

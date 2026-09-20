@@ -66,11 +66,17 @@ class OpportunityScore:
     The three versions ride on the object itself: they are the versions of the
     computation that produced this number, so persistence cannot disagree with it
     (review fix 2 — they used to arrive as independent `persist_scores` arguments).
+
+    `basis_weight` is the review ruling's coverage field: the sum of the component
+    weights that were actually measured. Renormalisation keeps the score smooth, so
+    the basis is what tells a reader whether an arm was scored from two components
+    or from six — and what the ranking floor in `latest_scores` checks.
     """
 
     arm_id: str
     market_opportunity_score: float
     confidence: float
+    basis_weight: float
     components: ScoreComponents
     evidence: EvidenceSummary
     as_of: datetime
@@ -86,6 +92,8 @@ class OpportunityScore:
             )
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"confidence must be within 0–1, got {self.confidence!r}")
+        if not 0.0 <= self.basis_weight <= 1.0:
+            raise ValueError(f"basis_weight must be within 0–1, got {self.basis_weight!r}")
 
 
 @dataclass(frozen=True, slots=True)

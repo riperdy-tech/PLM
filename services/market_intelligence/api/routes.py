@@ -63,7 +63,8 @@ def build_router(*, session_factory: SessionFactory | None,
         use_case: str | None = None,
     ) -> OpportunityListResponse:
         rows = latest_scores(session, limit=limit * 3, min_score=min_score,
-                             min_confidence=min_confidence)
+                             min_confidence=min_confidence,
+                             min_basis_weight=settings.min_rank_basis_weight)
         if country is not None:
             raise HTTPException(status_code=422, detail=ErrorShape(
                 code="unsupported_parameter", field_paths=["country"],

@@ -493,3 +493,110 @@ def test_demand_component_ranks_pull_not_raw_audience_size() -> None:
     assert demand["slow_mega"] == pytest.approx(0.0)
     assert demand["growing_mid"] == pytest.approx(50.0)
     assert demand["fast_small"] == pytest.approx(100.0)
+
+
+# --------------------------------------------------------------------------------------
+# Controller ruling (review fix 7): coverage is visible, and thin bases are not ranked.
+# --------------------------------------------------------------------------------------
+
+def _registered_arm(session, fingerprint: str, arm_id: str) -> None:
+    repositories.upsert_arm(
+        session,
+        ArmDraft(arm_id=arm_id, fingerprint=fingerprint, profile=TaxonomyProfile(),
+                 support_count=2),
+        brand_id="neon_seoul",
+    )
+
+
+def test_basis_weight_records_the_measured_coverage_and_is_persisted(market_session) -> None:
+    """The basis is the sum of the weights that were actually measured (§17.3/§35)."""
+    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b",
+                         arm_ids={"b": "rnb_late_night_drive"})
+    _registered_arm(market_session, "b", "rnb_late_night_drive")
+
+    half = ArmComponentScores(
+        demand=Tri.known(50.0), growth=Tri.known(50.0), competitor_velocity=Tri.unknown(),
+        competition=Tri.unknown(), audience_quality=Tri.unknown(),
+        cross_platform=Tri.unknown(), production_fit=Tri.unknown(),
+    )
+    score = _score_with(features["b"], half)
+    assert score.basis_weight == pytest.approx(0.25 + 0.20)
+    persist_scores(market_session, {"b": score}, computed_at=AS_OF)
+    row = repositories.scores_for_arm(market_session, "rnb_late_night_drive")[0]
+    assert float(row["basis_weight"]) == pytest.approx(0.45)
+
+    full = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)["b"]
+    assert full.basis_weight == pytest.approx(0.25 + 0.15 + 0.15 + 0.05)
+
+
+def test_an_under_covered_arm_is_flagged_and_not_ranked(market_session) -> None:
+    """Ruling: persist basis_weight, require a configurable minimum coverage for an arm
+    to be *ranked*, and return under-covered arms flagged instead of silently mixing
+    them into the ranking. A one-component arm with a higher number must not outrank a
+    fully covered arm with a lower one."""
+    wide = _features(market_session, views=45_000, subscribers=20_000, fingerprint="wide",
+                     arm_ids={"wide": "wide_arm"})
+    thin = _features(market_session, views=9_000, subscribers=5_000, fingerprint="thin",
+                     arm_ids={"thin": "thin_arm"})
+    _registered_arm(market_session, "wide", "wide_arm")
+    _registered_arm(market_session, "thin", "thin_arm")
+    wide_score = _score_with(
+        wide["wide"],
+        ScoreComponents.from_mapping({name.value: 40.0 for name in ScoringComponent}),
+    )
+    thin_score = _score_with(
+        thin["thin"],
+        ArmComponentScores(
+            demand=Tri.known(100.0), growth=Tri.unknown(), competitor_velocity=Tri.unknown(),
+            competition=Tri.unknown(), audience_quality=Tri.unknown(),
+            cross_platform=Tri.unknown(), production_fit=Tri.known(100.0),
+        ),
+    )
+    assert wide_score.basis_weight == pytest.approx(1.0)
+    assert thin_score.basis_weight == pytest.approx(0.30)
+    assert thin_score.market_opportunity_score == pytest.approx(100.0)
+    assert wide_score.market_opportunity_score == pytest.approx(40.0)
+    persist_scores(market_session, {"wide": wide_score, "thin": thin_score}, computed_at=AS_OF)
+
+    rows = repositories.latest_scores(
+        market_session, limit=10, min_basis_weight=SETTINGS.min_rank_basis_weight
+    )
+    assert [row["arm_id"] for row in rows] == ["wide_arm", "thin_arm"]  # ranked first, thin after
+    assert rows[0]["insufficient_coverage"] is False
+    assert rows[1]["insufficient_coverage"] is True
+    assert rows[1]["basis_weight"] == pytest.approx(0.30)
+    # both are still *returned* — nothing is silently dropped
+    assert {row["arm_id"] for row in rows} == {"wide_arm", "thin_arm"}
+
+
+def test_fully_covered_arms_keep_their_normal_score_ranking(market_session) -> None:
+    high = _features(market_session, views=45_000, subscribers=20_000, fingerprint="high",
+                     arm_ids={"high": "high_arm"})
+    low = _features(market_session, views=9_000, subscribers=5_000, fingerprint="low",
+                    arm_ids={"low": "low_arm"})
+    thin = _features(market_session, views=7_000, subscribers=4_000, fingerprint="thin",
+                     arm_ids={"thin": "thin_arm"})
+    _registered_arm(market_session, "high", "high_arm")
+    _registered_arm(market_session, "low", "low_arm")
+    _registered_arm(market_session, "thin", "thin_arm")
+    everything = {name.value: 50.0 for name in ScoringComponent}
+    scores = {
+        "high": _score_with(high["high"], ScoreComponents.from_mapping(everything | {"demand": 80.0})),
+        "low": _score_with(low["low"], ScoreComponents.from_mapping(everything | {"demand": 30.0})),
+        "thin": _score_with(
+            thin["thin"],
+            ArmComponentScores(
+                demand=Tri.known(100.0), growth=Tri.unknown(), competitor_velocity=Tri.unknown(),
+                competition=Tri.unknown(), audience_quality=Tri.unknown(),
+                cross_platform=Tri.unknown(), production_fit=Tri.known(100.0),
+            ),
+        ),
+    }
+    persist_scores(market_session, scores, computed_at=AS_OF)
+
+    rows = repositories.latest_scores(
+        market_session, limit=10, min_basis_weight=SETTINGS.min_rank_basis_weight
+    )
+    assert [row["arm_id"] for row in rows] == ["high_arm", "low_arm", "thin_arm"]
+    assert all(row["insufficient_coverage"] is False for row in rows[:2])
+    assert rows[0]["market_opportunity_score"] > rows[1]["market_opportunity_score"]

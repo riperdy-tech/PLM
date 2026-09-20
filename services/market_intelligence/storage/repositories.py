@@ -670,7 +670,8 @@ def insert_score(
     session.execute(sa.insert(scores).values(
         id=score_id, arm_id=arm_id, computed_at=computed_at, as_of=score.as_of,
         market_opportunity_score=score.market_opportunity_score,
-        confidence=score.confidence, components_json=dict(components),
+        confidence=score.confidence, basis_weight=score.basis_weight,
+        components_json=dict(components),
         evidence_json=dict(evidence), score_version=score.score_version,
         feature_version=score.feature_version,
         normalization_version=score.normalization_version,
@@ -680,9 +681,17 @@ def insert_score(
 
 def latest_scores(
     session: Session, *, limit: int = 100, min_score: float | None = None,
-    min_confidence: float | None = None,
+    min_confidence: float | None = None, min_basis_weight: float | None = None,
 ) -> list[Mapping[str, Any]]:
-    """Newest score per arm, ranked — the API's read path (§25)."""
+    """Newest score per arm, ranked — the API's read path (§25).
+
+    Review ruling: with `min_basis_weight` set, arms whose measured basis falls
+    below the floor are **flagged** (`insufficient_coverage`) and ordered after
+    every ranked arm — still returned, never silently mixed into the ranking. The
+    flag stays on the returned rows; the frozen C1 wire (registry entry C1) carries
+    no coverage field and is deliberately unchanged. Within each group the order is
+    the score's descending, ties broken by `arm_id` — a deterministic total order.
+    """
     newest = (
         sa.select(scores.c.arm_id, sa.func.max(scores.c.computed_at).label("computed_at"))
         .group_by(scores.c.arm_id).subquery()
@@ -697,9 +706,17 @@ def latest_scores(
         statement = statement.where(scores.c.market_opportunity_score >= min_score)
     if min_confidence is not None:
         statement = statement.where(scores.c.confidence >= min_confidence)
-    statement = statement.order_by(scores.c.market_opportunity_score.desc(),
-                                   scores.c.arm_id.asc()).limit(limit)
-    return [dict(row) for row in session.execute(statement).mappings()]
+    order = []
+    if min_basis_weight is not None:
+        order.append(sa.case((scores.c.basis_weight >= min_basis_weight, 0), else_=1))
+    order.extend((scores.c.market_opportunity_score.desc(), scores.c.arm_id.asc()))
+    statement = statement.order_by(*order).limit(limit)
+    rows = [dict(row) for row in session.execute(statement).mappings()]
+    for row in rows:
+        row["insufficient_coverage"] = (
+            min_basis_weight is not None and float(row["basis_weight"]) < min_basis_weight
+        )
+    return rows
 
 
 def scores_for_arm(session: Session, arm_id: str) -> list[Mapping[str, Any]]:
