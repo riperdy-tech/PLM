@@ -155,7 +155,7 @@ settle were taken by the human partner and are recorded in **ADR-0023**. PHASE-P
 and PHASE-P3 may now be implemented against this entry. After this point a wire
 change is a registry amendment first, then both sides in one change (R2).
 
-**Rulings:** R4, plus the C2 freeze rulings in ADR-0023.
+**Ruling:** R4, plus the C2 freeze rulings in ADR-0023.
 
 **Required amendments (must not be missed):**
 
@@ -198,11 +198,13 @@ change is a registry amendment first, then both sides in one change (R2).
    confidence; under-covered arms are returned flagged, never silently mixed into
    the ranking. The human partner holds override at all times (P2 §107).
 
-**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **pending, unblocked** by
-this freeze. It must assert the producer payload validates against the P3 consumer
-schema on the exact frozen names above, including the `allocation_type` →
-`exploration_level` enum map and the `quantity` → `requested_experiment_count`
-rename, so a drift failure names the field that moved.
+**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **exists** (P2's producer half,
+shipped by task P2.1A: it asserts the serialised directive payload against the registry's frozen
+names above, so a rename fails loudly and names the field that moved). P3's consumer half — its
+adapter ingesting P2's real payload, including the `allocation_type` → `exploration_level` enum
+map and the `quantity` → `requested_experiment_count` rename — lands with task P3.4 and extends
+this same file. Until then the enforcement is producer-side only, which the test's own docstring
+states so it is never mistaken for the whole seam.
 
 ---
 
