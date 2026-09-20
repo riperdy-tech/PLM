@@ -32,7 +32,11 @@ from ..domain.enums import (
 )
 from ..domain.value_objects import tri_from_optional
 from ..normalization.canonical import text_fingerprint
-from ..normalization.youtube import QUARANTINE_REASON_CODES, NormalizedObservationDraft
+from ..normalization.youtube import (
+    NORMALIZATION_VERSION,
+    QUARANTINE_REASON_CODES,
+    NormalizedObservationDraft,
+)
 from .models import (
     classifications,
     collection_runs,
@@ -240,7 +244,8 @@ def resolve_entity(
 
 
 def insert_normalized_observation(
-    session: Session, draft: NormalizedObservationDraft | None,
+    session: Session, draft: NormalizedObservationDraft | None, *,
+    normalization_version: str = NORMALIZATION_VERSION,
 ) -> tuple[str, bool]:
     """One row per (entity, source, observed_at); a repeat is idempotent (§7.6/AC-03)."""
     if draft is None:
@@ -260,6 +265,7 @@ def insert_normalized_observation(
         "channel_video_count": _tri_value(draft.channel_video_count),
         "text_title": draft.text_title, "text_description": draft.text_description,
         "country_signal": draft.country_signal, "language_signal": draft.language_signal,
+        "normalization_version": normalization_version,
     }
     try:
         with session.begin_nested():

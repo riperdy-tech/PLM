@@ -20,6 +20,7 @@ from ..domain.value_objects import tri_from_optional
 from .canonical import is_valid_channel_id, is_valid_video_id
 
 __all__ = [
+    "NORMALIZATION_VERSION",
     "QUARANTINE_REASON_CODES",
     "NormalizationOutcome",
     "NormalizedObservationDraft",
@@ -27,6 +28,10 @@ __all__ = [
     "normalize_search_hit",
     "normalize_video_object",
 ]
+
+NORMALIZATION_VERSION: Final[str] = "p1-norm-v1"
+"""Default transformation version stamped on every derived observation (mirrors
+`MarketSettings.normalization_version`; callers may pass their configured value)."""
 
 QUARANTINE_REASON_CODES: Final[frozenset[str]] = frozenset({
     "malformed_provider_id", "negative_count", "impossible_timestamp_order",

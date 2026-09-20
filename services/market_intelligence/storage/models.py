@@ -172,6 +172,7 @@ observations = sa.Table(
     sa.Column("text_description", sa.Text, nullable=True),
     sa.Column("country_signal", sa.Text, nullable=True),
     sa.Column("language_signal", sa.Text, nullable=True),
+    sa.Column("normalization_version", sa.Text, nullable=False),
     sa.Column("quality_status", sa.Text, nullable=False, server_default="VALID"),
     sa.UniqueConstraint(
         "entity_id", "source_id", "observed_at", name="uq_market_observation_point"
