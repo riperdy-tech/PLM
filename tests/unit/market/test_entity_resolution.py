@@ -1,8 +1,10 @@
 # tests/unit/market/test_entity_resolution.py
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
+from plm_contracts import Tri, TriState
 
 from services.market_intelligence.connectors.base import FetchedObject
 from services.market_intelligence.domain.entities import QuarantinedRecord
@@ -134,6 +136,32 @@ def test_an_observation_records_the_normalization_version_that_derived_it(
 
     assert _version(first_id) == "p1-norm-v1"  # the phase's default transformation
     assert _version(second_id) == "p1-norm-v9"  # callers may stamp their own
+
+
+def test_not_ready_metrics_survive_the_database_round_trip(market_session, source_id) -> None:
+    entity_id = repositories.resolve_entity(
+        market_session, entity_type=EntityType.VIDEO, source_id=source_id,
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
+        canonical_name="2AM Seoul", normalized_name="2am seoul",
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
+    )
+    fetched = FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
+                            provider_object_id="vid00000001", observed_at=FIXED_NOW,
+                            payload=PAYLOAD)
+    draft = normalize_video_object(fetched, entity_id=entity_id, source_id=source_id,
+                                   raw_observation_id=RAW_ONE, observed_at=FIXED_NOW)
+    # the payload has viewCount; likes/comments are absent (unknown); subscriber_count
+    # is expected later — a window that has not completed is not_ready, never unknown
+    pending = replace(draft.observation, likes=Tri.not_ready())
+    observation_id, _ = repositories.insert_normalized_observation(market_session, pending)
+    loaded = repositories.load_observations(market_session, entity_id=entity_id)
+    assert len(loaded) == 1
+    assert loaded[0].views.state is TriState.KNOWN
+    assert loaded[0].likes.state is TriState.NOT_READY
+    assert loaded[0].comments.state is TriState.UNKNOWN
+    assert str(market_session.execute(
+        sa.select(observations.c.id).where(observations.c.id == observation_id)
+    ).scalar_one())
 
 
 def test_quarantine_records_are_written_not_dropped(market_session, source_id) -> None:

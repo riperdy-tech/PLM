@@ -173,6 +173,8 @@ observations = sa.Table(
     sa.Column("country_signal", sa.Text, nullable=True),
     sa.Column("language_signal", sa.Text, nullable=True),
     sa.Column("normalization_version", sa.Text, nullable=False),
+    # which metrics are `not_ready` (their numeric columns are NULL): NULL/absent ⇒ unknown
+    sa.Column("not_ready_metrics", _json, nullable=True),
     sa.Column("quality_status", sa.Text, nullable=False, server_default="VALID"),
     sa.UniqueConstraint(
         "entity_id", "source_id", "observed_at", name="uq_market_observation_point"

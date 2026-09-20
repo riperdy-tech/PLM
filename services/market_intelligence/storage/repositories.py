@@ -266,6 +266,9 @@ def insert_normalized_observation(
         "text_title": draft.text_title, "text_description": draft.text_description,
         "country_signal": draft.country_signal, "language_signal": draft.language_signal,
         "normalization_version": normalization_version,
+        "not_ready_metrics": sorted(
+            name for name in _OBSERVATION_METRIC_FIELDS if getattr(draft, name).is_not_ready
+        ) or None,
     }
     try:
         with session.begin_nested():
@@ -288,7 +291,11 @@ def load_observations(
     session: Session, *, source_id: str | None = None, entity_id: str | None = None,
     since: datetime | None = None,
 ) -> list[NormalizedObservation]:
-    """Read back as Tri-typed domain records: NULL becomes unknown here, once."""
+    """Read back as Tri-typed domain records: NULL becomes unknown here, once.
+
+    A metric the row records in `not_ready_metrics` comes back `not_ready`, not
+    `unknown` — the distinction the Tri type exists to preserve.
+    """
     statement = sa.select(observations).order_by(observations.c.observed_at)
     if source_id is not None:
         statement = statement.where(observations.c.source_id == source_id)
@@ -298,16 +305,18 @@ def load_observations(
         statement = statement.where(observations.c.observed_at >= since)
     records: list[NormalizedObservation] = []
     for row in session.execute(statement).mappings():
+        not_ready = frozenset(row["not_ready_metrics"] or ())
         records.append(NormalizedObservation(
             entity_id=str(row["entity_id"]), source_id=str(row["source_id"]),
             raw_observation_id=str(row["raw_observation_id"]), observed_at=row["observed_at"],
             published_at=row["published_at"],
-            views=tri_from_optional(row["views"]), likes=tri_from_optional(row["likes"]),
-            comments=tri_from_optional(row["comments"]),
-            subscriber_count=tri_from_optional(row["subscriber_count"]),
-            video_duration_seconds=tri_from_optional(row["video_duration_seconds"]),
-            playlist_item_count=tri_from_optional(row["playlist_item_count"]),
-            channel_video_count=tri_from_optional(row["channel_video_count"]),
+            views=_tri_from_row(row, "views", not_ready),
+            likes=_tri_from_row(row, "likes", not_ready),
+            comments=_tri_from_row(row, "comments", not_ready),
+            subscriber_count=_tri_from_row(row, "subscriber_count", not_ready),
+            video_duration_seconds=_tri_from_row(row, "video_duration_seconds", not_ready),
+            playlist_item_count=_tri_from_row(row, "playlist_item_count", not_ready),
+            channel_video_count=_tri_from_row(row, "channel_video_count", not_ready),
             text_title=row["text_title"], text_description=row["text_description"],
             country_signal=row["country_signal"], language_signal=row["language_signal"],
         ))
@@ -357,8 +366,25 @@ def load_entity(session: Session, entity_id: str) -> Mapping[str, Any] | None:
 
 
 def _tri_value(metric: Tri) -> int | float | None:
-    """Tri → column value: unknown/not_ready are NULL, a verified zero is 0."""
+    """Tri → numeric column value: unknown and not_ready are NULL, verified zero is 0.
+
+    `not_ready` is not lost: its name goes into `not_ready_metrics` (see
+    `insert_normalized_observation`/`load_observations`).
+    """
     return metric.unwrap() if metric.is_known else None
+
+
+_OBSERVATION_METRIC_FIELDS: Final[tuple[str, ...]] = (
+    "views", "likes", "comments", "subscriber_count", "video_duration_seconds",
+    "playlist_item_count", "channel_video_count",
+)
+
+
+def _tri_from_row(row: Mapping[str, Any], name: str, not_ready: frozenset[str]) -> Tri:
+    """NULL ⇒ unknown, *unless* the row records that metric as `not_ready`."""
+    if row[name] is not None:
+        return tri_from_optional(row[name])
+    return Tri.not_ready() if name in not_ready else tri_from_optional(None)
 
 
 def upsert_query(
