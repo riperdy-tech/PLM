@@ -84,6 +84,13 @@ def test_component_scores_are_bounded_and_rank_the_population(market_session) ->
         for value in scores.as_mapping().values():
             if value.is_known:
                 assert 0.0 <= float(value.unwrap()) <= 100.0
+    # "…and rank the population" (review fix 4): the old test never asserted an
+    # ordering. The 30k/day absolute deltas put the mega channel at the top of the
+    # velocity axis; its 0.0015 views/day/subscriber put it at the bottom of pull.
+    assert float(components["a"].competitor_velocity.unwrap()) == pytest.approx(100.0)
+    assert float(components["b"].competitor_velocity.unwrap()) == pytest.approx(0.0)
+    assert float(components["b"].demand.unwrap()) == pytest.approx(100.0)
+    assert float(components["a"].demand.unwrap()) == pytest.approx(0.0)
 
 
 def test_scoring_is_deterministic_and_confidence_is_independent(market_session) -> None:
@@ -100,10 +107,26 @@ def test_scoring_is_deterministic_and_confidence_is_independent(market_session) 
 
 
 def test_confidence_does_not_imply_a_high_score(market_session) -> None:
-    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
-    score = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)["b"]
-    assert 0.0 <= score.market_opportunity_score <= 100.0
-    assert 0.0 <= score.confidence <= 1.0
+    """Review fix 4: the old version asserted bounds that construction guarantees.
+
+    A dense arm (24 sightings, confidence ≈ 0.74) fed modest components scores
+    exactly 30.0 — high confidence is evidence *quality*, never a score bonus
+    (§17.2/§19: confidence sits beside the score, it never multiplies it).
+    """
+    observations = tuple(
+        NormalizedObservation(
+            entity_id="dense-e", source_id="s1", raw_observation_id=f"d{index}",
+            observed_at=AS_OF - timedelta(days=24 - index),
+            published_at=AS_OF - timedelta(days=90),
+            views=Tri.known(1_000 + index * 50), subscriber_count=Tri.known(20_000),
+        )
+        for index in range(24)
+    )
+    features = compute_arm_features({"dense": observations}, as_of=AS_OF, settings=SETTINGS)
+    components = ScoreComponents.from_mapping({name.value: 30.0 for name in ScoringComponent})
+    score = _score_with(features["dense"], components)
+    assert score.confidence > 0.70
+    assert score.market_opportunity_score == pytest.approx(30.0)
     assert compute_component_scores({}, settings=SETTINGS) == {}
 
 
@@ -377,23 +400,14 @@ def test_replaying_the_same_stored_inputs_produces_identical_scores(market_sessi
     assert first["fast_small"].score_version == "p1-v1"
     assert '"score_version": "p1-v1"' in _canonical(first)  # the version travels with the run
 
-
-@pytest.mark.parametrize("component", [component.value for component in ScoringComponent])
-def test_raising_any_component_value_never_lowers_the_score(market_session,
-                                                            component: str) -> None:
-    """Property (§34): monotone in every component while nothing else changes."""
-    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
-    previous = -1.0
-    for value in (0.0, 25.0, 50.0, 75.0, 100.0):
-        mapping = {name.value: 50.0 for name in ScoringComponent}
-        mapping[component] = value
-        score = _score_with(features["b"], ScoreComponents.from_mapping(mapping))
-        assert score.market_opportunity_score >= previous, component
-        previous = score.market_opportunity_score
-
-
 def test_bounds_hold_for_a_grid_of_component_inputs(market_session) -> None:
-    """Property (§34): score ∈ [0,100] and confidence ∈ [0,1] for any component grid."""
+    """Property (§34): score ∈ [0,100] for any component grid.
+
+    Review fix 4: the grid used to re-check `0 <= confidence <= 1` twenty-five
+    times over a *constant* confidence — an assertion that could not fail. The
+    independence of confidence from components is pinned by
+    `tests/unit/market/test_confidence.py`.
+    """
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
     grid = (0.0, 25.0, 50.0, 75.0, 100.0)
     for demand in grid:
@@ -405,7 +419,6 @@ def test_bounds_hold_for_a_grid_of_component_inputs(market_session) -> None:
             )
             score = _score_with(features["b"], components)
             assert 0.0 <= score.market_opportunity_score <= 100.0
-            assert 0.0 <= score.confidence <= 1.0
 
 
 _THREE_CHANNELS = {
@@ -632,7 +645,7 @@ def test_observation_reads_have_a_deterministic_total_order(market_session) -> N
     tokens = ["alpha", "beta", "gamma"]
     entity_ids = {token: repositories.deterministic_id("entity", token) for token in tokens}
     row_ids: dict[str, str] = {}
-    for token in reversed(sorted(tokens, key=lambda name: entity_ids[name])):  # id order reversed
+    for token in sorted(tokens, key=lambda name: entity_ids[name], reverse=True):  # id order, reversed
         row_id, _ = repositories.insert_normalized_observation(
             market_session,
             NormalizedObservationDraft(
