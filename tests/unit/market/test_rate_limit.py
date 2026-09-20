@@ -27,6 +27,27 @@ def test_request_budget_counts_calls_not_units() -> None:
         budget.consume(operation="videos.list")
 
 
+def test_a_released_attempt_gives_its_units_back() -> None:
+    budget = QuotaBudget(limit_units=150)
+    budget.consume(100, operation="search.list")
+    budget.release(100, operation="search.list")
+    assert budget.used == 0
+    assert budget.remaining == 150
+    with pytest.raises(ValueError, match="negative"):
+        budget.release(-1, operation="search.list")
+    with pytest.raises(ValueError, match="only 0 are charged"):
+        budget.release(1, operation="search.list")
+
+
+def test_a_released_request_gives_its_count_back() -> None:
+    budget = RequestBudget(limit_requests=2)
+    budget.consume(operation="videos.list")
+    budget.release(operation="videos.list")
+    assert budget.used == 0
+    with pytest.raises(ValueError, match="none is charged"):
+        budget.release(operation="videos.list")
+
+
 def test_rate_limiter_computes_its_wait_from_the_injected_clock() -> None:
     now = {"t": 0.0}
     naps: list[float] = []

@@ -266,12 +266,15 @@ class YouTubeDataAPIConnector:
     def _get(
         self, path: str, params: Mapping[str, Any], *, quota_units: int, operation: str
     ) -> Mapping[str, Any]:
-        self._quota.consume(quota_units, operation=f"{self.provider_name.value}.{operation}")
-        self._requests.consume(operation=operation)
-        self._quota_units_used += quota_units
         clean = {k: v for k, v in params.items() if v is not None}
+        budget_operation = f"{self.provider_name.value}.{operation}"
 
         def attempt() -> Mapping[str, Any]:
+            # charged per attempt, before the request leaves: a retry is a
+            # separately billed provider request, not a replay of the first one.
+            self._quota.consume(quota_units, operation=budget_operation)
+            self._requests.consume(operation=operation)
+            self._quota_units_used += quota_units
             if self._limiter is not None:
                 self._limiter.acquire()
             self._request_count += 1
@@ -280,10 +283,12 @@ class YouTubeDataAPIConnector:
                     f"{self._base_url}{path}", params=clean, headers=self._credentials.headers()
                 )
             except httpx.TimeoutException as exc:
+                self._release_attempt(quota_units, budget_operation, operation)
                 raise ConnectorError(
                     ConnectorErrorClass.TRANSIENT_NETWORK, f"{operation} timed out"
                 ) from exc
             except httpx.TransportError as exc:
+                self._release_attempt(quota_units, budget_operation, operation)
                 raise ConnectorError(
                     ConnectorErrorClass.TRANSIENT_NETWORK, f"{operation} transport failure"
                 ) from exc
@@ -292,6 +297,12 @@ class YouTubeDataAPIConnector:
         return execute_with_retries(
             attempt, policy=self._policy, sleep=self._sleep, rng=self._rng
         )
+
+    def _release_attempt(self, quota_units: int, budget_operation: str, operation: str) -> None:
+        """An attempt that never reached the provider cannot have been billed (§27)."""
+        self._quota.release(quota_units, operation=budget_operation)
+        self._requests.release(operation=operation)
+        self._quota_units_used -= quota_units
 
 
 def _parse_response(response: httpx.Response, operation: str) -> Mapping[str, Any]:

@@ -51,6 +51,21 @@ class QuotaBudget:
             )
         self.used += units
 
+    def release(self, units: int, *, operation: str) -> None:
+        """Un-charge one attempt that the provider cannot have billed (no response).
+
+        Charging happens before the HTTP call so a call that would exceed the
+        budget never leaves the process; a transport failure afterwards is
+        reconciled here instead of leaving phantom units on the ledger.
+        """
+        if units < 0:
+            raise ValueError("cannot release a negative number of units")
+        if units > self.used:
+            raise ValueError(
+                f"cannot release {units} units for {operation!r}: only {self.used} are charged"
+            )
+        self.used -= units
+
 
 class RequestBudget:
     """Per-run request count cap, independent of provider quota cost."""
@@ -68,6 +83,12 @@ class RequestBudget:
                 f"({self.limit_requests}); stop low-priority work first (PHASE-P1 §27)"
             )
         self.used += 1
+
+    def release(self, *, operation: str) -> None:
+        """Give back the count for an attempt that never reached the provider."""
+        if self.used <= 0:
+            raise ValueError(f"cannot release a request for {operation!r}: none is charged")
+        self.used -= 1
 
 
 class RateLimiter:

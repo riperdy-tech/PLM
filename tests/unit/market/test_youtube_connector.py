@@ -122,6 +122,59 @@ def test_a_5xx_is_retried_then_succeeds(mock_http) -> None:
     assert len(mock_http.requests) == 2
 
 
+def test_every_billed_attempt_is_recorded_in_the_quota_ledger(mock_http) -> None:
+    mock_http.enqueue_server_error(status=503).enqueue_server_error(status=503)
+    mock_http.enqueue_json(load("search_lofi_p1.json"))
+    quota = QuotaBudget(limit_units=1000)
+    active = YouTubeDataAPIConnector(
+        client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
+        credentials=YouTubeCredentials(api_key=Secret("test-key")),
+        quota=quota, sleep=lambda _seconds: None, rng=Random(0),
+        observed_at=lambda: FIXED_NOW,
+    )
+    active.search_videos("lofi", max_results=2)
+    assert len(mock_http.requests) == 3
+    # every attempt is a separately billed provider request, not one logical call
+    assert quota.used == 3 * SEARCH_QUOTA_UNITS
+    assert active.quota_units_used == 3 * SEARCH_QUOTA_UNITS
+
+
+def test_a_call_that_never_succeeds_still_records_every_billed_attempt(mock_http) -> None:
+    mock_http.enqueue_server_error().enqueue_server_error().enqueue_server_error()
+    quota = QuotaBudget(limit_units=1000)
+    active = YouTubeDataAPIConnector(
+        client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
+        credentials=YouTubeCredentials(api_key=Secret("test-key")),
+        quota=quota, sleep=lambda _seconds: None, rng=Random(0),
+        observed_at=lambda: FIXED_NOW,
+    )
+    with pytest.raises(ConnectorError) as excinfo:
+        active.search_videos("lofi")
+    assert excinfo.value.error_class is ConnectorErrorClass.PROVIDER_5XX
+    assert quota.used == 3 * SEARCH_QUOTA_UNITS
+    assert active.quota_units_used == 3 * SEARCH_QUOTA_UNITS
+
+
+def test_an_attempt_with_no_provider_response_is_refunded(mock_http) -> None:
+    mock_http.enqueue_timeout()
+    mock_http.enqueue_server_error(status=503)
+    mock_http.enqueue_json(load("videos_lofi_batch.json"))
+    quota = QuotaBudget(limit_units=10)
+    active = YouTubeDataAPIConnector(
+        client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
+        credentials=YouTubeCredentials(api_key=Secret("test-key")),
+        quota=quota, sleep=lambda _seconds: None, rng=Random(0),
+        observed_at=lambda: FIXED_NOW,
+    )
+    result = active.fetch_videos(["vid000000001", "vid000000002"])
+    assert len(result.objects) == 2
+    assert len(mock_http.requests) == 3
+    # three attempts: the timed-out one never reached the provider (refunded); the
+    # 503 and the success were each billed — two units, not one and not three
+    assert quota.used == 2 * LIST_QUOTA_UNITS
+    assert active.quota_units_used == 2 * LIST_QUOTA_UNITS
+
+
 def test_a_429_honours_retry_after_and_is_not_retried_forever(mock_http) -> None:
     mock_http.enqueue_rate_limit(retry_after="30").enqueue_json(load("channels_lofi_batch.json"))
     naps: list[float] = []
