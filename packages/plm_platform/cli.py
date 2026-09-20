@@ -471,6 +471,17 @@ def simulate(scenario: str = "clear_winner", cycles: int = 80, seed: int = 1) ->
     typer.echo(simulate_impl(scenario, cycles, seed))
 
 
+@ar_app.command()
+def smoke() -> None:
+    """Run the §114 P2.16 dry-run smoke; blocked (exit 3) until P1 is reachable with a token."""
+    from autonomous_ar.acceptance.production_smoke import run_production_smoke
+
+    reason = run_production_smoke()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
+
+
 @experiments_app.command()
 def run() -> NoReturn:
     """Run a P3 experiment (registered stub until PHASE-P3)."""
