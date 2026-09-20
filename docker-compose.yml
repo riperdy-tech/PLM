@@ -49,10 +49,15 @@ services:
       - POSTGRES_USER=plm
       - POSTGRES_PWD=${POSTGRES_PASSWORD}
       - POSTGRES_SEEDS=postgres
+      # auto-setup defaults to binding the container IP only; loopback then refuses
+      # every in-container healthcheck. Bind all interfaces instead.
+      - BIND_ON_IP=0.0.0.0
     ports:
       - "7233:7233"
     healthcheck:
-      test: ["CMD", "tctl", "--address", "localhost:7233", "cluster", "health"]
+      # `tctl` ships too but is past its end-of-support date; the Temporal CLI is
+      # the supported probe. It exits 0 only while the frontend reports SERVING.
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -78,8 +83,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    # W0.7 replaces this command with: python -m plm_platform.worker
-    command: sleep infinity
+    # W0.7: the dev worker serves ph1.market; later waves add their queue and
+    # registrations (see packages/plm_platform/README.md). The bind mount makes
+    # the repo the source of truth, so code changes need no rebuild.
+    command: ["python", "-m", "plm_platform.worker", "--task-queue", "ph1.market"]
+    environment:
+      # Compose services reach each other by service name; the localhost values in
+      # .env are for tools on the host, and these explicit values win over .env.
+      - TEMPORAL_HOST=temporal:7233
+      - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/plm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
     volumes:
       - .:/app
     depends_on:
@@ -88,12 +105,15 @@ services:
       minio:
         condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "--version"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      # Real probe: exits non-zero unless the worker process is alive AND its
+      # pollers are visible on the served task queue.
+      test: ["CMD", "python", "-m", "plm_platform.worker", "--healthcheck", "--task-queue", "ph1.market"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:
