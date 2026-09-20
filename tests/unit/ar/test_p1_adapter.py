@@ -33,9 +33,9 @@ def _payload(**overrides: object) -> dict[str, object]:
 
 
 def test_mapping_is_exact_and_unobserved_components_stay_none() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import _OpportunityPayload
+    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
-    arm = adapt_opportunity(_OpportunityPayload.model_validate(_payload()), now=NOW)
+    arm = adapt_opportunity(OpportunityPayload.model_validate(_payload()), now=NOW)
     assert arm.arm_id == "rnb_late_night_drive_english_vocal_45_75m"
     assert arm.p1_score == 82.0 and arm.p1_confidence == 0.7
     assert arm.component_scores["demand"] == 70.0
@@ -46,9 +46,9 @@ def test_mapping_is_exact_and_unobserved_components_stay_none() -> None:
 
 
 def test_freshness_is_derived_from_an_aware_as_of() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import _OpportunityPayload
+    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
-    payload = _OpportunityPayload.model_validate(_payload())
+    payload = OpportunityPayload.model_validate(_payload())
     arm = adapt_opportunity(payload, now=AS_OF + timedelta(hours=5))
     assert arm.freshness_seconds == pytest.approx(5 * 3600.0)
     # as_of is ahead of the caller's clock (skew): age clamps at zero, never negative.
@@ -57,10 +57,10 @@ def test_freshness_is_derived_from_an_aware_as_of() -> None:
 
 
 def test_payload_schema_refuses_unknown_fields() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import _OpportunityPayload
+    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
     with pytest.raises(ValueError, match="freshness"):
-        _OpportunityPayload.model_validate(_payload(freshness="fresh"))
+        OpportunityPayload.model_validate(_payload(freshness="fresh"))
 
 
 def test_client_reads_the_flat_c1_envelope_over_the_real_app() -> None:

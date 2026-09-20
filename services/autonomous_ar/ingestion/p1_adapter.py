@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..domain.arm import ArmDimensions, ContentArm
 
 __all__ = [
-    "MARKET_OPPORTUNITIES_PATH", "MarketUnavailable", "OpportunityPage", "P1Client",
+    "MARKET_OPPORTUNITIES_PATH", "ComponentsPayload", "EvidencePayload", "MarketUnavailable",
+    "OpportunityPage", "OpportunityPayload", "P1Client", "TaxonomyPayload",
     "adapt_opportunity",
 ]
 
@@ -67,9 +68,9 @@ class EvidencePayload(_Frozen):
     top_observation_ids: list[str] = Field(default_factory=list)
 
 
-class _OpportunityPayload(_Frozen):
-    """P2's transcription of the frozen C1 object. Exported as `OpportunityPayload` in
-    P2.2A, where the consumer seam test pins it against the registry field list."""
+class OpportunityPayload(_Frozen):
+    """P2's transcription of the frozen C1 object; the consumer seam test pins it
+    against the registry field list (`tests/contract/test_c1_market_to_ar_consumer.py`)."""
 
     arm_id: str = Field(min_length=1)
     market_opportunity_score: float = Field(ge=0.0, le=100.0)
@@ -82,7 +83,7 @@ class _OpportunityPayload(_Frozen):
 
 
 class OpportunityPage(_Frozen):
-    items: tuple[_OpportunityPayload, ...]
+    items: tuple[OpportunityPayload, ...]
     next_cursor: str | None
     as_of: datetime
     score_version: str
@@ -128,7 +129,7 @@ class P1Client:
         return OpportunityPage.model_validate(body)
 
 
-def adapt_opportunity(payload: _OpportunityPayload, *, now: datetime) -> ContentArm:
+def adapt_opportunity(payload: OpportunityPayload, *, now: datetime) -> ContentArm:
     """C1 payload → `ContentArm`; `market_opportunity_score → p1_score` per registry C1."""
     age = (now - payload.as_of).total_seconds()
     dimensions = ArmDimensions(
