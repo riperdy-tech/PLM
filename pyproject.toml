@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "PLM monorepo: autonomous music-label platform (Wave 0 scaffold)"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.7",
+]
 
 [project.optional-dependencies]
 dev = [
