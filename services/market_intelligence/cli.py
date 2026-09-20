@@ -191,16 +191,25 @@ def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
 def smoke_live() -> str:
     """§40's live smoke test; blocked (never a silent pass) until credentials exist.
 
-    P1.14 adds the live run itself; with no credential configured the acceptance is
-    *blocked*, which is the honest state of a fresh checkout.
+    Returns the blocked reason — naming every missing variable — which the Typer
+    command turns into `BLOCKED_EXIT_CODE`; an empty string means the smoke test
+    ran and every step passed.
     """
     from plm_platform.config import load_settings
 
+    from .acceptance.youtube_smoke import blocked_reason, run_live_smoke
+
     platform = load_settings()
-    if platform.youtube_api_key is None:
-        return ("blocked: pending credentials (YOUTUBE_API_KEY, YOUTUBE_OAUTH_CLIENT_ID, "
-                "YOUTUBE_OAUTH_CLIENT_SECRET)")
-    return "blocked: the live smoke run is not implemented until PHASE-P1.14"
+    reason = blocked_reason(platform)
+    if reason is not None:
+        return reason
+    report = run_live_smoke(platform=platform, client=httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS))
+    if report.blocked_reason is not None:
+        return report.blocked_reason
+    if report.ok:
+        return ""
+    return "smoke failed: " + "; ".join(f"{step.name}: {step.detail}"
+                                        for step in report.failed_steps)
 
 
 # ---------------------------------------------------------------------------
