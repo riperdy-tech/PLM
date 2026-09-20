@@ -20,7 +20,12 @@ from plm_contracts import Tri
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..domain.entities import CollectionRunCounters, NormalizedObservation, QuarantinedRecord
+from ..domain.entities import (
+    CollectionRunCounters,
+    NormalizedObservation,
+    OpportunityScore,
+    QuarantinedRecord,
+)
 from ..domain.enums import (
     ArmStatus,
     CollectionRunStatus,
@@ -48,6 +53,7 @@ from .models import (
     observations,
     quarantined_records,
     queries,
+    scores,
     seed_evidence,
     sources,
 )
@@ -57,11 +63,11 @@ if TYPE_CHECKING:  # `taxonomy.arms` imports domain/validators only — no runti
 
 __all__ = [
     "add_run_cost", "count_quarantined", "deterministic_id", "finish_collection_run",
-    "insert_classification", "insert_normalized_observation", "insert_seed_evidence",
-    "latest_classifications_for", "load_arms", "load_classification", "load_entity",
-    "load_observations", "load_queries", "load_run", "load_seed_evidence",
-    "observations_for_entities", "quarantine_record", "resolve_entity",
-    "start_collection_run", "upsert_arm", "upsert_query", "upsert_source",
+    "insert_classification", "insert_normalized_observation", "insert_score",
+    "insert_seed_evidence", "latest_classifications_for", "latest_scores", "load_arms",
+    "load_classification", "load_entity", "load_observations", "load_queries", "load_run",
+    "load_seed_evidence", "observations_for_entities", "quarantine_record", "resolve_entity",
+    "scores_for_arm", "start_collection_run", "upsert_arm", "upsert_query", "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -583,3 +589,54 @@ def load_arms(session: Session, *, status: ArmStatus | None = None) -> list[Mapp
     if status is not None:
         statement = statement.where(arms.c.status == status.value)
     return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def insert_score(
+    session: Session, *, arm_id: str, score: OpportunityScore, computed_at: datetime,
+    components: Mapping[str, Any], evidence: Mapping[str, Any],
+    feature_version: str, normalization_version: str,
+) -> str:
+    """§20: evidence and versions travel with the number, always.
+
+    The row id is derived from the row's stable identity (arm + computation instant),
+    never minted — a replay in a fresh schema reproduces the same score rows.
+    """
+    score_id = deterministic_id("score", arm_id, computed_at.isoformat())
+    session.execute(sa.insert(scores).values(
+        id=score_id, arm_id=arm_id, computed_at=computed_at, as_of=score.as_of,
+        market_opportunity_score=score.market_opportunity_score,
+        confidence=score.confidence, components_json=dict(components),
+        evidence_json=dict(evidence), score_version=score.score_version,
+        feature_version=feature_version, normalization_version=normalization_version,
+    ))
+    return score_id
+
+
+def latest_scores(
+    session: Session, *, limit: int = 100, min_score: float | None = None,
+    min_confidence: float | None = None,
+) -> list[Mapping[str, Any]]:
+    """Newest score per arm, ranked — the API's read path (§25)."""
+    newest = (
+        sa.select(scores.c.arm_id, sa.func.max(scores.c.computed_at).label("computed_at"))
+        .group_by(scores.c.arm_id).subquery()
+    )
+    statement = (
+        sa.select(scores, arms.c.taxonomy_json)
+        .join(newest, sa.and_(scores.c.arm_id == newest.c.arm_id,
+                              scores.c.computed_at == newest.c.computed_at))
+        .join(arms, arms.c.arm_id == scores.c.arm_id)
+    )
+    if min_score is not None:
+        statement = statement.where(scores.c.market_opportunity_score >= min_score)
+    if min_confidence is not None:
+        statement = statement.where(scores.c.confidence >= min_confidence)
+    statement = statement.order_by(scores.c.market_opportunity_score.desc(),
+                                   scores.c.arm_id.asc()).limit(limit)
+    return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def scores_for_arm(session: Session, arm_id: str) -> list[Mapping[str, Any]]:
+    return [dict(row) for row in session.execute(
+        sa.select(scores).where(scores.c.arm_id == arm_id).order_by(scores.c.computed_at.desc())
+    ).mappings()]
