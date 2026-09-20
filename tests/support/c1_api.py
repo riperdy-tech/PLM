@@ -31,8 +31,8 @@ from services.market_intelligence.storage import repositories
 from services.market_intelligence.storage.models import MARKET_METADATA
 from services.market_intelligence.taxonomy.arms import ArmDraft
 
-__all__ = ["ARM_ID", "AS_OF", "SEAM_TOKEN", "SyncASGIClient", "open_c1_client",
-           "seed_market"]
+__all__ = ["ARM_ID", "AS_OF", "SEAM_TOKEN", "SyncASGIClient", "SyncASGITransport",
+           "open_c1_client", "seed_market"]
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SEAM_TOKEN = "seam-test-token"
@@ -105,6 +105,11 @@ class SyncASGIClient:
         self._base_url = base_url
         self._headers = dict(headers)
 
+    @property
+    def app(self) -> Any:
+        """The FastAPI app this client drives — lets a consumer adapter share the fixture."""
+        return self._app
+
     def request(self, method: str, path: str, *, params: Any = None,
                 headers: Mapping[str, str] | None = None) -> httpx.Response:
         async def send() -> httpx.Response:
@@ -124,6 +129,29 @@ class SyncASGIClient:
 
     def __exit__(self, *exc: object) -> None:
         return None
+
+
+class SyncASGITransport(httpx.BaseTransport):
+    """`httpx.ASGITransport` is async-only; this drives it synchronously for tests.
+
+    `P1Client` is sync (its interface is frozen), so it cannot take the async transport
+    directly. One ``asyncio.run`` per request reads the body inside the async context and
+    rebuilds the response over a sync stream — the same bridge idea as `SyncASGIClient`,
+    which serves a different shape (a whole client, not a transport).
+    """
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        async def send() -> tuple[int, list[tuple[bytes, bytes]], bytes]:
+            stream = httpx.ASGITransport(app=self._app)
+            async with stream:
+                response = await stream.handle_async_request(request)
+                return response.status_code, list(response.headers.raw), await response.aread()
+
+        status, headers, body = asyncio.run(send())
+        return httpx.Response(status, headers=headers, content=body, request=request)
 
 
 @contextmanager
