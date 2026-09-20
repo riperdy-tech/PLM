@@ -16,10 +16,11 @@ from services.market_intelligence.domain.enums import (
 )
 from services.market_intelligence.normalization.youtube import normalize_video_object
 from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import observations
+from services.market_intelligence.storage.models import entity_identities, observations
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 LATER = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
+NEWEST = datetime(2026, 9, 24, 6, 0, tzinfo=UTC)
 # raw_observation_id is a uuid column (FK to market_raw_observations); reading it back
 # runs through SQLAlchemy's Uuid type, so placeholders must be uuid-shaped.
 RAW_ONE = "00000000-0000-4000-8000-000000000001"
@@ -57,6 +58,48 @@ def test_the_same_provider_video_resolves_to_one_entity_across_collections(
     assert first == second
     entity = repositories.load_entity(market_session, first)
     assert entity["last_seen_at"] is not None
+
+
+def test_a_backfill_cannot_regress_the_entity_name_or_last_seen(
+    market_session, source_id
+) -> None:
+    entity_id = repositories.resolve_entity(
+        market_session, entity_type=EntityType.VIDEO, source_id=source_id,
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
+        canonical_name="2AM Seoul (remastered)", normalized_name="2am seoul remastered",
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=LATER,
+    )
+    before = repositories.load_entity(market_session, entity_id)
+
+    def _identity_last_seen() -> object:
+        return market_session.execute(
+            sa.select(entity_identities.c.last_seen_at).where(
+                entity_identities.c.entity_id == entity_id)
+        ).scalar_one()
+
+    identity_before = _identity_last_seen()
+
+    same = repositories.resolve_entity(  # a backfill sighting, older than the last one
+        market_session, entity_type=EntityType.VIDEO, source_id=source_id,
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
+        canonical_name="2AM Seoul", normalized_name="2am seoul",
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
+    )
+    assert same == entity_id
+    after = repositories.load_entity(market_session, entity_id)
+    assert after["canonical_name"] == "2AM Seoul (remastered)"
+    assert after["normalized_name"] == "2am seoul remastered"
+    assert after["last_seen_at"] == before["last_seen_at"]  # monotonic, not regressed
+    assert _identity_last_seen() == identity_before
+
+    repositories.resolve_entity(  # a genuinely newer sighting still moves the state
+        market_session, entity_type=EntityType.VIDEO, source_id=source_id,
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
+        canonical_name="2AM Seoul (2M remaster)", normalized_name="2am seoul 2m remaster",
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=NEWEST,
+    )
+    final = repositories.load_entity(market_session, entity_id)
+    assert final["canonical_name"] == "2AM Seoul (2M remaster)"
 
 
 def test_rerunning_the_same_query_on_a_later_date_adds_a_second_observation(

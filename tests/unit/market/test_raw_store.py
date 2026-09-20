@@ -15,6 +15,7 @@ from services.market_intelligence.domain.enums import (
     ProviderObjectType,
 )
 from services.market_intelligence.storage import repositories
+from services.market_intelligence.storage.models import raw_observations
 from services.market_intelligence.storage.raw_store import store_raw_observation
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
@@ -145,3 +146,14 @@ def test_a_later_collection_at_a_new_time_is_a_second_observation(market_session
                           observed_at=datetime(2026, 9, 21, 6, 0, tzinfo=UTC))
     assert second.created is True
     assert second.raw_observation_id != first.raw_observation_id
+    rows = market_session.execute(
+        sa.text("SELECT count(*) FROM market.market_raw_observations")
+    ).scalar_one()
+    assert rows == 2  # append-only: the new point adds a row, nothing overwrites
+    stored_first = market_session.execute(
+        sa.select(raw_observations.c.payload_hash, raw_observations.c.payload_uri)
+        .where(raw_observations.c.id == first.raw_observation_id)
+    ).one_or_none()
+    assert stored_first is not None  # the first observation is still present
+    assert stored_first.payload_hash == first.payload_hash
+    assert stored_first.payload_uri == first.payload_uri

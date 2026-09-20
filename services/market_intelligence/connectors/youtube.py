@@ -62,12 +62,14 @@ class YouTubeCredentials:
 
 @dataclass(frozen=True, slots=True)
 class SearchHit:
+    """A discovery result; a field the snippet does not carry stays `None`."""
+
     video_id: str
-    channel_id: str
-    title: str
-    description: str
+    channel_id: str | None
+    title: str | None
+    description: str | None
     published_at: datetime | None
-    channel_title: str
+    channel_title: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +213,12 @@ class YouTubeDataAPIConnector:
                 return
 
     def fetch_videos(self, video_ids: Sequence[str]) -> FetchResult:
-        """videos.list, batched at the documented 50-id limit; one FetchResult per batch."""
+        """videos.list for one batch of up to the documented 50 ids.
+
+        Exactly one provider call and one `FetchResult`; more than
+        `_MAX_IDS_PER_LIST_CALL` ids raise `INVALID_REQUEST` — split upstream into
+        batches (a list call bills 1 unit regardless of id count).
+        """
         payload = self._list("/videos", "snippet,statistics,contentDetails", "id",
                              list(video_ids), operation="videos.list")
         observed_at = self._observed_at()
@@ -376,11 +383,11 @@ def parse_search_hits(fetch: FetchResult) -> tuple[SearchHit, ...]:
         snippet = obj.payload.get("snippet") or {}
         hits.append(SearchHit(
             video_id=obj.provider_object_id,
-            channel_id=snippet.get("channelId", ""),
-            title=snippet.get("title", ""),
-            description=snippet.get("description", ""),
+            channel_id=snippet.get("channelId"),
+            title=snippet.get("title"),
+            description=snippet.get("description"),
             published_at=_parse_timestamp(snippet.get("publishedAt")),
-            channel_title=snippet.get("channelTitle", ""),
+            channel_title=snippet.get("channelTitle"),
         ))
     return tuple(hits)
 

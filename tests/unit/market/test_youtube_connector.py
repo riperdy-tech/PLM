@@ -65,6 +65,28 @@ def test_pagination_follows_next_page_token_and_respects_max_pages(mock_http) ->
     assert sum(p.quota_units for p in pages) == 2 * SEARCH_QUOTA_UNITS
 
 
+def test_search_hits_absent_fields_stay_none_never_empty_strings(mock_http) -> None:
+    mock_http.enqueue_json({
+        "items": [{"id": {"kind": "youtube#video", "videoId": "vid00000001"},
+                   "snippet": {}}],
+    })
+    result = connector(mock_http).search_videos("lofi", max_results=1)
+    hit = parse_search_hits(result)[0]
+    assert hit.video_id == "vid00000001"  # the id the discovery target must carry
+    assert hit.channel_id is None
+    assert hit.title is None
+    assert hit.description is None
+    assert hit.channel_title is None
+
+
+def test_fetch_videos_refuses_more_ids_than_the_documented_batch_limit(mock_http) -> None:
+    too_many = [f"vid{index:08d}" for index in range(51)]
+    with pytest.raises(ConnectorError) as excinfo:
+        connector(mock_http).fetch_videos(too_many)
+    assert excinfo.value.error_class is ConnectorErrorClass.INVALID_REQUEST
+    assert mock_http.requests == ()  # refused before anything left the process
+
+
 def test_quota_exhaustion_stops_before_the_request_is_sent(mock_http) -> None:
     # The plan used limit_units=100, but its own budget semantics allow a call whose
     # cost equals the remaining budget, so a 100-unit budget affords one search.list.

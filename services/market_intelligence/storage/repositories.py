@@ -210,12 +210,18 @@ def resolve_entity(
         )
     ).scalar_one_or_none()
     if identity is not None:
+        # A sighting only rewrites state when it is at least as new as the last one:
+        # a backfill must never regress a name or move `last_seen` backwards (§22).
         session.execute(sa.update(entity_identities).where(
             entity_identities.c.entity_id == identity,
             entity_identities.c.provider_object_type == provider_object_type.value,
             entity_identities.c.provider_object_id == provider_object_id,
+            entity_identities.c.last_seen_at <= observed_at,
         ).values(last_seen_at=observed_at))
-        session.execute(sa.update(entities).where(entities.c.id == identity).values(
+        session.execute(sa.update(entities).where(
+            entities.c.id == identity,
+            entities.c.last_seen_at <= observed_at,
+        ).values(
             last_seen_at=observed_at,
             canonical_name=canonical_name,
             normalized_name=normalized_name,
