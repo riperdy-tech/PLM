@@ -32,7 +32,10 @@ from ..domain.enums import ArmLifecycleStatus, ReasonCode
 from ..domain.policy import PolicyConfig
 from .exploration import reserve_baseline
 
-__all__ = ["Portfolio", "Selection", "apply_portfolio_constraints", "directive_budget_share"]
+__all__ = [
+    "BudgetCeilingExceeded", "Portfolio", "Selection", "apply_portfolio_constraints",
+    "directive_budget_share",
+]
 
 _INELIGIBLE_STATES = frozenset({
     ArmLifecycleStatus.BLOCKED, ArmLifecycleStatus.RETIRED, ArmLifecycleStatus.ARCHIVED,
@@ -40,6 +43,10 @@ _INELIGIBLE_STATES = frozenset({
 })
 """§9/§111: never selected, for any reason, in any mode. `cooldown` is filtered by the
 caller with `cooldown_until` (a temporary state, unlike these)."""
+
+
+class BudgetCeilingExceeded(RuntimeError):
+    """Directive shares would sum above the cycle's ceiling (ADR-0023 #1: refuse)."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict
 
 from services.autonomous_ar.domain.directive import (
     DIRECTIVE_WIRE_FIELDS,
-    DirectiveBrief,
     ProductionDirective,
 )
 from tests.support.contract import SeamRegistry, assert_seam_payload
@@ -77,24 +76,48 @@ class ConsumerSchema(BaseModel):
 
 
 def producer_directive() -> ProductionDirective:
-    """The producer: P2's real directive serialiser. Replaced by a cycle-produced
-    directive in P2.10 (same assertions, a stronger producer)."""
-    return ProductionDirective(
-        directive_id="directive-1", decision_id="decision-1",
-        arm_id="rnb_late_night_drive_english_vocal_45_75m",
-        allocation_type=AllocationType.EXPLOIT, priority=1, quantity=1,
-        brief=DirectiveBrief(genre="rnb", mood=("melancholic", "dreamy"),
-                             use_case=("late_night_drive",), language="english",
-                             vocal_mode="vocal", duration_bucket="45_75m",
-                             visual_world="rainy_asian_city"),
-        expected_value=0.72, uncertainty=0.31, budget_limit=0.5,
-        market_context={"p1_score": 82.0, "p1_confidence": 0.7, "freshness_seconds": 3600.0,
-                        "score_version": "p1-v1", "measured_component_count": 4},
-        selection_reason=("STRONG_POSTERIOR", "LOW_FATIGUE"),
-        directive_version="p2-directive-v1", policy_version="p2-v1",
-        expires_at=datetime(2026, 9, 27, 6, 0, tzinfo=UTC),
-        exploration_fraction=0.70, value_model="early-stage-proxy-v1",
+    """The producer: a directive produced by the real allocation cycle (P2.10), not a
+    hand-built fixture — the P2.1A note promised this swap. Every assertion below is
+    unchanged; the payload now proves the engine's own output crosses the frozen wire."""
+    from services.autonomous_ar.config import load_ar_settings
+    from services.autonomous_ar.decisioning.cycle import (
+        CycleRequest,
+        MarketSnapshot,
+        run_allocation_cycle,
     )
+    from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
+    from services.autonomous_ar.domain.policy import DEFAULT_POLICY
+    from services.autonomous_ar.storage import repositories
+    from tests.support.ar_db import ar_session, create_ar_engine
+
+    now = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
+    arm = ContentArm(
+        arm_id="rnb_late_night_drive_english_vocal_45_75m",
+        dimensions=ArmDimensions(genre="rnb", moods=("melancholic", "dreamy"),
+                                 use_cases=("late_night_drive",), language="english",
+                                 vocal_mode="vocal", duration_bucket="45_75m",
+                                 visual_world="rainy_asian_city"),
+        p1_score=82.0, p1_confidence=0.7,
+        component_scores={name: 60.0 for name in
+                          ("demand", "growth", "competitor_velocity", "competition",
+                           "audience_quality", "cross_platform", "production_fit")},
+        observation_count=6, source_count=2, as_of=now, score_version="p1-v1",
+        freshness_seconds=3600.0,
+    )
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
+                                   created_at=now)
+        result = run_allocation_cycle(
+            session,
+            CycleRequest(brand_id="neon_seoul", as_of=now, slot_count=1, budget=1.0,
+                         policy_version="p2-v1"),
+            settings=load_ar_settings(), market=MarketSnapshot(arms=(arm,), as_of=now,
+                                                               source="live",
+                                                               score_version="p1-v1"),
+            now=now,
+        )
+    return result.directives[0]
 
 
 def test_declared_fields_match_the_registry_field_list() -> None:

@@ -17,6 +17,7 @@ the defect P1 hit when deterministic ids met a naive `INSERT` twice.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -54,9 +55,11 @@ __all__ = [
     "finish_cycle", "get_channel_state", "insert_cycle", "insert_decision",
     "insert_directive", "insert_experiment_result", "insert_exposure",
     "insert_feature_snapshot", "insert_override", "insert_policy",
-    "insert_posterior_update", "insert_reward_observation", "list_queued_directives",
-    "load_active_overrides", "load_arm_states", "load_baselines", "load_cycle",
-    "load_decisions", "load_exposure", "load_feature_snapshot", "load_pending_observations",
+    "insert_posterior_update", "insert_reward_observation", "is_in_cooldown_state",
+    "list_queued_directives", "load_active_overrides", "load_all_latest_feature_snapshots",
+    "load_arm_states", "load_baselines", "load_cycle", "load_decisions",
+    "load_directives_for_cycle", "load_exposure", "load_exposure_score",
+    "load_feature_snapshot", "load_latest_feature_snapshot", "load_pending_observations",
     "load_policy", "load_posterior", "load_posterior_update", "load_similarity",
     "record_selection", "replace_baselines", "replace_similarity", "set_arm_status",
     "set_channel_state", "upsert_arm_state", "upsert_posterior",
@@ -220,6 +223,24 @@ def load_arm_states(session: Session) -> list[dict[str, Any]]:
     ).mappings()]
 
 
+def load_exposure_score(session: Session, arm_id: str) -> float:
+    """The decayed §26 exposure score carried on the arm's state row (`0.0` when new)."""
+    value = session.execute(
+        sa.select(ar_content_arm_state.c.recent_exposure_score)
+        .where(ar_content_arm_state.c.arm_id == arm_id)
+    ).scalar_one_or_none()
+    return float(value) if value is not None else 0.0
+
+
+def is_in_cooldown_state(session: Session, *, arm_id: str, now: datetime) -> bool:
+    """§9: a stored `cooldown_until` in the future keeps the arm out of this cycle."""
+    until = session.execute(
+        sa.select(ar_content_arm_state.c.cooldown_until)
+        .where(ar_content_arm_state.c.arm_id == arm_id)
+    ).scalar_one_or_none()
+    return until is not None and _aware(until) > now
+
+
 # --- feature snapshots (insert-only: no leakage) ------------------------------------
 
 def insert_feature_snapshot(session: Session, *, brand_id: str, arm: ContentArm,
@@ -240,7 +261,16 @@ def insert_feature_snapshot(session: Session, *, brand_id: str, arm: ContentArm,
         cross_platform_score=arm.component_scores["cross_platform"],
         production_fit_score=arm.component_scores["production_fit"],
         freshness_seconds=arm.freshness_seconds,
-        feature_json=dict(arm.component_scores), feature_version=feature_version,
+        # The dimensions ride inside `feature_json` so §102's degraded path can rebuild
+        # the arm without reading P1 (P2.10; the row is the arm's last known state).
+        feature_json={
+            "components": dict(arm.component_scores),
+            "dimensions": asdict(arm.dimensions),
+            "observation_count": arm.observation_count,
+            "source_count": arm.source_count,
+            "score_version": arm.score_version,
+        },
+        feature_version=feature_version,
     ))
     return snapshot_id
 
@@ -251,6 +281,35 @@ def load_feature_snapshot(session: Session, snapshot_id: str) -> dict[str, Any] 
         .where(ar_arm_feature_snapshot.c.id == snapshot_id)
     ).mappings().one_or_none()
     return None if row is None else dict(row)
+
+
+def load_latest_feature_snapshot(session: Session, arm_id: str) -> dict[str, Any] | None:
+    """The arm's most recent snapshot — §39's stored score for reopen decisions."""
+    row = session.execute(
+        sa.select(ar_arm_feature_snapshot)
+        .where(ar_arm_feature_snapshot.c.arm_id == arm_id)
+        .order_by(ar_arm_feature_snapshot.c.captured_at.desc())
+    ).mappings().first()
+    return None if row is None else dict(row)
+
+
+def load_all_latest_feature_snapshots(session: Session, *, brand_id: str,
+                                      ) -> list[dict[str, Any]]:
+    """One row per arm: its newest snapshot for the brand (§102's stored rebuild)."""
+    newest = (
+        sa.select(ar_arm_feature_snapshot.c.arm_id,
+                  sa.func.max(ar_arm_feature_snapshot.c.captured_at).label("captured_at"))
+        .where(ar_arm_feature_snapshot.c.brand_id == brand_id)
+        .group_by(ar_arm_feature_snapshot.c.arm_id)
+        .subquery()
+    )
+    return [dict(row) for row in session.execute(
+        sa.select(ar_arm_feature_snapshot)
+        .join(newest, sa.and_(
+            ar_arm_feature_snapshot.c.arm_id == newest.c.arm_id,
+            ar_arm_feature_snapshot.c.captured_at == newest.c.captured_at))
+        .order_by(ar_arm_feature_snapshot.c.arm_id)
+    ).mappings()]
 
 
 # --- posteriors ---------------------------------------------------------------------
@@ -438,6 +497,17 @@ def load_directive(session: Session, directive_id: str) -> dict[str, Any] | None
         .where(ar_production_directive.c.id == directive_id)
     ).mappings().one_or_none()
     return None if row is None else dict(row)
+
+
+def load_directives_for_cycle(session: Session, cycle_id: str) -> list[dict[str, Any]]:
+    """The cycle's directives in priority order — the replay read-back path."""
+    return [dict(row) for row in session.execute(
+        sa.select(ar_production_directive)
+        .join(ar_allocation_decision,
+              ar_allocation_decision.c.id == ar_production_directive.c.decision_id)
+        .where(ar_allocation_decision.c.cycle_id == cycle_id)
+        .order_by(ar_production_directive.c.priority, ar_production_directive.c.id)
+    ).mappings()]
 
 
 # --- reward observations and updates ------------------------------------------------
