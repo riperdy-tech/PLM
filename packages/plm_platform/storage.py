@@ -62,6 +62,7 @@ __all__ = [
     "put_verified",
     "replace_object",
     "sha256_digest",
+    "split_endpoint",
     "to_uri",
 ]
 
@@ -229,8 +230,13 @@ def from_uri(uri: str, *, settings: Settings | None = None) -> str:
     return uri[len(marker):]
 
 
-def _split_endpoint(endpoint: str) -> tuple[str, bool]:
-    """``host:port`` keeps TLS off; an explicit ``http(s)://`` scheme decides."""
+def split_endpoint(endpoint: str) -> tuple[str, bool]:
+    """``host:port`` keeps TLS off; an explicit ``http(s)://`` scheme decides.
+
+    Public because :mod:`plm_platform.cli` builds a bounded probe client for
+    ``plm doctor`` from the same parsing (the doctor must not inherit the
+    production client's retry budget).
+    """
     if endpoint.startswith("https://"):
         return endpoint.removeprefix("https://"), True
     if endpoint.startswith("http://"):
@@ -241,7 +247,7 @@ def _split_endpoint(endpoint: str) -> tuple[str, bool]:
 def build_client(settings: Settings | None = None) -> Minio:
     """A MinIO client from configuration; credentials never appear in logs."""
     resolved = load_settings() if settings is None else settings
-    endpoint, secure = _split_endpoint(resolved.minio_endpoint)
+    endpoint, secure = split_endpoint(resolved.minio_endpoint)
     return Minio(
         endpoint,
         access_key=resolved.minio_root_user,

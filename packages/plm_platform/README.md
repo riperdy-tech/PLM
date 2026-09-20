@@ -15,6 +15,7 @@ lives here.
 | `worker.py` | Runnable worker: `python -m plm_platform.worker` (W0.7) |
 | `correlation.py` | Correlation-id context variable, header middleware, dependency (W0.8) |
 | `observability.py` | JSON logging, Prometheus metrics, per-run cost counters (W0.8) |
+| `cli.py` | The `plm` operator CLI: doctor gate, migration runner, one group per phase (W0.12) |
 
 ## Temporal conventions (W0.7)
 
@@ -113,3 +114,16 @@ before any phase exists. `--healthcheck` exits 0 only when Temporal is reachable
 and every selected queue has a live poller; the compose worker uses it. The dev
 compose worker serves `ph1.market` only, so phase task queues stay free for
 tests and ad-hoc workers.
+
+## Operator CLI (`plm`, W0.12)
+
+One CLI for the whole program (ruling R20), installed as the `plm` console
+script; `python -m plm_platform.cli` is equivalent and is what `make.ps1` and
+the `Makefile` call. `plm doctor` is the Wave 0 gate (PostgreSQL reachability
+and alembic revision vs head, MinIO, Temporal, the nine task-queue constants;
+PASS/FAIL table, non-zero exit on any FAIL). `plm migrate [REVISION]` runs the
+alembic chain (default `head`). The nine phase groups (`market`, `ar`,
+`experiments`, `music`, `qa`, `media`, `youtube`, `distribution`, `analytics`)
+are registered stubs until their phase is built: invoking one prints
+`not implemented until PHASE-Pn` and exits 2 — the surface is discoverable in
+Wave 0 and never silently succeeds.

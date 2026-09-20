@@ -16,7 +16,11 @@ dependencies = [
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
     "temporalio>=1.33",
+    "typer>=0.12",
 ]
+
+[project.scripts]
+plm = "plm_platform.cli:main"
 
 [project.optional-dependencies]
 dev = [

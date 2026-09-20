@@ -28,13 +28,8 @@ fmt:  ## format
 typecheck:  ## strict typing for packages/
 	$(PY) -m mypy
 
-doctor:  ## report host tooling state
-	@echo "== plm doctor =="
-	@$(PY) --version
-	@docker --version
-	@docker compose version
-	@test -f .env || echo ".env missing - copy .env.example to .env"
-	@echo "ffmpeg and psql run inside the containers; the host does not need them."
+doctor:  ## Wave 0 gate via the plm CLI (same implementation as make.ps1)
+	$(PY) -m plm_platform.cli doctor
 
-migrate:  ## apply migrations (placeholder until the alembic chain lands)
-	@echo "No alembic chain yet - a later Wave 0 task wires 'alembic upgrade head' here."
+migrate:  ## apply the alembic chain via the plm CLI
+	$(PY) -m plm_platform.cli migrate

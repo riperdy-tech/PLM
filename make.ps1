@@ -27,42 +27,6 @@ function Stop-IfFailed([int]$Code) {
     }
 }
 
-function Show-Doctor {
-    Write-Host '== plm doctor =='
-    & $Python --version
-    & docker --version
-    & docker compose version
-
-    if (Test-Path -LiteralPath (Join-Path $RepoRoot '.env')) {
-        Write-Host '.env: present'
-    } else {
-        Write-Host '.env: missing - copy .env.example to .env'
-    }
-
-    $previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $server = (& docker info --format '{{.ServerVersion}}' 2>&1 | Out-String).Trim()
-    } finally {
-        $ErrorActionPreference = $previous
-    }
-    Write-Host "docker server: $server"
-
-    foreach ($tool in @('ffmpeg', 'psql')) {
-        if (Get-Command $tool -ErrorAction SilentlyContinue) {
-            Write-Host "${tool}: on host"
-        } else {
-            Write-Host "${tool}: not on host (expected - provided inside the containers)"
-        }
-    }
-
-    if (Test-Path -LiteralPath $VenvPython) {
-        & $Python -c "import plm_contracts, plm_platform; print('plm packages importable')"
-    } else {
-        Write-Host '.venv: missing - run: python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -e ".[dev]"'
-    }
-}
-
 switch ($Target) {
     'up'        { & docker compose up -d; Stop-IfFailed $LASTEXITCODE }
     'down'      { & docker compose down; Stop-IfFailed $LASTEXITCODE }
@@ -71,8 +35,13 @@ switch ($Target) {
     'lint'      { & $Python -m ruff check .; Stop-IfFailed $LASTEXITCODE }
     'fmt'       { & $Python -m ruff format .; Stop-IfFailed $LASTEXITCODE }
     'typecheck' { & $Python -m mypy; Stop-IfFailed $LASTEXITCODE }
-    'doctor'    { Show-Doctor }
-    'migrate'   { Write-Host "No alembic chain yet - a later Wave 0 task wires 'alembic upgrade head' here." }
+    'doctor'    {
+        # The real Wave 0 gate now lives in the plm CLI (W0.12); run it via
+        # `python -m` so PATH or an unactivated venv cannot pick a different tool.
+        & $Python -m plm_platform.cli doctor
+        Stop-IfFailed $LASTEXITCODE
+    }
+    'migrate'   { & $Python -m plm_platform.cli migrate; Stop-IfFailed $LASTEXITCODE }
 }
 
 Pop-Location
