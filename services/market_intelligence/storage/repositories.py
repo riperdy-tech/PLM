@@ -10,7 +10,7 @@ version string).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -54,8 +54,8 @@ __all__ = [
     "insert_classification", "insert_normalized_observation", "insert_seed_evidence",
     "latest_classifications_for", "load_classification", "load_entity",
     "load_observations", "load_queries", "load_run", "load_seed_evidence",
-    "quarantine_record", "resolve_entity", "start_collection_run", "upsert_query",
-    "upsert_source",
+    "observations_for_entities", "quarantine_record", "resolve_entity",
+    "start_collection_run", "upsert_query", "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -309,8 +309,31 @@ def load_observations(
         statement = statement.where(observations.c.entity_id == entity_id)
     if since is not None:
         statement = statement.where(observations.c.observed_at >= since)
+    return _rows_to_observations(session.execute(statement).mappings())
+
+
+def observations_for_entities(
+    session: Session, entity_ids: Sequence[str], *, since: datetime | None = None,
+) -> list[NormalizedObservation]:
+    """The feature layer's read path; quarantined records have no row and cannot appear."""
+    if not entity_ids:
+        return []
+    statement = (sa.select(observations)
+                 .where(observations.c.entity_id.in_(list(entity_ids)))
+                 .order_by(observations.c.observed_at))
+    if since is not None:
+        statement = statement.where(observations.c.observed_at >= since)
+    return _rows_to_observations(session.execute(statement).mappings())
+
+
+def _rows_to_observations(rows: Iterable[Mapping[str, Any]]) -> list[NormalizedObservation]:
+    """One Tri mapping for every read path: NULL becomes unknown here, once.
+
+    A metric the row records in `not_ready_metrics` comes back `not_ready`, not
+    `unknown` — the distinction the Tri type exists to preserve.
+    """
     records: list[NormalizedObservation] = []
-    for row in session.execute(statement).mappings():
+    for row in rows:
         not_ready = frozenset(row["not_ready_metrics"] or ())
         records.append(NormalizedObservation(
             entity_id=str(row["entity_id"]), source_id=str(row["source_id"]),
