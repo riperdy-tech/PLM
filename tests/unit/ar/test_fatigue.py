@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 from services.autonomous_ar.domain.policy import FatigueConfig
 from services.autonomous_ar.modeling.fatigue import (
-    exposure_score, fatigue_penalty, is_in_cooldown,
+    exposure_score,
+    fatigue_penalty,
+    is_in_cooldown,
 )
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

@@ -6,7 +6,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from services.autonomous_ar.modeling.decay import (
-    detect_regime_shift, effective_observation_count, recency_weight, weighted_reward,
+    detect_regime_shift,
+    effective_observation_count,
+    recency_weight,
+    weighted_reward,
 )
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

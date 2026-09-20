@@ -26,7 +26,9 @@ def recency_weight(observed_at: datetime, *, now: datetime, half_life_days: floa
     age_days = (now - observed_at).total_seconds() / 86400.0
     if age_days <= 0.0:
         return 1.0
-    return 0.5 ** (age_days / half_life_days)
+    # `float.__pow__` is `Any` in typeshed (negative bases can return complex); the cast
+    # keeps mypy strict honest — at runtime `float()` of a float is the same value.
+    return float(0.5 ** (age_days / half_life_days))
 
 
 def effective_observation_count(observation_instants: Sequence[datetime], *, now: datetime,
