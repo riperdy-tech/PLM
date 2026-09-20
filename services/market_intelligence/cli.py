@@ -73,7 +73,7 @@ _HTTP_TIMEOUT_SECONDS = 30.0
 def run_daily(now: datetime | None = None, *, session_factory: SessionFactory | None = None,
               connector: YouTubeDataAPIConnector | None = None,
               connector_factory: ConnectorFactory | None = None,
-              settings: MarketSettings | None = None) -> dict:
+              settings: MarketSettings | None = None) -> dict[str, Any]:
     """One daily cycle in-process: seeds → discovery → classification → features → scores.
 
     This is the single orchestration entry point: the Temporal activities call
@@ -103,10 +103,10 @@ def run_daily(now: datetime | None = None, *, session_factory: SessionFactory | 
     return steps
 
 
-def run_daily_step(job: str, *, payload: dict, session_factory: SessionFactory | None = None,
+def run_daily_step(job: str, *, payload: dict[str, Any], session_factory: SessionFactory | None = None,
                    connector: YouTubeDataAPIConnector | None = None,
                    connector_factory: ConnectorFactory | None = None,
-                   settings: MarketSettings | None = None) -> dict:
+                   settings: MarketSettings | None = None) -> dict[str, Any]:
     """One activity's worth of work; the Temporal layer calls this, nothing else does."""
     from plm_platform.correlation import correlation_scope
     from plm_platform.observability import run_scope
@@ -125,7 +125,7 @@ def run_daily_step(job: str, *, payload: dict, session_factory: SessionFactory |
     return result
 
 
-def run_collect(*, refresh: bool = False, limit: int = 25) -> dict:
+def run_collect(*, refresh: bool = False, limit: int = 25) -> dict[str, Any]:
     """`plm market collect`: one operator-triggered collection over due queries."""
     settings = _settings()
     now = datetime.now(UTC)
@@ -137,7 +137,7 @@ def run_collect(*, refresh: bool = False, limit: int = 25) -> dict:
     return result
 
 
-def run_score() -> dict:
+def run_score() -> dict[str, Any]:
     """`plm market score`: recompute arms, features and opportunity scores from storage."""
     settings = _settings()
     with _session() as session:
@@ -149,12 +149,13 @@ def run_score() -> dict:
 def run_report(as_of: str | None = None) -> str:
     """Write the §31 report — implemented by P1.12's `reports` module."""
     try:
-        from .reports import write_report
+        # The module does not exist until P1.12; the ImportError path below is the contract.
+        from .reports import write_report  # type: ignore[import-not-found]  # lands in P1.12
     except ImportError as exc:  # pragma: no cover - until P1.12 lands
         raise SystemExit(
             "market report is not implemented until PHASE-P1.12 (the reports module)"
         ) from exc
-    return write_report(as_of=as_of)
+    return str(write_report(as_of=as_of))
 
 
 def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
@@ -187,9 +188,9 @@ def smoke_live() -> str:
 # step dispatch (shared by `run_daily_step`)
 
 
-def _execute_step(job: str, session: Session, *, payload: dict, now: datetime,
+def _execute_step(job: str, session: Session, *, payload: dict[str, Any], now: datetime,
                   settings: MarketSettings, connector: YouTubeDataAPIConnector | None = None,
-                  connector_factory: ConnectorFactory | None = None) -> dict:
+                  connector_factory: ConnectorFactory | None = None) -> dict[str, Any]:
     if job == "market.seed_refresh":
         source_id = _ensure_source(session)
         return {"job": job, "new_queries": _install_seeds(session, source_id=source_id)}
@@ -221,7 +222,7 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
                         connector: YouTubeDataAPIConnector | None = None,
                         connector_factory: ConnectorFactory | None = None,
                         query_ids: list[str] | None = None, trigger: str = "market.youtube_discovery",
-                        limit: int | None = None) -> dict:
+                        limit: int | None = None) -> dict[str, Any]:
     """Collect every due query within the day's remaining quota; never overdraw it."""
     due = due_queries(session, now=now, settings=settings)
     if query_ids is not None:
@@ -391,7 +392,7 @@ def _counters_from_db(session: Session, run_id: str, *, requests: int) -> Collec
 
 
 def _classify_pending(session: Session, *, now: datetime, settings: MarketSettings,
-                      full: bool = False) -> dict:
+                      full: bool = False) -> dict[str, Any]:
     """Classify observations whose content has no classification row yet (§15/§28)."""
     window = None if full else now - timedelta(hours=settings.freshness_normal_hours)
     rows = repositories.observation_classification_inputs(session, since=window)
@@ -422,7 +423,7 @@ def _classify_pending(session: Session, *, now: datetime, settings: MarketSettin
             "cached": cached, "unclassifiable": unclassifiable}
 
 
-def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> dict:
+def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> dict[str, Any]:
     """Arms from stored classifications, then features and scores — the §16–§20 chain."""
     rows = repositories.latest_classifications_for(
         session, taxonomy_version=settings.taxonomy_version
@@ -488,7 +489,7 @@ def _taxonomy_confidence(drafts: list[ClassificationDraft]) -> dict[str, float]:
     return {key: sum(values) / len(values) for key, values in buckets.items()}
 
 
-def _stale_inventory(session: Session, *, now: datetime, settings: MarketSettings) -> dict:
+def _stale_inventory(session: Session, *, now: datetime, settings: MarketSettings) -> dict[str, Any]:
     """§26's stale-data cleanup as an inventory: P1 never deletes evidence (§3.2).
 
     Raw observations are immutable and quarantined records are the audit trail, so the

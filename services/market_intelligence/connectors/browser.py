@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..domain.enums import ConnectorErrorClass, ProviderName
 from .base import ConnectorError
 
@@ -15,7 +17,7 @@ class BrowserConnector:
     def __init__(self, *, research_allowed: bool = False) -> None:
         self.research_allowed = research_allowed
 
-    def fetch_public_page(self, url: str) -> dict:
+    def fetch_public_page(self, url: str) -> dict[str, Any]:
         if not self.research_allowed:
             raise ConnectorError(
                 ConnectorErrorClass.UNSUPPORTED_OPERATION,

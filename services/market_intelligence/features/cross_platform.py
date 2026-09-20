@@ -16,7 +16,7 @@ __all__ = ["cross_platform_signal"]
 _SECONDARY_SOURCES = frozenset({ProviderName.SPOTIFY_WEB_API.value, ProviderName.PUBLIC_TRENDS.value})
 
 
-def cross_platform_signal(secondary_observations: Sequence[NormalizedObservation]) -> Tri:
+def cross_platform_signal(secondary_observations: Sequence[NormalizedObservation]) -> Tri[float]:
     """Mean normalised engagement across secondary sources; unknown with none of them.
 
     An unavailable secondary source reduces confidence (P1.8's breakdown) — it never

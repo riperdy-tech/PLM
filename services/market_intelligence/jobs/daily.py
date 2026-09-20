@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from plm_platform.temporal import DEFAULT_RETRY_POLICY
 from temporalio import activity, workflow
@@ -36,10 +37,10 @@ class DailyMarketWorkflow:
     """seed refresh → discovery → classification → features/scores → reschedule."""
 
     @workflow.run
-    async def run(self, payload: dict) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = payload.get("now") or workflow.now().isoformat()
         correlation_id = payload.get("correlation_id")
-        summary: dict = {"started_at": now, "steps": []}
+        summary: dict[str, Any] = {"started_at": now, "steps": []}
         for name, activity_fn in (
             ("market.seed_refresh", ingest_seeds_activity),
             ("market.youtube_discovery", discover_activity),
@@ -58,21 +59,21 @@ class DailyMarketWorkflow:
 
 
 @activity.defn
-async def ingest_seeds_activity(payload: dict) -> dict:
+async def ingest_seeds_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.seed_refresh", payload=payload)
 
 
 @activity.defn
-async def discover_activity(payload: dict) -> dict:
+async def discover_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.youtube_discovery", payload=payload)
 
 
 @activity.defn
-async def classify_activity(payload: dict) -> dict:
+async def classify_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.taxonomy_classification",
@@ -80,21 +81,21 @@ async def classify_activity(payload: dict) -> dict:
 
 
 @activity.defn
-async def recompute_activity(payload: dict) -> dict:
+async def recompute_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.feature_recompute", payload=payload)
 
 
 @activity.defn
-async def score_activity(payload: dict) -> dict:
+async def score_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.opportunity_scoring", payload=payload)
 
 
 @activity.defn
-async def reschedule_activity(payload: dict) -> dict:
+async def reschedule_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.reschedule", payload=payload)

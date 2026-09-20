@@ -35,7 +35,8 @@ def video_age_hours(*, observed_at: datetime, published_at: datetime) -> float:
     return max(delta, MIN_AGE_EPSILON_HOURS)
 
 
-def lifetime_views_per_day(views: Tri, *, observed_at: datetime, published_at: datetime) -> Tri:
+def lifetime_views_per_day(views: Tri[float], *, observed_at: datetime,
+                           published_at: datetime) -> Tri[float]:
     """§11.2. Explicitly the *lifetime* measure: the caller must prefer windowed velocity.
 
     Old videos dominate cumulative averages, which is why §11.5 exists and why every
@@ -48,9 +49,9 @@ def lifetime_views_per_day(views: Tri, *, observed_at: datetime, published_at: d
 
 
 def windowed_views_per_day(
-    views_before: Tri, views_after: Tri, *, observed_at_before: datetime,
+    views_before: Tri[float], views_after: Tri[float], *, observed_at_before: datetime,
     observed_at_after: datetime,
-) -> Tri:
+) -> Tri[float]:
     """§11.5's preferred measure: the observed delta between two real sightings."""
     if not (views_before.is_known and views_after.is_known):
         return Tri.unknown()
@@ -64,20 +65,20 @@ def windowed_views_per_day(
     return Tri.known(delta / window_days)
 
 
-def like_rate(likes: Tri, views: Tri) -> Tri:
+def like_rate(likes: Tri[float], views: Tri[float]) -> Tri[float]:
     """§11.4 descriptive proxy. Zero views gives no rate — never a division artefact."""
     if not (likes.is_known and views.is_known) or views.unwrap() <= 0:
         return Tri.unknown()
     return Tri.known(likes.unwrap() / max(views.unwrap(), _EPSILON))
 
 
-def comment_rate(comments: Tri, views: Tri) -> Tri:
+def comment_rate(comments: Tri[float], views: Tri[float]) -> Tri[float]:
     if not (comments.is_known and views.is_known) or views.unwrap() <= 0:
         return Tri.unknown()
     return Tri.known(comments.unwrap() / max(views.unwrap(), _EPSILON))
 
 
-def channel_relative_views(views: Tri, subscriber_count: Tri) -> Tri:
+def channel_relative_views(views: Tri[float], subscriber_count: Tri[float]) -> Tri[float]:
     """§11.3: unstable when subscriber count is missing **or zero** → unknown."""
     if not (views.is_known and subscriber_count.is_known):
         return Tri.unknown()

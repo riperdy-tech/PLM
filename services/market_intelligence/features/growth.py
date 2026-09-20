@@ -13,6 +13,7 @@ from itertools import pairwise
 
 from plm_contracts import Tri
 
+from ..config import MarketSettings
 from ..domain.entities import NormalizedObservation
 from .velocity import lifetime_views_per_day, windowed_views_per_day
 
@@ -46,7 +47,7 @@ def growth_rate(current: float, baseline: float, *, minimum_baseline: float = 1.
 
 def median_velocity(
     observations: Sequence[NormalizedObservation], *, as_of: datetime, window_days: int,
-) -> Tri:
+) -> Tri[float]:
     """Median of in-window view deltas (§11.5/§12's suggested features), windowed only.
 
     The metric is computed from in-window sightings alone. It used to average the
@@ -87,8 +88,9 @@ def median_velocity(
 
 
 def growth_30d_vs_prev30d(
-    observations: Sequence[NormalizedObservation], *, as_of: datetime, settings=None,
-) -> Tri:
+    observations: Sequence[NormalizedObservation], *, as_of: datetime,
+    settings: MarketSettings | None = None,
+) -> Tri[float]:
     """Recent 30 days against the preceding comparable 30 days (§12)."""
     # The plan passed offset=0, which made the baseline window identical to the
     # current one (growth ≡ 0). Window 1 is the preceding window — the plan's own
@@ -97,15 +99,16 @@ def growth_30d_vs_prev30d(
 
 
 def growth_30d_vs_prev90d(
-    observations: Sequence[NormalizedObservation], *, as_of: datetime, settings=None,
-) -> Tri:
+    observations: Sequence[NormalizedObservation], *, as_of: datetime,
+    settings: MarketSettings | None = None,
+) -> Tri[float]:
     """Recent 30 days against the preceding 90-day window (the robust second metric)."""
     return _growth_between(observations, as_of=as_of, days=ARM_WINDOW_DAYS * 3, offset=1)
 
 
 def _growth_between(
     observations: Sequence[NormalizedObservation], *, as_of: datetime, days: int, offset: int,
-) -> Tri:
+) -> Tri[float]:
     current = _window_median(observations, as_of=as_of, days=ARM_WINDOW_DAYS, offset=0)
     baseline = _window_median(observations, as_of=as_of, days=days, offset=offset)
     if not (current.is_known and baseline.is_known):
@@ -116,7 +119,7 @@ def _growth_between(
 
 def _window_median(
     observations: Sequence[NormalizedObservation], *, as_of: datetime, days: int, offset: int,
-) -> Tri:
+) -> Tri[float]:
     start, end = window_bounds(as_of, days=days, offset_windows=offset)
     inside = [o for o in observations if start <= o.observed_at < end]
     values: list[float] = []

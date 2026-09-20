@@ -51,7 +51,12 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["packages"]
+# Review fix 3: the gate must cover service code too — `files = ["packages"]` left
+# every services/ error unreported, so the report was vacuous for those tasks. Both
+# trees are checked with top-level module names (`plm_contracts`, `plm_platform`,
+# `market_intelligence`), which is how the editable install exposes them.
+files = ["packages", "services"]
+mypy_path = ["$MYPY_CONFIG_FILE_DIR/packages", "$MYPY_CONFIG_FILE_DIR/services"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "services"]

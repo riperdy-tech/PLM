@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from plm_contracts import Tri
 
@@ -29,6 +29,9 @@ from ..domain.value_objects import EvidenceSummary, ScoreComponents
 from ..features.arm_features import ArmFeatures
 from .calibration import SCORE_VERSION, ScoreWeights, default_weights
 from .normalization import percentile_score
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 __all__ = [
     "ArmComponentScores",
@@ -53,15 +56,15 @@ EVIDENCE_COMPONENTS: Final[tuple[ScoringComponent, ...]] = (
 class ArmComponentScores:
     """§17.2's seven components as Tri: `unknown` = unobserved, never a measured zero."""
 
-    demand: Tri
-    growth: Tri
-    competitor_velocity: Tri
-    competition: Tri
-    audience_quality: Tri
-    cross_platform: Tri
-    production_fit: Tri
+    demand: Tri[float]
+    growth: Tri[float]
+    competitor_velocity: Tri[float]
+    competition: Tri[float]
+    audience_quality: Tri[float]
+    cross_platform: Tri[float]
+    production_fit: Tri[float]
 
-    def as_mapping(self) -> dict[ScoringComponent, Tri]:
+    def as_mapping(self) -> dict[ScoringComponent, Tri[float]]:
         return {component: getattr(self, component.value) for component in ScoringComponent}
 
     @property
@@ -156,13 +159,13 @@ def compute_component_scores(
         for arm, features in features_by_arm.items()
     }
     populations: dict[ScoringComponent, list[float]] = {
-        component: [values[component] for values in raw_values.values()
-                    if values[component] is not None]
+        component: [value for values in raw_values.values()
+                    if (value := values[component]) is not None]
         for component in ScoringComponent
     }
     scores: dict[str, ArmComponentScores] = {}
     for arm, values in raw_values.items():
-        components: dict[str, Tri] = {}
+        components: dict[str, Tri[float]] = {}
         for component in ScoringComponent:
             value = values[component]
             if value is None:
@@ -254,7 +257,7 @@ def score_all_arms(
 
 
 def persist_scores(
-    session,
+    session: Session,
     scores: Mapping[str, OpportunityScore],
     *,
     computed_at: datetime,

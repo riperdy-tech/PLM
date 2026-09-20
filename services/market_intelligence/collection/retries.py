@@ -68,7 +68,7 @@ def delay_for_attempt(
     """
     if retry_after_seconds is not None:
         return min(max(retry_after_seconds, 0.0), _MAX_RETRY_AFTER_SECONDS)
-    exponential = policy.base_delay_seconds * (2 ** (attempt - 1))
+    exponential = policy.base_delay_seconds * (2.0 ** (attempt - 1))
     capped = min(exponential, policy.max_delay_seconds)
     return capped + (rng.random() * policy.jitter_seconds if policy.jitter_seconds else 0.0)
 

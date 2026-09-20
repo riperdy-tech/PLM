@@ -107,7 +107,7 @@ def store_raw_observation(
         )
     add_run_cost(session, run_id, storage_bytes=stored_object.size)
     return StoredRawObservation(
-        raw_observation_id=values["id"], created=True,
+        raw_observation_id=str(values["id"]), created=True,
         payload_uri=payload_uri, payload_hash=stored_object.digest, size=stored_object.size,
     )
 

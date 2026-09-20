@@ -373,7 +373,7 @@ analytics_app = typer.Typer(help="P9 analytics & economics: ingestion and period
 @market_app.command()
 def collect(refresh: bool = False, limit: int = 25) -> None:
     """Collect market evidence for due queries (P1)."""
-    from services.market_intelligence.cli import run_collect
+    from market_intelligence.cli import run_collect
 
     run_collect(refresh=refresh, limit=limit)
 
@@ -381,7 +381,7 @@ def collect(refresh: bool = False, limit: int = 25) -> None:
 @market_app.command()
 def score() -> None:
     """Recompute market opportunity scores (P1)."""
-    from services.market_intelligence.cli import run_score
+    from market_intelligence.cli import run_score
 
     run_score()
 
@@ -389,7 +389,7 @@ def score() -> None:
 @market_app.command()
 def report(as_of: str = "") -> None:
     """Write the daily market snapshot and report (P1)."""
-    from services.market_intelligence.cli import run_report
+    from market_intelligence.cli import run_report
 
     run_report(as_of=as_of or None)
 
@@ -397,7 +397,7 @@ def report(as_of: str = "") -> None:
 @market_app.command("run-daily")
 def run_daily_command() -> None:
     """Run one daily market cycle in-process (P1)."""
-    from services.market_intelligence.cli import run_daily
+    from market_intelligence.cli import run_daily
 
     typer.echo(json.dumps(run_daily(), indent=2, default=str))
 
@@ -405,7 +405,7 @@ def run_daily_command() -> None:
 @market_app.command()
 def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
     """Serve the `/market/v1` API (P1)."""
-    from services.market_intelligence.cli import serve as serve_impl
+    from market_intelligence.cli import serve as serve_impl
 
     serve_impl(host=host, port=port)
 
@@ -413,7 +413,7 @@ def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
 @market_app.command("smoke-live")
 def smoke_live() -> None:
     """Run the §40 live smoke test; blocked (exit 3) until credentials exist."""
-    from services.market_intelligence.cli import smoke_live as smoke_impl
+    from market_intelligence.cli import smoke_live as smoke_impl
 
     reason = smoke_impl()
     typer.echo(reason, err=True)

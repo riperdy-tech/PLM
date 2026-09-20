@@ -83,7 +83,7 @@ def generate_candidate_arms(
     return drafts
 
 
-def _profile_from_draft(draft: ClassificationDraft):
+def _profile_from_draft(draft: ClassificationDraft) -> TaxonomyProfile:
     from .ontology import profile_from_dimensions
 
     return profile_from_dimensions(draft.dimensions)

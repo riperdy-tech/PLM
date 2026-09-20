@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from typing import Any
 
 from plm_platform.temporal import DEFAULT_RETRY_POLICY
 from temporalio import activity, workflow
@@ -19,7 +20,7 @@ class BackfillWorkflow:
     """`market.youtube_refresh` for the query ids the caller names — never automatic."""
 
     @workflow.run
-    async def run(self, payload: dict) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await workflow.execute_activity(
             backfill_activity, payload or {},
             start_to_close_timeout=timedelta(minutes=30),
@@ -28,7 +29,7 @@ class BackfillWorkflow:
 
 
 @activity.defn
-async def backfill_activity(payload: dict) -> dict:
+async def backfill_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.youtube_refresh", payload=payload)

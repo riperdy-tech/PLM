@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from minio import Minio
 from sqlalchemy.orm import Session
 
 from ..config import MarketSettings
@@ -24,7 +25,7 @@ from ..normalization.youtube import (
     normalize_video_object,
 )
 from ..storage import repositories
-from ..storage.raw_store import store_raw_observation
+from ..storage.raw_store import StoredRawObservation, store_raw_observation
 
 __all__ = ["CollectionRunSummary", "collect_query", "hydrate_and_store"]
 
@@ -50,7 +51,7 @@ class CollectionRunSummary:
 def collect_query(
     session: Session, *, connector: YouTubeDataAPIConnector, source_id: str, query_id: str,
     query_text: str, run_id: str, settings: MarketSettings, now: datetime,
-    storage_client=None,
+    storage_client: Minio | None = None,
 ) -> CollectionRunSummary:
     """One discovery pass for one query: search → store raw → hydrate → normalize."""
     raw_count = 0
@@ -102,7 +103,8 @@ def collect_query(
 
 def hydrate_and_store(
     session: Session, *, connector: YouTubeDataAPIConnector, source_id: str, run_id: str,
-    video_ids: list[str], settings: MarketSettings, now: datetime, storage_client=None,
+    video_ids: list[str], settings: MarketSettings, now: datetime,
+    storage_client: Minio | None = None,
 ) -> CollectionRunSummary:
     """videos.list hydration: metric-bearing observations for entities discovery created."""
     raw_count = 0
@@ -143,7 +145,7 @@ def hydrate_and_store(
 
 
 def _store(session: Session, *, run_id: str, source_id: str, fetched: FetchedObject,
-           context: str, storage_client=None):
+           context: str, storage_client: Minio | None = None) -> StoredRawObservation:
     """Store the raw object; `store_raw_observation` records `storage_bytes` itself."""
     return store_raw_observation(
         session, run_id=run_id, source_id=source_id, fetched=fetched,

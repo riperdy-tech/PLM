@@ -40,9 +40,9 @@ __all__ = ["DemandInputs", "demand_inputs"]
 
 @dataclass(frozen=True, slots=True)
 class DemandInputs:
-    median_pull_per_day: Tri
-    query_prevalence: Tri
-    active_channel_audience: Tri
+    median_pull_per_day: Tri[float]
+    query_prevalence: Tri[float]
+    active_channel_audience: Tri[float]
     recent_activity_count: int
 
 
@@ -64,7 +64,7 @@ def demand_inputs(
         subscribers = float(observation.subscriber_count.unwrap())
         if velocity.is_known and subscribers > 0:
             pulls.append(float(velocity.unwrap()) / subscribers)
-    pull: Tri = Tri.known(median(pulls)) if pulls else Tri.unknown()
+    pull: Tri[float] = Tri.known(median(pulls)) if pulls else Tri.unknown()
     audiences = [float(o.subscriber_count.unwrap()) for o in recent
                  if o.subscriber_count.is_known]
     return DemandInputs(

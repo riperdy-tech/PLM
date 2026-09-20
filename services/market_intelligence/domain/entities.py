@@ -9,7 +9,7 @@ from datetime import datetime
 from plm_contracts import Tri
 
 from .enums import ChangeEventType, CollectionRunStatus, EntityStatus, EntityType
-from .value_objects import EvidenceSummary, ScoreComponents
+from .value_objects import ComponentScoresLike, EvidenceSummary
 
 __all__ = [
     "CollectionRunCounters", "MarketChangeEventDraft", "MarketEntity", "NormalizedObservation",
@@ -26,13 +26,13 @@ class NormalizedObservation:
     raw_observation_id: str
     observed_at: datetime
     published_at: datetime | None = None
-    views: Tri = field(default_factory=Tri.unknown)
-    likes: Tri = field(default_factory=Tri.unknown)
-    comments: Tri = field(default_factory=Tri.unknown)
-    subscriber_count: Tri = field(default_factory=Tri.unknown)
-    video_duration_seconds: Tri = field(default_factory=Tri.unknown)
-    playlist_item_count: Tri = field(default_factory=Tri.unknown)
-    channel_video_count: Tri = field(default_factory=Tri.unknown)
+    views: Tri[float] = field(default_factory=Tri.unknown)
+    likes: Tri[float] = field(default_factory=Tri.unknown)
+    comments: Tri[float] = field(default_factory=Tri.unknown)
+    subscriber_count: Tri[float] = field(default_factory=Tri.unknown)
+    video_duration_seconds: Tri[float] = field(default_factory=Tri.unknown)
+    playlist_item_count: Tri[float] = field(default_factory=Tri.unknown)
+    channel_video_count: Tri[float] = field(default_factory=Tri.unknown)
     text_title: str | None = None
     text_description: str | None = None
     country_signal: str | None = None
@@ -77,7 +77,7 @@ class OpportunityScore:
     market_opportunity_score: float
     confidence: float
     basis_weight: float
-    components: ScoreComponents
+    components: ComponentScoresLike
     evidence: EvidenceSummary
     as_of: datetime
     score_version: str

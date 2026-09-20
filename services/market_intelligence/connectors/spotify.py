@@ -8,9 +8,10 @@ the opportunity score must not depend on something the provider no longer return
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -92,7 +93,7 @@ def parse_track_stats(fetch: FetchResult) -> tuple[TrackStats, ...]:
     )
 
 
-def _parse_release(track: dict) -> datetime:
+def _parse_release(track: Mapping[str, Any]) -> datetime:
     """Tracks carry a release date, not a timestamp: midnight UTC of that date.
 
     A missing or unparseable date is refused as a provider-schema failure. The old

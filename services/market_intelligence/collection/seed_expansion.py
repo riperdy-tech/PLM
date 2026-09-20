@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from ..config import MarketSettings
 from ..domain.enums import QueryType
 from ..normalization.canonical import text_fingerprint
 from ..storage.repositories import insert_seed_evidence, load_queries, upsert_query
@@ -45,7 +46,7 @@ def propose_from_observations(
     titles: Sequence[str],
     descriptions: Sequence[str],
     parent_query_id: str | None,
-    settings=None,
+    settings: MarketSettings | None = None,
     min_confidence: float = 0.5,
     max_new_seeds: int = 25,
 ) -> list[SeedDecision]:

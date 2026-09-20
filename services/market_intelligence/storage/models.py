@@ -7,6 +7,8 @@ arrive as new rows with a new `observed_at` (§3.2). Enum-ish columns are text (
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
 
 MARKET_SCHEMA = "market"
@@ -17,11 +19,11 @@ _ts = sa.DateTime(timezone=True)
 _json = sa.JSON
 
 
-def _pk() -> sa.Column:
+def _pk() -> sa.Column[Any]:
     return sa.Column("id", _uuid, primary_key=True)
 
 
-def _now() -> sa.Column:
+def _now() -> sa.Column[Any]:
     return sa.Column("created_at", _ts, nullable=False, server_default=sa.func.now())
 
 

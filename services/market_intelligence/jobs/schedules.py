@@ -29,7 +29,9 @@ JOB_NAMES: Final[tuple[str, ...]] = (
 )
 """§26's seven job names, in the spec's order — the constants the workflows report."""
 
-_SCHEDULES: Final[tuple[tuple[str, type, timedelta], ...]] = (
+_SCHEDULES: Final[tuple[
+    tuple[str, type[DailyMarketWorkflow | WeeklyMarketWorkflow], timedelta], ...
+]] = (
     ("market.daily.workflow", DailyMarketWorkflow, timedelta(hours=24)),
     ("market.weekly.workflow", WeeklyMarketWorkflow, timedelta(days=7)),
 )

@@ -48,13 +48,13 @@ class NormalizedObservationDraft:
     raw_observation_id: str
     observed_at: datetime
     published_at: datetime | None
-    views: Tri
-    likes: Tri
-    comments: Tri
-    subscriber_count: Tri
-    video_duration_seconds: Tri
-    playlist_item_count: Tri
-    channel_video_count: Tri
+    views: Tri[float]
+    likes: Tri[float]
+    comments: Tri[float]
+    subscriber_count: Tri[float]
+    video_duration_seconds: Tri[float]
+    playlist_item_count: Tri[float]
+    channel_video_count: Tri[float]
     text_title: str | None
     text_description: str | None
     country_signal: str | None

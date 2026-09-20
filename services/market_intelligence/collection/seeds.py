@@ -93,10 +93,18 @@ def install_bootstrap_seeds(
 
 
 class SeedCandidate(Protocol):
-    """What validation needs from a proposal; `SeedProposal` satisfies it structurally."""
+    """What validation needs from a proposal; `SeedProposal` satisfies it structurally.
 
-    term: str
-    confidence: float
+    Read-only on purpose: a frozen dataclass exposes its fields as get-only attributes,
+    which a protocol member declared writable refuses (mypy: "expected settable
+    variable, got read-only attribute").
+    """
+
+    @property
+    def term(self) -> str: ...
+
+    @property
+    def confidence(self) -> float: ...
 
 
 def validate_candidate_seed(

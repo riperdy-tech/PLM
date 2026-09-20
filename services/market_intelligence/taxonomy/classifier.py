@@ -10,7 +10,7 @@ reads the persisted classification (§30).
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
@@ -75,7 +75,8 @@ class RuleBasedClassifier:
                       for dimension, values in found.items()}
         hits = sum(len(values) for values in dimensions.values())
         confidence = min(0.9, 0.2 + 0.15 * hits) if hits else 0.0
-        raw = {dimension.value: list(values) for dimension, values in dimensions.items()}
+        raw: dict[str, Any] = {dimension.value: list(values)
+                               for dimension, values in dimensions.items()}
         raw["confidence"] = confidence
         raw["unmapped_terms"] = sorted(unmatched)
         return validate_classification(raw)

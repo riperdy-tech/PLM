@@ -17,6 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
 from plm_contracts import Tri
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -319,7 +320,7 @@ def insert_normalized_observation(
         if existing is None:
             raise
         return str(existing), False
-    return values["id"], True
+    return str(values["id"]), True
 
 
 def load_observations(
@@ -383,7 +384,7 @@ def observation_classification_inputs(
     return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def _rows_to_observations(rows: Iterable[Mapping[str, Any]]) -> list[NormalizedObservation]:
+def _rows_to_observations(rows: Iterable[RowMapping]) -> list[NormalizedObservation]:
     """One Tri mapping for every read path: NULL becomes unknown here, once.
 
     A metric the row records in `not_ready_metrics` comes back `not_ready`, not
@@ -451,7 +452,7 @@ def load_entity(session: Session, entity_id: str) -> Mapping[str, Any] | None:
     return dict(row) if row is not None else None
 
 
-def _tri_value(metric: Tri) -> int | float | None:
+def _tri_value(metric: Tri[float]) -> float | None:
     """Tri → numeric column value: unknown and not_ready are NULL, verified zero is 0.
 
     `not_ready` is not lost: its name goes into `not_ready_metrics` (see
@@ -466,7 +467,7 @@ _OBSERVATION_METRIC_FIELDS: Final[tuple[str, ...]] = (
 )
 
 
-def _tri_from_row(row: Mapping[str, Any], name: str, not_ready: frozenset[str]) -> Tri:
+def _tri_from_row(row: RowMapping, name: str, not_ready: frozenset[str]) -> Tri[float]:
     """NULL ⇒ unknown, *unless* the row records that metric as `not_ready`."""
     if row[name] is not None:
         return tri_from_optional(row[name])
@@ -700,7 +701,7 @@ def insert_score(
 def latest_scores(
     session: Session, *, limit: int = 100, min_score: float | None = None,
     min_confidence: float | None = None, min_basis_weight: float | None = None,
-) -> list[Mapping[str, Any]]:
+) -> list[dict[str, Any]]:
     """Newest score per arm, ranked — the API's read path (§25).
 
     Review ruling: with `min_basis_weight` set, arms whose measured basis falls
@@ -724,12 +725,13 @@ def latest_scores(
         statement = statement.where(scores.c.market_opportunity_score >= min_score)
     if min_confidence is not None:
         statement = statement.where(scores.c.confidence >= min_confidence)
-    order = []
+    order: list[Any] = []
     if min_basis_weight is not None:
         order.append(sa.case((scores.c.basis_weight >= min_basis_weight, 0), else_=1))
     order.extend((scores.c.market_opportunity_score.desc(), scores.c.arm_id.asc()))
     statement = statement.order_by(*order).limit(limit)
-    rows = [dict(row) for row in session.execute(statement).mappings()]
+    rows: list[dict[str, Any]] = [dict(row)
+                                  for row in session.execute(statement).mappings()]
     for row in rows:
         row["insufficient_coverage"] = (
             min_basis_weight is not None and float(row["basis_weight"]) < min_basis_weight

@@ -9,7 +9,7 @@ No ``from __future__ import annotations`` here on purpose: FastAPI resolves
 dependencies are per-app closures that only the eager form can see.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -160,8 +160,8 @@ def build_router(*, session_factory: SessionFactory | None,
     return router
 
 
-def _dependencies(session_factory: SessionFactory | None):
-    def session_dependency() -> Session:
+def _dependencies(session_factory: SessionFactory | None) -> Callable[[], Iterator[Session]]:
+    def session_dependency() -> Iterator[Session]:
         if session_factory is None:
             raise HTTPException(status_code=503, detail=ErrorShape(
                 code="no_database", field_paths=[], message="no session factory configured",
@@ -172,7 +172,7 @@ def _dependencies(session_factory: SessionFactory | None):
     return session_dependency
 
 
-def _auth(settings: MarketSettings):
+def _auth(settings: MarketSettings) -> Callable[[str | None], None]:
     from .service_token import require_service_token
 
     return require_service_token(settings.platform)
@@ -194,7 +194,7 @@ def _instant(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _opportunity(row) -> OpportunityOut:
+def _opportunity(row: Mapping[str, Any]) -> OpportunityOut:
     taxonomy = row["taxonomy_json"]
     return OpportunityOut(
         arm_id=row["arm_id"], market_opportunity_score=float(row["market_opportunity_score"]),
@@ -236,7 +236,7 @@ def _components(stored: Mapping[str, Any]) -> ComponentsOut:
     return ComponentsOut(**values)
 
 
-def _taxonomy_payload(stored: dict) -> dict:
+def _taxonomy_payload(stored: Mapping[str, Any]) -> dict[str, Any]:
     """Map the stored 13-dimension profile onto the frozen 9-key wire object."""
     moods = _split(stored.get("mood"))
     use_cases = _split(stored.get("use_case"))
@@ -260,7 +260,7 @@ def _split(value: object) -> list[str]:
     return [part for part in str(value).split("+") if part]
 
 
-def _arm(row) -> ArmOut:
+def _arm(row: Mapping[str, Any]) -> ArmOut:
     taxonomy = row["taxonomy_json"]
     return ArmOut(
         arm_id=row["arm_id"], fingerprint=row.get("fingerprint", row["arm_id"]),
@@ -279,15 +279,16 @@ def _arm(row) -> ArmOut:
     )
 
 
-def _after_cursor(row, score_floor: float, arm_floor: str) -> bool:
+def _after_cursor(row: Mapping[str, Any], score_floor: float, arm_floor: str) -> bool:
     """Keyset position under `(score desc, arm_id asc)`."""
     score = float(row["market_opportunity_score"])
     if score != score_floor:
         return score < score_floor
-    return row["arm_id"] > arm_floor
+    return str(row["arm_id"]) > arm_floor
 
 
-def _matches(row, *, language: str | None, genre: str | None, use_case: str | None) -> bool:
+def _matches(row: Mapping[str, Any], *, language: str | None, genre: str | None,
+             use_case: str | None) -> bool:
     taxonomy = row["taxonomy_json"] or {}
     if language is not None and _single(taxonomy.get("language")) != language:
         return False

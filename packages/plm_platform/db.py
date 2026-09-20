@@ -15,7 +15,7 @@ resolves inside that phase's schema.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import cache
 from typing import Final
@@ -109,9 +109,12 @@ def session_factory(engine: Engine | None = None) -> sessionmaker[Session]:
 def scoped_session(
     schema: str,
     *,
-    factory: sessionmaker[Session] | None = None,
+    factory: Callable[[], Session] | None = None,
 ) -> Iterator[Session]:
     """A session whose ``search_path`` is one phase schema.
+
+    ``factory`` is called and nothing more (a ``sessionmaker`` is the usual shape),
+    so the contract is any zero-argument callable returning a session.
 
     Scoping is transaction-local (``set_config(…, is_local => true)``), so it can
     never leak onto a pooled connection. The scope therefore lasts for the

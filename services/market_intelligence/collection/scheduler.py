@@ -10,8 +10,10 @@ run — not the connector — is what survives across runs of the same day (§27
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -116,7 +118,7 @@ def run_quota_budget(state: DailyQuotaState, *, per_run_limit: int) -> QuotaBudg
     return QuotaBudget(min(per_run_limit, state.remaining_units))
 
 
-def _state(row) -> QueryState:
+def _state(row: Mapping[str, Any]) -> QueryState:
     return QueryState(
         query_id=str(row["id"]), query_fingerprint=str(row["query_fingerprint"]),
         query_text=str(row["query_text"]), priority=int(row["priority"]),

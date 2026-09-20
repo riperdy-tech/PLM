@@ -8,7 +8,9 @@ expensive half on `ph1.market` (same queue, same registrations — one worker se
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from typing import Any
 
 from plm_platform.temporal import DEFAULT_RETRY_POLICY
 from temporalio import activity, workflow
@@ -25,11 +27,11 @@ class WeeklyMarketWorkflow:
     """Full taxonomy recompute → rescore → stale-data inventory (§26)."""
 
     @workflow.run
-    async def run(self, payload: dict) -> dict:
+    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = payload.get("now") or workflow.now().isoformat()
         correlation_id = payload.get("correlation_id")
-        summary: dict = {"started_at": now, "steps": []}
-        steps = (
+        summary: dict[str, Any] = {"started_at": now, "steps": []}
+        steps: tuple[tuple[str, Callable[..., Awaitable[dict[str, Any]]], dict[str, Any]], ...] = (
             ("market.taxonomy_classification", classify_activity,
              {"full": True}),
             ("market.feature_recompute", recompute_activity, {}),
@@ -47,7 +49,7 @@ class WeeklyMarketWorkflow:
 
 
 @activity.defn
-async def cleanup_activity(payload: dict) -> dict:
+async def cleanup_activity(payload: dict[str, Any]) -> dict[str, Any]:
     from ..cli import run_daily_step
 
     return await asyncio.to_thread(run_daily_step, "market.stale_data_cleanup", payload=payload)

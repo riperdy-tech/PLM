@@ -7,15 +7,15 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from plm_contracts import Tri
 
 from .enums import FreshnessBucket, ScoringComponent, TaxonomyDimension
 
 __all__ = [
-    "EvidenceSummary", "FreshnessAssessment", "ScoreComponents", "TaxonomyProfile",
-    "classify_freshness", "fingerprint", "slug_token", "tri_from_optional",
+    "ComponentScoresLike", "EvidenceSummary", "FreshnessAssessment", "ScoreComponents",
+    "TaxonomyProfile", "classify_freshness", "fingerprint", "slug_token", "tri_from_optional",
 ]
 
 _UNSET: Final[str] = "none"
@@ -65,7 +65,7 @@ def slug_token(text: str, *, max_length: int = 48) -> str:
     return slug[:max_length].rstrip("_")
 
 
-def tri_from_optional(value: float | None) -> Tri:
+def tri_from_optional(value: float | None) -> Tri[float]:
     """`NULL` from the database becomes `Tri.unknown()`, never `0` (Review Focus 1)."""
     return Tri.unknown() if value is None else Tri.known(value)
 
@@ -98,6 +98,14 @@ class ScoreComponents:
     def as_mapping(self) -> dict[ScoringComponent, float]:
         """The wire dict of §20 keys on `ScoringComponent` members."""
         return {c: float(getattr(self, c.value)) for c in ScoringComponent}
+
+
+class ComponentScoresLike(Protocol):
+    """The shape both component containers share: `ScoreComponents` (all-float) and
+    the Tri-valued `ArmComponentScores` in `scoring/opportunity.py`. An
+    `OpportunityScore` may hold either, so the domain type is the protocol."""
+
+    def as_mapping(self) -> Mapping[ScoringComponent, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)

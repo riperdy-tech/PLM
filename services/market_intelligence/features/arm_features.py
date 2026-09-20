@@ -32,15 +32,15 @@ class ArmFeatures:
     observation_count: int
     source_count: int
     observation_ids: tuple[str, ...]
-    median_velocity_7d: Tri
-    median_velocity_30d: Tri
-    median_velocity_90d: Tri
-    growth_30d_vs_prev30d: Tri
-    growth_30d_vs_prev90d: Tri
+    median_velocity_7d: Tri[float]
+    median_velocity_30d: Tri[float]
+    median_velocity_90d: Tri[float]
+    growth_30d_vs_prev30d: Tri[float]
+    growth_30d_vs_prev90d: Tri[float]
     competition: ArmCompetition
     demand: DemandInputs
     audience: AudienceQualityInputs
-    cross_platform: Tri
+    cross_platform: Tri[float]
     production_fit: ProductionFitInputs
     confidence_breakdown: ConfidenceBreakdown
 
