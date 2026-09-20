@@ -131,6 +131,8 @@ selection_reason
 directive_version
 policy_version
 expires_at
+exploration_fraction
+value_model
 ```
 
 P2 §52 (`production_directive` table) additionally persists: `id`, `status`,
@@ -148,7 +150,12 @@ directive with no `arm_id` or no valid policy/decision identity (P3 §10).
 **Status before ruling:** **broken** — field-level mismatch on six of twelve
 fields (P2 §32/§120 vs P3 §10).
 
-**Ruling:** R4.
+**Status: FROZEN — 2026-09-20.** The five policy decisions the documents could not
+settle were taken by the human partner and are recorded in **ADR-0023**. PHASE-P2
+and PHASE-P3 may now be implemented against this entry. After this point a wire
+change is a registry amendment first, then both sides in one change (R2).
+
+**Rulings:** R4, plus the C2 freeze rulings in ADR-0023.
 
 **Required amendments (must not be missed):**
 
@@ -159,10 +166,43 @@ fields (P2 §32/§120 vs P3 §10).
   `exploration_level ← allocation_type` (enum map); `production_deadline ←
   expires_at`; `required_constraints` / `recommended_attributes ← arm hard
   constraints + creative search region`.
-- Frozen before either P2.1 or P3.4 starts (P0 §6, pre-step W2.0).
+- Frozen before either P2.1 or P3.4 starts (P0 §6, pre-step W2.0). **Done — frozen 2026-09-20.**
 
-**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **pending** (this is
-the template's worked copy target).
+**Freeze rulings (ADR-0023, decided by the human partner):**
+
+1. **Budget authority.** The allocation **cycle** owns the ceiling; each directive
+   carries its **share** in `budget_limit`. P3 rejects any package whose
+   `budget_envelope` exceeds its directive's share. Where P3 §34, §44 and §86
+   disagree on precedence, the directive's share wins.
+2. **Exploration vocabulary.** P3 consumes P2's three discrete levels
+   `exploit` / `adjacent_explore` / `radical_explore`. `exploration_fraction`
+   (0.0–1.0) rides alongside for reporting and is **not** the contract — no consumer
+   may branch on it. `exploration_level`'s token set is defined nowhere in PHASE-P3,
+   so this entry is the only definition of it.
+3. **Allocation fractions sum to 1.0.** The default policy is 70% exploit / 20%
+   adjacent / 10% radical. P2 §90's `baseline_fraction` is **dropped as a separate
+   slice**; if kept as a config key it is the non-exploratory residual *inside* the
+   exploit slice, and validation rejects any policy whose fractions sum to more
+   than 1.0 (P2 §13 over §90).
+4. **Value model.** `expected_value` is computed under an explicit, versioned
+   `value_model` carried on the wire. The first cycles use the early-stage proxy
+   (view velocity, watch time, retention, subscriber conversion, engagement). The
+   full Expected Economic Value terms (revenue, subscriber value, catalog value,
+   Spotify conversion, future discovery value, production cost) are **reserved in
+   the C7 reward schema from day one** so P9 can populate them without a contract
+   change; P2 must not fabricate them before P9 supplies them.
+5. **Activation and evidence threshold.** P2 starts in `SHADOW` (P2 §117):
+   directives are computed, logged and auditable with no production effect until
+   P4 and P5 exist. An arm is **ranked** only with at least **2 measured evidence
+   components** (EVIDENCE set), using the `basis_weight` P1 persists beside
+   confidence; under-covered arms are returned flagged, never silently mixed into
+   the ranking. The human partner holds override at all times (P2 §107).
+
+**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **pending, unblocked** by
+this freeze. It must assert the producer payload validates against the P3 consumer
+schema on the exact frozen names above, including the `allocation_type` →
+`exploration_level` enum map and the `quantity` → `requested_experiment_count`
+rename, so a drift failure names the field that moved.
 
 ---
 
