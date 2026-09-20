@@ -27,7 +27,12 @@ from sqlalchemy.orm import Session
 
 from ..domain.arm import ContentArm
 from ..domain.directive import ProductionDirective
-from ..domain.enums import AllocationCycleStatus, ArmLifecycleStatus, DirectiveStatus
+from ..domain.enums import (
+    AllocationCycleStatus,
+    ArmLifecycleStatus,
+    DirectiveStatus,
+    ObservationMaturity,
+)
 from ..domain.policy import PolicyConfig
 from ..domain.posterior import PosteriorState, UpdateRecord
 from ..domain.reward import RewardObservation
@@ -52,8 +57,8 @@ from .models import (
 
 __all__ = [
     "PolicyImmutableError", "PosteriorVersionConflict", "activate_policy",
-    "finish_cycle", "get_channel_state", "insert_cycle", "insert_decision",
-    "insert_directive", "insert_experiment_result", "insert_exposure",
+    "finish_cycle", "get_channel_state", "increment_result_counts", "insert_cycle",
+    "insert_decision", "insert_directive", "insert_experiment_result", "insert_exposure",
     "insert_feature_snapshot", "insert_override", "insert_policy",
     "insert_posterior_update", "insert_reward_observation", "is_in_cooldown_state",
     "list_queued_directives", "load_active_overrides", "load_all_latest_feature_snapshots",
@@ -575,14 +580,15 @@ def insert_experiment_result(session: Session, observation: RewardObservation, *
 
 
 def load_pending_observations(session: Session, *, now: datetime) -> list[dict[str, Any]]:
-    """Observations not yet `applied`, dated at/before `now` — no future data (§23)."""
-    applied = sa.select(ar_posterior_update_log.c.reward_observation_id).where(
-        ar_posterior_update_log.c.update_status == "applied"
-    )
+    """Every observation due at/before `now`, deterministic order — no future data (§23).
+
+    Applied observations are deliberately included: §74's retry must consult the persisted
+    update log and be *visible* as a skip (`skipped_duplicate`), not silently filtered out
+    by this query. The worker (`modeling.update`) owns the "already applied" check.
+    """
     return [dict(row) for row in session.execute(
         sa.select(ar_reward_observation)
-        .where(ar_reward_observation.c.id.not_in(applied),
-               ar_reward_observation.c.observed_at <= now)
+        .where(ar_reward_observation.c.observed_at <= now)
         .order_by(ar_reward_observation.c.observed_at, ar_reward_observation.c.id)
     ).mappings()]
 
@@ -612,6 +618,17 @@ def load_posterior_update(session: Session, reward_observation_id: str) -> dict[
                ar_posterior_update_log.c.update_status == "applied")
     ).mappings().one_or_none()
     return None if row is None else dict(row)
+
+
+def increment_result_counts(session: Session, *, arm_id: str,
+                            maturity: ObservationMaturity, now: datetime) -> None:
+    """§38 evidence counter: an applied update increments the arm's result tally."""
+    column = (ar_content_arm_state.c.mature_result_count
+              if maturity is ObservationMaturity.MATURE
+              else ar_content_arm_state.c.provisional_result_count)
+    session.execute(sa.update(ar_content_arm_state)
+                    .where(ar_content_arm_state.c.arm_id == arm_id)
+                    .values({column.name: column + 1, "last_updated_at": now}))
 
 
 # --- similarity, exposure, baselines, overrides, channel state ----------------------
