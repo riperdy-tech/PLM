@@ -47,10 +47,14 @@ def growth_rate(current: float, baseline: float, *, minimum_baseline: float = 1.
 def median_velocity(
     observations: Sequence[NormalizedObservation], *, as_of: datetime, window_days: int,
 ) -> Tri:
-    """Median of per-observation velocity inside one window (§12's suggested features).
+    """Median of in-window view deltas (§11.5/§12's suggested features), windowed only.
 
-    A single sighting has no delta, so its *lifetime* velocity is used and that is
-    recorded by the caller via `sample_size`; unknown metrics simply do not vote.
+    The metric is computed from in-window sightings alone. It used to average the
+    lifetime fallback of the newest sighting into the same median, which let an old
+    channel's cumulative average outvote its own slow deltas and flipped §35's
+    ranking as soon as one sighting moved out of the window (review fix 5). When the
+    window holds too few sightings for even one delta, the metric is *insufficient* —
+    `Tri.unknown()`, never a fallback value.
     """
     start, end = window_bounds(as_of, days=window_days)
     inside = [o for o in observations if start <= o.observed_at < end]
@@ -73,13 +77,6 @@ def median_velocity(
                 velocity = Tri.unknown()
             if velocity.is_known and velocity.unwrap() >= 0:
                 velocities.append(float(velocity.unwrap()))
-        newest = ordered[-1]
-        if newest.published_at is not None and newest.views.is_known:
-            lifetime = lifetime_views_per_day(
-                newest.views, observed_at=newest.observed_at, published_at=newest.published_at
-            )
-            if lifetime.is_known:
-                velocities.append(float(lifetime.unwrap()))
     if not velocities:
         return Tri.unknown()
     ordered_values = sorted(velocities)

@@ -453,3 +453,28 @@ def test_a_mega_channel_with_slow_growth_does_not_automatically_outrank_growers(
     for score in scores.values():
         assert score.components.cross_platform.is_unknown
         assert 0.0 < score.market_opportunity_score <= 100.0
+
+
+def test_the_mega_channel_still_loses_when_one_window_sighting_is_removed() -> None:
+    """Review fix 5: the ranking must survive on the windowed metric alone.
+
+    With the day-5 sighting gone, slow_mega used to keep a ~869/day "velocity" —
+    its 50/day delta averaged with its own lifetime fallback (~1689/day) — which beat
+    fast_small's ~439/day and flipped §35 (slow 61.11 vs fast 47.22). Windowed-only
+    medians: slow 50/day, fast 500/day, mid 400/day, and the ranking holds for the
+    right reason.
+    """
+    observations_by_arm = {
+        token: tuple(observation for observation in _channel_observations(token)
+                     if observation.observed_at != AS_OF - timedelta(days=5))
+        for token in _THREE_CHANNELS
+    }
+    features = compute_arm_features(observations_by_arm, as_of=AS_OF, settings=SETTINGS)
+    assert float(features["slow_mega"].median_velocity_30d.unwrap()) == pytest.approx(50.0)
+    assert float(features["fast_small"].median_velocity_30d.unwrap()) == pytest.approx(500.0)
+    assert float(features["growing_mid"].median_velocity_30d.unwrap()) == pytest.approx(400.0)
+
+    scores = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
+    mega = scores["slow_mega"].market_opportunity_score
+    for smaller in ("fast_small", "growing_mid"):
+        assert mega < scores[smaller].market_opportunity_score
