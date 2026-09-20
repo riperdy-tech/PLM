@@ -181,6 +181,32 @@ def _all_unknown_components() -> ArmComponentScores:
     )
 
 
+def test_production_fit_alone_cannot_carry_a_score(market_session) -> None:
+    """Review fix 1: the module docstring says configuration "cannot carry a score by
+    itself", but a measured `production_fit` used to satisfy the old
+    `total_weight > 0` guard and produced an 80.0 score from no market evidence."""
+    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
+    components = ArmComponentScores(
+        demand=Tri.unknown(), growth=Tri.unknown(), competitor_velocity=Tri.unknown(),
+        competition=Tri.unknown(), audience_quality=Tri.unknown(), cross_platform=Tri.unknown(),
+        production_fit=Tri.known(80.0),
+    )
+    with pytest.raises(ValueError, match="evidence"):
+        _score_with(features["b"], components)
+
+
+def test_production_fit_still_contributes_when_evidence_exists(market_session) -> None:
+    """The ruling keeps production_fit's weight once a real evidence component is in."""
+    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
+    components = ArmComponentScores(
+        demand=Tri.known(50.0), growth=Tri.unknown(), competitor_velocity=Tri.unknown(),
+        competition=Tri.unknown(), audience_quality=Tri.unknown(), cross_platform=Tri.unknown(),
+        production_fit=Tri.known(80.0),
+    )
+    score = _score_with(features["b"], components)
+    assert score.market_opportunity_score == pytest.approx((50 * 0.25 + 80 * 0.05) / 0.30)
+
+
 def _store_channel(session, token: str, *, subscribers: int, published_days_ago: int,
                    views: tuple[int, ...]) -> None:
     """Store one channel's real observation series through the production write path."""

@@ -198,8 +198,18 @@ def score_arm(
         if tri.is_known:
             measured[component] = float(tri.unwrap())
     total_weight = sum(weight_by_component[component.value] for component in measured)
-    if total_weight <= 0:
-        raise ValueError("no measured components: an arm without evidence gets no score")
+    evidence_measured = any(
+        component in measured for component in EVIDENCE_COMPONENTS
+    )
+    if not evidence_measured or total_weight <= 0:
+        # §3.6/§35: `production_fit` is configuration, not market evidence. A measured
+        # production_fit used to satisfy a `total_weight > 0` guard and the arm got a
+        # score from no evidence at all; an arm without one observed evidence
+        # component gets no score, whatever the configuration says.
+        raise ValueError(
+            "no measured components: an arm without evidence gets no score; "
+            "production_fit is configuration and cannot carry a score by itself"
+        )
     weighted = sum(measured[component] * weight_by_component[component.value]
                    for component in measured) / total_weight
     score = max(0.0, min(100.0, weighted))
