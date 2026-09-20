@@ -9,7 +9,10 @@ description = "PLM monorepo: autonomous music-label platform (Wave 0 scaffold)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
     "pydantic>=2.7",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -35,3 +38,6 @@ files = ["packages"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "services"]
+markers = [
+    "integration: needs docker compose services (postgres, minio); skips cleanly when unreachable",
+]
