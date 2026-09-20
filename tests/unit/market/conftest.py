@@ -10,16 +10,12 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from services.market_intelligence.storage.models import MARKET_METADATA
+from tests.support.market_db import create_market_engine
 
 
 @pytest.fixture
 def market_db() -> sa.Engine:
-    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
-    with engine.begin() as connection:
-        connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS market")
-    MARKET_METADATA.create_all(engine)
-    return engine
+    return create_market_engine()
 
 
 @pytest.fixture

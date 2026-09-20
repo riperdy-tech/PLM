@@ -1,12 +1,19 @@
 # services/market_intelligence/storage/repositories.py
 """Typed helpers over the `market` schema. Every function takes a Session whose
-search_path is the `market` schema (`plm_platform.db.scoped_session("market")`)."""
+search_path is the `market` schema (`plm_platform.db.scoped_session("market")`).
+
+Ids are *derived*, never minted: every row's id is a uuid5 over its stable identity,
+so replaying the same inputs into a fresh schema reproduces the same ids — the
+project determinism constraint (values reproducible from stored inputs plus a
+version string).
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
 from plm_contracts import Tri
@@ -39,13 +46,26 @@ from .models import (
 )
 
 __all__ = [
-    "add_run_cost", "count_quarantined", "finish_collection_run",
+    "add_run_cost", "count_quarantined", "deterministic_id", "finish_collection_run",
     "insert_classification", "insert_normalized_observation", "insert_seed_evidence",
     "latest_classifications_for", "load_classification", "load_entity",
     "load_observations", "load_queries", "load_run", "load_seed_evidence",
     "quarantine_record", "resolve_entity", "start_collection_run", "upsert_query",
     "upsert_source",
 ]
+
+_ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
+ENTITY_RESOLUTION_VERSION: Final[str] = "p1-entity-v1"
+"""Entity ids carry the version of the resolution rules that bound them (§22)."""
+
+
+def deterministic_id(*parts: str) -> str:
+    """uuid5 over a row's stable identity parts, joined with `|`.
+
+    Callers pass the inputs that *are* the row's identity (provider identity,
+    observed timestamp, transformation/version tokens) — never anything mutable.
+    """
+    return str(uuid5(_ID_NAMESPACE, "|".join(parts)))
 
 
 def upsert_source(
@@ -70,7 +90,7 @@ def upsert_source(
             )
         )
         return str(existing)
-    source_id = _new_id()
+    source_id = deterministic_id("source", provider_name.value)
     session.execute(sa.insert(sources).values(
         id=source_id, provider_name=provider_name.value,
         connector_type=connector_type.value, base_identifier=base_identifier,
@@ -88,11 +108,24 @@ def start_collection_run(
     started_at: datetime,
 ) -> str:
     """§7.3: every collection attempt has a run record, starting `running`."""
-    run_id = _new_id()
-    session.execute(sa.insert(collection_runs).values(
-        id=run_id, source_id=source_id, query_id=query_id, started_at=started_at,
-        status=CollectionRunStatus.RUNNING.value, software_version=software_version,
-    ))
+    run_id = deterministic_id(
+        "collection_run", source_id, query_id or "", software_version,
+        started_at.isoformat(),
+    )
+    try:
+        with session.begin_nested():
+            session.execute(sa.insert(collection_runs).values(
+                id=run_id, source_id=source_id, query_id=query_id, started_at=started_at,
+                status=CollectionRunStatus.RUNNING.value, software_version=software_version,
+            ))
+    except IntegrityError:
+        # Re-starting the identical attempt (a replay) is the same run, not a second one.
+        existing = session.execute(
+            sa.select(collection_runs.c.id).where(collection_runs.c.id == run_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return str(existing)
     return run_id
 
 
@@ -150,12 +183,6 @@ def load_run(session: Session, run_id: str) -> Mapping[str, Any] | None:
     return dict(row) if row is not None else None
 
 
-def _new_id() -> str:
-    import uuid
-
-    return str(uuid.uuid4())
-
-
 def resolve_entity(
     session: Session,
     *,
@@ -191,7 +218,10 @@ def resolve_entity(
         ))
         return str(identity)
 
-    entity_id = _new_id()
+    entity_id = deterministic_id(
+        "entity", ENTITY_RESOLUTION_VERSION, entity_type.value, source_id,
+        provider_object_type.value, provider_object_id,
+    )
     session.execute(sa.insert(entities).values(
         id=entity_id, entity_type=entity_type.value, canonical_name=canonical_name,
         normalized_name=normalized_name, canonical_url=canonical_url, language=language,
@@ -199,7 +229,10 @@ def resolve_entity(
         status=EntityStatus.ACTIVE.value,
     ))
     session.execute(sa.insert(entity_identities).values(
-        id=_new_id(), entity_id=entity_id, source_id=source_id,
+        id=deterministic_id(
+            "entity_identity", source_id, provider_object_type.value, provider_object_id
+        ),
+        entity_id=entity_id, source_id=source_id,
         provider_object_type=provider_object_type.value, provider_object_id=provider_object_id,
         first_seen_at=observed_at, last_seen_at=observed_at,
     ))
@@ -213,7 +246,10 @@ def insert_normalized_observation(
     if draft is None:
         raise ValueError("cannot insert a draft that was quarantined")
     values = {
-        "id": _new_id(), "entity_id": draft.entity_id, "source_id": draft.source_id,
+        "id": deterministic_id(
+            "observation", draft.entity_id, draft.source_id, draft.observed_at.isoformat()
+        ),
+        "entity_id": draft.entity_id, "source_id": draft.source_id,
         "raw_observation_id": draft.raw_observation_id, "observed_at": draft.observed_at,
         "published_at": draft.published_at,
         "views": _tri_value(draft.views), "likes": _tri_value(draft.likes),
@@ -276,12 +312,24 @@ def quarantine_record(session: Session, record: QuarantinedRecord) -> str:
     """§24: quarantine with a reason code instead of dropping silently."""
     if record.reason_code not in QUARANTINE_REASON_CODES:
         raise ValueError(f"unknown quarantine reason code {record.reason_code!r}")
-    record_id = _new_id()
-    session.execute(sa.insert(quarantined_records).values(
-        id=record_id, source_id=None, raw_observation_id=record.raw_observation_id,
-        collection_run_id=record.collection_run_id, reason_code=record.reason_code,
-        detail=record.detail, payload_uri=record.payload_uri,
-    ))
+    record_id = deterministic_id(
+        "quarantine", record.raw_observation_id or "", record.collection_run_id or "",
+        record.reason_code, record.detail, record.payload_uri or "",
+    )
+    try:
+        with session.begin_nested():
+            session.execute(sa.insert(quarantined_records).values(
+                id=record_id, source_id=None, raw_observation_id=record.raw_observation_id,
+                collection_run_id=record.collection_run_id, reason_code=record.reason_code,
+                detail=record.detail, payload_uri=record.payload_uri,
+            ))
+    except IntegrityError:
+        existing = session.execute(
+            sa.select(quarantined_records.c.id).where(quarantined_records.c.id == record_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return str(existing)
     return record_id
 
 
@@ -329,7 +377,7 @@ def upsert_query(
     ).scalar_one_or_none()
     if existing is not None:
         return str(existing), False
-    query_id = _new_id()
+    query_id = deterministic_id("query", source_id, fingerprint)
     session.execute(sa.insert(queries).values(
         id=query_id, source_id=source_id, query_text=query_text,
         query_fingerprint=fingerprint, query_type=query_type.value, locale=locale,
@@ -364,7 +412,8 @@ def insert_seed_evidence(
         try:
             with session.begin_nested():
                 session.execute(sa.insert(seed_evidence).values(
-                    id=_new_id(), query_id=query_id, raw_observation_id=raw_id,
+                    id=deterministic_id("seed_evidence", query_id, raw_id),
+                    query_id=query_id, raw_observation_id=raw_id,
                 ))
             inserted += 1
         except IntegrityError:
@@ -398,7 +447,9 @@ def insert_classification(
     """§29: every classification names the taxonomy, model, prompt and schema versions."""
     if not 0.0 <= confidence <= 1.0:
         raise ValueError("classification confidence must be within 0–1")
-    classification_id = _new_id()
+    classification_id = deterministic_id(
+        "classification", content_fingerprint, taxonomy_version
+    )
     session.execute(sa.insert(classifications).values(
         id=classification_id, observation_id=observation_id, entity_id=entity_id,
         content_fingerprint=content_fingerprint, taxonomy_version=taxonomy_version,

@@ -5,7 +5,6 @@ without collapsing time series. Nothing here ever updates a row."""
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -17,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..connectors.base import FetchedObject
 from .models import raw_observations
-from .repositories import add_run_cost
+from .repositories import add_run_cost, deterministic_id
 
 __all__ = ["StoredRawObservation", "load_raw_observation", "store_raw_observation"]
 
@@ -69,7 +68,11 @@ def store_raw_observation(
     payload_uri = to_uri(stored_object.key, settings=settings)
 
     values = {
-        "id": str(uuid.uuid4()),
+        # The dedupe key *is* the identity: same source object, moment and payload ⇒ one row.
+        "id": deterministic_id(
+            "raw_observation", source_id, fetched.provider_object_type.value,
+            fetched.provider_object_id, fetched.observed_at.isoformat(), stored_object.digest,
+        ),
         "collection_run_id": run_id,
         "source_id": source_id,
         "provider_object_type": fetched.provider_object_type.value,
