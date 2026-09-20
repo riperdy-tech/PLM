@@ -319,13 +319,15 @@ def quarantine_record(session: Session, record: QuarantinedRecord) -> str:
     if record.reason_code not in QUARANTINE_REASON_CODES:
         raise ValueError(f"unknown quarantine reason code {record.reason_code!r}")
     record_id = deterministic_id(
-        "quarantine", record.raw_observation_id or "", record.collection_run_id or "",
-        record.reason_code, record.detail, record.payload_uri or "",
+        "quarantine", record.source_id or "", record.raw_observation_id or "",
+        record.collection_run_id or "", record.reason_code, record.detail,
+        record.payload_uri or "",
     )
     try:
         with session.begin_nested():
             session.execute(sa.insert(quarantined_records).values(
-                id=record_id, source_id=None, raw_observation_id=record.raw_observation_id,
+                id=record_id, source_id=record.source_id,
+                raw_observation_id=record.raw_observation_id,
                 collection_run_id=record.collection_run_id, reason_code=record.reason_code,
                 detail=record.detail, payload_uri=record.payload_uri,
             ))

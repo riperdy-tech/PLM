@@ -83,11 +83,17 @@ class OpportunityScore:
 
 @dataclass(frozen=True, slots=True)
 class QuarantinedRecord:
-    """§24: quarantine instead of silent drop; always carries a reason code."""
+    """§24: quarantine instead of silent drop; always carries a reason code.
+
+    The evidence identifiers (`raw_observation_id`, `source_id`) are part of the
+    record: a quarantined row that cannot be traced back to what produced it is
+    a silent drop with extra columns.
+    """
 
     reason_code: str
     detail: str
     raw_observation_id: str | None = None
+    source_id: str | None = None
     collection_run_id: str | None = None
     payload_uri: str | None = None
 

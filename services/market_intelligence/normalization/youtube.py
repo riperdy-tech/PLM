@@ -74,7 +74,8 @@ def normalize_video_object(
     if not is_valid_video_id(fetched.provider_object_id):
         return _quarantined("malformed_provider_id",
                             f"video id {fetched.provider_object_id!r} is not 11 URL-safe chars",
-                            fetched)
+                            fetched, raw_observation_id=raw_observation_id,
+                            source_id=source_id)
     snippet = fetched.payload.get("snippet") or {}
     statistics = fetched.payload.get("statistics") or {}
     details = fetched.payload.get("contentDetails") or {}
@@ -102,7 +103,8 @@ def normalize_channel_object(
     if not is_valid_channel_id(fetched.provider_object_id):
         return _quarantined("malformed_provider_id",
                             f"channel id {fetched.provider_object_id!r} is not UC + 22 chars",
-                            fetched)
+                            fetched, raw_observation_id=raw_observation_id,
+                            source_id=source_id)
     snippet = fetched.payload.get("snippet") or {}
     statistics = fetched.payload.get("statistics") or {}
     draft = NormalizedObservationDraft(
@@ -126,7 +128,8 @@ def normalize_search_hit(
     """Discovery sees text and a publish date only — every metric stays unknown."""
     snippet = fetched.payload.get("snippet") or {}
     if not is_valid_video_id(fetched.provider_object_id):
-        return _quarantined("malformed_provider_id", "search result without a video id", fetched)
+        return _quarantined("malformed_provider_id", "search result without a video id", fetched,
+                            raw_observation_id=raw_observation_id, source_id=source_id)
     draft = NormalizedObservationDraft(
         entity_id=entity_id, source_id=source_id, raw_observation_id=raw_observation_id,
         observed_at=observed_at, published_at=_timestamp(snippet.get("publishedAt")),
@@ -148,24 +151,31 @@ def _validated(draft: NormalizedObservationDraft, fetched: FetchedObject) -> Nor
         if metric.is_known:
             value = metric.unwrap()
             if value < 0:
-                return _quarantined("negative_count", f"{name}={value}", fetched)
+                return _quarantined("negative_count", f"{name}={value}", fetched,
+                                    raw_observation_id=draft.raw_observation_id,
+                                    source_id=draft.source_id)
     if draft.video_duration_seconds.is_known and draft.video_duration_seconds.unwrap() < 0:
         return _quarantined("negative_duration",
-                            f"duration={draft.video_duration_seconds.unwrap()}", fetched)
+                            f"duration={draft.video_duration_seconds.unwrap()}", fetched,
+                            raw_observation_id=draft.raw_observation_id,
+                            source_id=draft.source_id)
     if draft.published_at is not None and draft.published_at > draft.observed_at:
         return _quarantined(
             "impossible_timestamp_order",
             f"published_at {draft.published_at.isoformat()} is after observed_at "
             f"{draft.observed_at.isoformat()}",
-            fetched,
+            fetched, raw_observation_id=draft.raw_observation_id, source_id=draft.source_id,
         )
     return NormalizationOutcome(observation=draft)
 
 
-def _quarantined(reason: str, detail: str, fetched: FetchedObject) -> NormalizationOutcome:
+def _quarantined(
+    reason: str, detail: str, fetched: FetchedObject, *,
+    raw_observation_id: str | None, source_id: str | None,
+) -> NormalizationOutcome:
     return NormalizationOutcome(quarantine=QuarantinedRecord(
-        reason_code=reason, detail=detail, raw_observation_id=None,
-        payload_uri=None,
+        reason_code=reason, detail=detail, raw_observation_id=raw_observation_id,
+        source_id=source_id, payload_uri=None,
     ))
 
 

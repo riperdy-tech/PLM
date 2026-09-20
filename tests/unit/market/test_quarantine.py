@@ -7,14 +7,21 @@ the assertions pin the gates implemented in `normalization/youtube.py`.
 
 from datetime import UTC, datetime
 
+import sqlalchemy as sa
 from plm_contracts import TriState
 
 from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import ProviderObjectType
+from services.market_intelligence.domain.enums import (
+    ConnectorType,
+    ProviderName,
+    ProviderObjectType,
+)
 from services.market_intelligence.normalization.youtube import (
     QUARANTINE_REASON_CODES,
     normalize_video_object,
 )
+from services.market_intelligence.storage import repositories
+from services.market_intelligence.storage.models import quarantined_records
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 RAW = "00000000-0000-4000-8000-000000000001"
@@ -66,3 +73,28 @@ def test_unobserved_metric_is_not_a_measured_zero() -> None:
     assert measured_zero.observation.views.state is TriState.KNOWN
     assert measured_zero.observation.views.is_zero is True
     assert measured_zero.observation.views.unwrap() == 0
+
+
+def test_a_quarantined_record_keeps_the_evidence_that_caused_it() -> None:
+    outcome = _normalize(_fetched("vid000000001", statistics={"viewCount": "-5"}))
+    assert outcome.quarantine.raw_observation_id == RAW
+    assert outcome.quarantine.source_id == "source-1"
+
+
+def test_the_quarantine_row_traces_back_to_the_raw_observation(market_session) -> None:
+    source_id = repositories.upsert_source(
+        market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
+        connector_type=ConnectorType.DATA_API, base_identifier="x",
+        configuration_version="p1-sources-v1",
+    )
+    outcome = normalize_video_object(
+        _fetched("vid000000001", statistics={"viewCount": "-5"}),
+        entity_id="00000000-0000-4000-8000-000000000002", source_id=source_id,
+        raw_observation_id=RAW, observed_at=FIXED_NOW,
+    )
+    record_id = repositories.quarantine_record(market_session, outcome.quarantine)
+    row = market_session.execute(
+        sa.select(quarantined_records).where(quarantined_records.c.id == record_id)
+    ).mappings().one()
+    assert str(row["raw_observation_id"]) == RAW
+    assert str(row["source_id"]) == source_id
