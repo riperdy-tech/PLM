@@ -11,9 +11,20 @@ from services.autonomous_ar.storage.models import AR_METADATA
 __all__ = ["ar_session", "create_ar_engine"]
 
 
-def create_ar_engine() -> sa.Engine:
-    """In-memory SQLite with an attached `ar` schema and all P2 tables created."""
-    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+def create_ar_engine(*, static_pool: bool = False) -> sa.Engine:
+    """In-memory SQLite with an attached `ar` schema and all P2 tables created.
+
+    `static_pool=True` shares one connection across threads — required when the engine
+    sits behind a `TestClient`, whose sync endpoints run in a worker thread: an in-memory
+    database is per-connection, so a thread-local pool would see an empty schema.
+    """
+    if static_pool:
+        engine = sa.create_engine(
+            "sqlite+pysqlite:///:memory:", poolclass=sa.pool.StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+    else:
+        engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS ar")
     AR_METADATA.create_all(engine)

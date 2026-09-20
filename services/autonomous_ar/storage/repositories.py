@@ -61,7 +61,8 @@ __all__ = [
     "insert_decision", "insert_directive", "insert_experiment_result", "insert_exposure",
     "insert_feature_snapshot", "insert_override", "insert_policy",
     "insert_posterior_update", "insert_reward_observation", "is_in_cooldown_state",
-    "list_queued_directives", "load_active_overrides", "load_all_latest_feature_snapshots",
+    "latest_observation_instant", "list_queued_directives", "load_active_overrides",
+    "load_active_policy", "load_all_latest_feature_snapshots", "load_arm_state",
     "load_arm_states", "load_baselines", "load_cycle", "load_decisions",
     "load_directives_for_cycle", "load_exposure", "load_exposure_score",
     "load_feature_snapshot", "load_latest_feature_snapshot", "load_pending_observations",
@@ -169,6 +170,19 @@ def load_policy(session: Session, version: str) -> PolicyConfig | None:
     return None if row is None else _policy_from_row(row)
 
 
+def load_active_policy(session: Session) -> PolicyConfig | None:
+    """The policy row `activate_policy` marked active, or `None` when none is (§92).
+
+    Callers that find `None` refuse the operation — the update worker never runs on code
+    defaults, and activation is the operator's explicit act.
+    """
+    row = session.execute(
+        sa.select(ar_allocation_policy).where(ar_allocation_policy.c.active.is_(True))
+        .order_by(ar_allocation_policy.c.version)
+    ).mappings().first()
+    return None if row is None else _policy_from_row(row)
+
+
 # --- arm state ----------------------------------------------------------------------
 
 def upsert_arm_state(session: Session, *, brand_id: str, arm_id: str,
@@ -226,6 +240,14 @@ def load_arm_states(session: Session) -> list[dict[str, Any]]:
     return [dict(row) for row in session.execute(
         sa.select(ar_content_arm_state).order_by(ar_content_arm_state.c.arm_id)
     ).mappings()]
+
+
+def load_arm_state(session: Session, arm_id: str) -> dict[str, Any] | None:
+    row = session.execute(
+        sa.select(ar_content_arm_state)
+        .where(ar_content_arm_state.c.arm_id == arm_id)
+    ).mappings().one_or_none()
+    return None if row is None else dict(row)
 
 
 def load_exposure_score(session: Session, arm_id: str) -> float:
@@ -577,6 +599,18 @@ def insert_experiment_result(session: Session, observation: RewardObservation, *
         attribution_confidence=observation.attribution_confidence, source_ids=[],
     ))
     return result_id
+
+
+def latest_observation_instant(session: Session) -> datetime | None:
+    """The newest stored `observed_at`, or `None` when nothing is stored.
+
+    The API's update worker uses this as its default `now`: applying "everything stored"
+    is deterministic and replay-stable, where a wall-clock read would not be (§67).
+    """
+    value = session.execute(
+        sa.select(sa.func.max(ar_reward_observation.c.observed_at))
+    ).scalar_one_or_none()
+    return None if value is None else _aware(value)
 
 
 def load_pending_observations(session: Session, *, now: datetime) -> list[dict[str, Any]]:
