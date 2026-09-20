@@ -1,0 +1,19 @@
+# Superpowers SDD scratch workspace
+.superpowers/
+
+# Secrets - only .env.example is committed
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime data
+data/

@@ -1,0 +1,27 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# FFmpeg 7 is pinned for the media phases; fail the build if apt ships another major.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && ffmpeg -version | grep -Eq "^ffmpeg version 7\." \
+    && rm -rf /var/lib/apt/lists/*
+
+# libsndfile for audio I/O; build-essential for native wheels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsndfile1 build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Editable install; the compose worker bind-mounts the repo over /app at runtime.
+COPY pyproject.toml README.md ./
+COPY packages/ packages/
+COPY services/ services/
+RUN pip install -e ".[dev]"
+
+# W0.7 replaces this with the real worker entry point (python -m plm_platform.worker).
+CMD ["sleep", "infinity"]
