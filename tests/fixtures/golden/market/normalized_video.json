@@ -1,0 +1,39 @@
+{
+  "channel_video_count": {
+    "state": "unknown",
+    "value": null
+  },
+  "comments": {
+    "state": "known",
+    "value": 410
+  },
+  "country_signal": null,
+  "entity_id": "entity-1",
+  "language_signal": "en",
+  "likes": {
+    "state": "known",
+    "value": 8400
+  },
+  "observed_at": "2026-09-20T06:00:00+00:00",
+  "playlist_item_count": {
+    "state": "unknown",
+    "value": null
+  },
+  "published_at": "2026-08-01T10:00:00+00:00",
+  "raw_observation_id": "raw-1",
+  "source_id": "source-1",
+  "subscriber_count": {
+    "state": "unknown",
+    "value": null
+  },
+  "text_description": "Late-night Korean city vibes",
+  "text_title": "2AM Seoul \u2014 Rainy Night R&B Mix",
+  "video_duration_seconds": {
+    "state": "known",
+    "value": 3720.0
+  },
+  "views": {
+    "state": "known",
+    "value": 120000
+  }
+}
