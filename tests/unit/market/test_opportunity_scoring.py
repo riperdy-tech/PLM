@@ -478,3 +478,18 @@ def test_the_mega_channel_still_loses_when_one_window_sighting_is_removed() -> N
     mega = scores["slow_mega"].market_opportunity_score
     for smaller in ("fast_small", "growing_mid"):
         assert mega < scores[smaller].market_opportunity_score
+
+
+def test_demand_component_ranks_pull_not_raw_audience_size() -> None:
+    """Review fix 6: demand used to be the median of raw cumulative views plus the
+    summed subscriber base, so the 10M-subscriber channel scored 100 on demand by
+    construction. With the per-subscriber pull rate the component flips to
+    slow_mega 0 / fast_small 100 / growing_mid 50."""
+    observations_by_arm = {token: _channel_observations(token) for token in _THREE_CHANNELS}
+    features = compute_arm_features(observations_by_arm, as_of=AS_OF, settings=SETTINGS)
+    components = compute_component_scores(features, settings=SETTINGS)
+
+    demand = {token: float(components[token].demand.unwrap()) for token in _THREE_CHANNELS}
+    assert demand["slow_mega"] == pytest.approx(0.0)
+    assert demand["growing_mid"] == pytest.approx(50.0)
+    assert demand["fast_small"] == pytest.approx(100.0)
