@@ -1,5 +1,7 @@
 # services/market_intelligence/jobs/__init__.py
-"""Worker registrations: `plm_platform.worker --load services.market_intelligence.jobs:REGISTRATIONS`."""
+"""Worker registrations: `plm_platform.worker --task-queue ph1.market --load
+market_intelligence.jobs:REGISTRATIONS` (the editable install exposes the package
+under its top-level name; compose wires this command for the deployed worker)."""
 
 from __future__ import annotations
 

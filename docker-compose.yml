@@ -83,10 +83,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    # W0.7: the dev worker serves ph1.market; later waves add their queue and
-    # registrations (see packages/plm_platform/README.md). The bind mount makes
-    # the repo the source of truth, so code changes need no rebuild.
-    command: ["python", "-m", "plm_platform.worker", "--task-queue", "ph1.market"]
+    # W0.7: the dev worker serves ph1.market; P1.13 wires this phase's registrations
+    # in so the deployed worker actually runs the market jobs (previously it served
+    # the heartbeat only). Later waves add their queue and registrations (see
+    # packages/plm_platform/README.md). The bind mount makes the repo the source of
+    # truth, so code changes need no rebuild.
+    command: ["python", "-m", "plm_platform.worker", "--task-queue", "ph1.market",
+              "--load", "market_intelligence.jobs:REGISTRATIONS"]
     environment:
       # Compose services reach each other by service name; the localhost values in
       # .env are for tools on the host, and these explicit values win over .env.
