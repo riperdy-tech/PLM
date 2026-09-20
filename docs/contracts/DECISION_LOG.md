@@ -66,3 +66,10 @@ working unit that owned the ruling at the time it was made.
 | L3 | 2026-09-20 | Temporal task-queue names are defined once in `plm_platform` | W0.7 temporal vs W0.12 CLI (pre-flight scan) | implementer + D1 reviewer | — | ledger ruling; implemented W0.7/W0.12 | holds — `TaskQueue` enum; doctor's task_queues check derives from it |
 | L4 | 2026-09-20 | Enum values are stored as text validated by `plm_contracts`, not native Postgres enums | W0.3 contracts vs W0.5 db (pre-flight scan) | implementer + D1 reviewer | — | ledger ruling; implemented W0.3/W0.5 | holds — allows a status value without a cross-phase migration |
 | L5 | 2026-09-20 | The Control Plane document is admitted to the repository as documentation in W0.10 and treated as a deferred cross-cutting workstream, not a tenth phase to build now | Unrecognised 88.5 KB doc found in the D1 working tree | dispatch D1 (process finding) | — | ledger ruling; being implemented in W0.10 (moves to `docs/`) | pending — its inputs are P1–P9 outputs |
+
+## Phase-build decisions: P1.10 API (2026-09-20)
+
+| # | DATE | DECISION | INPUT DATA | MODEL | CONFIDENCE | ACTION | RESULT |
+|---|---|---|---|---|---|---|---|
+| D1 | 2026-09-20 | P1 serves `/market/v1` behind an optional `PLM_SERVICE_TOKEN` (unconfigured ⇒ 503 `blocked_pending_credentials`, mismatch ⇒ 401 `invalid_service_token`, constant-time compare); framework is FastAPI | R15 fixed the base path and "service token from `plm_platform`", but no such setting existed in W0.4 and §36 names no framework | planning agent | — | `ADR-0021`; `plm_platform.config.SERVICE_TOKEN_VAR/HEADER`; `services/market_intelligence/api/` | pending |
+| D2 | 2026-09-20 | The C1 list response is the registry's flat `{items, next_cursor, as_of, score_version}` — not `plm_contracts.Page`/`Envelope`; P1.2's table list is frozen in the same entry; `brand_id` stays on `market_arms` and off the payload | Registry C1 field list vs platform envelope shapes; open item 18 (R19 vs the frozen wire); P1.2 `MARKET_TABLES` | planning agent | — | `ADR-0022`; registry C1 seam test landed (`test_c1_market_to_ar.py` — exists) | pending |

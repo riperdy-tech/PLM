@@ -41,13 +41,19 @@ class TaxonomyOut(_Frozen):
 
 
 class ComponentsOut(_Frozen):
-    demand: float
-    growth: float
-    competitor_velocity: float
-    competition: float
-    audience_quality: float
-    cross_platform: float
-    production_fit: float
+    """§20's seven component names; an unobserved component is `null`, not a zero.
+
+    §17.3/§3.6: a component the evidence does not support is unknown, and the wire
+    says so rather than fabricating a 0.0 (which would read as "measured, terrible").
+    """
+
+    demand: float | None
+    growth: float | None
+    competitor_velocity: float | None
+    competition: float | None
+    audience_quality: float | None
+    cross_platform: float | None
+    production_fit: float | None
 
 
 class EvidenceOut(_Frozen):
@@ -142,5 +148,5 @@ def decode_cursor(cursor: str) -> tuple[float, str]:
     try:
         decoded = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
         return float(decoded["s"]), str(decoded["a"])
-    except Exception as exc:  # noqa: BLE001 - any malformed cursor is one message
+    except Exception as exc:  # any malformed cursor is one message
         raise ValueError(f"invalid cursor {cursor!r}") from exc

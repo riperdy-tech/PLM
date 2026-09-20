@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from tests.support.c1_api import SyncASGIClient, open_c1_client
 from tests.support.market_db import create_market_engine
 
 
@@ -22,3 +23,10 @@ def market_db() -> sa.Engine:
 def market_session(market_db: sa.Engine) -> Iterator[Session]:
     with Session(market_db) as session:
         yield session
+
+
+@pytest.fixture
+def c1_api_client() -> Iterator[SyncASGIClient]:
+    """The real `/market/v1` app over a seeded SQLite market schema (shared seam fixture)."""
+    with open_c1_client() as client:
+        yield client

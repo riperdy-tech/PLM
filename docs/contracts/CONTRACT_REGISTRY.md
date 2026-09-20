@@ -34,7 +34,7 @@ names first (see `tests/support/contract.py`).
 
 | Seam | Direction | Status before ruling | Rulings | Seam test |
 |---|---|---|---|---|
-| C1 | PHASE-P1 → PHASE-P2 (market opportunity) | compatible (two gaps) | R14, R15 | `test_c1_market_to_ar.py` — pending |
+| C1 | PHASE-P1 → PHASE-P2 (market opportunity) | compatible (two gaps) | R14, R15 | `test_c1_market_to_ar.py` — exists |
 | C2 | PHASE-P2 → PHASE-P3 (production directive) | broken (6 of 12 fields mismatch) | R4 | `test_c2_ar_to_experiments.py` — pending |
 | C3 | PHASE-P3 → PHASE-P4 (track spec) | drift (names and missing keys) | R5 | `test_c3_experiments_to_music.py` — pending |
 | C4 | PHASE-P4 → PHASE-P5 (candidate ready) | broken (event OK, retrieval missing) | R6 | `test_c4_music_to_qa.py` — pending |
@@ -95,8 +95,9 @@ freshness buckets from `as_of`; `freshness_seconds` is P2-internal (P2 §46).
   *state* (P2 §45), posteriors (P2 §47) and exposure (P2 §54) (R15).
 - Base path `/market/v1`; auth via service token from `plm_platform` (R15).
 
-**Seam test:** `tests/contract/test_c1_market_to_ar.py` — **pending** (named by the
-P1 gate in the master plan; does not exist yet).
+**Seam test:** `tests/contract/test_c1_market_to_ar.py` — **exists** (P1.10; the
+producer's real payload is validated against the consumer schema, and the
+no-`freshness` / aware-`as_of` halves of this entry are asserted).
 
 ---
 
