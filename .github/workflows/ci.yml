@@ -1,0 +1,77 @@
+# PR CI for the PLM monorepo (W0.11).
+#
+# The integration tests run against the repository's own docker-compose.yml —
+# deliberately *not* a parallel GitHub `services:` block. Ruling (W0.11, SDD
+# ledger): CI builds its service containers from the same compose file as
+# local development, because a second service definition is exactly the
+# local/CI drift this program exists to prevent. When CI needs a different
+# resource profile, add an override file — never fork the service list.
+#
+# Step shape: lint, types, then the fast suite (every non-integration test —
+# unit, contract, smoke), then the compose stack with a health-waited start,
+# then the integration suite (its migration round-trip is the migration
+# check), then teardown that runs even when the tests failed.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: lint, types, unit, contract, integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The pip download directory is cached on pyproject.toml: a dependency
+      # change invalidates it, everything else restores from the last run.
+      - name: Cache pip downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install project (editable, dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type-check (mypy)
+        run: mypy packages/
+
+      # Hermetic: no services, no .env (the unit tests inject their settings).
+      - name: Unit and contract tests
+        run: pytest -q -m "not integration"
+
+      # Compose reads .env for POSTGRES_PASSWORD, MINIO_* and friends; the
+      # committed example documents the canonical local values.
+      - name: Provide .env for compose and tests
+        run: cp .env.example .env
+
+      - name: Start the compose stack and wait for health
+        run: docker compose up -d --wait --wait-timeout 420
+
+      - name: Integration tests
+        run: pytest -q -m integration
+
+      - name: Tear down the compose stack
+        if: always()
+        run: docker compose down -v --remove-orphans
