@@ -114,6 +114,19 @@ async def _wait_for_markers(counter_path: Path, expected: list[str]) -> None:
             await asyncio.sleep(0.05)
 
 
+def _log_text(log_path: Path) -> str:
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return ""
+
+
+async def _wait_for_log_text(log_path: Path, needle: str) -> None:
+    async with asyncio.timeout(MARKER_TIMEOUT):
+        while needle not in _log_text(log_path):
+            await asyncio.sleep(0.05)
+
+
 @pytest.fixture
 def settings() -> Settings:
     try:
@@ -139,19 +152,24 @@ async def client(settings: Settings) -> AsyncIterator[Client]:
 async def test_workflow_survives_worker_restart_mid_run(client: Client, tmp_path: Path) -> None:
     counter = tmp_path / "counter.log"
     workflow_id = business_workflow_id("test", "durable-echo", uuid.uuid4().hex)
+    correlation_id = f"it-{uuid.uuid4().hex}"
     first_worker = WorkerProcess(f"plm-it-a-{uuid.uuid4().hex[:8]}", tmp_path / "worker-a.log")
     second_worker: WorkerProcess | None = None
     try:
         await first_worker.wait_until_polling(client)
         handle = await client.start_workflow(
             DurableEcho.run,
-            args=[str(counter), HOLD_SECONDS],
+            args=[str(counter), correlation_id, HOLD_SECONDS],
             id=workflow_id,
             task_queue=QUEUE.value,
         )
         run_id = handle.first_execution_run_id
         assert run_id is not None
         await _wait_for_markers(counter, ["first"])
+        # The correlation id crossed the workflow boundary into the activity's
+        # JSON log line (W0.8), and the line is attributable to the run.
+        await _wait_for_log_text(first_worker.log_path, f'"correlation_id": "{correlation_id}"')
+        assert '"marker": "first"' in _log_text(first_worker.log_path)
 
         # Mid-run: the first increment is durable, the second has not happened.
         assert _markers(counter) == ["first"]

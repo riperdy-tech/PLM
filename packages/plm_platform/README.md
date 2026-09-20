@@ -13,6 +13,8 @@ lives here.
 | `temporal.py` | Temporal connectors, task-queue registry and workflow conventions (W0.7) |
 | `heartbeat.py` | Platform heartbeat workflow; lets a fresh checkout register a worker (W0.7) |
 | `worker.py` | Runnable worker: `python -m plm_platform.worker` (W0.7) |
+| `correlation.py` | Correlation-id context variable, header middleware, dependency (W0.8) |
+| `observability.py` | JSON logging, Prometheus metrics, per-run cost counters (W0.8) |
 
 ## Temporal conventions (W0.7)
 
@@ -69,6 +71,31 @@ must never be retried as a transport failure (or the reverse).** A rejected
 creation is a business outcome that policy re-decides; a network blip is
 retried under the policy above. Neither may be disguised as the other, and
 neither may be silently absorbed.
+
+## Observability conventions (W0.8)
+
+- **JSON logging.** `configure_logging()` installs the platform handler: one
+  JSON object per line with timestamp, level, logger, message, `correlation_id`
+  and `run_id` when bound, plus structured extras. No bare `print` anywhere in
+  `plm_platform` — enforced by a test.
+- **Correlation ids.** Inbound HTTP carries `X-Correlation-ID`
+  (`CorrelationIdMiddleware` for any ASGI app, or `correlation_id_dependency`
+  for FastAPI `Depends`); a missing header is minted. Temporal convention: the
+  caller passes the id into the workflow as an argument, and every
+  side-effecting activity takes a `correlation_id` parameter and wraps its body
+  in `correlation_scope(...)` — see `tests/integration/temporal_sample.py`.
+- **Redaction by construction.** A `Secret` renders as `**********` in `%s`
+  arguments, dicts and structured extras alike; the JSON encoder falls back to
+  `str()`, so there is no path that leaks the value.
+- **Metrics.** `plm_operations_total` (counter by operation/outcome) and
+  `plm_operation_seconds` (histogram) live on the dedicated `METRICS_REGISTRY`;
+  scrape with `MetricsApp` at `/metrics` or any handler returning
+  `metrics_payload()`.
+- **Run costs.** `CostTracker`/`run_scope` keep the five per-run counters
+  (`api_calls`, `llm_tokens`, `llm_cost_estimate`, `storage_bytes`,
+  `render_seconds`) keyed by run id; a phase enforces its budget by reading
+  `tracker.totals(run_id)` — totals are snapshots, so reading cannot mutate
+  them.
 
 ## Running a worker
 

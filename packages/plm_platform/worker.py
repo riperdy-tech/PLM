@@ -23,6 +23,11 @@ queue has a live poller — process liveness alone is not health. Exit codes: 0
 served until a clean shutdown (or healthcheck ok), 1 runtime/healthcheck
 failure, 2 configuration or registration error.
 
+Logs are structured JSON (:func:`plm_platform.observability.configure_logging`):
+one object per line, carrying the current correlation id and run id when set.
+Note that the server keeps a stopped worker's poller listed for a while, so the
+healthcheck proves "a poller was recently seen", not sub-second liveness.
+
 Shutdown is graceful: SIGINT/SIGTERM (POSIX) set a stop event and each worker is
 shut down explicitly, so in-flight workflow and activity tasks drain before the
 process exits.
@@ -43,6 +48,7 @@ from temporalio.worker import Worker
 
 from .config import Settings, SettingsError, load_settings
 from .heartbeat import PlatformHeartbeat
+from .observability import configure_logging
 from .temporal import (
     DEFAULT_NAMESPACE,
     Phase,
@@ -180,16 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(name)s %(message)s",
-    )
     try:
         settings = load_settings()
     except SettingsError as exc:
         logger.error("worker cannot start: %s", exc)
         return 2
-    logging.getLogger().setLevel(settings.log_level.value)
+    configure_logging(level=settings.log_level)
 
     try:
         sets = tuple(
