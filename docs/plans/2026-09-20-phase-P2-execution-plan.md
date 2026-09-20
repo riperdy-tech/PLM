@@ -1112,7 +1112,10 @@ class ProductionDirective(BaseModel):
     priority: Annotated[int, Field(ge=1)]
     quantity: Annotated[int, Field(ge=1)]
     brief: DirectiveBrief
-    expected_value: float = Field(ge=0.0, le=1.0)
+    # No upper bound: the bound belongs to the value model's normalisation, not the wire.
+    # P9's full economic terms (revenue, subscriber value, ...) rescale this field, and a
+    # frozen `le=1.0` would turn that expected change into a C2 wire change.
+    expected_value: float = Field(ge=0.0)
     uncertainty: float = Field(ge=0.0)
     budget_limit: float = Field(ge=0.0)
     market_context: Mapping[str, Any]

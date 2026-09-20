@@ -55,3 +55,18 @@ def test_rejections_and_samples_are_plain_records() -> None:
     rejection = ConstraintRejection(arm_id="a", reason=ReasonCode.DIVERSITY_CONSTRAINT,
                                     detail="genre cap 0.6")
     assert sample.sampled_reward == 0.71 and rejection.reason is ReasonCode.DIVERSITY_CONSTRAINT
+
+
+def test_expected_value_has_no_upper_bound_because_the_scale_is_the_value_models() -> None:
+    """Controller review finding, 2026-09-20 - pins a deliberate *absence* of a constraint.
+
+    The bound belongs to the value model's normalisation, not to the C2 wire. While
+    `value_model` is the normalised early-stage proxy the range happens to be 0-1, but P9's
+    full economic terms (revenue, subscriber value, catalog value, ...) rescale the field. A
+    frozen `le=1.0` would convert that expected change into a change to a frozen seam, so it
+    must not exist. The lower bound stays: a negative expected value is meaningless.
+    """
+    assert _directive(expected_value=12.5).expected_value == 12.5
+    assert _directive(expected_value=0.0).expected_value == 0.0
+    with pytest.raises(ValueError):
+        _directive(expected_value=-0.01)

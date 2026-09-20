@@ -63,7 +63,12 @@ class ProductionDirective(BaseModel):
     priority: Annotated[int, Field(ge=1)]
     quantity: Annotated[int, Field(ge=1)]
     brief: DirectiveBrief
-    expected_value: float = Field(ge=0.0, le=1.0)
+    # Deliberately no upper bound. The range belongs to the value model's normalisation, not to
+    # the wire: while `value_model` is the normalised early-stage proxy it happens to be 0-1, but
+    # the moment P9 supplies the full economic terms (revenue, subscriber value, catalog value,
+    # ...) the scale changes. Pinning `le=1.0` here would convert that expected change into a wire
+    # change against a frozen seam, so the bound is left to the model (controller review finding).
+    expected_value: float = Field(ge=0.0)
     uncertainty: float = Field(ge=0.0)
     budget_limit: float = Field(ge=0.0)
     market_context: Mapping[str, Any]
