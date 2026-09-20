@@ -26,11 +26,12 @@ HOW TO USE
     either side is implemented. When the producer lands, swap the stub for an
     import; the assertions below do not change.
 
-    This template registers a placeholder entry (``C0-TEMPLATE``) so running it
-    un-edited *before* the registry exists skips cleanly; once W0.10 lands the
-    same run fails, because a seam test for an entry the registry does not
-    define is testing a contract nobody froze. Copy it — do not leave it as a
-    live test.
+    W0.10 landed the registry. Running this template un-edited now *verifies
+    the registry itself* — that it exists and defines exactly the seams
+    ``C1``–``C10`` — and a copied template additionally requires its own pasted
+    ``C``-entry. Nothing about the check skips any more: a seam test for an
+    entry the registry does not define is testing a contract nobody froze.
+    Copy it — do not leave it as a live test.
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ from tests.support.contract import SeamRegistry, assert_seam_payload
 
 # (1) PASTE THE REGISTRY ENTRY ID HERE, exactly as it appears in the registry
 #     (e.g. "C2 — P2 directive → P3 experiment adapter").
-REGISTRY_ENTRY = "C0-TEMPLATE"
+TEMPLATE_PLACEHOLDER = "C0-TEMPLATE"
+REGISTRY_ENTRY = TEMPLATE_PLACEHOLDER
 
 # (2) PASTE THE ENTRY'S FIELD LIST HERE, copied verbatim from the registry.
 #     The registry is the single source of truth (P0 §9 R2); when the wire
@@ -113,12 +115,29 @@ def test_producer_payload_validates_against_consumer_schema() -> None:
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
-    """The entry this seam implements must be in the frozen registry.
+    """The frozen registry must exist, resolve ``C1``–``C10``, and — once this
+    template has been copied and its ``C``-entry pasted — resolve that entry.
 
-    Skips only while the registry file itself has not landed (W0.10); a missing
-    *entry* afterwards is a failure, not a skip.
+    No skip path: W0.10 created the registry, so its absence is a failure. The
+    un-edited template cannot name a real entry (it ships the placeholder), so
+    what it asserts is the registry it will be tested against; paste the entry
+    id in spot (1) and the same assertion also requires that entry to exist.
     """
-    contract_registry.require_entry(REGISTRY_ENTRY)
+    assert contract_registry.exists, (
+        f"contract registry missing ({contract_registry.path}) — W0.10 created it; "
+        "a seam test cannot pin a contract whose registry is absent"
+    )
+    entry_ids = [
+        line.removeprefix("## ").split("·", 1)[0].strip()
+        for line in contract_registry.path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("## C")
+    ]
+    assert entry_ids == [f"C{n}" for n in range(1, 11)], (
+        f"the registry must define exactly the ten seams C1..C10, in order; "
+        f"found {entry_ids}"
+    )
+    if REGISTRY_ENTRY != TEMPLATE_PLACEHOLDER:
+        contract_registry.require_entry(REGISTRY_ENTRY)
 
 
 # ---------------------------------------------------------------------------

@@ -41,7 +41,12 @@ regenerates the contract.
 
 - `tests.support.contract.assert_seam_payload` does the name check and the
   value validation; `SeamRegistry.require_entry` validates the registry entry
-  (skips only while W0.10 has not created the registry file).
+  (the skip only exists while the registry file itself is absent — it landed in
+  W0.10).
+- `test_contract_registry.py` is the suite's default registry check: the
+  registry must exist, define exactly `C1`–`C10` in order, carry a complete
+  entry per seam, and its pending/exists marks must agree with the files on
+  disk.
 - Fixtures (`contract_registry`, `mock_http`, `frozen_clock`, `seeded_rng`)
   come from `tests/conftest.py`; helper modules live under `tests/support/`.
 - Consumer-side provider seams (P1/P7/P8/P9 connectors) use
