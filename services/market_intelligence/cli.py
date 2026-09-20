@@ -292,7 +292,8 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
     except QuotaExceededError:
         # The connector refused an attempt that would have crossed the run's budget
         # (per-run or the day's remainder): stop low-priority work, reschedule (§27).
-        repositories.add_run_cost(session, run_id, api_quota_units=active.quota_units_used)
+        repositories.add_run_cost(session, run_id, api_calls=active.request_count,
+                                  api_quota_units=active.quota_units_used)
         for state in due:
             reset_schedule(session, state.query_id, now=now, settings=settings,
                            reason="QUOTA_EXCEEDED")
@@ -303,7 +304,8 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
         )
         return {"job": trigger, "queries": len(due), "run_id": run_id, "quota_exhausted": True,
                 "status": CollectionRunStatus.PARTIAL.value}
-    repositories.add_run_cost(session, run_id, api_quota_units=active.quota_units_used)
+    repositories.add_run_cost(session, run_id, api_calls=active.request_count,
+                              api_quota_units=active.quota_units_used)
     status = (CollectionRunStatus.PARTIAL
               if any(summary.status is not CollectionRunStatus.SUCCEEDED for summary in summaries)
               else CollectionRunStatus.SUCCEEDED)
@@ -507,12 +509,18 @@ def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> 
     for arm in arms:
         stored_id, _ = repositories.upsert_arm(session, arm, brand_id=settings.default_brand_id)
         arm_ids[arm.fingerprint] = stored_id
+    # A scoring run at `now` reads the observations that existed at `now`: rows newer
+    # than the run's own instant are not inputs to its scores (a replay of an earlier
+    # instant must reproduce that instant's numbers, and §21's freshness refuses a
+    # future `as_of` outright).
+    observations_at_instant = [observation for observation in repositories.load_observations(session)
+                               if observation.observed_at <= now]
     by_observation_id = {
         repositories.deterministic_id(
             "observation", observation.entity_id, observation.source_id,
             observation.observed_at.isoformat(),
         ): observation
-        for observation in repositories.load_observations(session)
+        for observation in observations_at_instant
     }
     grouped: dict[str, list[Any]] = {}
     for arm in arms:

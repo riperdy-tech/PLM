@@ -27,7 +27,7 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, replace
@@ -73,6 +73,7 @@ __all__ = [
     "correlation_scope",
     "current_correlation_id",
     "ensure_correlation_id",
+    "get_or_create_counter",
     "metrics_payload",
     "new_correlation_id",
     "run_scope",
@@ -153,6 +154,32 @@ def configure_logging(*, level: str | int = "INFO", stream: TextIO | None = None
 
 METRICS_REGISTRY: Final[CollectorRegistry] = CollectorRegistry()
 """Dedicated registry: scraping the platform never mixes in process-global metrics."""
+
+_COUNTERS_BY_NAME: dict[str, Counter] = {}
+
+
+def get_or_create_counter(
+    name: str, documentation: str, labelnames: Sequence[str] = (),
+) -> Counter:
+    """Get registry counter `name`, creating and registering it on first use.
+
+    Service packages are importable under two module identities — their
+    ``services.<package>`` path and the editable top-level ``<package>`` mapping —
+    so a module-level ``Counter(...)`` runs twice against the shared
+    :data:`METRICS_REGISTRY`, and the second call raises ``DuplicateTimeseries``:
+    an in-process CLI invocation (the Typer app) crashes where a fresh process
+    would not. Both calls refer to the same intended instrument, so the already
+    registered collector is returned; a name is still owned by one collector, and
+    a same-named request from *different* instrumentation remains a collision the
+    registry refuses.
+    """
+    existing = _COUNTERS_BY_NAME.get(name)
+    if existing is not None:
+        return existing
+    counter = Counter(name, documentation, labelnames, registry=METRICS_REGISTRY)
+    _COUNTERS_BY_NAME[name] = counter
+    return counter
+
 
 METRICS_PATH: Final[str] = "/metrics"
 """Path :class:`MetricsApp` serves the Prometheus text format on."""

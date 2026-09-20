@@ -48,6 +48,7 @@ from tests.fixtures.market.scenario import (
     MID_ARM_ID,
     PRIMARY_ARM_ID,
     SECONDARY_ARM_ID,
+    MarketScenario,
     build_scenario,
 )
 
@@ -153,6 +154,24 @@ def _read_back_scores(engine: sa.Engine, entity_ids: Mapping[str, list[str]],
     return score_all_arms(features, as_of=scenario.now, settings=settings)
 
 
+def _persist_arms_and_scores(engine: sa.Engine, scores: Mapping[str, OpportunityScore],
+                             scenario: MarketScenario, settings: MarketSettings) -> None:
+    """The write leg a replay exercises twice: arms, then scores, at the fixed instant."""
+    with scoped_session("market", factory=sessionmaker(bind=engine)) as session:
+        for arm in ARMS:
+            repositories.upsert_arm(
+                session,
+                ArmDraft(arm_id=arm, fingerprint=f"scenario-{arm}",
+                         profile=TaxonomyProfile(genre=arm.split("_")[0]),
+                         source_observation_ids=scores[arm].evidence.observation_ids,
+                         support_count=scores[arm].evidence.observation_count),
+                brand_id=settings.default_brand_id,
+            )
+        session.flush()
+        persist_scores(session, scores, computed_at=scenario.now)
+        session.commit()
+
+
 def test_the_stored_scenario_replays_into_identical_scores_on_postgres(
         engine: sa.Engine) -> None:
     """§30/AC-08 on the real store: same stored rows + same versions ⇒ same scores."""
@@ -207,22 +226,32 @@ def test_a_persisted_score_reads_back_with_the_value_it_was_computed_with(
     scenario = build_scenario()
     entity_ids = _store_scenario(engine, settings)
     scores = _read_back_scores(engine, entity_ids, settings)
+    _persist_arms_and_scores(engine, scores, scenario, settings)
     with scoped_session("market", factory=sessionmaker(bind=engine)) as session:
-        for arm in ARMS:
-            repositories.upsert_arm(
-                session,
-                ArmDraft(arm_id=arm, fingerprint=f"scenario-{arm}",
-                         profile=TaxonomyProfile(genre=arm.split("_")[0]),
-                         source_observation_ids=scores[arm].evidence.observation_ids,
-                         support_count=scores[arm].evidence.observation_count),
-                brand_id=settings.default_brand_id,
-            )
-        session.flush()
-        persist_scores(session, scores, computed_at=scenario.now)
-        session.commit()
         for arm in ARMS:
             rows = repositories.scores_for_arm(session, arm)
             assert rows, arm
             assert float(rows[0]["market_opportunity_score"]) == \
                 scores[arm].market_opportunity_score, arm
             assert float(rows[0]["confidence"]) == scores[arm].confidence, arm
+
+
+def test_a_replayed_scenario_is_idempotent_against_one_database(engine: sa.Engine) -> None:
+    """The same scenario, twice, against one database.
+
+    The suite replays its fixed instants — the write leg previously raised
+    `UniqueViolation` on `market_arms.arm_id` (the deterministic ids resolve a replay
+    to the same arm), so a second run of the same corpus could not run at all. It now
+    succeeds and leaves exactly one row per arm; scores follow the sibling test's
+    read-back rule.
+    """
+    settings = load_market_settings()
+    scenario = build_scenario()
+    entity_ids = _store_scenario(engine, settings)
+    scores = _read_back_scores(engine, entity_ids, settings)
+    _persist_arms_and_scores(engine, scores, scenario, settings)
+    _persist_arms_and_scores(engine, scores, scenario, settings)  # the replay
+    with scoped_session("market", factory=sessionmaker(bind=engine)) as session:
+        stored = {row["arm_id"] for row in repositories.load_arms(session)
+                  if row["arm_id"] in ARMS}
+    assert stored == set(ARMS)  # one row per arm: the replay neither raised nor doubled

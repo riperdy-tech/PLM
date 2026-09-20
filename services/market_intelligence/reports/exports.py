@@ -13,7 +13,13 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from plm_platform.storage import StoredObject, put_content
+from plm_platform.storage import (
+    ObjectAlreadyExistsError,
+    StoredObject,
+    build_key,
+    put_content,
+    sha256_digest,
+)
 
 from .market_snapshot import MarketSnapshot
 
@@ -61,8 +67,16 @@ def _put(
     settings: Any, client: Any,
 ) -> StoredObject:
     put = put_content if put_object is None else put_object
-    return put("market/", f"reports/{snapshot.as_of.date().isoformat()}", body,
-               content_type=content_type, settings=settings, client=client)
+    resource_path = f"reports/{snapshot.as_of.date().isoformat()}"
+    try:
+        return put("market/", resource_path, body, content_type=content_type,
+                   settings=settings, client=client)
+    except ObjectAlreadyExistsError:
+        # Content addressing means the same key *is* the same bytes: re-storing an
+        # identical report is a replay, not a conflict (same rule as the raw store).
+        digest = sha256_digest(body)
+        return StoredObject(key=build_key("market/", resource_path, digest), digest=digest,
+                            size=len(body))
 
 
 def store_report(snapshot: MarketSnapshot, *,

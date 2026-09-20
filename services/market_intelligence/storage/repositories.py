@@ -292,7 +292,15 @@ def insert_normalized_observation(
     session: Session, draft: NormalizedObservationDraft | None, *,
     normalization_version: str = NORMALIZATION_VERSION,
 ) -> tuple[str, bool]:
-    """One row per (entity, source, observed_at); a repeat is idempotent (§7.6/AC-03)."""
+    """One row per (entity, source, observed_at); a repeat is idempotent (§7.6/AC-03).
+
+    A repeat is not necessarily a *copy*: discovery writes the sighting with text
+    only, and hydration's metric-bearing draft arrives for the same
+    (entity, source, instant). The second write must not vanish — it fills what the
+    first still had unknown (`_enrich_existing_observation`), never overwriting a
+    known value. The merge is a function of the payload *set*, not its order: each
+    payload only ever fills what is missing, so replays converge on one state.
+    """
     if draft is None:
         raise ValueError("cannot insert a draft that was quarantined")
     values = {
@@ -320,16 +328,51 @@ def insert_normalized_observation(
             session.execute(sa.insert(observations).values(**values))
     except IntegrityError:
         existing = session.execute(
-            sa.select(observations.c.id).where(
+            sa.select(observations).where(
                 observations.c.entity_id == draft.entity_id,
                 observations.c.source_id == draft.source_id,
                 observations.c.observed_at == draft.observed_at,
             )
-        ).scalar_one_or_none()
+        ).mappings().one_or_none()
         if existing is None:
             raise
-        return str(existing), False
+        _enrich_existing_observation(session, row=existing, draft=draft)
+        return str(existing["id"]), False
     return str(values["id"]), True
+
+
+def _enrich_existing_observation(
+    session: Session, *, row: RowMapping, draft: NormalizedObservationDraft,
+) -> None:
+    """Fill a stored sighting's still-unknown fields from a richer same-instant draft.
+
+    Only missing values are filled: a known metric is never overwritten with an
+    unknown, and an unknown is never fabricated. When something is filled, the
+    row's `raw_observation_id` moves to the payload those values came from, so the
+    row's evidence pointer names the payload its state is drawn from. A draft that
+    adds nothing (the plain replay) writes nothing and stays a true no-op.
+    """
+    updates: dict[str, Any] = {}
+    not_ready = set(row["not_ready_metrics"] or ())
+    for name in _OBSERVATION_METRIC_FIELDS:
+        metric = getattr(draft, name)
+        if metric.is_known and row[name] is None:
+            updates[name] = float(metric.unwrap())
+            not_ready.discard(name)
+        elif metric.is_not_ready and row[name] is None and name not in not_ready:
+            not_ready.add(name)
+    for name in ("published_at", "text_title", "text_description", "country_signal",
+                 "language_signal"):
+        value = getattr(draft, name)
+        if value is not None and row[name] is None:
+            updates[name] = value
+    if not updates:
+        return
+    updates["not_ready_metrics"] = sorted(not_ready) or None
+    updates["raw_observation_id"] = draft.raw_observation_id
+    session.execute(
+        sa.update(observations).where(observations.c.id == row["id"]).values(**updates)
+    )
 
 
 def load_observations(
@@ -645,16 +688,39 @@ def latest_classifications_for(
 
 
 def upsert_arm(session: Session, draft: ArmDraft, *, brand_id: str) -> tuple[str, bool]:
-    """One row per fingerprint; an existing arm keeps its identity (Review Focus 4).
+    """One row per identity; an existing arm keeps its arm_id (Review Focus 4).
+
+    Arm ids are deterministic (R15), so re-running the same pipeline against one
+    database must be idempotent — the same rule observations, quarantine rows and
+    scores already follow — instead of raising `UniqueViolation` on the slug. Two
+    store-level keys exist, and both are honoured:
+
+    * a row already carries this fingerprint: it keeps its id and slug, and its
+      evidence-bearing fields are refreshed (a later run sees at least the same
+      corpus; support and source observations may grow);
+    * the slug is already taken by a *different* fingerprint: the incumbent row is
+      returned untouched. The slug is the schema's unique key, and rewriting a row's
+      fingerprint would silently merge two identities (§14.3), so first writer wins.
 
     The row id is derived from the fingerprint (uuid5), never minted: replaying the
     same classifications into a fresh schema reproduces the same arm row.
     """
-    existing = session.execute(
+    by_fingerprint = session.execute(
         sa.select(arms.c.arm_id).where(arms.c.fingerprint == draft.fingerprint)
     ).scalar_one_or_none()
-    if existing is not None:
-        return str(existing), False
+    if by_fingerprint is not None:
+        session.execute(
+            sa.update(arms).where(arms.c.fingerprint == draft.fingerprint).values(
+                support_count=draft.support_count,
+                source_observation_ids=list(draft.source_observation_ids),
+            )
+        )
+        return str(by_fingerprint), False
+    by_arm_id = session.execute(
+        sa.select(arms.c.arm_id).where(arms.c.arm_id == draft.arm_id)
+    ).scalar_one_or_none()
+    if by_arm_id is not None:
+        return str(by_arm_id), False
     session.execute(sa.insert(arms).values(
         id=deterministic_id("arm", draft.fingerprint), brand_id=brand_id, arm_id=draft.arm_id,
         fingerprint=draft.fingerprint, status=ArmStatus.CANDIDATE.value,

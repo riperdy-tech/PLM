@@ -1,0 +1,101 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "etag-search-multi-1",
+  "nextPageToken": "CAoQAA",
+  "pageInfo": {
+    "totalResults": 913,
+    "resultsPerPage": 6
+  },
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-1",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000001"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-01T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "2AM Seoul — Rainy Night R&B Mix",
+        "description": "Late-night Korean city vibes",
+        "channelTitle": "NightLoop"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-2",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000002"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-15T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "lofi study beats",
+        "description": "focus music",
+        "channelTitle": "StudyLoops"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-3",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000004"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-18T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "lofi study session",
+        "description": "focus music",
+        "channelTitle": "StudyLoops"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-4",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000005"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-20T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "lofi study focus",
+        "description": "focus music",
+        "channelTitle": "StudyLoops"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-5",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000006"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-05T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "3AM Seoul — Rainy Night R&B Mix",
+        "description": "Late-night Korean city vibes",
+        "channelTitle": "NightLoop"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-multi-item-6",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid00000007"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-08T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "4AM Seoul — Rainy Night R&B Mix",
+        "description": "Late-night Korean city vibes",
+        "channelTitle": "NightLoop"
+      }
+    }
+  ]
+}

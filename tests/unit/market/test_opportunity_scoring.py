@@ -244,6 +244,45 @@ def test_arm_identity_survives_a_recompute(market_session) -> None:
     assert (again, created) == (first, False)  # Review Focus 4: identity is minted once
 
 
+def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_session) -> None:
+    """Arm ids are deterministic, so a second run against one database meets the same
+    slug and must be idempotent — the same rule observations, quarantine rows and
+    scores follow — not raise `UniqueViolation` on `market_arms.arm_id`. A replay of
+    the same fingerprint keeps the row and refreshes its evidence fields; a draft
+    whose slug is taken by a *different* fingerprint keeps the incumbent untouched,
+    because rewriting a row's fingerprint would silently merge two identities (§14.3)."""
+    profile = TaxonomyProfile(genre="lofi", use_case="study_focus")
+    first_id, first_created = repositories.upsert_arm(
+        market_session,
+        ArmDraft(arm_id="lofi_study_focus", fingerprint="f1", profile=profile,
+                 support_count=2, source_observation_ids=("o1",)),
+        brand_id="neon_seoul",
+    )
+    assert first_created is True
+    replay_id, replay_created = repositories.upsert_arm(
+        market_session,
+        ArmDraft(arm_id="lofi_study_focus", fingerprint="f1", profile=profile,
+                 support_count=5, source_observation_ids=("o1", "o2")),
+        brand_id="neon_seoul",
+    )
+    assert (replay_id, replay_created) == (first_id, False)
+    rows = repositories.load_arms(market_session)
+    assert len(rows) == 1
+    assert rows[0]["support_count"] == 5  # evidence refreshed, identity kept
+
+    incumbent_id, incumbent_created = repositories.upsert_arm(
+        market_session,
+        ArmDraft(arm_id="lofi_study_focus", fingerprint="f2", profile=profile,
+                 support_count=1, source_observation_ids=()),
+        brand_id="neon_seoul",
+    )
+    assert (incumbent_id, incumbent_created) == (first_id, False)
+    rows = repositories.load_arms(market_session)
+    assert len(rows) == 1
+    assert rows[0]["fingerprint"] == "f1"  # the incumbent identity wins the slug
+    assert rows[0]["support_count"] == 5  # and is not rewritten by the other draft
+
+
 # --------------------------------------------------------------------------------------
 # Dispatcher-mandated coverage: insufficient data, determinism, properties, §35 fixture.
 # --------------------------------------------------------------------------------------
