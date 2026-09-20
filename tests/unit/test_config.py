@@ -18,6 +18,7 @@ from plm_platform.config import (
     DEFAULTS,
     PROVIDER_SECRET_VARS,
     REQUIRED_VARS,
+    SERVICE_TOKEN_VAR,
     Env,
     LogLevel,
     Secret,
@@ -25,6 +26,9 @@ from plm_platform.config import (
     SettingsError,
     load_settings,
 )
+
+INTERNAL_SECRET_VARS = (SERVICE_TOKEN_VAR,)
+"""Operator-configured secrets that are not provider credentials (R15)."""
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
@@ -225,11 +229,27 @@ class TestMockMode:
         assert settings.spotify_client_id is None
 
 
+class TestServiceToken:
+    def test_the_service_token_is_optional_and_redacted(self) -> None:
+        settings = load(full_env(PLM_SERVICE_TOKEN="shared-secret-sentinel"))
+        assert settings.service_token is not None
+        assert settings.service_token.get_secret_value() == "shared-secret-sentinel"
+        assert "shared-secret-sentinel" not in repr(settings)
+
+    def test_absent_service_token_is_none_and_does_not_break_mock_mode(self) -> None:
+        settings = load(full_env())
+        assert settings.service_token is None
+        assert settings.is_mock_mode()
+
+    def test_the_token_variable_name_is_not_a_provider_credential(self) -> None:
+        assert SERVICE_TOKEN_VAR not in PROVIDER_SECRET_VARS
+
+
 class TestEnvExampleDrift:
     def test_loader_variable_names_match_the_example_exactly(self) -> None:
         active, commented = env_example_names()
         assert active == set(REQUIRED_VARS)
-        assert commented == set(PROVIDER_SECRET_VARS)
+        assert commented == set(PROVIDER_SECRET_VARS) | set(INTERNAL_SECRET_VARS)
         # ENV and LOG_LEVEL are operator knobs with code defaults, not deployment
         # values; .env.example must not grow or lose entries silently.
         assert set(DEFAULTS) & (active | commented) == set()

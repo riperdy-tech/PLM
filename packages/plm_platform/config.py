@@ -16,6 +16,9 @@ through to the next layer.
   ``DISTRIBUTOR_API_KEY``, ``SPOTIFY_*`` (:data:`PROVIDER_SECRET_VARS`) — are optional
   and default to unset so mock-first development runs without them;
   :meth:`Settings.is_mock_mode` reports whether *all* of them are absent.
+* Internal service token — ``PLM_SERVICE_TOKEN`` (:data:`SERVICE_TOKEN_VAR`, R15) — is
+  optional too, but it is not a provider credential: an unconfigured token makes the
+  phase APIs answer ``503 blocked_pending_credentials`` instead of serving openly.
 
 Secret values are :class:`~plm_platform.secrets.Secret` wrappers: ``repr``, ``str``,
 formatting and logging show ``**********`` and the real value is reachable only through
@@ -40,6 +43,8 @@ __all__ = [
     "DEFAULTS",
     "PROVIDER_SECRET_VARS",
     "REQUIRED_VARS",
+    "SERVICE_TOKEN_HEADER",
+    "SERVICE_TOKEN_VAR",
     "Env",
     "LogLevel",
     "Secret",
@@ -69,6 +74,12 @@ PROVIDER_SECRET_VARS: Final[tuple[str, ...]] = (
     "SPOTIFY_CLIENT_SECRET",
 )
 """External provider credentials; optional, unset by default, mock-first."""
+
+SERVICE_TOKEN_VAR: Final[str] = "PLM_SERVICE_TOKEN"
+"""Shared service token for internal phase APIs (R15); optional, never a provider key."""
+
+SERVICE_TOKEN_HEADER: Final[str] = "X-PLM-Service-Token"
+"""Header carrying the service token; the name is defined once, here."""
 
 DEFAULTS: Final[Mapping[str, str]] = MappingProxyType({"ENV": "local", "LOG_LEVEL": "INFO"})
 """Documented defaults for the operator knobs (there are no defaults for secrets)."""
@@ -112,6 +123,7 @@ class Settings:
     minio_root_password: Secret
     minio_bucket: str
     temporal_host: str
+    service_token: Secret | None
     youtube_api_key: Secret | None
     youtube_oauth_client_id: Secret | None
     youtube_oauth_client_secret: Secret | None
@@ -153,6 +165,7 @@ def load_settings(
         minio_root_password=_resolve_secret("MINIO_ROOT_PASSWORD", layers),
         minio_bucket=_resolve("MINIO_BUCKET", layers),
         temporal_host=_resolve("TEMPORAL_HOST", layers),
+        service_token=_resolve_optional_secret(SERVICE_TOKEN_VAR, layers),
         youtube_api_key=_resolve_optional_secret("YOUTUBE_API_KEY", layers),
         youtube_oauth_client_id=_resolve_optional_secret("YOUTUBE_OAUTH_CLIENT_ID", layers),
         youtube_oauth_client_secret=_resolve_optional_secret(
