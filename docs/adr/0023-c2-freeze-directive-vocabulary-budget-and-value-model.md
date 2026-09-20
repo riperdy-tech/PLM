@@ -61,6 +61,24 @@ All five were put to the human partner and answered:
    beside confidence (ADR-0022 / the P1 basis_weight ruling); under-covered arms are returned
    flagged rather than silently mixed into the ranking. The human partner holds override.
 
+## Correction - review finding, 2026-09-20
+
+**Decision 5 says the ranking threshold uses "the `basis_weight` P1 persists beside confidence".
+That is unsatisfiable and the phrase is withdrawn.** `basis_weight` is persisted on P1's score
+rows, but it does **not** cross the C1 wire: ADR-0022 froze the C1 payload as
+`{items, next_cursor, as_of, score_version}`, and P2's C1 consumer test pins that absence. P2
+therefore cannot read a weighted coverage figure from P1.
+
+The **intent** of decision 5 stands unchanged: an arm is ranked only when it has at least
+**2 measured evidence components**. It is operationalised on data P2 can actually see - the
+count of non-null entries in P1's `components` object on the returned payload - with
+under-covered arms persisted and returned flagged as `EVIDENCE_INSUFFICIENT`, never silently
+ranked.
+
+If the *weighted* share itself is wanted on the wire, that is a C1 registry amendment (a wire
+change against a frozen seam), which is out of PHASE-P2's remit and was not requested. Recorded
+here so the corpus carries no instruction that cannot be carried out.
+
 ## Evidence
 
 - Registry C2's producer/consumer field lists; ADR-0004 (`R4`) for the ten mechanical mappings.

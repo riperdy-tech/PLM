@@ -1305,26 +1305,26 @@ stores to serve the wire) must never be added here — a wire change is a regist
 amendment first (R2)."""
 
 
-def to_wire(self: ProductionDirective) -> dict[str, Any]:
-    """The JSON-safe payload that crosses C2; keys are exactly DIRECTIVE_WIRE_FIELDS."""
-    payload = json.loads(self.model_dump_json())
-    assert tuple(payload) == DIRECTIVE_WIRE_FIELDS  # serialisation order is part of the pin
-    return payload
-
-
-ProductionDirective.to_wire = to_wire  # type: ignore[attr-defined]
+Declare `to_wire` **inside the class body** (below), never by monkey-patching: the repo forbids a
+blanket `type: ignore`, and mypy strict requires the method on the class. Raise on drift rather
+than using `assert` - asserts are stripped under `python -O`, so the pin would vanish in an
+optimised run.
 ```
-
-To keep mypy strict happy, declare the method inside the class body instead of monkey-patching:
 
 ```python
 # inside class ProductionDirective, after the field declarations:
     def to_wire(self) -> dict[str, Any]:
         """The JSON-safe payload that crosses C2; keys are exactly DIRECTIVE_WIRE_FIELDS."""
-        payload = json.loads(self.model_dump_json())
-        assert tuple(payload) == DIRECTIVE_WIRE_FIELDS  # serialisation order is part of the pin
+        payload: dict[str, Any] = json.loads(self.model_dump_json())
+        if tuple(payload) != DIRECTIVE_WIRE_FIELDS:
+            raise DirectiveWireError(
+                f"C2 wire drift: produced {tuple(payload)}; registry freezes {DIRECTIVE_WIRE_FIELDS}"
+            )
         return payload
 ```
+
+Add `class DirectiveWireError(RuntimeError): ...` to `domain/directive.py` and list it in
+`__all__`.
 
 - [ ] **Step 4: Run it and watch it pass**
 
@@ -8014,7 +8014,7 @@ ruling touches ADR-0023's frozen seams, the owning task records it in ADR-0024 i
     reward versions; each appears on decisions so nothing is anonymous.
 17. `ar_allocation_cycle.{activation_state, random_seed, warning_codes_json}` and the wire copies
     on `ar_production_directive` — persistence-only columns so the serving rule and replay are
-    enforceable; C2's wire stays the frozen eighteen.
+    enforceable; C2's wire stays the frozen seventeen (the registry's field list).
 18. `tests/contract/test_c1_market_to_ar_consumer.py` — a second C1 file rather than editing P1's;
     `tests/contract/` is the only place two services may be imported together (P0 §4), and P1's
     producer half stays untouched.
