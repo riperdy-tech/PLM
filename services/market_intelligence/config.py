@@ -35,6 +35,7 @@ class MarketSettings:
     default_brand_id: str = "neon_seoul"
     cadence: CadenceHours = field(default_factory=CadenceHours)
     quota_units_per_run: int = 1000
+    quota_units_per_day: int = 10_000
     max_requests_per_run: int = 200
     requests_per_second: float = 5.0
     max_pages_per_search: int = 2

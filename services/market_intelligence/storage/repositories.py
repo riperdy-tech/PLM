@@ -11,7 +11,7 @@ version string).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -67,7 +67,8 @@ __all__ = [
     "insert_seed_evidence", "latest_classifications_for", "latest_scores", "load_arms",
     "load_classification", "load_entity", "load_observations", "load_queries", "load_run",
     "load_seed_evidence", "observations_for_entities", "quarantine_record", "resolve_entity",
-    "scores_for_arm", "start_collection_run", "upsert_arm", "upsert_query", "upsert_source",
+    "scores_for_arm", "start_collection_run", "sum_run_quota_units", "update_query_schedule",
+    "upsert_arm", "upsert_query", "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -177,19 +178,34 @@ def add_run_cost(
     run_id: str,
     *,
     api_calls: int = 0,
+    api_quota_units: int = 0,
     llm_tokens: int = 0,
     llm_cost_estimate: float = 0.0,
     storage_bytes: int = 0,
 ) -> None:
-    """§42: costs attach to `collection_run_id` so P9 can price market research."""
-    if min(api_calls, llm_tokens, storage_bytes) < 0 or llm_cost_estimate < 0:
+    """§42: costs attach to `collection_run_id` so P9 can price market research.
+
+    `api_quota_units` is the provider's *billing* unit (a `search.list` costs 100,
+    a list call 1) as charged by the run's `QuotaBudget`; it is what the scheduler's
+    per-day ceiling reads. `api_calls` stays the count of HTTP calls.
+    """
+    if min(api_calls, api_quota_units, llm_tokens, storage_bytes) < 0 or llm_cost_estimate < 0:
         raise ValueError("costs cannot be negative")
     session.execute(sa.update(collection_runs).where(collection_runs.c.id == run_id).values(
         cost_api_calls=collection_runs.c.cost_api_calls + api_calls,
+        cost_api_quota_units=collection_runs.c.cost_api_quota_units + api_quota_units,
         cost_llm_tokens=collection_runs.c.cost_llm_tokens + llm_tokens,
         cost_llm_cost_estimate=collection_runs.c.cost_llm_cost_estimate + llm_cost_estimate,
         cost_storage_bytes=collection_runs.c.cost_storage_bytes + storage_bytes,
     ))
+
+
+def sum_run_quota_units(session: Session, *, since: datetime, until: datetime) -> int:
+    """Quota units charged by every run that started in `[since, until)` — §27's ledger."""
+    statement = sa.select(
+        sa.func.coalesce(sa.func.sum(collection_runs.c.cost_api_quota_units), 0)
+    ).where(collection_runs.c.started_at >= since, collection_runs.c.started_at < until)
+    return int(session.execute(statement).scalar_one())
 
 
 def load_run(session: Session, run_id: str) -> Mapping[str, Any] | None:
@@ -475,7 +491,34 @@ def load_queries(
         statement = statement.where(queries.c.source_id == source_id)
     if active_only:
         statement = statement.where(queries.c.active.is_(True))
-    return [dict(row) for row in session.execute(statement).mappings()]
+    return [_with_aware_schedule(dict(row)) for row in session.execute(statement).mappings()]
+
+
+def _with_aware_schedule(row: dict[str, Any]) -> dict[str, Any]:
+    """SQLite drops `tzinfo` on read-back; the schedule instants were written aware-UTC.
+
+    The planner is pure and compares these against an aware `now`, so the storage
+    boundary re-attaches UTC — the stored instant itself is unchanged, and Postgres
+    (which returns aware values) passes through untouched.
+    """
+    for name in ("last_run_at", "next_run_at"):
+        value = row.get(name)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            row[name] = value.replace(tzinfo=UTC)
+    return row
+
+
+def update_query_schedule(
+    session: Session, *, query_id: str, now: datetime, next_run_at: datetime | None,
+    last_run_at: datetime | None,
+) -> None:
+    """Move one query's schedule cursor; `None` leaves that column untouched."""
+    values: dict[str, Any] = {"updated_at": now}
+    if next_run_at is not None:
+        values["next_run_at"] = next_run_at
+    if last_run_at is not None:
+        values["last_run_at"] = last_run_at
+    session.execute(sa.update(queries).where(queries.c.id == query_id).values(**values))
 
 
 def insert_seed_evidence(

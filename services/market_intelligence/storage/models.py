@@ -93,6 +93,7 @@ collection_runs = sa.Table(
     sa.Column("error_summary", _json, nullable=True),
     sa.Column("software_version", sa.Text, nullable=False),
     sa.Column("cost_api_calls", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("cost_api_quota_units", sa.Integer, nullable=False, server_default="0"),
     sa.Column("cost_llm_tokens", sa.Integer, nullable=False, server_default="0"),
     sa.Column("cost_llm_cost_estimate", sa.Float, nullable=False, server_default="0"),
     sa.Column("cost_storage_bytes", sa.BigInteger, nullable=False, server_default="0"),
