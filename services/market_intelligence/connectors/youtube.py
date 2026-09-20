@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from random import Random
@@ -24,9 +24,9 @@ from ..domain.enums import ConnectorErrorClass, ProviderName, ProviderObjectType
 from .base import ConnectorError, FetchedObject, FetchResult, hash_request_context
 
 __all__ = [
-    "BASE_URL", "LIST_QUOTA_UNITS", "SEARCH_QUOTA_UNITS", "SearchHit",
-    "YouTubeCredentials", "YouTubeDataAPIConnector", "parse_iso8601_duration",
-    "parse_search_hits",
+    "BASE_URL", "LIST_QUOTA_UNITS", "SEARCH_QUOTA_UNITS", "ChannelStats", "SearchHit",
+    "VideoStats", "YouTubeCredentials", "YouTubeDataAPIConnector", "parse_channel_stats",
+    "parse_iso8601_duration", "parse_search_hits", "parse_video_stats",
 ]
 
 BASE_URL: Final[str] = "https://www.googleapis.com/youtube/v3"
@@ -62,6 +62,31 @@ class SearchHit:
     description: str
     published_at: datetime | None
     channel_title: str
+
+
+@dataclass(frozen=True, slots=True)
+class VideoStats:
+    video_id: str
+    channel_id: str | None
+    title: str | None
+    description: str | None
+    published_at: datetime | None
+    view_count: int | None
+    like_count: int | None
+    comment_count: int | None
+    duration_seconds: float | None
+    language: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelStats:
+    channel_id: str
+    title: str | None
+    subscriber_count: int | None
+    video_count: int | None
+    view_count: int | None
+    country: str | None
+    language: str | None
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
@@ -179,6 +204,63 @@ class YouTubeDataAPIConnector:
             if not token:
                 return
 
+    def fetch_videos(self, video_ids: Sequence[str]) -> FetchResult:
+        """videos.list, batched at the documented 50-id limit; one FetchResult per batch."""
+        payload = self._list("/videos", "snippet,statistics,contentDetails", "id",
+                             list(video_ids), operation="videos.list")
+        observed_at = self._observed_at()
+        objects = tuple(
+            FetchedObject(
+                provider_object_type=ProviderObjectType.VIDEO,
+                provider_object_id=str(item.get("id")),
+                observed_at=observed_at,
+                payload=item,
+            )
+            for item in payload.get("items", [])
+            if item.get("id")
+        )
+        return FetchResult(
+            objects=objects, quota_units=LIST_QUOTA_UNITS,
+            request_context_hash=hash_request_context(
+                self.provider_name.value, "videos.list", {"id": ",".join(video_ids)}
+            ),
+        )
+
+    def fetch_channels(self, channel_ids: Sequence[str]) -> FetchResult:
+        payload = self._list("/channels", "snippet,statistics", "id",
+                             list(channel_ids), operation="channels.list")
+        observed_at = self._observed_at()
+        objects = tuple(
+            FetchedObject(
+                provider_object_type=ProviderObjectType.CHANNEL,
+                provider_object_id=str(item.get("id")),
+                observed_at=observed_at,
+                payload=item,
+            )
+            for item in payload.get("items", [])
+            if item.get("id")
+        )
+        return FetchResult(
+            objects=objects, quota_units=LIST_QUOTA_UNITS,
+            request_context_hash=hash_request_context(
+                self.provider_name.value, "channels.list", {"id": ",".join(channel_ids)}
+            ),
+        )
+
+    def _list(
+        self, path: str, part: str, id_param: str, ids: Sequence[str], *, operation: str
+    ) -> Mapping[str, Any]:
+        if not ids:
+            raise ConnectorError(ConnectorErrorClass.INVALID_REQUEST,
+                                 f"{operation} called without ids")
+        if len(ids) > _MAX_IDS_PER_LIST_CALL:
+            raise ConnectorError(
+                ConnectorErrorClass.INVALID_REQUEST,
+                f"{operation} accepts at most {_MAX_IDS_PER_LIST_CALL} ids per call",
+            )
+        return self._get(path, {"part": part, id_param: ",".join(ids)},
+                         quota_units=LIST_QUOTA_UNITS, operation=operation)
+
     # -- internals --------------------------------------------------------------
 
     def _get(
@@ -235,8 +317,9 @@ def _error_for(response: httpx.Response, operation: str) -> ConnectorError:
     reason = ""
     try:
         body = response.json()
-        errors = body.get("error", {}).get("errors", [])
-        reason = errors[0].get("reason", "") if errors else ""
+        error = body.get("error") if isinstance(body, Mapping) else None
+        errors = error.get("errors", []) if isinstance(error, Mapping) else []
+        reason = errors[0].get("reason", "") if errors and isinstance(errors[0], Mapping) else ""
     except ValueError:
         pass
         # a non-JSON error body is normal (gateway pages); the status still decides
@@ -277,3 +360,41 @@ def parse_search_hits(fetch: FetchResult) -> tuple[SearchHit, ...]:
             channel_title=snippet.get("channelTitle", ""),
         ))
     return tuple(hits)
+
+
+def parse_video_stats(fetch: FetchResult) -> tuple[VideoStats, ...]:
+    stats: list[VideoStats] = []
+    for obj in fetch.objects:
+        snippet = obj.payload.get("snippet") or {}
+        statistics = obj.payload.get("statistics") or {}
+        details = obj.payload.get("contentDetails") or {}
+        stats.append(VideoStats(
+            video_id=obj.provider_object_id,
+            channel_id=snippet.get("channelId"),
+            title=snippet.get("title"),
+            description=snippet.get("description"),
+            published_at=_parse_timestamp(snippet.get("publishedAt")),
+            view_count=_int_or_none(statistics.get("viewCount")),
+            like_count=_int_or_none(statistics.get("likeCount")),
+            comment_count=_int_or_none(statistics.get("commentCount")),
+            duration_seconds=parse_iso8601_duration(details.get("duration")),
+            language=snippet.get("defaultLanguage"),
+        ))
+    return tuple(stats)
+
+
+def parse_channel_stats(fetch: FetchResult) -> tuple[ChannelStats, ...]:
+    stats: list[ChannelStats] = []
+    for obj in fetch.objects:
+        snippet = obj.payload.get("snippet") or {}
+        statistics = obj.payload.get("statistics") or {}
+        stats.append(ChannelStats(
+            channel_id=obj.provider_object_id,
+            title=snippet.get("title"),
+            subscriber_count=_int_or_none(statistics.get("subscriberCount")),
+            video_count=_int_or_none(statistics.get("videoCount")),
+            view_count=_int_or_none(statistics.get("viewCount")),
+            country=snippet.get("country"),
+            language=snippet.get("defaultLanguage"),
+        ))
+    return tuple(stats)
