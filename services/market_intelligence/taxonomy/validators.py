@@ -46,6 +46,10 @@ class ClassificationDraft:
     confidence: float
     unmapped_terms: tuple[str, ...] = ()
     schema_version: str = CLASSIFICATION_SCHEMA_VERSION
+    # The content cache key the classifier keyed this draft on (P1.9's arms need it
+    # to carry the observation ids their members came from); empty when the caller
+    # validated raw model output and has no input text.
+    content_fingerprint: str = ""
 
 
 def validate_classification(raw: Mapping[str, Any]) -> ClassificationDraft:

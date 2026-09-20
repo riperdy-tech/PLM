@@ -9,7 +9,7 @@ reads the persisted classification (§30).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from sqlalchemy.orm import Session
@@ -99,7 +99,7 @@ def classify_observation(
     )
     if cached is not None:
         return str(cached["id"]), False
-    draft = classifier.classify(text)
+    draft = replace(classifier.classify(text), content_fingerprint=fingerprint)
     classification_id = insert_classification(
         session, observation_id=observation_id, entity_id=entity_id,
         content_fingerprint=fingerprint, taxonomy_version=taxonomy_version,

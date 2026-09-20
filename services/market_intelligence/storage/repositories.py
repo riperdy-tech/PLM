@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..domain.entities import CollectionRunCounters, NormalizedObservation, QuarantinedRecord
 from ..domain.enums import (
+    ArmStatus,
     CollectionRunStatus,
     ConnectorType,
     EntityStatus,
@@ -29,6 +30,7 @@ from ..domain.enums import (
     ProviderName,
     ProviderObjectType,
     QueryType,
+    TaxonomyDimension,
 )
 from ..domain.value_objects import tri_from_optional
 from ..normalization.canonical import text_fingerprint
@@ -38,6 +40,7 @@ from ..normalization.youtube import (
     NormalizedObservationDraft,
 )
 from .models import (
+    arms,
     classifications,
     collection_runs,
     entities,
@@ -49,13 +52,16 @@ from .models import (
     sources,
 )
 
+if TYPE_CHECKING:  # `taxonomy.arms` imports domain/validators only — no runtime cycle
+    from ..taxonomy.arms import ArmDraft
+
 __all__ = [
     "add_run_cost", "count_quarantined", "deterministic_id", "finish_collection_run",
     "insert_classification", "insert_normalized_observation", "insert_seed_evidence",
-    "latest_classifications_for", "load_classification", "load_entity",
+    "latest_classifications_for", "load_arms", "load_classification", "load_entity",
     "load_observations", "load_queries", "load_run", "load_seed_evidence",
     "observations_for_entities", "quarantine_record", "resolve_entity",
-    "start_collection_run", "upsert_query", "upsert_source",
+    "start_collection_run", "upsert_arm", "upsert_query", "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -547,4 +553,33 @@ def latest_classifications_for(
         .order_by(classifications.c.created_at.desc())
         .limit(limit)
     )
+    return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def upsert_arm(session: Session, draft: ArmDraft, *, brand_id: str) -> tuple[str, bool]:
+    """One row per fingerprint; an existing arm keeps its identity (Review Focus 4).
+
+    The row id is derived from the fingerprint (uuid5), never minted: replaying the
+    same classifications into a fresh schema reproduces the same arm row.
+    """
+    existing = session.execute(
+        sa.select(arms.c.arm_id).where(arms.c.fingerprint == draft.fingerprint)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return str(existing), False
+    session.execute(sa.insert(arms).values(
+        id=deterministic_id("arm", draft.fingerprint), brand_id=brand_id, arm_id=draft.arm_id,
+        fingerprint=draft.fingerprint, status=ArmStatus.CANDIDATE.value,
+        taxonomy_json={dimension.value: draft.profile.value_for(dimension)
+                       for dimension in TaxonomyDimension},
+        source_observation_ids=list(draft.source_observation_ids),
+        support_count=draft.support_count,
+    ))
+    return draft.arm_id, True
+
+
+def load_arms(session: Session, *, status: ArmStatus | None = None) -> list[Mapping[str, Any]]:
+    statement = sa.select(arms).order_by(arms.c.arm_id)
+    if status is not None:
+        statement = statement.where(arms.c.status == status.value)
     return [dict(row) for row in session.execute(statement).mappings()]
