@@ -93,11 +93,21 @@ def parse_track_stats(fetch: FetchResult) -> tuple[TrackStats, ...]:
 
 
 def _parse_release(track: dict) -> datetime:
-    """Tracks carry a release date, not a timestamp: midnight UTC of that date."""
+    """Tracks carry a release date, not a timestamp: midnight UTC of that date.
+
+    A missing or unparseable date is refused as a provider-schema failure. The old
+    fallback returned 1970-01-01, which turned a schema problem into a
+    plausible-looking observation instant — a date that was never observed
+    (review fix 8).
+    """
     release = str(track.get("album", {}).get("release_date") or "").strip()
     for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
         try:
             return datetime.strptime(release, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
-    return datetime(1970, 1, 1, tzinfo=UTC)
+    raise ConnectorError(
+        ConnectorErrorClass.SCHEMA_CHANGE,
+        f"spotify track {track.get('id')!r} has no parseable release date "
+        f"({release!r}); refusing to invent one",
+    )

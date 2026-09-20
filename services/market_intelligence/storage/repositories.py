@@ -329,9 +329,13 @@ def load_observations(
     """Read back as Tri-typed domain records: NULL becomes unknown here, once.
 
     A metric the row records in `not_ready_metrics` comes back `not_ready`, not
-    `unknown` — the distinction the Tri type exists to preserve.
+    `unknown` — the distinction the Tri type exists to preserve. The order is a
+    deterministic total order on (observed_at, id): an equal `observed_at` used to
+    come back in whatever order the engine chose, which moved last-bit
+    floating-point sums and evidence-id ordering between runs (review fix 8).
     """
-    statement = sa.select(observations).order_by(observations.c.observed_at)
+    statement = (sa.select(observations)
+                 .order_by(observations.c.observed_at, observations.c.id))
     if source_id is not None:
         statement = statement.where(observations.c.source_id == source_id)
     if entity_id is not None:
@@ -344,12 +348,16 @@ def load_observations(
 def observations_for_entities(
     session: Session, entity_ids: Sequence[str], *, since: datetime | None = None,
 ) -> list[NormalizedObservation]:
-    """The feature layer's read path; quarantined records have no row and cannot appear."""
+    """The feature layer's read path; quarantined records have no row and cannot appear.
+
+    Ordered by (observed_at, id) — the deterministic total order the feature layer
+    needs so two runs over the same rows produce the same sums (review fix 8).
+    """
     if not entity_ids:
         return []
     statement = (sa.select(observations)
                  .where(observations.c.entity_id.in_(list(entity_ids)))
-                 .order_by(observations.c.observed_at))
+                 .order_by(observations.c.observed_at, observations.c.id))
     if since is not None:
         statement = statement.where(observations.c.observed_at >= since)
     return _rows_to_observations(session.execute(statement).mappings())
@@ -663,19 +671,29 @@ def insert_score(
 
     The versions are read off the score object — the object the computation returned —
     so a row cannot claim a version the computation never used (review fix 2). The row
-    id is derived from the row's stable identity (arm + computation instant), never
-    minted: a replay in a fresh schema reproduces the same score rows.
+    id is derived from the row's stable identity (arm + computation instant), and a
+    replay of the same run is idempotent (review fix 8): the existing row id is
+    returned instead of raising, matching the observation and quarantine inserts.
     """
     score_id = deterministic_id("score", arm_id, computed_at.isoformat())
-    session.execute(sa.insert(scores).values(
-        id=score_id, arm_id=arm_id, computed_at=computed_at, as_of=score.as_of,
-        market_opportunity_score=score.market_opportunity_score,
-        confidence=score.confidence, basis_weight=score.basis_weight,
-        components_json=dict(components),
-        evidence_json=dict(evidence), score_version=score.score_version,
-        feature_version=score.feature_version,
-        normalization_version=score.normalization_version,
-    ))
+    try:
+        with session.begin_nested():
+            session.execute(sa.insert(scores).values(
+                id=score_id, arm_id=arm_id, computed_at=computed_at, as_of=score.as_of,
+                market_opportunity_score=score.market_opportunity_score,
+                confidence=score.confidence, basis_weight=score.basis_weight,
+                components_json=dict(components),
+                evidence_json=dict(evidence), score_version=score.score_version,
+                feature_version=score.feature_version,
+                normalization_version=score.normalization_version,
+            ))
+    except IntegrityError:
+        existing = session.execute(
+            sa.select(scores.c.id).where(scores.c.id == score_id)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        return str(existing)
     return score_id
 
 

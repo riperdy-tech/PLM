@@ -600,3 +600,63 @@ def test_fully_covered_arms_keep_their_normal_score_ranking(market_session) -> N
     assert [row["arm_id"] for row in rows] == ["high_arm", "low_arm", "thin_arm"]
     assert all(row["insufficient_coverage"] is False for row in rows[:2])
     assert rows[0]["market_opportunity_score"] > rows[1]["market_opportunity_score"]
+
+
+# --------------------------------------------------------------------------------------
+# Review fix 8: deterministic reads, idempotent score inserts.
+# --------------------------------------------------------------------------------------
+
+def test_a_replayed_score_insert_is_idempotent(market_session) -> None:
+    """A replayed run must not raise and must not duplicate the score row —
+    observations and quarantine rows already behave this way; scores now match."""
+    features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b",
+                         arm_ids={"b": "rnb_late_night_drive"})
+    _registered_arm(market_session, "b", "rnb_late_night_drive")
+    scores = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
+
+    first = persist_scores(market_session, scores, computed_at=AS_OF)
+    second = persist_scores(market_session, scores, computed_at=AS_OF)  # replay of the same run
+    assert (first, second) == (1, 1)
+    rows = repositories.scores_for_arm(market_session, "rnb_late_night_drive")
+    assert len(rows) == 1
+    assert rows[0]["market_opportunity_score"] == pytest.approx(
+        scores["b"].market_opportunity_score
+    )
+
+
+def test_observation_reads_have_a_deterministic_total_order(market_session) -> None:
+    """Ties on `observed_at` used to come back in whatever order the engine chose,
+    so last-bit floating-point sums and evidence-id ordering could differ between
+    runs. The reads now order by (observed_at, id) — a total order."""
+    same_instant = AS_OF - timedelta(days=7)
+    tokens = ["alpha", "beta", "gamma"]
+    entity_ids = {token: repositories.deterministic_id("entity", token) for token in tokens}
+    row_ids: dict[str, str] = {}
+    for token in reversed(sorted(tokens, key=lambda name: entity_ids[name])):  # id order reversed
+        row_id, _ = repositories.insert_normalized_observation(
+            market_session,
+            NormalizedObservationDraft(
+                entity_id=entity_ids[token],
+                source_id=repositories.deterministic_id("source", token),
+                raw_observation_id=repositories.deterministic_id("raw", token),
+                observed_at=same_instant, published_at=None,
+                views=Tri.known(100), likes=Tri.unknown(), comments=Tri.unknown(),
+                subscriber_count=Tri.unknown(), video_duration_seconds=Tri.unknown(),
+                playlist_item_count=Tri.unknown(), channel_video_count=Tri.unknown(),
+                text_title=None, text_description=None, country_signal=None,
+                language_signal=None,
+            ),
+        )
+        row_ids[token] = row_id
+    expected_tokens = sorted(tokens, key=lambda token: row_ids[token])
+
+    by_entities = repositories.observations_for_entities(
+        market_session, [entity_ids[token] for token in tokens]
+    )
+    assert [observation.entity_id for observation in by_entities] == [
+        entity_ids[token] for token in expected_tokens
+    ]
+    everything = repositories.load_observations(market_session)
+    assert [observation.entity_id for observation in everything] == [
+        entity_ids[token] for token in expected_tokens
+    ]
