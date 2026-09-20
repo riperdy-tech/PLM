@@ -1,8 +1,8 @@
 from services.market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
 
 EXPECTED = (
-    "market_sources", "market_queries", "market_seed_evidence", "market_collection_runs",
-    "market_raw_observations", "market_entities", "market_entity_identities",
+    "market_sources", "market_queries", "market_collection_runs", "market_raw_observations",
+    "market_seed_evidence", "market_entities", "market_entity_identities",
     "market_observations", "market_taxonomy_classifications", "market_arms",
     "market_opportunity_scores", "market_change_events", "market_quarantined_records",
     "market_snapshots",
