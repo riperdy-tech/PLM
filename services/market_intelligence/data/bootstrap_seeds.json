@@ -1,0 +1,22 @@
+[
+  {"term": "rnb", "query_type": "music_genre", "priority": 80},
+  {"term": "pop", "query_type": "music_genre", "priority": 80},
+  {"term": "indie", "query_type": "music_genre", "priority": 70},
+  {"term": "city pop", "query_type": "music_genre", "priority": 70},
+  {"term": "synthwave", "query_type": "music_genre", "priority": 70},
+  {"term": "lofi", "query_type": "music_genre", "priority": 80},
+  {"term": "ambient", "query_type": "music_genre", "priority": 70},
+  {"term": "house", "query_type": "music_genre", "priority": 60},
+  {"term": "deep house", "query_type": "music_genre", "priority": 60},
+  {"term": "jazz", "query_type": "music_genre", "priority": 60},
+  {"term": "acoustic", "query_type": "music_genre", "priority": 60},
+  {"term": "sleep music", "query_type": "use_case", "priority": 70},
+  {"term": "study music", "query_type": "use_case", "priority": 70},
+  {"term": "focus music", "query_type": "use_case", "priority": 70},
+  {"term": "night drive", "query_type": "use_case", "priority": 70},
+  {"term": "cafe music", "query_type": "use_case", "priority": 60},
+  {"term": "rainy day", "query_type": "music_mood", "priority": 60},
+  {"term": "luxury lounge", "query_type": "use_case", "priority": 50},
+  {"term": "romantic", "query_type": "music_mood", "priority": 50},
+  {"term": "melancholic", "query_type": "music_mood", "priority": 50}
+]

@@ -4,7 +4,7 @@ search_path is the `market` schema (`plm_platform.db.scoped_session("market")`).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -21,8 +21,10 @@ from ..domain.enums import (
     EntityType,
     ProviderName,
     ProviderObjectType,
+    QueryType,
 )
 from ..domain.value_objects import tri_from_optional
+from ..normalization.canonical import text_fingerprint
 from ..normalization.youtube import QUARANTINE_REASON_CODES, NormalizedObservationDraft
 from .models import (
     collection_runs,
@@ -30,13 +32,17 @@ from .models import (
     entity_identities,
     observations,
     quarantined_records,
+    queries,
+    seed_evidence,
     sources,
 )
 
 __all__ = [
     "add_run_cost", "count_quarantined", "finish_collection_run",
-    "insert_normalized_observation", "load_entity", "load_observations", "load_run",
-    "quarantine_record", "resolve_entity", "start_collection_run", "upsert_source",
+    "insert_normalized_observation", "insert_seed_evidence", "load_entity",
+    "load_observations", "load_queries", "load_run", "load_seed_evidence",
+    "quarantine_record", "resolve_entity", "start_collection_run", "upsert_query",
+    "upsert_source",
 ]
 
 
@@ -295,3 +301,78 @@ def load_entity(session: Session, entity_id: str) -> Mapping[str, Any] | None:
 def _tri_value(metric: Tri) -> int | float | None:
     """Tri → column value: unknown/not_ready are NULL, a verified zero is 0."""
     return metric.unwrap() if metric.is_known else None
+
+
+def upsert_query(
+    session: Session,
+    *,
+    source_id: str,
+    query_text: str,
+    query_type: QueryType,
+    locale: str,
+    country_code: str,
+    language: str,
+    seed_group: str,
+    priority: int,
+    query_version: str,
+    parent_query_id: str | None = None,
+    proposal: object | None = None,
+) -> tuple[str, bool]:
+    """One row per (source, normalised term). Stage B proposals carry their lineage."""
+    fingerprint = text_fingerprint(query_text)
+    existing = session.execute(
+        sa.select(queries.c.id).where(
+            queries.c.source_id == source_id, queries.c.query_fingerprint == fingerprint
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return str(existing), False
+    query_id = _new_id()
+    session.execute(sa.insert(queries).values(
+        id=query_id, source_id=source_id, query_text=query_text,
+        query_fingerprint=fingerprint, query_type=query_type.value, locale=locale,
+        country_code=country_code, language=language, seed_group=seed_group,
+        active=True, priority=priority, query_version=query_version,
+        parent_query_id=parent_query_id,
+        proposed_by_model=getattr(proposal, "proposed_by_model", None),
+        model_name=getattr(proposal, "model_name", None),
+        model_version=getattr(proposal, "model_version", None),
+        proposal_confidence=getattr(proposal, "confidence", None),
+    ))
+    return query_id, True
+
+
+def load_queries(
+    session: Session, *, source_id: str | None = None, active_only: bool = True,
+) -> list[Mapping[str, Any]]:
+    statement = sa.select(queries).order_by(queries.c.priority.desc(), queries.c.query_text)
+    if source_id is not None:
+        statement = statement.where(queries.c.source_id == source_id)
+    if active_only:
+        statement = statement.where(queries.c.active.is_(True))
+    return [dict(row) for row in session.execute(statement).mappings()]
+
+
+def insert_seed_evidence(
+    session: Session, *, query_id: str, raw_observation_ids: Sequence[str],
+) -> int:
+    """§8: every automatic seed stores the observations it was derived from."""
+    inserted = 0
+    for raw_id in raw_observation_ids:
+        try:
+            with session.begin_nested():
+                session.execute(sa.insert(seed_evidence).values(
+                    id=_new_id(), query_id=query_id, raw_observation_id=raw_id,
+                ))
+            inserted += 1
+        except IntegrityError:
+            continue  # the same observation already backs this seed
+    return inserted
+
+
+def load_seed_evidence(session: Session, query_id: str) -> list[str]:
+    return [str(value) for value in session.execute(
+        sa.select(seed_evidence.c.raw_observation_id)
+        .where(seed_evidence.c.query_id == query_id)
+        .order_by(seed_evidence.c.created_at)
+    ).scalars()]
