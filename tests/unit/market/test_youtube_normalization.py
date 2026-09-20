@@ -14,7 +14,7 @@ from tests.support.golden import assert_golden, golden_path
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 VIDEO_PAYLOAD = {
-    "kind": "youtube#video", "id": "vid000000001",
+    "kind": "youtube#video", "id": "vid00000001",
     "snippet": {"publishedAt": "2026-08-01T10:00:00Z", "channelId": "UC" + "a" * 22,
                 "title": "2AM Seoul — Rainy Night R&B Mix",
                 "description": "Late-night Korean city vibes",
@@ -31,7 +31,7 @@ CHANNEL_PAYLOAD = {
 
 def _video():
     return FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
-                         provider_object_id="vid000000001", observed_at=FIXED_NOW,
+                         provider_object_id="vid00000001", observed_at=FIXED_NOW,
                          payload=VIDEO_PAYLOAD)
 
 

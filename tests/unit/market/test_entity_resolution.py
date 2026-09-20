@@ -22,7 +22,7 @@ LATER = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
 # runs through SQLAlchemy's Uuid type, so placeholders must be uuid-shaped.
 RAW_ONE = "00000000-0000-4000-8000-000000000001"
 RAW_TWO = "00000000-0000-4000-8000-000000000002"
-PAYLOAD = {"kind": "youtube#video", "id": "vid000000001",
+PAYLOAD = {"kind": "youtube#video", "id": "vid00000001",
            "snippet": {"publishedAt": "2026-08-01T10:00:00Z", "channelId": "UC" + "a" * 22,
                        "title": "2AM Seoul", "description": ""},
            "statistics": {"viewCount": "120000"}}
@@ -42,15 +42,15 @@ def test_the_same_provider_video_resolves_to_one_entity_across_collections(
 ) -> None:
     first = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         canonical_name="2AM Seoul", normalized_name="2am seoul",
-        canonical_url="https://www.youtube.com/watch?v=vid000000001", observed_at=FIXED_NOW,
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
     )
     second = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         canonical_name="2AM Seoul (remastered)", normalized_name="2am seoul remastered",
-        canonical_url="https://www.youtube.com/watch?v=vid000000001", observed_at=LATER,
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=LATER,
     )
     assert first == second
     entity = repositories.load_entity(market_session, first)
@@ -62,12 +62,12 @@ def test_rerunning_the_same_query_on_a_later_date_adds_a_second_observation(
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         canonical_name="2AM Seoul", normalized_name="2am seoul",
-        canonical_url="https://www.youtube.com/watch?v=vid000000001", observed_at=FIXED_NOW,
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
     )
     fetched = FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
-                            provider_object_id="vid000000001", observed_at=FIXED_NOW,
+                            provider_object_id="vid00000001", observed_at=FIXED_NOW,
                             payload=PAYLOAD)
     first = normalize_video_object(fetched, entity_id=entity_id, source_id=source_id,
                                    raw_observation_id=RAW_ONE, observed_at=FIXED_NOW)
@@ -89,12 +89,12 @@ def test_inserting_the_same_observation_point_twice_is_idempotent(
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         canonical_name="2AM Seoul", normalized_name="2am seoul",
-        canonical_url="https://www.youtube.com/watch?v=vid000000001", observed_at=FIXED_NOW,
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
     )
     fetched = FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
-                            provider_object_id="vid000000001", observed_at=FIXED_NOW,
+                            provider_object_id="vid00000001", observed_at=FIXED_NOW,
                             payload=PAYLOAD)
     draft = normalize_video_object(fetched, entity_id=entity_id, source_id=source_id,
                                    raw_observation_id=RAW_ONE, observed_at=FIXED_NOW)
@@ -111,12 +111,12 @@ def test_an_observation_records_the_normalization_version_that_derived_it(
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         canonical_name="2AM Seoul", normalized_name="2am seoul",
-        canonical_url="https://www.youtube.com/watch?v=vid000000001", observed_at=FIXED_NOW,
+        canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=FIXED_NOW,
     )
     fetched = FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
-                            provider_object_id="vid000000001", observed_at=FIXED_NOW,
+                            provider_object_id="vid00000001", observed_at=FIXED_NOW,
                             payload=PAYLOAD)
     first = normalize_video_object(fetched, entity_id=entity_id, source_id=source_id,
                                    raw_observation_id=RAW_ONE, observed_at=FIXED_NOW)

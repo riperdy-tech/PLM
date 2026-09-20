@@ -45,14 +45,14 @@ def connector(mock_http) -> YouTubeDataAPIConnector:
 def test_search_sends_the_documented_request_and_returns_raw_objects(mock_http) -> None:
     mock_http.enqueue_json(load("search_lofi_p1.json"))
     result = connector(mock_http).search_videos("lofi", max_results=2)
-    assert [o.provider_object_id for o in result.objects] == ["vid000000001", "vid000000002"]
+    assert [o.provider_object_id for o in result.objects] == ["vid00000001", "vid00000002"]
     assert result.quota_units == SEARCH_QUOTA_UNITS
     assert result.next_page_token == "CAoQAA"
     request = mock_http.requests[0]
     assert request.path == "/youtube/v3/search"
     mock_http.assert_query_params(0, part="snippet", type="video", q="lofi", maxResults="2")
     hits = parse_search_hits(result)
-    assert hits[0].video_id == "vid000000001"
+    assert hits[0].video_id == "vid00000001"
     assert hits[0].published_at == datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
     assert hits[1].channel_title == "StudyLoops"
 
@@ -90,14 +90,14 @@ def test_iso8601_durations_are_parsed_and_unparseable_values_are_none() -> None:
 
 def test_video_hydration_maps_counts_and_durations_without_inventing_missing_values(mock_http) -> None:
     mock_http.enqueue_json(load("videos_lofi_batch.json"))
-    result = connector(mock_http).fetch_videos(["vid000000001", "vid000000002"])
+    result = connector(mock_http).fetch_videos(["vid00000001", "vid00000002"])
     assert result.quota_units == LIST_QUOTA_UNITS
     mock_http.assert_query_params(0, part="snippet,statistics,contentDetails")
     stats = {s.video_id: s for s in parse_video_stats(result)}
-    assert stats["vid000000001"].view_count == 120000
-    assert stats["vid000000001"].duration_seconds == 3720.0
-    assert stats["vid000000002"].comment_count is None  # absent ⇒ None, never 0
-    assert stats["vid000000002"].like_count == 210
+    assert stats["vid00000001"].view_count == 120000
+    assert stats["vid00000001"].duration_seconds == 3720.0
+    assert stats["vid00000002"].comment_count is None  # absent ⇒ None, never 0
+    assert stats["vid00000002"].like_count == 210
 
 
 def test_channel_hydration_keeps_hidden_subscriber_counts_unknown(mock_http) -> None:
@@ -117,7 +117,7 @@ def test_a_5xx_is_retried_then_succeeds(mock_http) -> None:
         credentials=YouTubeCredentials(api_key=Secret("test-key")),
         sleep=lambda _seconds: None, rng=Random(0), observed_at=lambda: FIXED_NOW,
     )
-    result = active.fetch_videos(["vid000000001", "vid000000002"])
+    result = active.fetch_videos(["vid00000001", "vid00000002"])
     assert len(result.objects) == 2
     assert len(mock_http.requests) == 2
 
@@ -166,7 +166,7 @@ def test_an_attempt_with_no_provider_response_is_refunded(mock_http) -> None:
         quota=quota, sleep=lambda _seconds: None, rng=Random(0),
         observed_at=lambda: FIXED_NOW,
     )
-    result = active.fetch_videos(["vid000000001", "vid000000002"])
+    result = active.fetch_videos(["vid00000001", "vid00000002"])
     assert len(result.objects) == 2
     assert len(mock_http.requests) == 3
     # three attempts: the timed-out one never reached the provider (refunded); the
@@ -191,7 +191,7 @@ def test_an_invalid_request_is_never_retried(mock_http) -> None:
     mock_http.enqueue_status(400, payload={"error": {"code": 400, "message": "bad"}})
     active = connector(mock_http)
     with pytest.raises(ConnectorError) as excinfo:
-        active.fetch_videos(["vid000000001"])
+        active.fetch_videos(["vid00000001"])
     assert excinfo.value.error_class is ConnectorErrorClass.INVALID_REQUEST
     assert len(mock_http.requests) == 1
 
@@ -208,7 +208,7 @@ def test_a_403_rate_limit_reason_is_retried_with_backoff(mock_http, reason: str)
         credentials=YouTubeCredentials(api_key=Secret("test-key")),
         sleep=naps.append, rng=Random(0), observed_at=lambda: FIXED_NOW,
     )
-    result = active.fetch_videos(["vid000000001", "vid000000002"])
+    result = active.fetch_videos(["vid00000001", "vid00000002"])
     assert len(result.objects) == 2
     assert len(mock_http.requests) == 2  # §23: a rate-limited call is retried, not fatal
     assert naps and naps[0] > 0  # the retry waits out the backoff
@@ -240,7 +240,7 @@ def test_a_403_without_a_rate_limit_reason_stays_a_permanent_auth_failure(
     mock_http.enqueue_status(403, payload=payload)
     active = connector(mock_http)
     with pytest.raises(ConnectorError) as excinfo:
-        active.fetch_videos(["vid000000001"])
+        active.fetch_videos(["vid00000001"])
     assert excinfo.value.error_class is ConnectorErrorClass.AUTH_FAILURE
     assert excinfo.value.retryable is False
     assert len(mock_http.requests) == 1
@@ -250,7 +250,7 @@ def test_an_exhausted_provider_quota_is_permanent_not_retried(mock_http) -> None
     mock_http.enqueue_status(403, payload={"error": {"errors": [{"reason": "quotaExceeded"}]}})
     active = connector(mock_http)
     with pytest.raises(ConnectorError) as excinfo:
-        active.fetch_videos(["vid000000001"])
+        active.fetch_videos(["vid00000001"])
     assert excinfo.value.error_class is ConnectorErrorClass.QUOTA_EXCEEDED
     assert len(mock_http.requests) == 1  # §27: reschedule, do not retry
 

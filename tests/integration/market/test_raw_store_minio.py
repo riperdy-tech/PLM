@@ -48,8 +48,8 @@ def test_the_payload_artifact_round_trips_through_minio() -> None:
             session, run_id=run_id, source_id=source_id,
             fetched=FetchedObject(
                 provider_object_type=ProviderObjectType.VIDEO,
-                provider_object_id="vid000000001", observed_at=baked_at,
-                payload={"id": "vid000000001", "statistics": {"viewCount": "1"}},
+                provider_object_id="vid00000001", observed_at=baked_at,
+                payload={"id": "vid00000001", "statistics": {"viewCount": "1"}},
             ),
             request_context_hash="0" * 64, client=client,
         )

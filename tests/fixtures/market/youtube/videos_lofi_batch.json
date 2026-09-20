@@ -6,7 +6,7 @@
     {
       "kind": "youtube#video",
       "etag": "etag-video-1",
-      "id": "vid000000001",
+      "id": "vid00000001",
       "snippet": {
         "publishedAt": "2026-08-01T10:00:00Z",
         "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
@@ -21,7 +21,7 @@
     {
       "kind": "youtube#video",
       "etag": "etag-video-2",
-      "id": "vid000000002",
+      "id": "vid00000002",
       "snippet": {
         "publishedAt": "2026-08-15T10:00:00Z",
         "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",

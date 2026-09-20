@@ -19,9 +19,9 @@ __all__ = [
     "video_canonical_url",
 ]
 
-# P1.5-1 ruling: 11 chars is the real-world id length; 12 is accepted so the phase's
-# recorded fixture ids (`vid000000001`) validate. 4-char and 13-char ids stay refused.
-VIDEO_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]{11,12}$")
+# Real YouTube video ids are exactly 11 URL-safe characters; anything else is
+# malformed and is quarantined, never repaired (§22).
+VIDEO_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CHANNEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 PLAYLIST_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]{13,43}$")
 

@@ -62,7 +62,7 @@ def test_collection_run_records_status_then_counters_and_costs(market_session) -
     assert run["finished_at"] is not None
 
 
-PAYLOAD = {"kind": "youtube#video", "id": "vid000000001",
+PAYLOAD = {"kind": "youtube#video", "id": "vid00000001",
            "statistics": {"viewCount": "120000"}}
 CONTEXT_HASH = "a" * 64
 
@@ -96,7 +96,7 @@ def _store(market_session, store, *, observed_at=FIXED_NOW):
         software_version="p1-v1", started_at=FIXED_NOW,
     )
     fetched = FetchedObject(
-        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid000000001",
+        provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
         observed_at=observed_at, payload=PAYLOAD,
     )
     return source_id, run_id, store_raw_observation(
@@ -113,7 +113,7 @@ def test_raw_observation_is_immutable_content_addressed_and_costed(market_sessio
     assert stored.payload_uri.endswith(stored.payload_hash)
     assert "market/raw/youtube_data_api/video/2026-09-20/" in store.calls[0]
     assert store.keys[store.calls[0]] == (
-        b'{"id":"vid000000001","kind":"youtube#video","statistics":{"viewCount":"120000"}}'
+        b'{"id":"vid00000001","kind":"youtube#video","statistics":{"viewCount":"120000"}}'
     )
     run = repositories.load_run(market_session, run_id)
     assert run["cost_storage_bytes"] == len(store.keys[store.calls[0]])

@@ -43,7 +43,7 @@ def _normalize(fetched: FetchedObject):
 
 
 def test_malformed_provider_id_is_quarantined() -> None:
-    for bad_id in ("vid1", "vid" + "0" * 10):  # too short, and a 13-character id
+    for bad_id in ("vid1", "vid" + "0" * 9, "vid" + "0" * 10):  # 4, 12 and 13 chars
         outcome = _normalize(_fetched(bad_id))
         assert outcome.observation is None
         assert outcome.quarantine is not None
@@ -51,32 +51,32 @@ def test_malformed_provider_id_is_quarantined() -> None:
 
 
 def test_negative_view_count_is_quarantined_with_a_reason_code() -> None:
-    outcome = _normalize(_fetched("vid000000001", statistics={"viewCount": "-5"}))
+    outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "-5"}))
     assert outcome.observation is None
     assert outcome.quarantine.reason_code == "negative_count"
     assert outcome.quarantine.reason_code in QUARANTINE_REASON_CODES
 
 
 def test_impossible_timestamp_order_is_quarantined() -> None:
-    outcome = _normalize(_fetched("vid000000001", statistics={"viewCount": "1"},
+    outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "1"},
                                   published_at="2027-01-01T00:00:00Z"))
     assert outcome.observation is None
     assert outcome.quarantine.reason_code == "impossible_timestamp_order"
 
 
 def test_unobserved_metric_is_not_a_measured_zero() -> None:
-    unobserved = _normalize(_fetched("vid000000001"))
+    unobserved = _normalize(_fetched("vid00000001"))
     assert unobserved.observation.views.state is TriState.UNKNOWN
     assert unobserved.observation.views.is_zero is False
 
-    measured_zero = _normalize(_fetched("vid000000001", statistics={"viewCount": "0"}))
+    measured_zero = _normalize(_fetched("vid00000001", statistics={"viewCount": "0"}))
     assert measured_zero.observation.views.state is TriState.KNOWN
     assert measured_zero.observation.views.is_zero is True
     assert measured_zero.observation.views.unwrap() == 0
 
 
 def test_a_quarantined_record_keeps_the_evidence_that_caused_it() -> None:
-    outcome = _normalize(_fetched("vid000000001", statistics={"viewCount": "-5"}))
+    outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "-5"}))
     assert outcome.quarantine.raw_observation_id == RAW
     assert outcome.quarantine.source_id == "source-1"
 
@@ -88,7 +88,7 @@ def test_the_quarantine_row_traces_back_to_the_raw_observation(market_session) -
         configuration_version="p1-sources-v1",
     )
     outcome = normalize_video_object(
-        _fetched("vid000000001", statistics={"viewCount": "-5"}),
+        _fetched("vid00000001", statistics={"viewCount": "-5"}),
         entity_id="00000000-0000-4000-8000-000000000002", source_id=source_id,
         raw_observation_id=RAW, observed_at=FIXED_NOW,
     )

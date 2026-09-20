@@ -28,7 +28,7 @@ def test_the_credential_never_reaches_a_log_line_repr_or_payload(mock_http, capl
         credentials=credentials, quota=QuotaBudget(10), observed_at=lambda: FIXED_NOW,
     )
     with caplog.at_level(logging.DEBUG):
-        result = active.fetch_videos(["vid000000001"])
+        result = active.fetch_videos(["vid00000001"])
     assert SENTINEL not in repr(credentials)
     assert SENTINEL not in caplog.text
     assert SENTINEL not in str(result)
@@ -41,7 +41,7 @@ def test_a_connector_without_credentials_fails_closed(mock_http) -> None:
         credentials=YouTubeCredentials(),
     )
     with pytest.raises(ConnectorError, match="AUTH_FAILURE"):
-        active.fetch_videos(["vid000000001"])
+        active.fetch_videos(["vid00000001"])
     assert mock_http.requests == ()
 
 

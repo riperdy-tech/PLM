@@ -7,7 +7,7 @@
     {
       "kind": "youtube#searchResult",
       "etag": "etag-item-1",
-      "id": {"kind": "youtube#video", "videoId": "vid000000001"},
+      "id": {"kind": "youtube#video", "videoId": "vid00000001"},
       "snippet": {
         "publishedAt": "2026-08-01T10:00:00Z",
         "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
@@ -19,7 +19,7 @@
     {
       "kind": "youtube#searchResult",
       "etag": "etag-item-2",
-      "id": {"kind": "youtube#video", "videoId": "vid000000002"},
+      "id": {"kind": "youtube#video", "videoId": "vid00000002"},
       "snippet": {
         "publishedAt": "2026-08-15T10:00:00Z",
         "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",

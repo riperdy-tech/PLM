@@ -23,12 +23,13 @@ def test_fingerprint_is_stable_across_the_two_spellings_the_spec_gives() -> None
 
 
 def test_provider_ids_are_validated_with_the_documented_shapes() -> None:
-    assert is_valid_video_id("vid000000001")
+    assert is_valid_video_id("vid00000001")  # exactly 11 URL-safe characters
+    assert not is_valid_video_id("vid000000001")  # 12: YouTube cannot mint such an id
     assert not is_valid_video_id("vid1")  # malformed ids are quarantined, never repaired
     assert is_valid_channel_id("UC" + "a" * 22)
     assert not is_valid_channel_id("UCaaaaaaaaaaaaaaaaaaaaa")
 
 
 def test_canonical_urls_are_built_for_youtube_entities() -> None:
-    assert video_canonical_url("vid000000001") == "https://www.youtube.com/watch?v=vid000000001"
+    assert video_canonical_url("vid00000001") == "https://www.youtube.com/watch?v=vid00000001"
     assert channel_canonical_url("UC" + "a" * 22).endswith("/channel/UC" + "a" * 22)
