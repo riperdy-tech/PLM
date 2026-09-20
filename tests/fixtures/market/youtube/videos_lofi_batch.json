@@ -1,0 +1,36 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "etag-videos-1",
+  "pageInfo": {"totalResults": 2, "resultsPerPage": 2},
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "etag-video-1",
+      "id": "vid000000001",
+      "snippet": {
+        "publishedAt": "2026-08-01T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "2AM Seoul — Rainy Night R&B Mix",
+        "description": "Late-night Korean city vibes",
+        "channelTitle": "NightLoop",
+        "defaultLanguage": "ko"
+      },
+      "statistics": {"viewCount": "120000", "likeCount": "8400", "commentCount": "312"},
+      "contentDetails": {"duration": "PT1H2M"}
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-video-2",
+      "id": "vid000000002",
+      "snippet": {
+        "publishedAt": "2026-08-15T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "lofi study beats",
+        "description": "focus music",
+        "channelTitle": "StudyLoops"
+      },
+      "statistics": {"viewCount": "5400", "likeCount": "210"},
+      "contentDetails": {"duration": "PT45M10S"}
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "kind": "youtube#channelListResponse",
+  "etag": "etag-channels-1",
+  "pageInfo": {"totalResults": 2, "resultsPerPage": 2},
+  "items": [
+    {
+      "kind": "youtube#channel",
+      "etag": "etag-channel-1",
+      "id": "UCaaaaaaaaaaaaaaaaaaaaaa",
+      "snippet": {"title": "NightLoop", "country": "KR", "defaultLanguage": "ko"},
+      "statistics": {"viewCount": "145000000", "subscriberCount": "820000", "videoCount": "412"}
+    },
+    {
+      "kind": "youtube#channel",
+      "etag": "etag-channel-2",
+      "id": "UCbbbbbbbbbbbbbbbbbbbbbb",
+      "snippet": {"title": "StudyLoops"},
+      "statistics": {"viewCount": "22000000", "hiddenSubscriberCount": true, "videoCount": "150"}
+    }
+  ]
+}

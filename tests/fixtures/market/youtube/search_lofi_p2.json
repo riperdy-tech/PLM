@@ -1,0 +1,19 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "etag-search-2",
+  "pageInfo": {"totalResults": 813, "resultsPerPage": 1},
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "etag-item-3",
+      "id": {"kind": "youtube#video", "videoId": "vid000000003"},
+      "snippet": {
+        "publishedAt": "2026-07-20T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "Night drive synthwave",
+        "description": "neon highway",
+        "channelTitle": "NightLoop"
+      }
+    }
+  ]
+}
