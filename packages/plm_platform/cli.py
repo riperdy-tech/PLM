@@ -421,9 +421,54 @@ def smoke_live() -> None:
 
 
 @ar_app.command()
-def cycle() -> NoReturn:
-    """Run a P2 allocation cycle (registered stub until PHASE-P2)."""
-    _not_implemented("PHASE-P2")
+def cycle(slot_count: int = 10, budget: float = 10.0, policy_version: str = "p2-v1",
+          as_of: str = "") -> None:
+    """Run one allocation cycle (P2)."""
+    from autonomous_ar.cli import run_cycle_once
+
+    typer.echo(json.dumps(run_cycle_once(slot_count=slot_count, budget=budget,
+                                         policy_version=policy_version,
+                                         as_of=as_of or None), indent=2, default=str))
+
+
+@ar_app.command()
+def show(cycle_id: str) -> None:
+    """Show one cycle's status and counts (P2)."""
+    from autonomous_ar.cli import show_cycle
+
+    typer.echo(show_cycle(cycle_id))
+
+
+@ar_app.command()
+def arms() -> None:
+    """List arm states and posterior summaries (P2)."""
+    from autonomous_ar.cli import list_arms
+
+    typer.echo(list_arms())
+
+
+@ar_app.command()
+def explain(decision_id: str) -> None:
+    """Explain one decision from its stored rows (P2)."""
+    from autonomous_ar.cli import explain as explain_impl
+
+    typer.echo(explain_impl(decision_id))
+
+
+@ar_app.command(name="serve")
+def ar_serve(host: str = "127.0.0.1", port: int = 8082) -> None:
+    """Serve the `/ar` API (P2). (`ar_serve` because the market group owns `serve`.)"""
+    from autonomous_ar.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@ar_app.command()
+def simulate(scenario: str = "clear_winner", cycles: int = 80, seed: int = 1) -> None:
+    """Run one synthetic scenario and print its metrics (P2)."""
+    from autonomous_ar.cli import simulate as simulate_impl
+
+    typer.echo(simulate_impl(scenario, cycles, seed))
 
 
 @experiments_app.command()

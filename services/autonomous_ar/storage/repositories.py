@@ -63,8 +63,9 @@ __all__ = [
     "insert_posterior_update", "insert_reward_observation", "is_in_cooldown_state",
     "latest_observation_instant", "list_queued_directives", "load_active_overrides",
     "load_active_policy", "load_all_latest_feature_snapshots", "load_arm_state",
-    "load_arm_states", "load_baselines", "load_cycle", "load_decisions",
-    "load_directives_for_cycle", "load_exposure", "load_exposure_score",
+    "load_arm_states", "load_baselines", "load_cycle", "load_decision", "load_decisions",
+    "load_directive", "load_directive_for_decision", "load_directives_for_cycle",
+    "load_exposure", "load_exposure_score",
     "load_feature_snapshot", "load_latest_feature_snapshot", "load_pending_observations",
     "load_policy", "load_posterior", "load_posterior_update", "load_similarity",
     "record_selection", "replace_baselines", "replace_similarity", "set_arm_status",
@@ -475,6 +476,14 @@ def load_decisions(session: Session, cycle_id: str) -> list[dict[str, Any]]:
     ).mappings()]
 
 
+def load_decision(session: Session, decision_id: str) -> dict[str, Any] | None:
+    row = session.execute(
+        sa.select(ar_allocation_decision)
+        .where(ar_allocation_decision.c.id == decision_id)
+    ).mappings().one_or_none()
+    return None if row is None else dict(row)
+
+
 def insert_directive(session: Session, directive: ProductionDirective, *, brand_id: str,
                      status: DirectiveStatus, created_at: datetime) -> str:
     exists = session.execute(
@@ -522,6 +531,15 @@ def load_directive(session: Session, directive_id: str) -> dict[str, Any] | None
     row = session.execute(
         sa.select(ar_production_directive)
         .where(ar_production_directive.c.id == directive_id)
+    ).mappings().one_or_none()
+    return None if row is None else dict(row)
+
+
+def load_directive_for_decision(session: Session, decision_id: str) -> dict[str, Any] | None:
+    """The directive a decision produced, or `None` when the arm was not selected."""
+    row = session.execute(
+        sa.select(ar_production_directive)
+        .where(ar_production_directive.c.decision_id == decision_id)
     ).mappings().one_or_none()
     return None if row is None else dict(row)
 

@@ -9,12 +9,13 @@ same request returns the stored cycle instead of writing a second one.
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from plm_contracts import ChannelActivationState
+from plm_contracts import AllocationType, ChannelActivationState
 
 from ..config import ARSettings
 from ..domain.arm import ContentArm
@@ -30,6 +31,8 @@ from ..domain.posterior import PosteriorState
 from ..modeling.decay import detect_regime_shift
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
+from ..observability.logging import emit_alert, evaluate_cycle_alerts, log_cycle
+from ..observability.metrics import CONSTRAINT_REJECTIONS, CYCLE_FAILURES, record_cycle
 from ..policy.constraints import directive_budget_share
 from ..policy.exploration import effective_fractions, quota_from_fractions
 from ..policy.lifecycle import evaluate_retirements, reopen_reason
@@ -98,7 +101,24 @@ def _row_to_directive(row: Any) -> ProductionDirective:
 def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                          market: MarketSnapshot, model: RewardModel | None = None,
                          now: datetime) -> CycleResult:
-    """§29, in order. Every step below is one of the spec's fifteen."""
+    """§29, in order. Every step below is one of the spec's fifteen.
+
+    A cycle that cannot finish increments `CYCLE_FAILURES` and re-raises — a refusal is
+    counted, never swallowed. A replay is not a failure: it returns the stored rows.
+    """
+    try:
+        return _run_cycle(session, request, settings=settings, market=market, model=model,
+                          now=now)
+    except Exception:
+        CYCLE_FAILURES.inc()
+        raise
+
+
+def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
+               market: MarketSnapshot, model: RewardModel | None = None,
+               now: datetime) -> CycleResult:
+    """The body of `run_allocation_cycle` (split out so the failure counter can wrap it)."""
+    started = time.perf_counter()
     resolved_model = model or NormalNormalRewardModel(
         observation_variance=settings.observation_variance,
         variance_floor=settings.posterior_variance_floor,
@@ -169,13 +189,16 @@ def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSet
     # 5b — §38 retirement and §39 reopening, decided before eligibility is computed
     mature_counts = {arm_id: int(row["mature_result_count"])
                      for arm_id, row in state_rows.items()}
-    for decision in evaluate_retirements(posteriors, mature_counts=mature_counts,
-                                         policy=policy, now=now):
+    retirement_decisions = evaluate_retirements(posteriors, mature_counts=mature_counts,
+                                                policy=policy, now=now)
+    for decision in retirement_decisions:
         repositories.set_arm_status(session, arm_id=decision.arm_id,
                                     status=ArmLifecycleStatus.RETIRED, now=now,
                                     reason=decision.reason)
         states[decision.arm_id] = ArmLifecycleStatus.RETIRED
         warnings.append(ReasonCode.WEAK_POSTERIOR.value)  # §38 evidence, never silent
+    retirements = len(retirement_decisions)
+    reactivations = 0
     for arm in market.arms:
         if states.get(arm.arm_id) is not ArmLifecycleStatus.RETIRED:
             continue
@@ -189,6 +212,7 @@ def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSet
                                         status=ArmLifecycleStatus.ACTIVE, now=now,
                                         reason=reason)
             states[arm.arm_id] = ArmLifecycleStatus.ACTIVE
+            reactivations += 1
     eligible_ids = {arm_id for arm_id, status in states.items()
                     if status in (ArmLifecycleStatus.CANDIDATE, ArmLifecycleStatus.ACTIVE)}
     selection_recency: dict[str, float] = {}
@@ -288,5 +312,30 @@ def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSet
                                                 detail="ineligible before ranking"))
         except ValueError:
             continue  # NO_POSTERIOR is an internal guard, not a contract reason token
-    return CycleResult(cycle_id=cycle_id, status=status, directives=directives,
-                       rejected=tuple(rejected), warnings=tuple(unique_warnings), replay=False)
+    for rejection in portfolio.rejections:  # §87: one count per refusal reason
+        CONSTRAINT_REJECTIONS.labels(reason=rejection.reason.value).inc()
+    result = CycleResult(cycle_id=cycle_id, status=status, directives=directives,
+                         rejected=tuple(rejected), warnings=tuple(unique_warnings), replay=False)
+    # §87/§88/§94, after `finish_cycle`: counters, one structured line, then the alert codes
+    runtime_ms = (time.perf_counter() - started) * 1000.0
+    record_cycle(status=status.value, eligible=len(snapshot_arms), selected=len(directives),
+                 rejected=len(portfolio.rejections), retirements=retirements,
+                 reactivations=reactivations)
+    log_cycle(result, brand_id=request.brand_id, policy_version=policy.version,
+              p1_snapshot_time=market.as_of, runtime_ms=runtime_ms)
+    stale_count = sum(1 for reason in prepared.ineligible.values()
+                      if reason == ReasonCode.MARKET_STALE.value)
+    selections = tuple((directive.arm_id,
+                        prepared.clusters.get(directive.arm_id, directive.arm_id))
+                       for directive in directives)
+    realized_exploration = (sum(1 for directive in directives
+                                if directive.allocation_type is not AllocationType.EXPLOIT)
+                            / len(directives)) if directives else 0.0
+    for code in evaluate_cycle_alerts(eligible=len(snapshot_arms), stale=stale_count,
+                                      selections=selections,
+                                      exploration_fraction=realized_exploration,
+                                      policy=policy):
+        emit_alert(code, brand_id=request.brand_id,
+                   detail=(f"cycle {cycle_id}: {len(directives)} selected of "
+                           f"{len(snapshot_arms)} eligible"))
+    return result

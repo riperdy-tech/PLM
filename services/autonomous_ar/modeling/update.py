@@ -22,6 +22,7 @@ from ..domain.posterior import UpdateRecord
 from ..domain.reward import RewardObservation
 from ..modeling.decay import recency_weight
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
+from ..observability.metrics import record_posterior_updates
 from ..storage import repositories
 
 __all__ = ["UpdateSummary", "apply_pending_updates"]
@@ -148,5 +149,7 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
         repositories.increment_result_counts(session, arm_id=observation.arm_id,
                                              maturity=observation.maturity, now=now)
         applied += 1
-    return UpdateSummary(applied=applied, skipped_duplicate=skipped, quarantined=quarantined,
-                         failed=failed)
+    summary = UpdateSummary(applied=applied, skipped_duplicate=skipped, quarantined=quarantined,
+                            failed=failed)
+    record_posterior_updates(summary)  # §87: one count per applied/failed/quarantined
+    return summary
