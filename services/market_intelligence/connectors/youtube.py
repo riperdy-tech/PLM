@@ -33,6 +33,12 @@ BASE_URL: Final[str] = "https://www.googleapis.com/youtube/v3"
 SEARCH_QUOTA_UNITS: Final[int] = 100  # documented cost of one search.list call (§4.1)
 LIST_QUOTA_UNITS: Final[int] = 1
 
+# §23: a 403 carrying one of these reasons is throttling, not an authentication
+# failure — it must back off and be rescheduled, never shelved as permanent.
+_RATE_LIMIT_REASONS: Final[frozenset[str]] = frozenset({
+    "rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded",
+})
+
 _DURATION_RE: Final[re.Pattern[str]] = re.compile(
     r"^PT(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?$"
 )
@@ -334,6 +340,12 @@ def _error_for(response: httpx.Response, operation: str) -> ConnectorError:
     except ValueError:
         pass
         # a non-JSON error body is normal (gateway pages); the status still decides
+    if response.status_code == 403 and reason in _RATE_LIMIT_REASONS:
+        return ConnectorError(
+            ConnectorErrorClass.RATE_LIMIT,
+            f"{operation}: provider rate limit ({reason})",
+            retry_after_seconds=retry_after_seconds,
+        )
     if response.status_code == 403 and reason == "quotaExceeded":
         return ConnectorError(
             ConnectorErrorClass.QUOTA_EXCEEDED, f"{operation}: provider quota exhausted"

@@ -196,6 +196,65 @@ def test_an_invalid_request_is_never_retried(mock_http) -> None:
     assert len(mock_http.requests) == 1
 
 
+@pytest.mark.parametrize(
+    "reason", ["rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"]
+)
+def test_a_403_rate_limit_reason_is_retried_with_backoff(mock_http, reason: str) -> None:
+    mock_http.enqueue_status(403, payload={"error": {"errors": [{"reason": reason}]}})
+    mock_http.enqueue_json(load("videos_lofi_batch.json"))
+    naps: list[float] = []
+    active = YouTubeDataAPIConnector(
+        client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
+        credentials=YouTubeCredentials(api_key=Secret("test-key")),
+        sleep=naps.append, rng=Random(0), observed_at=lambda: FIXED_NOW,
+    )
+    result = active.fetch_videos(["vid000000001", "vid000000002"])
+    assert len(result.objects) == 2
+    assert len(mock_http.requests) == 2  # §23: a rate-limited call is retried, not fatal
+    assert naps and naps[0] > 0  # the retry waits out the backoff
+
+
+def test_a_403_rate_limit_honours_the_provider_retry_after(mock_http) -> None:
+    mock_http.enqueue_status(
+        403, payload={"error": {"errors": [{"reason": "rateLimitExceeded"}]}},
+        headers={"Retry-After": "30"},
+    )
+    mock_http.enqueue_json(load("channels_lofi_batch.json"))
+    naps: list[float] = []
+    active = YouTubeDataAPIConnector(
+        client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
+        credentials=YouTubeCredentials(api_key=Secret("test-key")),
+        sleep=naps.append, rng=Random(0), observed_at=lambda: FIXED_NOW,
+    )
+    active.fetch_channels(["UCaaaaaaaaaaaaaaaaaaaaaa"])
+    assert naps == [30.0]
+
+
+@pytest.mark.parametrize("payload", [
+    {"error": {"errors": [{"reason": "forbidden"}]}},  # a real permission failure
+    {"error": {"errors": [{"reason": ""}]}},
+])
+def test_a_403_without_a_rate_limit_reason_stays_a_permanent_auth_failure(
+    mock_http, payload: dict
+) -> None:
+    mock_http.enqueue_status(403, payload=payload)
+    active = connector(mock_http)
+    with pytest.raises(ConnectorError) as excinfo:
+        active.fetch_videos(["vid000000001"])
+    assert excinfo.value.error_class is ConnectorErrorClass.AUTH_FAILURE
+    assert excinfo.value.retryable is False
+    assert len(mock_http.requests) == 1
+
+
+def test_an_exhausted_provider_quota_is_permanent_not_retried(mock_http) -> None:
+    mock_http.enqueue_status(403, payload={"error": {"errors": [{"reason": "quotaExceeded"}]}})
+    active = connector(mock_http)
+    with pytest.raises(ConnectorError) as excinfo:
+        active.fetch_videos(["vid000000001"])
+    assert excinfo.value.error_class is ConnectorErrorClass.QUOTA_EXCEEDED
+    assert len(mock_http.requests) == 1  # §27: reschedule, do not retry
+
+
 def test_a_malformed_body_is_a_parser_failure_and_a_missing_items_key_is_a_schema_change(mock_http) -> None:
     mock_http.enqueue_malformed_json()
     with pytest.raises(ConnectorError) as excinfo:
