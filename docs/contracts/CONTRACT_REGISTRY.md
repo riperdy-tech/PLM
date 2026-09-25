@@ -398,7 +398,7 @@ assembling the playlist-level manifest; vocabulary drifted (`cleared` vs `PASSED
   means "`PASSED`, or `PASSED_WITH_WARNINGS` where that phase's own policy
   permits warnings".
 
-**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **pending**.
+**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **exists**.
 
 ---
 

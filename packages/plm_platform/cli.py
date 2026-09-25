@@ -587,10 +587,89 @@ def music_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@qa_app.command()
-def review() -> NoReturn:
-    """Work the P5 review queue (registered stub until PHASE-P5)."""
-    _not_implemented("PHASE-P5")
+@qa_app.command(name="review")
+def qa_review() -> None:
+    """Work the P5 review queue (quarantined candidates)."""
+    from quality_gate.cli import cli_review
+
+    cli_review()
+
+
+@qa_app.command(name="evaluate")
+def qa_evaluate(
+    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID"),
+    artifact_id: str = typer.Option(..., "--artifact-id", "-a", help="Artifact ID"),
+    audio_path: str = typer.Option(..., "--audio", "-f", help="Path to WAV audio file"),
+    expected_duration: float = typer.Option(..., "--duration", "-d", help="Expected duration in seconds"),
+    track_spec_id: str = typer.Option("spec_default", "--track-spec-id", help="Track spec ID"),
+    experiment_id: str = typer.Option("exp_default", "--experiment-id", help="Experiment ID"),
+    content_arm_id: str = typer.Option("arm_default", "--arm-id", help="Content arm ID"),
+    plan_tier: str = typer.Option("pro", "--tier", help="Provider license tier (pro, free, etc.)"),
+    account_ref: str = typer.Option("acc_internal", "--account-ref", help="Account identity reference"),
+    terms_version: str = typer.Option("v1.0", "--terms", help="Terms of service version"),
+) -> None:
+    """Evaluate a candidate against quality, rights, and release gates."""
+    from quality_gate.cli import cli_evaluate
+
+    cli_evaluate(
+        candidate_id=candidate_id,
+        artifact_id=artifact_id,
+        audio_path=audio_path,
+        expected_duration=expected_duration,
+        track_spec_id=track_spec_id,
+        experiment_id=experiment_id,
+        content_arm_id=content_arm_id,
+        plan_tier=plan_tier,
+        account_ref=account_ref,
+        terms_version=terms_version,
+    )
+
+
+@qa_app.command(name="manifest")
+def qa_manifest(
+    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID to lookup manifest for"),
+) -> None:
+    """Retrieve the Seam C5 release manifest for a cleared candidate."""
+    from quality_gate.cli import cli_manifest
+
+    cli_manifest(candidate_id=candidate_id)
+
+
+@qa_app.command(name="resolve")
+def qa_resolve(
+    case_id: str = typer.Option(..., "--case-id", help="Quarantine case ID"),
+    resolution: str = typer.Option("CLEARED_BY_OVERRIDE", "--resolution", help="Resolution: CLEARED_BY_OVERRIDE or CONFIRMED_REJECTED"),
+    auditor_id: str = typer.Option("auditor_cli", "--auditor", help="Auditor identity"),
+    notes: str = typer.Option("", "--notes", help="Audit notes"),
+) -> None:
+    """Resolve an open quarantine case."""
+    from quality_gate.cli import cli_resolve
+
+    cli_resolve(
+        case_id=case_id,
+        resolution=resolution,
+        auditor_id=auditor_id,
+        notes=notes,
+    )
+
+
+@qa_app.command(name="serve")
+def qa_serve(host: str = "127.0.0.1", port: int = 8005) -> None:
+    """Serve the `/qa` API (P5)."""
+    from quality_gate.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@qa_app.command(name="smoke")
+def qa_smoke() -> None:
+    """Run the P5 dry-run smoke test."""
+    from quality_gate.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @media_app.command()

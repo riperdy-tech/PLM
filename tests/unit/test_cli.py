@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 STUB_CASES = [
-    ("qa", "review", "PHASE-P5"),
     ("media", "render", "PHASE-P6"),
     ("youtube", "publish", "PHASE-P7"),
     ("distribution", "submit", "PHASE-P8"),
@@ -67,9 +66,15 @@ def test_stub_commands_exit_nonzero_with_the_phase_message(
 
 def test_stub_cases_cover_every_registered_group() -> None:
     # P1's market group is implemented (P1.11), P2's ar group is implemented (P2.14),
-    # P3's experiments group is implemented (P3.11), and P4's music group is implemented (P4.13),
-    # so none of them are stubs.
-    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {"market", "ar", "experiments", "music"}
+    # P3's experiments group is implemented (P3.11), P4's music group is implemented (P4.13),
+    # and P5's qa group is implemented (P5.14), so none of them are stubs.
+    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {
+        "market",
+        "ar",
+        "experiments",
+        "music",
+        "qa",
+    }
 
 
 def test_market_commands_are_implemented_not_stubs() -> None:
@@ -162,3 +167,14 @@ def test_migrate_failure_is_reported_without_a_traceback(
     assert result.exit_code == 1
     assert "simulated" in output
     assert "Traceback" not in output
+
+
+def test_qa_subcommands_are_registered_and_display_help() -> None:
+    res = runner.invoke(app, ["qa", "--help"])
+    assert res.exit_code == 0
+    assert "review" in res.output
+    assert "evaluate" in res.output
+    assert "manifest" in res.output
+    assert "resolve" in res.output
+    assert "serve" in res.output
+    assert "smoke" in res.output
