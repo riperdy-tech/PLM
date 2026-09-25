@@ -268,7 +268,7 @@ not emit.
   `duration_range`; `provider_policy` from the experiment's provider constraints.
 - P4 must reject only what P4 §7 says it rejects — no extra strictness.
 
-**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **pending**.
+**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists** (producer half shipped by P3.7).
 
 ---
 
