@@ -74,63 +74,65 @@
 
 ## Tasks & Implementation Sequence
 
-### Task P3.1: Domain Contracts & 21-Dimension Content Genome
-- Define `domain/enums.py` and `domain/genome.py`.
-- Implement canonical 21 dimensions with types, validation, and constraint types (`HARD`, `SOFT`, `FREE`).
-- Unit tests: `tests/unit/experiments/test_domain_genome.py`.
+### Task P3.1: Domain Contracts & 21-Dimension Content Genome [DONE - commit `6910828`]
+- Defined `domain/enums.py` and `domain/genome.py`.
+- Implemented canonical 21 dimensions with types, validation, and constraint types (`HARD`, `SOFT`, `FREE`).
+- Unit tests: `tests/unit/experiments/test_domain_genome.py` (5/5 PASS).
 
-### Task P3.2: Schema, Fingerprinting & Immutability Layer
-- Define `domain/experiment.py`, `domain/package.py`, `domain/measurement.py`.
-- Implement SHA256 genome fingerprinting and experiment variable hashing.
-- Unit tests: `tests/unit/experiments/test_domain_experiment.py`.
+### Task P3.2: Schema, Fingerprinting & Immutability Layer [DONE - commit `d2f936c`]
+- Defined `domain/experiment.py`, `domain/package.py`, `domain/fingerprint.py`.
+- Implemented SHA256 genome fingerprinting and experiment variable hashing.
+- Unit tests: `tests/unit/experiments/test_domain_experiment.py` (5/5 PASS).
 
-### Task P3.3: Database Migration & Repositories (`experiments` schema)
-- Create `migrations/versions/experiments/experiments_0009_initial_tables.py` (`down_revision="0008_ar_initial"`).
-- Implement `storage/models.py` for all 13 tables in schema `experiments`.
-- Implement `storage/repositories.py` with scoped session support.
-- Unit tests: `tests/unit/experiments/test_repositories.py`.
+### Task P3.3: Database Migration & Repositories (`experiments` schema) [DONE - commit `ad73fde`]
+- Created `migrations/versions/experiments/experiments_0009_initial_tables.py` (`down_revision="0008_ar_initial"`).
+- Implemented `storage/models.py` for all 13 tables in schema `experiments`.
+- Implemented `storage/repositories.py` with scoped session support.
+- Unit tests: `tests/unit/experiments/test_repositories.py` (4/4 PASS).
 
-### Task P3.4: P2 Directive Adapter & Seam C2 Consumer Gate
-- Implement `ingestion/p2_adapter.py`.
-- Ingest P2 `ProductionDirective` wire payload, validate C2 schema, map fields, enforce budget share ceiling.
-- Extend `tests/contract/test_c2_ar_to_experiments.py` with consumer-side assertions.
+### Task P3.4: P2 Directive Adapter & Seam C2 Consumer Gate [DONE - commit `2ffb89e`]
+- Implemented `ingestion/p2_adapter.py`.
+- Ingested P2 `ProductionDirective` wire payload, validated C2 schema, mapped fields, enforced budget share ceiling.
+- Extended `tests/contract/test_c2_ar_to_experiments.py` with consumer-side assertions (6/6 PASS).
 
-### Task P3.5: Genome Engine & Creative Latitude Envelopes
-- Implement `genome/engine.py`: template inheritance, constraint resolution, normalization, and creative latitude bounds.
-- Unit tests: `tests/unit/experiments/test_genome_engine.py`.
+### Task P3.5: Genome Engine & Creative Latitude Envelopes [DONE - commit `bfaa84b`]
+- Implemented `genome/engine.py`: template inheritance, constraint resolution, normalization, and creative latitude bounds.
+- Unit tests: `tests/unit/experiments/test_genome_engine.py` (4/4 PASS).
 
-### Task P3.6: Experiment Engine, Variables & Treatment Assignment
-- Implement `experiments/engine.py`: experiment creation, variable classification (`fixed`, `controlled`, `experimental`, `incidental`), treatment generation, and lifecycle state machine.
-- Unit tests: `tests/unit/experiments/test_experiment_engine.py`.
+### Task P3.6: Experiment Engine, Variables & Treatment Assignment [DONE - commit `8a652ec`]
+- Implemented `experiments/engine.py`: experiment creation, variable classification (`fixed`, `controlled`, `experimental`, `incidental`), treatment generation, and lifecycle state machine.
+- Unit tests: `tests/unit/experiments/test_experiment_engine.py` (3/3 PASS).
 
-### Task P3.7: Materializer & Downstream Specifications (Seam C3 Producer)
-- Implement `materialization/builder.py`: materialize `ContentPackage`, `TrackSpec`, `PlaylistSpec`, `VisualSpec`, `ThumbnailSpec`, `TitleSpec`.
-- Create seam contract test `tests/contract/test_c3_experiments_to_music.py` pinning the frozen C3 wire format for P4.
-- Unit tests: `tests/unit/experiments/test_materializer.py`.
+### Task P3.7: Materializer & Downstream Specifications (Seam C3 Producer) [DONE - commit `bb70ce7`]
+- Implemented `materialization/builder.py`: materialize `ContentPackage`, `TrackSpec`, `PlaylistSpec`, `VisualSpec`, `ThumbnailSpec`, `TitleSpec`.
+- Created seam contract test `tests/contract/test_c3_experiments_to_music.py` pinning the frozen C3 wire format for P4 (3/3 PASS).
+- Updated `docs/contracts/CONTRACT_REGISTRY.md` line 271 to `**exists**`.
+- Unit tests: `tests/unit/experiments/test_materializer.py` (2/2 PASS).
 
-### Task P3.8: Validation Engine (Contradiction, Duplicate & Budget Check)
-- Implement `validation/engine.py`: detect conflicting constraints, prevent duplicate experiment fingerprints, flag cross-treatment contamination, enforce budget limits.
-- Unit tests: `tests/unit/experiments/test_validation_engine.py`.
+### Task P3.8: Validation Engine (Contradiction, Duplicate & Budget Check) [DONE - commit `14be5d7`]
+- Implemented `validation/engine.py`: detect conflicting constraints, prevent duplicate experiment fingerprints, flag cross-treatment contamination, enforce budget limits.
+- Unit tests: `tests/unit/experiments/test_validation_engine.py` (4/4 PASS).
 
-### Task P3.9: Measurement Contract & Metric Registry
-- Implement `domain/measurement.py`: attribution windows, primary/secondary success metrics, cohort definitions.
-- Unit tests: `tests/unit/experiments/test_measurement_contract.py`.
+### Task P3.9: Measurement Contract & Metric Registry [DONE - commit `672e4b2`]
+- Implemented `domain/measurement.py`: attribution windows, primary/secondary success metrics, cohort definitions.
+- Unit tests: `tests/unit/experiments/test_measurement_contract.py` (3/3 PASS).
 
-### Task P3.10: API Surface & Service Token Auth (`/experiments/v1`)
-- Implement `api/routes.py`, `api/schemas.py`, `api/service_token.py`, `api/app.py`.
+### Task P3.10: API Surface & Service Token Auth (`/experiments/v1`) [DONE - commit `4de091b`]
+- Implemented `api/routes.py`, `api/schemas.py`, `api/service_token.py`, `api/app.py`.
 - Endpoints: `POST /experiments/v1/experiments`, `POST /experiments/v1/experiments/validate`, `POST /experiments/v1/experiments/{id}/materialize`, `GET /experiments/v1/packages/{id}`, `GET /experiments/v1/experiments/{id}`.
-- Unit tests: `tests/unit/experiments/test_api_endpoints.py`.
+- Unit tests: `tests/unit/experiments/test_api_endpoints.py` (4/4 PASS).
 
-### Task P3.11: Observability, Metrics & CLI Integration
-- Implement `observability/metrics.py`, `observability/events.py`, and `cli.py`.
-- Replace stub in `packages/plm_platform/cli.py` for `plm experiments ...`.
-- Unit tests: `tests/unit/experiments/test_cli.py`.
+### Task P3.11: Observability, Metrics & CLI Integration [DONE - commit `dcc9b9f`]
+- Implemented `observability/metrics.py`, `observability/logging.py`, and `cli.py`.
+- Replaced stub in `packages/plm_platform/cli.py` for `plm experiments ...`.
+- Unit tests: `tests/unit/experiments/test_cli.py` (5/5 PASS) and updated `tests/unit/test_cli.py` (24/24 PASS).
 
-### Task P3.12: Acceptance Scenarios AC-01–AC-15 & Invariant Tests
-- Implement `tests/unit/experiments/test_acceptance_scenarios.py` verifying all 15 scenarios from §83.
+### Task P3.12: Acceptance Scenarios AC-01–AC-15 & Invariant Tests [DONE - commit `283c398`]
+- Implemented `tests/unit/experiments/test_acceptance_scenarios.py` verifying all 15 scenarios from §83 (15/15 PASS).
 - Invariants: deterministic materialization, budget ceiling violations blocked, duplicate prevention, replication lineage.
 
-### Task P3.13: Controlled Production Dry-Run Smoke Test
-- Implement `acceptance/smoke.py` and `plm experiments smoke`.
+### Task P3.13: Controlled Production Dry-Run Smoke Test [DONE - commit `283c398`]
+- Implemented `acceptance/smoke.py` and `plm experiments smoke`.
 - Run synthetic end-to-end cycle: P2 directive → P3 experiment → validate → materialize → package retrieval.
-- Gate verification: full test suite, ruff clean, mypy strict clean.
+- Unit tests: `tests/unit/experiments/test_smoke.py` (4/4 PASS).
+- Gate verification: full test suite, ruff clean, mypy strict clean (171 files checked, 0 errors).
