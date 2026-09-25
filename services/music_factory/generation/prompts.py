@@ -7,8 +7,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from ..ingestion.p3_adapter import AdaptedTrackSpec
-
 __all__ = ["CompiledPrompt", "build_generation_prompt", "compute_prompt_hash"]
 
 

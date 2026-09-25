@@ -6,7 +6,7 @@ import io
 import math
 import struct
 import wave
-from datetime import UTC, datetime
+from typing import Any
 
 from ..domain.enums import AttemptStatus
 from ..domain.models import GenerationRequest, GenerationResponse
@@ -101,3 +101,16 @@ class MockMusicProvider:
             actual_duration_seconds=duration,
             cost_credits=1.0,
         )
+
+    def check_health(self) -> bool:
+        """Mock provider is always healthy in-process."""
+        return True
+
+    def get_quota_status(self) -> dict[str, Any]:
+        """Mock provider has infinite quota."""
+        return {
+            "provider_id": self.provider_id,
+            "credits_remaining": 999999,
+            "quota_exhausted": False,
+        }
+

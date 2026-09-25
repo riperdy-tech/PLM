@@ -15,7 +15,6 @@ from ..domain.enums import (
     AttemptType,
     CandidateStatus,
     CommercialUseStatus,
-    CostType,
     PlanStatus,
 )
 from ..domain.models import (

@@ -5,13 +5,13 @@ from __future__ import annotations
 import uuid
 
 __all__ = [
-    "deterministic_id",
-    "plan_id",
+    "artifact_id",
     "attempt_id",
     "candidate_id",
-    "artifact_id",
-    "variant_id",
+    "deterministic_id",
+    "plan_id",
     "rights_snapshot_id",
+    "variant_id",
 ]
 
 _PLM_MUSIC_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "music.factory.plm.internal")

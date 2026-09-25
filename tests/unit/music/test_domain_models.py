@@ -4,16 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-from pydantic import ValidationError
-
 from services.music_factory.domain.enums import (
     ArtifactType,
     AttemptStatus,
     AttemptType,
     CandidateStatus,
     CommercialUseStatus,
-    CostType,
     PlanStatus,
 )
 from services.music_factory.domain.ids import (
@@ -22,18 +18,12 @@ from services.music_factory.domain.ids import (
     candidate_id,
     plan_id,
     rights_snapshot_id,
-    variant_id,
 )
 from services.music_factory.domain.models import (
     AudioArtifact,
-    CostRecord,
-    CreativeVariant,
     GeneratedCandidate,
     GenerationAttempt,
     GenerationPlan,
-    GenerationRequest,
-    GenerationResponse,
-    MeasuredAudio,
     ProviderCapabilities,
     RightsSnapshot,
 )

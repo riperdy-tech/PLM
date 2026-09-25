@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from services.music_factory.generation.prompts import (
     build_generation_prompt,
-    compute_prompt_hash,
 )
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 

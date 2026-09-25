@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..domain.models import ProviderCapabilities
 
 __all__ = [
@@ -87,7 +85,7 @@ def select_provider_and_model(
     """Select the first matching registered provider and model satisfying requirements."""
     allowed = set(allowed_providers) if allowed_providers else None
 
-    for key, cap in _REGISTRY.items():
+    for cap in _REGISTRY.values():
         if allowed is not None and cap.provider_id not in allowed:
             continue
         if requested_duration > cap.max_duration_seconds:
