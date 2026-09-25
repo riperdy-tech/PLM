@@ -125,3 +125,21 @@ def test_producer_track_spec_validates_against_consumer_schema() -> None:
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
     assert contract_registry.exists
     contract_registry.require_entry(REGISTRY_ENTRY)
+
+
+def test_p4_adapter_ingests_real_p3_track_spec() -> None:
+    from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+
+    exp, trt, genome = _sample_experiment()
+    package = materialize_package(exp, trt, genome, budget_envelope=100.0, track_count=3)
+    track_spec = package.track_specs[0]
+    payload = track_spec.model_dump(mode="json")
+
+    adapted = adapt_track_spec(payload)
+    assert adapted.track_spec_id == track_spec.track_spec_id
+    assert adapted.experiment_id == exp.experiment_id
+    assert adapted.content_arm_id == exp.content_arm_id
+    assert adapted.genre == "rnb"
+    assert adapted.vocal_mode == "vocal"
+    assert adapted.requested_duration == 190
+    assert adapted.budget_limit > 0.0
