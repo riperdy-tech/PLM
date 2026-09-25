@@ -24,19 +24,40 @@ from tests.support.contract import SeamRegistry, assert_seam_payload
 REGISTRY_ENTRY = "C1 · PHASE-P1 → PHASE-P2"
 
 REGISTRY_FIELDS: tuple[str, ...] = (
-    "arm_id", "market_opportunity_score", "confidence", "as_of", "taxonomy", "components",
-    "evidence", "score_version",
+    "arm_id",
+    "market_opportunity_score",
+    "confidence",
+    "as_of",
+    "taxonomy",
+    "components",
+    "evidence",
+    "score_version",
 )
 REGISTRY_TAXONOMY_FIELDS: tuple[str, ...] = (
-    "genre", "subgenre", "mood", "use_case", "language", "vocal_mode", "duration_bucket",
-    "visual_world", "title_archetype",
+    "genre",
+    "subgenre",
+    "mood",
+    "use_case",
+    "language",
+    "vocal_mode",
+    "duration_bucket",
+    "visual_world",
+    "title_archetype",
 )
 REGISTRY_COMPONENT_FIELDS: tuple[str, ...] = (
-    "demand", "growth", "competitor_velocity", "competition", "audience_quality",
-    "cross_platform", "production_fit",
+    "demand",
+    "growth",
+    "competitor_velocity",
+    "competition",
+    "audience_quality",
+    "cross_platform",
+    "production_fit",
 )
-REGISTRY_EVIDENCE_FIELDS: tuple[str, ...] = ("observation_count", "source_count",
-                                             "top_observation_ids")
+REGISTRY_EVIDENCE_FIELDS: tuple[str, ...] = (
+    "observation_count",
+    "source_count",
+    "top_observation_ids",
+)
 
 
 def test_consumer_schema_matches_the_registry_field_lists() -> None:
@@ -55,15 +76,20 @@ def test_real_producer_payload_validates_against_the_consumer_schema() -> None:
         )
         payload = json.loads(json.dumps(body["items"][0]))
         assert "freshness" not in payload and "freshness_seconds" not in payload
-        assert_seam_payload(payload, OpportunityPayload, seam=REGISTRY_ENTRY,
-                            producer="GET /market/v1/opportunities",
-                            consumer="autonomous_ar.ingestion.p1_adapter.OpportunityPayload")
+        assert_seam_payload(
+            payload,
+            OpportunityPayload,
+            seam=REGISTRY_ENTRY,
+            producer="GET /market/v1/opportunities",
+            consumer="autonomous_ar.ingestion.p1_adapter.OpportunityPayload",
+        )
 
 
 def test_adapter_consumes_only_frozen_fields() -> None:
     with open_c1_client() as api:
-        client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
-                          transport=SyncASGITransport(api.app))
+        client = P1Client(
+            base_url="http://p1.test", token=SEAM_TOKEN, transport=SyncASGITransport(api.app)
+        )
         page = client.fetch_opportunities(limit=1)
         arm = adapt_opportunity(page.items[0], now=page.as_of)
         assert "freshness_seconds" not in page.items[0].model_dump()

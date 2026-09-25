@@ -549,10 +549,42 @@ def experiments_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@music_app.command()
-def generate() -> NoReturn:
-    """Generate P4 music candidates (registered stub until PHASE-P4)."""
-    _not_implemented("PHASE-P4")
+@music_app.command(name="generate")
+def music_generate(
+    spec_path: str = typer.Option(..., "--spec", "-s", help="Path to JSON file containing TrackSpec"),
+    provider: str = typer.Option("mock", "--provider", "-p", help="Provider to use (mock, suno, elevenlabs)"),
+) -> None:
+    """Generate P4 music candidates from a TrackSpec JSON file."""
+    from music_factory.cli import cli_generate
+
+    cli_generate(spec_path=spec_path, provider=provider)
+
+
+@music_app.command(name="providers")
+def music_providers() -> None:
+    """List registered AI music generation providers."""
+    from music_factory.cli import cli_providers
+
+    cli_providers()
+
+
+@music_app.command(name="serve")
+def music_serve(host: str = "127.0.0.1", port: int = 8004) -> None:
+    """Serve the `/music` API (P4)."""
+    from music_factory.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@music_app.command(name="smoke")
+def music_smoke() -> None:
+    """Run the P4 dry-run smoke test."""
+    from music_factory.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @qa_app.command()

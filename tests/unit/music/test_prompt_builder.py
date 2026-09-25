@@ -14,7 +14,11 @@ SAMPLE_C3_SPEC = {
     "content_arm_id": "arm_01",
     "brand_profile_id": "neon_seoul",
     "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-    "bounded_preferences": {"bpm": 84, "mood": ["melancholic", "intimate"], "use_case": ["late_night_drive"]},
+    "bounded_preferences": {
+        "bpm": 84,
+        "mood": ["melancholic", "intimate"],
+        "use_case": ["late_night_drive"],
+    },
     "creative_latitude": {},
     "lyric_spec": {},
     "vocal_spec": {"vocal_mode": "vocal"},

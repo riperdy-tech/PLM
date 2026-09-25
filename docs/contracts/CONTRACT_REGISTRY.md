@@ -326,7 +326,7 @@ reconstructing generation history from raw provider logs.
 - Must land before P5.3 starts; without these, P5 §117 defaults every candidate
   to quarantine.
 
-**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **pending**.
+**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**.
 
 ---
 

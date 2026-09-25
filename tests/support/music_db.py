@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
+
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
 
 from services.music_factory.storage.models import MUSIC_METADATA
 
-__all__ = ["create_music_engine", "music_session"]
+__all__ = ["create_music_engine", "music_db_session", "music_session"]
 
 
 def create_music_engine(*, static_pool: bool = False) -> sa.Engine:
@@ -29,3 +32,20 @@ def create_music_engine(*, static_pool: bool = False) -> sa.Engine:
 def music_session(engine: sa.Engine) -> Session:
     """A session bound to the engine."""
     return sessionmaker(bind=engine)()
+
+
+@contextmanager
+def music_db_session() -> Generator[Session, None, None]:
+    """Provide a transactional in-memory music SQLite session."""
+    engine = create_music_engine(static_pool=True)
+    session = music_session(engine)
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+        engine.dispose()
+

@@ -29,13 +29,32 @@ from tests.support.contract import SeamRegistry, assert_seam_payload
 REGISTRY_ENTRY = "C2 · PHASE-P2 → PHASE-P3"
 
 REGISTRY_FIELDS: tuple[str, ...] = (
-    "directive_id", "decision_id", "arm_id", "allocation_type", "priority", "quantity",
-    "brief", "expected_value", "uncertainty", "budget_limit", "market_context",
-    "selection_reason", "directive_version", "policy_version", "expires_at",
-    "exploration_fraction", "value_model",
+    "directive_id",
+    "decision_id",
+    "arm_id",
+    "allocation_type",
+    "priority",
+    "quantity",
+    "brief",
+    "expected_value",
+    "uncertainty",
+    "budget_limit",
+    "market_context",
+    "selection_reason",
+    "directive_version",
+    "policy_version",
+    "expires_at",
+    "exploration_fraction",
+    "value_model",
 )
 REGISTRY_BRIEF_FIELDS: tuple[str, ...] = (
-    "genre", "mood", "use_case", "language", "vocal_mode", "duration_bucket", "visual_world",
+    "genre",
+    "mood",
+    "use_case",
+    "language",
+    "vocal_mode",
+    "duration_bucket",
+    "visual_world",
 )
 
 
@@ -93,28 +112,45 @@ def producer_directive() -> ProductionDirective:
     now = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
     arm = ContentArm(
         arm_id="rnb_late_night_drive_english_vocal_45_75m",
-        dimensions=ArmDimensions(genre="rnb", moods=("melancholic", "dreamy"),
-                                 use_cases=("late_night_drive",), language="english",
-                                 vocal_mode="vocal", duration_bucket="45_75m",
-                                 visual_world="rainy_asian_city"),
-        p1_score=82.0, p1_confidence=0.7,
-        component_scores={name: 60.0 for name in
-                          ("demand", "growth", "competitor_velocity", "competition",
-                           "audience_quality", "cross_platform", "production_fit")},
-        observation_count=6, source_count=2, as_of=now, score_version="p1-v1",
+        dimensions=ArmDimensions(
+            genre="rnb",
+            moods=("melancholic", "dreamy"),
+            use_cases=("late_night_drive",),
+            language="english",
+            vocal_mode="vocal",
+            duration_bucket="45_75m",
+            visual_world="rainy_asian_city",
+        ),
+        p1_score=82.0,
+        p1_confidence=0.7,
+        component_scores={
+            name: 60.0
+            for name in (
+                "demand",
+                "growth",
+                "competitor_velocity",
+                "competition",
+                "audience_quality",
+                "cross_platform",
+                "production_fit",
+            )
+        },
+        observation_count=6,
+        source_count=2,
+        as_of=now,
+        score_version="p1-v1",
         freshness_seconds=3600.0,
     )
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
-                                   created_at=now)
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul", created_at=now)
         result = run_allocation_cycle(
             session,
-            CycleRequest(brand_id="neon_seoul", as_of=now, slot_count=1, budget=1.0,
-                         policy_version="p2-v1"),
-            settings=load_ar_settings(), market=MarketSnapshot(arms=(arm,), as_of=now,
-                                                               source="live",
-                                                               score_version="p1-v1"),
+            CycleRequest(
+                brand_id="neon_seoul", as_of=now, slot_count=1, budget=1.0, policy_version="p2-v1"
+            ),
+            settings=load_ar_settings(),
+            market=MarketSnapshot(arms=(arm,), as_of=now, source="live", score_version="p1-v1"),
             now=now,
         )
     return result.directives[0]
@@ -128,9 +164,13 @@ def test_declared_fields_match_the_registry_field_list() -> None:
 
 def test_producer_payload_validates_against_the_consumer_schema() -> None:
     payload = json.loads(json.dumps(producer_directive().to_wire()))
-    assert_seam_payload(payload, ConsumerSchema, seam=REGISTRY_ENTRY,
-                        producer="ProductionDirective.to_wire",
-                        consumer="P3 adapter schema (registry C2)")
+    assert_seam_payload(
+        payload,
+        ConsumerSchema,
+        seam=REGISTRY_ENTRY,
+        producer="ProductionDirective.to_wire",
+        consumer="P3 adapter schema (registry C2)",
+    )
 
 
 def test_frozen_vocabulary_and_rename_direction() -> None:
@@ -140,8 +180,12 @@ def test_frozen_vocabulary_and_rename_direction() -> None:
     assert to_exploration_level(AllocationType.RADICAL_EXPLORE) == "radical_explore"
     # P3's internal names are the consumer's, never the producer's (R4): if either rename
     # ever appears on P2's wire, the seam has been broken from the wrong side.
-    for consumer_only in ("requested_experiment_count", "exploration_level",
-                          "production_deadline", "required_constraints"):
+    for consumer_only in (
+        "requested_experiment_count",
+        "exploration_level",
+        "production_deadline",
+        "required_constraints",
+    ):
         assert consumer_only not in DIRECTIVE_WIRE_FIELDS
 
 
@@ -190,4 +234,3 @@ def test_p3_adapter_rejects_missing_identity_or_invalid_budget() -> None:
     bad_alloc["allocation_type"] = "unknown_type"
     with pytest.raises(DirectiveValidationError, match="allocation_type"):
         adapt_directive(bad_alloc)
-

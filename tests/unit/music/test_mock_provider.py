@@ -43,7 +43,9 @@ def test_mock_provider_success_flow() -> None:
         seed=1,
     )
     resp = provider.generate(req)
-    assert resp.status_code if hasattr(resp, "status_code") else resp.status == AttemptStatus.SUCCEEDED
+    assert (
+        resp.status_code if hasattr(resp, "status_code") else resp.status == AttemptStatus.SUCCEEDED
+    )
     assert resp.audio_data is not None
     assert len(resp.audio_data) > 1000
     assert resp.mime_type == "audio/wav"

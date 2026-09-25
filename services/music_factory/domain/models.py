@@ -40,6 +40,11 @@ class MeasuredAudio(BaseModel):
     duration_seconds: float = Field(ge=0.0)
     sample_rate: int = Field(ge=8000)
     channels: int = Field(ge=1, le=8)
+    codec: str = "pcm_s16le"
+    byte_size: int = Field(default=0, ge=0)
+    sha256: str = ""
+    mime_type: str = "audio/wav"
+    probe_version: str = "probe-v1"
 
 
 class ProviderCapabilities(BaseModel):

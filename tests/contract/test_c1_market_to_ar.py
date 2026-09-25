@@ -25,19 +25,39 @@ from tests.support.contract import SeamRegistry, assert_seam_payload
 REGISTRY_ENTRY = "C1 · PHASE-P1 → PHASE-P2"
 
 REGISTRY_FIELDS: tuple[str, ...] = (
-    "arm_id", "market_opportunity_score", "confidence", "as_of", "taxonomy",
-    "components", "evidence", "score_version",
+    "arm_id",
+    "market_opportunity_score",
+    "confidence",
+    "as_of",
+    "taxonomy",
+    "components",
+    "evidence",
+    "score_version",
 )
 REGISTRY_TAXONOMY_FIELDS: tuple[str, ...] = (
-    "genre", "subgenre", "mood", "use_case", "language", "vocal_mode", "duration_bucket",
-    "visual_world", "title_archetype",
+    "genre",
+    "subgenre",
+    "mood",
+    "use_case",
+    "language",
+    "vocal_mode",
+    "duration_bucket",
+    "visual_world",
+    "title_archetype",
 )
 REGISTRY_COMPONENT_FIELDS: tuple[str, ...] = (
-    "demand", "growth", "competitor_velocity", "competition", "audience_quality",
-    "cross_platform", "production_fit",
+    "demand",
+    "growth",
+    "competitor_velocity",
+    "competition",
+    "audience_quality",
+    "cross_platform",
+    "production_fit",
 )
 REGISTRY_EVIDENCE_FIELDS: tuple[str, ...] = (
-    "observation_count", "source_count", "top_observation_ids",
+    "observation_count",
+    "source_count",
+    "top_observation_ids",
 )
 
 
@@ -110,8 +130,9 @@ def test_producer_payload_validates_against_the_consumer_schema(c1_api_client) -
     body = response.json()
     assert set(body) == {"items", "next_cursor", "as_of", "score_version"}
     payload = json.loads(json.dumps(body["items"][0]))
-    assert_seam_payload(payload, ConsumerSchema, seam=REGISTRY_ENTRY,
-                        producer="GET /market/v1/opportunities")
+    assert_seam_payload(
+        payload, ConsumerSchema, seam=REGISTRY_ENTRY, producer="GET /market/v1/opportunities"
+    )
 
 
 def test_freshness_is_derivable_from_as_of_and_never_a_field(c1_api_client) -> None:

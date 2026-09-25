@@ -133,8 +133,7 @@ def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
         if line.startswith("## C")
     ]
     assert entry_ids == [f"C{n}" for n in range(1, 11)], (
-        f"the registry must define exactly the ten seams C1..C10, in order; "
-        f"found {entry_ids}"
+        f"the registry must define exactly the ten seams C1..C10, in order; found {entry_ids}"
     )
     if REGISTRY_ENTRY != TEMPLATE_PLACEHOLDER:
         contract_registry.require_entry(REGISTRY_ENTRY)

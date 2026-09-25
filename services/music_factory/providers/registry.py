@@ -7,6 +7,7 @@ from ..domain.models import ProviderCapabilities
 __all__ = [
     "DEFAULT_PROVIDER_CAPABILITIES",
     "get_capabilities",
+    "list_providers",
     "list_registered_providers",
     "register_provider",
     "select_provider_and_model",
@@ -104,3 +105,6 @@ def select_provider_and_model(
         f"No registered provider satisfies genre='{genre}', vocal_mode='{vocal_mode}', "
         f"duration={requested_duration}, allowed={allowed_providers}"
     )
+
+
+list_providers = list_registered_providers

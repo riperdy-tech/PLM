@@ -113,4 +113,3 @@ class MockMusicProvider:
             "credits_remaining": 999999,
             "quota_exhausted": False,
         }
-

@@ -78,9 +78,13 @@ def insert_generation_plan(session: Session, plan: GenerationPlan) -> None:
 
 
 def get_generation_plan(session: Session, plan_id: str) -> GenerationPlan | None:
-    row = session.execute(
-        sa.select(generation_plans_table).where(generation_plans_table.c.id == plan_id)
-    ).mappings().one_or_none()
+    row = (
+        session.execute(
+            sa.select(generation_plans_table).where(generation_plans_table.c.id == plan_id)
+        )
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     return GenerationPlan(
@@ -134,11 +138,15 @@ def insert_creative_variant(session: Session, variant: CreativeVariant) -> None:
 
 
 def list_creative_variants(session: Session, plan_id: str) -> list[CreativeVariant]:
-    rows = session.execute(
-        sa.select(creative_variants_table)
-        .where(creative_variants_table.c.generation_plan_id == plan_id)
-        .order_by(creative_variants_table.c.created_at)
-    ).mappings().all()
+    rows = (
+        session.execute(
+            sa.select(creative_variants_table)
+            .where(creative_variants_table.c.generation_plan_id == plan_id)
+            .order_by(creative_variants_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
     return [
         CreativeVariant(
             variant_id=r["id"],
@@ -181,9 +189,13 @@ def insert_generation_attempt(session: Session, attempt: GenerationAttempt) -> N
 
 
 def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttempt | None:
-    row = session.execute(
-        sa.select(generation_attempts_table).where(generation_attempts_table.c.id == attempt_id)
-    ).mappings().one_or_none()
+    row = (
+        session.execute(
+            sa.select(generation_attempts_table).where(generation_attempts_table.c.id == attempt_id)
+        )
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     return GenerationAttempt(
@@ -210,11 +222,15 @@ def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttem
 
 
 def list_generation_attempts(session: Session, plan_id: str) -> list[GenerationAttempt]:
-    rows = session.execute(
-        sa.select(generation_attempts_table)
-        .where(generation_attempts_table.c.generation_plan_id == plan_id)
-        .order_by(generation_attempts_table.c.started_at)
-    ).mappings().all()
+    rows = (
+        session.execute(
+            sa.select(generation_attempts_table)
+            .where(generation_attempts_table.c.generation_plan_id == plan_id)
+            .order_by(generation_attempts_table.c.started_at)
+        )
+        .mappings()
+        .all()
+    )
     return [
         GenerationAttempt(
             attempt_id=r["id"],
@@ -259,11 +275,15 @@ def insert_candidate(session: Session, candidate: GeneratedCandidate) -> None:
 
 
 def get_candidate(session: Session, candidate_id: str) -> GeneratedCandidate | None:
-    row = session.execute(
-        sa.select(generated_candidates_table).where(
-            generated_candidates_table.c.id == candidate_id
+    row = (
+        session.execute(
+            sa.select(generated_candidates_table).where(
+                generated_candidates_table.c.id == candidate_id
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     return GeneratedCandidate(
@@ -281,11 +301,15 @@ def get_candidate(session: Session, candidate_id: str) -> GeneratedCandidate | N
 
 
 def list_candidates_by_track(session: Session, track_spec_id: str) -> list[GeneratedCandidate]:
-    rows = session.execute(
-        sa.select(generated_candidates_table)
-        .where(generated_candidates_table.c.track_spec_id == track_spec_id)
-        .order_by(generated_candidates_table.c.created_at)
-    ).mappings().all()
+    rows = (
+        session.execute(
+            sa.select(generated_candidates_table)
+            .where(generated_candidates_table.c.track_spec_id == track_spec_id)
+            .order_by(generated_candidates_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
     return [
         GeneratedCandidate(
             candidate_id=r["id"],
@@ -303,9 +327,7 @@ def list_candidates_by_track(session: Session, track_spec_id: str) -> list[Gener
     ]
 
 
-def update_candidate_status(
-    session: Session, candidate_id: str, status: CandidateStatus
-) -> None:
+def update_candidate_status(session: Session, candidate_id: str, status: CandidateStatus) -> None:
     now = datetime.now(UTC)
     session.execute(
         sa.update(generated_candidates_table)
@@ -335,9 +357,13 @@ def insert_audio_artifact(session: Session, artifact: AudioArtifact) -> None:
 
 
 def get_audio_artifact(session: Session, artifact_id: str) -> AudioArtifact | None:
-    row = session.execute(
-        sa.select(audio_artifacts_table).where(audio_artifacts_table.c.id == artifact_id)
-    ).mappings().one_or_none()
+    row = (
+        session.execute(
+            sa.select(audio_artifacts_table).where(audio_artifacts_table.c.id == artifact_id)
+        )
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     return AudioArtifact(
@@ -358,11 +384,15 @@ def get_audio_artifact(session: Session, artifact_id: str) -> AudioArtifact | No
 
 
 def list_artifacts_for_candidate(session: Session, candidate_id: str) -> list[AudioArtifact]:
-    rows = session.execute(
-        sa.select(audio_artifacts_table)
-        .where(audio_artifacts_table.c.candidate_id == candidate_id)
-        .order_by(audio_artifacts_table.c.created_at)
-    ).mappings().all()
+    rows = (
+        session.execute(
+            sa.select(audio_artifacts_table)
+            .where(audio_artifacts_table.c.candidate_id == candidate_id)
+            .order_by(audio_artifacts_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
     return [
         AudioArtifact(
             artifact_id=r["id"],
@@ -404,9 +434,15 @@ def insert_rights_snapshot(session: Session, snapshot: RightsSnapshot) -> None:
 
 
 def get_rights_snapshot_for_attempt(session: Session, attempt_id: str) -> RightsSnapshot | None:
-    row = session.execute(
-        sa.select(rights_snapshots_table).where(rights_snapshots_table.c.attempt_id == attempt_id)
-    ).mappings().one_or_none()
+    row = (
+        session.execute(
+            sa.select(rights_snapshots_table).where(
+                rights_snapshots_table.c.attempt_id == attempt_id
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     return RightsSnapshot(

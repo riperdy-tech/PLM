@@ -12,73 +12,73 @@
 
 ## Tasks & Implementation Sequence
 
-- [ ] ### Task P4.1: Domain Contracts & Enums
+- [x] ### Task P4.1: Domain Contracts & Enums
   - Define `services/music_factory/domain/enums.py` and `models.py`.
   - Implement `ProviderCapabilities`, `GenerationRequest`, `GenerationResponse`, `GenerationPlan`, `GenerationAttempt`, `GeneratedCandidate`, `AudioArtifact`, `RightsSnapshot`, `CostRecord`, `MeasuredAudio`.
   - Implement `storage/ids.py` for deterministic uuid5 ID generation.
   - Unit tests: `tests/unit/music/test_domain_models.py`.
 
-- [ ] ### Task P4.2: Persistence & Repositories (`music` schema)
+- [x] ### Task P4.2: Persistence & Repositories (`music` schema)
   - Create Alembic migration `migrations/versions/music/music_0010_initial_tables.py` (`down_revision="0009_experiments_initial"`).
   - Implement `storage/models.py` across all 10 tables in schema `music` (including R6 fields on `rights_snapshots`).
   - Implement `storage/repositories.py` with scoped session support.
   - SQLite harness: `tests/support/music_db.py`.
   - Unit tests: `tests/unit/music/test_repositories.py`.
 
-- [ ] ### Task P4.3: Provider Registry & Capability Discovery
+- [x] ### Task P4.3: Provider Registry & Capability Discovery
   - Implement `providers/registry.py`: provider/model catalog, capability filtering matching `TrackSpec`.
   - Unit tests: `tests/unit/music/test_provider_registry.py`.
 
-- [ ] ### Task P4.4: Mock Provider (Deterministic Audio Synthesis)
+- [x] ### Task P4.4: Mock Provider (Deterministic Audio Synthesis)
   - Implement `providers/mock_provider.py`: generates valid WAV audio headers and deterministic waveforms.
   - Unit tests: `tests/unit/music/test_mock_provider.py`.
 
-- [ ] ### Task P4.5: P3 Integration (C3 Consumer Seam)
+- [x] ### Task P4.5: P3 Integration (C3 Consumer Seam)
   - Implement `ingestion/p3_adapter.py`: ingest P3 `TrackSpec`, validate constraints, derive candidate target and budget limit.
   - Extend `tests/contract/test_c3_experiments_to_music.py` with consumer assertions.
 
-- [ ] ### Task P4.6: Prompt Builder & Provenance
+- [x] ### Task P4.6: Prompt Builder & Provenance
   - Implement `generation/prompts.py`: translates `TrackSpec` into provider prompts, style tags, negative tags, and variant deltas with SHA256 prompt hashing.
   - Unit tests: `tests/unit/music/test_prompt_builder.py`.
 
-- [ ] ### Task P4.7: Generation Planner & Batch Control
+- [x] ### Task P4.7: Generation Planner & Batch Control
   - Implement `generation/planner.py`: builds `GenerationPlan` with creative variants, retry limits, budget enforcement, and stopping rules.
   - Unit tests: `tests/unit/music/test_generation_planner.py`.
 
-- [ ] ### Task P4.8: Provider Protocol & Adapters
+- [x] ### Task P4.8: Provider Protocol & Adapters
   - Implement `providers/protocol.py`, `providers/adapters.py` (Mock, Suno, ElevenLabs).
   - Unit tests: `tests/unit/music/test_provider_adapters.py`.
 
-- [ ] ### Task P4.9: Durable Generation Engine
+- [x] ### Task P4.9: Durable Generation Engine
   - Implement `generation/engine.py`: executes generation plan, orchestrates provider attempts, tracks cost and credits.
   - Unit tests: `tests/unit/music/test_generation_engine.py`.
 
-- [ ] ### Task P4.10: Artifact Intake & Storage
+- [x] ### Task P4.10: Artifact Intake & Storage
   - Implement `storage/artifacts.py`: downloads/intakes audio bytes, writes to MinIO under `music/`, calculates SHA256 checksum, extracts duration and channel count.
   - Unit tests: `tests/unit/music/test_artifact_storage.py`.
 
-- [ ] ### Task P4.11: Candidate Bank
+- [x] ### Task P4.11: Candidate Bank
   - Implement `candidates/bank.py`: candidate lifecycle management, state transitions, retrieval by track spec or experiment.
   - Unit tests: `tests/unit/music/test_candidate_bank.py`.
 
-- [ ] ### Task P4.12: P5 Event Contract & Seam C4 Producer Gate
+- [x] ### Task P4.12: P5 Event Contract & Seam C4 Producer Gate
   - Implement `api/events.py` for `music_candidate_ready_for_p5` event.
   - Implement C4 read endpoints: attempts, license, artifacts, provenance (Ruling R6).
   - Create `tests/contract/test_c4_music_to_qa.py` and register seam as `**exists**` in `docs/contracts/CONTRACT_REGISTRY.md`.
 
-- [ ] ### Task P4.13: API Surface, Observability, Metrics & CLI
+- [x] ### Task P4.13: API Surface, Observability, Metrics & CLI
   - Implement `api/app.py`, `api/routes.py`, `api/service_token.py`.
   - Implement `observability/metrics.py`, `observability/logging.py`.
   - Implement `cli.py` and register `plm music ...` in `packages/plm_platform/cli.py`.
   - Update `tests/unit/test_cli.py` removing `music` from stubs.
   - Unit tests: `tests/unit/music/test_cli.py`.
 
-- [ ] ### Task P4.14: Acceptance Scenarios & Invariant Tests
+- [x] ### Task P4.14: Acceptance Scenarios & Invariant Tests
   - Implement `tests/unit/music/test_acceptance_scenarios.py` verifying P4 §111 ACs.
 
-- [ ] ### Task P4.15: Controlled Production Dry-Run Smoke Test
+- [x] ### Task P4.15: Controlled Production Dry-Run Smoke Test
   - Implement `acceptance/smoke.py` and `plm music smoke`.
   - Unit tests: `tests/unit/music/test_smoke.py`.
 
-- [ ] ### Task P4.16: Autonomous-Mode Gate & Full Verification
+- [x] ### Task P4.16: Autonomous-Mode Gate & Full Verification
   - Verification: `pytest`, `ruff check .`, `mypy packages services`.
