@@ -241,6 +241,24 @@ def get_experiment(session: Session, experiment_id: str) -> Experiment | None:
     )
 
 
+def list_experiments(
+    session: Session, limit: int = 50, offset: int = 0
+) -> list[Experiment]:
+    """List experiments ordered by creation time descending."""
+    exp_ids = session.execute(
+        sa.select(experiments_table.c.experiment_id)
+        .order_by(experiments_table.c.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    ).scalars().all()
+    results: list[Experiment] = []
+    for eid in exp_ids:
+        exp = get_experiment(session, str(eid))
+        if exp is not None:
+            results.append(exp)
+    return results
+
+
 def update_experiment_status(
     session: Session, experiment_id: str, status: ExperimentStatus
 ) -> None:
