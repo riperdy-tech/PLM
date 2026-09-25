@@ -84,7 +84,7 @@ def frozen_time(start: str | datetime = DEFAULT_START) -> Iterator[FrozenClock]:
             ...                       # the 24h window boundary, exactly
     """
     with freeze_time(start) as factory:
-        yield FrozenClock(factory)
+        yield FrozenClock(factory)  # type: ignore[arg-type]
 
 
 def seed(value: int = DEFAULT_SEED) -> int:
@@ -103,7 +103,7 @@ def seed(value: int = DEFAULT_SEED) -> int:
 
 def _numpy() -> ModuleType | None:
     try:
-        import numpy
+        import numpy  # type: ignore[import-not-found]
     except ImportError:
         return None
-    return numpy
+    return numpy  # type: ignore[no-any-return]
