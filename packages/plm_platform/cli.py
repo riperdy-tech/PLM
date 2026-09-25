@@ -482,10 +482,71 @@ def smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@experiments_app.command()
-def run() -> NoReturn:
-    """Run a P3 experiment (registered stub until PHASE-P3)."""
-    _not_implemented("PHASE-P3")
+@experiments_app.command(name="list")
+def experiments_list(limit: int = 20) -> None:
+    """List recent experiments (P3)."""
+    from experiments.cli import list_experiments
+
+    typer.echo(list_experiments(limit=limit))
+
+
+@experiments_app.command(name="show")
+def experiments_show(experiment_id: str) -> None:
+    """Show one experiment's definition (P3)."""
+    from experiments.cli import show_experiment
+
+    typer.echo(show_experiment(experiment_id))
+
+
+@experiments_app.command(name="validate")
+def experiments_validate(experiment_id: str) -> None:
+    """Run preflight validation on an experiment (P3)."""
+    from experiments.cli import validate_experiment_cli
+
+    typer.echo(validate_experiment_cli(experiment_id))
+
+
+@experiments_app.command(name="materialize")
+def experiments_materialize(
+    experiment_id: str,
+    treatment_id: str,
+    brand_id: str = "neon_seoul",
+    budget_envelope: float = 100.0,
+    track_count: int = 5,
+    total_duration_minutes: int = 60,
+) -> None:
+    """Materialize an experiment treatment into a ContentPackage (P3)."""
+    from experiments.cli import materialize_treatment_cli
+
+    typer.echo(
+        materialize_treatment_cli(
+            experiment_id,
+            treatment_id,
+            brand_id=brand_id,
+            budget_envelope=budget_envelope,
+            track_count=track_count,
+            total_duration_minutes=total_duration_minutes,
+        )
+    )
+
+
+@experiments_app.command(name="serve")
+def experiments_serve(host: str = "127.0.0.1", port: int = 8083) -> None:
+    """Serve the `/experiments` API (P3)."""
+    from experiments.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@experiments_app.command(name="smoke")
+def experiments_smoke() -> None:
+    """Run the P3 dry-run smoke test."""
+    from experiments.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @music_app.command()

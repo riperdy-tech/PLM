@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 STUB_CASES = [
-    ("experiments", "run", "PHASE-P3"),
     ("music", "generate", "PHASE-P4"),
     ("qa", "review", "PHASE-P5"),
     ("media", "render", "PHASE-P6"),
@@ -68,9 +67,9 @@ def test_stub_commands_exit_nonzero_with_the_phase_message(
 
 
 def test_stub_cases_cover_every_registered_group() -> None:
-    # P1's market group is implemented (P1.11) and P2's ar group is implemented (P2.14),
-    # so neither is a stub case any more.
-    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {"market", "ar"}
+    # P1's market group is implemented (P1.11), P2's ar group is implemented (P2.14),
+    # and P3's experiments group is implemented (P3.11), so none of them are stubs.
+    assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {"market", "ar", "experiments"}
 
 
 def test_market_commands_are_implemented_not_stubs() -> None:
@@ -83,6 +82,13 @@ def test_market_commands_are_implemented_not_stubs() -> None:
 def test_ar_commands_are_implemented_not_stubs() -> None:
     for command in ("cycle", "show", "arms", "explain", "serve", "simulate"):
         result = runner.invoke(app, ["ar", command, "--help"])
+        assert result.exit_code == 0, (command, _output(result))
+        assert "not implemented until" not in _output(result)
+
+
+def test_experiments_commands_are_implemented_not_stubs() -> None:
+    for command in ("list", "show", "validate", "materialize", "serve", "smoke"):
+        result = runner.invoke(app, ["experiments", command, "--help"])
         assert result.exit_code == 0, (command, _output(result))
         assert "not implemented until" not in _output(result)
 
