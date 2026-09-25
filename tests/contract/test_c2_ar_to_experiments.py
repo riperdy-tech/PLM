@@ -148,3 +148,46 @@ def test_frozen_vocabulary_and_rename_direction() -> None:
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
     assert contract_registry.exists, "the registry was frozen 2026-09-20; it cannot be missing"
     contract_registry.require_entry(REGISTRY_ENTRY)
+
+
+def test_p3_adapter_ingests_real_p2_producer_payload() -> None:
+    from services.experiments.ingestion.p2_adapter import adapt_directive
+
+    wire = producer_directive().to_wire()
+    adapted = adapt_directive(wire)
+
+    assert adapted.directive_id == wire["directive_id"]
+    assert adapted.decision_id == wire["decision_id"]
+    assert adapted.arm_id == wire["arm_id"]
+    assert adapted.requested_experiment_count == wire["quantity"]
+    assert adapted.exploration_level == wire["allocation_type"]
+    assert adapted.production_deadline == datetime.fromisoformat(wire["expires_at"])
+    assert adapted.budget_limit == wire["budget_limit"]
+    assert adapted.required_constraints["genre"] == wire["brief"]["genre"]
+
+
+def test_p3_adapter_rejects_missing_identity_or_invalid_budget() -> None:
+    import pytest
+
+    from services.experiments.ingestion.p2_adapter import (
+        DirectiveValidationError,
+        adapt_directive,
+    )
+
+    wire = producer_directive().to_wire()
+
+    bad_id = dict(wire)
+    bad_id["arm_id"] = ""
+    with pytest.raises(DirectiveValidationError, match="arm_id"):
+        adapt_directive(bad_id)
+
+    bad_budget = dict(wire)
+    bad_budget["budget_limit"] = -5.0
+    with pytest.raises(DirectiveValidationError, match="budget_limit"):
+        adapt_directive(bad_budget)
+
+    bad_alloc = dict(wire)
+    bad_alloc["allocation_type"] = "unknown_type"
+    with pytest.raises(DirectiveValidationError, match="allocation_type"):
+        adapt_directive(bad_alloc)
+
