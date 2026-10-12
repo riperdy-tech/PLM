@@ -857,10 +857,54 @@ def distribution_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@analytics_app.command()
-def ingest() -> NoReturn:
-    """Ingest P9 analytics files (registered stub until PHASE-P9)."""
-    _not_implemented("PHASE-P9")
+@analytics_app.command(name="ingest")
+def analytics_ingest(
+    source: str = typer.Option("distributor", "--source", "-s", help="Source type: youtube, distributor, cost"),
+    file_path: str = typer.Option(..., "--file", "-f", help="Path to data file"),
+) -> None:
+    """Ingest a metrics, statement, or cost file into the analytics ledger (P9)."""
+    from analytics.cli import cli_ingest
+
+    cli_ingest(source=source, file_path=file_path)
+
+
+@analytics_app.command(name="report")
+def analytics_report(
+    entity_id: str = typer.Option(..., "--entity-id", "-e", help="Entity ID (video, track, etc.)"),
+) -> None:
+    """Show unit-economics and performance report for an entity (P9)."""
+    from analytics.cli import cli_report
+
+    cli_report(entity_id=entity_id)
+
+
+@analytics_app.command(name="rewards")
+def analytics_rewards(
+    experiment_id: str = typer.Option(..., "--experiment-id", "-x", help="Experiment ID"),
+) -> None:
+    """Show experiment feedback rewards (P9, Ruling R11)."""
+    from analytics.cli import cli_rewards
+
+    cli_rewards(experiment_id=experiment_id)
+
+
+@analytics_app.command(name="serve")
+def analytics_serve(host: str = "127.0.0.1", port: int = 8009) -> None:
+    """Serve the `/analytics` API (P9)."""
+    from analytics.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@analytics_app.command(name="smoke")
+def analytics_smoke() -> None:
+    """Run the P9 dry-run smoke test."""
+    from analytics.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 app.add_typer(market_app, name="market")
