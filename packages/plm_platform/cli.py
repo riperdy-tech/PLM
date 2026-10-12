@@ -159,9 +159,7 @@ def _migrations_check(settings: Settings, connect_timeout: float) -> Check:
     try:
         head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
     except Exception as exc:  # noqa: BLE001 - a broken checkout is a FAIL row too
-        return Check(
-            "migrations", False, f"alembic configuration unreadable - {_describe(exc)}"
-        )
+        return Check("migrations", False, f"alembic configuration unreadable - {_describe(exc)}")
     engine = _engine(settings, connect_timeout)
     try:
         with engine.connect() as connection:
@@ -180,9 +178,7 @@ def _migrations_check(settings: Settings, connect_timeout: float) -> Check:
         return Check(
             "migrations", False, f"database not migrated (head is {head}) - run: plm migrate"
         )
-    return Check(
-        "migrations", False, f"database at {current}, head is {head} - run: plm migrate"
-    )
+    return Check("migrations", False, f"database at {current}, head is {head} - run: plm migrate")
 
 
 def _minio_check(settings: Settings) -> Check:
@@ -210,7 +206,9 @@ def _minio_probe_client(settings: Settings) -> Minio:
     with the configured credentials, so the probe also exercises auth.
     """
     endpoint, secure = split_endpoint(settings.minio_endpoint)
-    timeout = urllib3.Timeout(connect=_MINIO_PROBE_TIMEOUT_SECONDS, read=_MINIO_PROBE_TIMEOUT_SECONDS)
+    timeout = urllib3.Timeout(
+        connect=_MINIO_PROBE_TIMEOUT_SECONDS, read=_MINIO_PROBE_TIMEOUT_SECONDS
+    )
     return Minio(
         endpoint,
         access_key=settings.minio_root_user,
@@ -225,7 +223,9 @@ def _temporal_check(settings: Settings, timeout: float) -> Check:
         version = asyncio.run(asyncio.wait_for(_temporal_probe(settings), timeout=timeout))
     except TimeoutError:
         return Check(
-            "temporal", False, f"unreachable at {settings.temporal_host} - timed out after {timeout:g}s"
+            "temporal",
+            False,
+            f"unreachable at {settings.temporal_host} - timed out after {timeout:g}s",
         )
     except Exception as exc:  # noqa: BLE001
         return Check(
@@ -421,14 +421,24 @@ def smoke_live() -> None:
 
 
 @ar_app.command()
-def cycle(slot_count: int = 10, budget: float = 10.0, policy_version: str = "p2-v1",
-          as_of: str = "") -> None:
+def cycle(
+    slot_count: int = 10, budget: float = 10.0, policy_version: str = "p2-v1", as_of: str = ""
+) -> None:
     """Run one allocation cycle (P2)."""
     from autonomous_ar.cli import run_cycle_once
 
-    typer.echo(json.dumps(run_cycle_once(slot_count=slot_count, budget=budget,
-                                         policy_version=policy_version,
-                                         as_of=as_of or None), indent=2, default=str))
+    typer.echo(
+        json.dumps(
+            run_cycle_once(
+                slot_count=slot_count,
+                budget=budget,
+                policy_version=policy_version,
+                as_of=as_of or None,
+            ),
+            indent=2,
+            default=str,
+        )
+    )
 
 
 @ar_app.command()
@@ -551,8 +561,12 @@ def experiments_smoke() -> None:
 
 @music_app.command(name="generate")
 def music_generate(
-    spec_path: str = typer.Option(..., "--spec", "-s", help="Path to JSON file containing TrackSpec"),
-    provider: str = typer.Option("mock", "--provider", "-p", help="Provider to use (mock, suno, elevenlabs)"),
+    spec_path: str = typer.Option(
+        ..., "--spec", "-s", help="Path to JSON file containing TrackSpec"
+    ),
+    provider: str = typer.Option(
+        "mock", "--provider", "-p", help="Provider to use (mock, suno, elevenlabs)"
+    ),
 ) -> None:
     """Generate P4 music candidates from a TrackSpec JSON file."""
     from music_factory.cli import cli_generate
@@ -600,12 +614,16 @@ def qa_evaluate(
     candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID"),
     artifact_id: str = typer.Option(..., "--artifact-id", "-a", help="Artifact ID"),
     audio_path: str = typer.Option(..., "--audio", "-f", help="Path to WAV audio file"),
-    expected_duration: float = typer.Option(..., "--duration", "-d", help="Expected duration in seconds"),
+    expected_duration: float = typer.Option(
+        ..., "--duration", "-d", help="Expected duration in seconds"
+    ),
     track_spec_id: str = typer.Option("spec_default", "--track-spec-id", help="Track spec ID"),
     experiment_id: str = typer.Option("exp_default", "--experiment-id", help="Experiment ID"),
     content_arm_id: str = typer.Option("arm_default", "--arm-id", help="Content arm ID"),
     plan_tier: str = typer.Option("pro", "--tier", help="Provider license tier (pro, free, etc.)"),
-    account_ref: str = typer.Option("acc_internal", "--account-ref", help="Account identity reference"),
+    account_ref: str = typer.Option(
+        "acc_internal", "--account-ref", help="Account identity reference"
+    ),
     terms_version: str = typer.Option("v1.0", "--terms", help="Terms of service version"),
 ) -> None:
     """Evaluate a candidate against quality, rights, and release gates."""
@@ -627,7 +645,9 @@ def qa_evaluate(
 
 @qa_app.command(name="manifest")
 def qa_manifest(
-    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID to lookup manifest for"),
+    candidate_id: str = typer.Option(
+        ..., "--candidate-id", "-c", help="Candidate ID to lookup manifest for"
+    ),
 ) -> None:
     """Retrieve the Seam C5 release manifest for a cleared candidate."""
     from quality_gate.cli import cli_manifest
@@ -638,7 +658,11 @@ def qa_manifest(
 @qa_app.command(name="resolve")
 def qa_resolve(
     case_id: str = typer.Option(..., "--case-id", help="Quarantine case ID"),
-    resolution: str = typer.Option("CLEARED_BY_OVERRIDE", "--resolution", help="Resolution: CLEARED_BY_OVERRIDE or CONFIRMED_REJECTED"),
+    resolution: str = typer.Option(
+        "CLEARED_BY_OVERRIDE",
+        "--resolution",
+        help="Resolution: CLEARED_BY_OVERRIDE or CONFIRMED_REJECTED",
+    ),
     auditor_id: str = typer.Option("auditor_cli", "--auditor", help="Auditor identity"),
     notes: str = typer.Option("", "--notes", help="Audit notes"),
 ) -> None:
@@ -672,10 +696,61 @@ def qa_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@media_app.command()
-def render() -> NoReturn:
-    """Render a P6 media package (registered stub until PHASE-P6)."""
-    _not_implemented("PHASE-P6")
+@media_app.command(name="assemble")
+def media_assemble(
+    manifest_path: str = typer.Option(
+        ..., "--manifest", "-m", help="Path to P5 release manifest JSON file"
+    ),
+    brand_id: str = typer.Option("brand_neon", "--brand-id", help="Brand ID"),
+    brand_name: str = typer.Option("Neon Records", "--brand-name", help="Brand display name"),
+    render_profile: str = typer.Option(
+        "yt_longform_1080p_v1", "--render-profile", help="Render profile"
+    ),
+    duration_seconds: float = typer.Option(
+        3600.0, "--duration", "-d", help="Required playlist duration in seconds"
+    ),
+    version: str = typer.Option("v1", "--version", help="Package sequence version"),
+) -> None:
+    """Assemble and render a media package from a release manifest file."""
+    from media_factory.cli import cli_assemble
+
+    cli_assemble(
+        manifest_path=manifest_path,
+        brand_id=brand_id,
+        brand_name=brand_name,
+        render_profile=render_profile,
+        duration_seconds=duration_seconds,
+        version=version,
+    )
+
+
+@media_app.command(name="package")
+def media_package(
+    package_id: str = typer.Option(..., "--package-id", "-p", help="Media package ID to inspect"),
+) -> None:
+    """Retrieve an assembled media package record."""
+    from media_factory.cli import cli_package
+
+    cli_package(package_id=package_id)
+
+
+@media_app.command(name="serve")
+def media_serve(host: str = "127.0.0.1", port: int = 8006) -> None:
+    """Serve the `/media` API (P6)."""
+    from media_factory.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@media_app.command(name="smoke")
+def media_smoke() -> None:
+    """Run the P6 dry-run smoke test."""
+    from media_factory.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @youtube_app.command()

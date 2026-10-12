@@ -38,8 +38,8 @@ names first (see `tests/support/contract.py`).
 | C2 | PHASE-P2 → PHASE-P3 (production directive) | broken (6 of 12 fields mismatch) | R4 | `test_c2_ar_to_experiments.py` — pending |
 | C3 | PHASE-P3 → PHASE-P4 (track spec) | drift (names and missing keys) | R5 | `test_c3_experiments_to_music.py` — pending |
 | C4 | PHASE-P4 → PHASE-P5 (candidate ready) | broken (event OK, retrieval missing) | R6 | `test_c4_music_to_qa.py` — pending |
-| C5 | PHASE-P5 → PHASE-P6 (release manifest) | broken (different shapes entirely) | R7, R8 | `test_c5_qa_to_media.py` — pending |
-| C6 | PHASE-P6 → PHASE-P7 → PHASE-P8 (publish/distribution identity) | drift (linkage incomplete) | R9 | `test_c6_media_to_publishing.py` — pending |
+| C5 | PHASE-P5 → PHASE-P6 (release manifest) | broken (different shapes entirely) | R7, R8 | `test_c5_qa_to_media.py` — exists |
+| C6 | PHASE-P6 → PHASE-P7 → PHASE-P8 (publish/distribution identity) | drift (linkage incomplete) | R9 | `test_c6_media_to_publishing.py` — exists |
 | C7 | PHASE-P8 → PHASE-P9 → PHASE-P2 (feedback loop) | open (loop does not close) | R10, R11 | `test_c7_distribution_to_analytics.py` — pending |
 | C8 | PHASE-P9 → PHASE-P10 (deferred feature seam) | out of scope (P10 deferred) | R12 | `test_c8_analytics_to_p10.py` — pending |
 | C9 | Cross-phase storage layout | drift (three divergent prefixes) | R13 | `test_c9_storage_namespace.py` — pending |
@@ -481,7 +481,7 @@ producer sent the identity fields P9 §38 requires).
   P8's release provenance (P8 §39) references `p5_manifest_id` and
   `p6_manifest_id`; `source_manifest_ids` in P8 §11 is the compiled snapshot.
 
-**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **pending**.
+**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **exists**.
 
 ---
 
