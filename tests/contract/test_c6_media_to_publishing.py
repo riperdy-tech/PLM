@@ -145,3 +145,64 @@ def test_producer_event_validates_against_consumer_schema(contract_registry: Sea
     assert len(validated.chapters) == 2
     assert validated.chapters[0]["start_seconds"] == 0.0  # YouTube 00:00 requirement
     assert validated.status == "ready_for_publish"
+
+
+REGISTRY_HOP2_FIELDS: tuple[str, ...] = (
+    "event",
+    "youtube_video_id",
+    "publish_attempt_id",
+    "experiment_id",
+    "content_arm_id",
+    "published_at",
+    "metadata_version",
+    "experiment_family_id",
+    "content_genome_id",
+    "production_directive_id",
+    "media_package_id",
+)
+
+
+def test_hop2_declared_fields_match_registry() -> None:
+    from youtube_publishing.domain.models import YouTubeVideoPublishedEvent
+
+    assert set(YouTubeVideoPublishedEvent.model_fields) == set(REGISTRY_HOP2_FIELDS)
+
+
+def test_hop2_producer_event_validates_against_consumer_schema(
+    contract_registry: SeamRegistry,
+) -> None:
+    from datetime import UTC, datetime
+
+    from youtube_publishing.domain.models import YouTubeVideoPublishedEvent
+
+    contract_registry.require_entry(REGISTRY_ENTRY)
+
+    now = datetime.now(UTC)
+    event = YouTubeVideoPublishedEvent(
+        event="youtube_video_published",
+        youtube_video_id="dQw4w9WgXcQ",
+        publish_attempt_id="att_001_01",
+        experiment_id="exp_synth_01",
+        content_arm_id="arm_synth_01",
+        published_at=now,
+        metadata_version="v1",
+        experiment_family_id="fam_synth_01",
+        content_genome_id="gen_synth_01",
+        production_directive_id="dir_synth_01",
+        media_package_id="pkg_test_001",
+    )
+
+    validated = assert_seam_payload(
+        event.model_dump(),
+        YouTubeVideoPublishedEvent,
+        seam="C6 (Hop 2: P7 → P8/P9)",
+        producer="youtube_publishing.engine.YouTubePublishingEngine",
+        consumer="P8/P9 distribution & analytics consumer",
+    )
+    assert isinstance(validated, YouTubeVideoPublishedEvent)
+    assert validated.youtube_video_id == "dQw4w9WgXcQ"
+    assert validated.experiment_family_id == "fam_synth_01"
+    assert validated.content_genome_id == "gen_synth_01"
+    assert validated.production_directive_id == "dir_synth_01"
+    assert validated.media_package_id == "pkg_test_001"
+

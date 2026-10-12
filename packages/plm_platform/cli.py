@@ -753,10 +753,57 @@ def media_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@youtube_app.command()
-def publish() -> NoReturn:
-    """Publish to YouTube (registered stub until PHASE-P7)."""
-    _not_implemented("PHASE-P7")
+@youtube_app.command(name="publish")
+def youtube_publish(
+    package_path: str = typer.Option(
+        ..., "--package", "-p", help="Path to media package JSON file"
+    ),
+    channel_id: str = typer.Option("UC_neon_records", "--channel-id", "-c", help="Target YouTube channel ID"),
+    mode: str = typer.Option("dry_run", "--mode", "-m", help="Operating mode: dry_run, private_only, staged, autonomous"),
+) -> None:
+    """Publish a media package to YouTube (P7)."""
+    from youtube_publishing.cli import cli_publish
+
+    cli_publish(package_path=package_path, channel_id=channel_id, mode=mode)
+
+
+@youtube_app.command(name="attempt")
+def youtube_attempt(
+    attempt_id: str = typer.Option(..., "--attempt-id", "-a", help="Publish attempt ID"),
+) -> None:
+    """Retrieve the status of a publish attempt."""
+    from youtube_publishing.cli import cli_attempt
+
+    cli_attempt(attempt_id=attempt_id)
+
+
+@youtube_app.command(name="reconcile")
+def youtube_reconcile(
+    attempt_id: str = typer.Option(..., "--attempt-id", "-a", help="Publish attempt ID"),
+) -> None:
+    """Reconcile a publish attempt with remote YouTube state."""
+    from youtube_publishing.cli import cli_reconcile
+
+    cli_reconcile(attempt_id=attempt_id)
+
+
+@youtube_app.command(name="serve")
+def youtube_serve(host: str = "127.0.0.1", port: int = 8007) -> None:
+    """Serve the `/youtube` API (P7)."""
+    from youtube_publishing.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@youtube_app.command(name="smoke")
+def youtube_smoke() -> None:
+    """Run the P7 dry-run smoke test."""
+    from youtube_publishing.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @distribution_app.command()
