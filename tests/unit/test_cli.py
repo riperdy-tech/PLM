@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 STUB_CASES = [
-    ("distribution", "submit", "PHASE-P8"),
     ("analytics", "ingest", "PHASE-P9"),
 ]
 
@@ -66,7 +65,7 @@ def test_stub_cases_cover_every_registered_group() -> None:
     # P1's market group is implemented (P1.11), P2's ar group is implemented (P2.14),
     # P3's experiments group is implemented (P3.11), P4's music group is implemented (P4.13),
     # P5's qa group is implemented (P5.14), P6's media group is implemented (P6.11),
-    # and P7's youtube group is implemented (P7.11), so none of them are stubs.
+    # and P7's youtube group is implemented (P7.11), and P8's distribution group is implemented (P8.11), so none of them are stubs.
     assert {group for group, _, _ in STUB_CASES} == set(PHASES_BY_GROUP) - {
         "market",
         "ar",
@@ -75,6 +74,7 @@ def test_stub_cases_cover_every_registered_group() -> None:
         "qa",
         "media",
         "youtube",
+        "distribution",
     }
 
 
@@ -198,4 +198,21 @@ def test_youtube_subcommands_are_registered_and_display_help() -> None:
     assert "reconcile" in res.output
     assert "serve" in res.output
     assert "smoke" in res.output
+
+
+def test_distribution_subcommands_are_registered_and_display_help() -> None:
+    res = runner.invoke(app, ["distribution", "--help"])
+    assert res.exit_code == 0
+    assert "submit" in res.output
+    assert "release" in res.output
+    assert "report" in res.output
+    assert "serve" in res.output
+    assert "smoke" in res.output
+
+
+def test_distribution_commands_are_implemented_not_stubs() -> None:
+    for command in ("submit", "release", "report", "serve", "smoke"):
+        result = runner.invoke(app, ["distribution", command, "--help"])
+        assert result.exit_code == 0, (command, _output(result))
+        assert "not implemented until" not in _output(result)
 

@@ -806,10 +806,55 @@ def youtube_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
-@distribution_app.command()
-def submit() -> NoReturn:
-    """Submit a P8 release to DSPs (registered stub until PHASE-P8)."""
-    _not_implemented("PHASE-P8")
+@distribution_app.command(name="submit")
+def distribution_submit(
+    package_path: str = typer.Option(..., "--package", "-p", help="Path to release package JSON file"),
+    artist_name: str = typer.Option("Neon Artist", "--artist", "-a", help="Artist display name"),
+    brand_id: str = typer.Option("brand_neon", "--brand", "-b", help="Brand ID"),
+) -> None:
+    """Submit a compiled release package to DSPs (P8)."""
+    from distribution.cli import cli_submit
+
+    cli_submit(package_path=package_path, artist_name=artist_name, brand_id=brand_id)
+
+
+@distribution_app.command(name="release")
+def distribution_release(
+    release_id: str = typer.Option(..., "--release-id", "-r", help="Distribution release ID"),
+) -> None:
+    """Show details of a distribution release (P8)."""
+    from distribution.cli import cli_release
+
+    cli_release(release_id=release_id)
+
+
+@distribution_app.command(name="report")
+def distribution_report(
+    report_id: str = typer.Option(..., "--report-id", "-i", help="Provider report ID"),
+) -> None:
+    """Show details of an ingested raw provider report (P8, Ruling R10)."""
+    from distribution.cli import cli_report
+
+    cli_report(report_id=report_id)
+
+
+@distribution_app.command(name="serve")
+def distribution_serve(host: str = "127.0.0.1", port: int = 8008) -> None:
+    """Serve the `/distribution` API (P8)."""
+    from distribution.cli import serve as serve_impl
+
+    serve_impl(host=host, port=port)
+
+
+@distribution_app.command(name="smoke")
+def distribution_smoke() -> None:
+    """Run the P8 dry-run smoke test."""
+    from distribution.acceptance.smoke import run_smoke_test
+
+    reason = run_smoke_test()
+    if reason is not None:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
 @analytics_app.command()
