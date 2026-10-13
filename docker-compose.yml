@@ -1,5 +1,9 @@
 name: plm
 
+# Every published port binds to 127.0.0.1: the stack is for this machine only and
+# its credentials are development placeholders. Containers reach each other by
+# service name on the compose network, which these bindings do not affect.
+
 services:
   postgres:
     image: postgres:16
@@ -9,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     # Host port for alembic / psql runs from the dev venv (DATABASE_URL uses localhost).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -27,8 +31,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -53,7 +57,7 @@ services:
       # every in-container healthcheck. Bind all interfaces instead.
       - BIND_ON_IP=0.0.0.0
     ports:
-      - "7233:7233"
+      - "127.0.0.1:7233:7233"
     healthcheck:
       # `tctl` ships too but is past its end-of-support date; the Temporal CLI is
       # the supported probe. It exits 0 only while the frontend reports SERVING.
@@ -71,7 +75,7 @@ services:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"]
       interval: 10s

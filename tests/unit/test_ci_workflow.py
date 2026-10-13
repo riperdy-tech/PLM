@@ -77,7 +77,7 @@ def test_gate_commands_present_and_in_order(job: dict[str, Any]) -> None:
     joined = "\n".join(commands)
     assert 'pip install -e ".[dev]"' in joined
     assert "ruff check ." in joined
-    assert "mypy packages/" in joined
+    assert "mypy packages services" in joined
     assert 'pytest -q -m "not integration"' in joined
     assert "docker compose up -d --wait" in joined
     assert "pytest -q -m integration" in joined

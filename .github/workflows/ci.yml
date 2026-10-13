@@ -55,7 +55,7 @@ jobs:
         run: ruff check .
 
       - name: Type-check (mypy)
-        run: mypy packages/
+        run: mypy packages services
 
       # Hermetic: no services, no .env (the unit tests inject their settings).
       - name: Unit and contract tests
