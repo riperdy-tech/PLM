@@ -176,18 +176,18 @@ Also: P7's §12 state list gains `PROCESSING_TIMEOUT`; P8 consumes P5 clearance 
 
 ### Wave 0 — Foundation · 12 tasks · blocks everything
 
-- [ ] **W0.1 Repo scaffold.** `git init`, `pyproject.toml`, `packages/` + `services/` trees, ruff/mypy/pytest config, `.gitignore` including `.superpowers/`. Test: `make lint` and `make test` run green on an empty tree.
-- [ ] **W0.2 Docker Compose stack.** `postgres:16`, `minio`, `temporal`, `temporal-ui`, a worker image with pinned FFmpeg 7 and librosa deps. Test: `docker compose up -d` is healthy; FFmpeg version inside the image matches the pin.
-- [ ] **W0.3 `plm_contracts` package.** Base event envelope, error shape (`code`, `field_paths`, `message` — P3 §81), cursor pagination, `as_of`/`*_version` envelope (P9 §89), canonical enums (dispositions, statuses, window, currency), `unknown`/`zero`/`not_ready` tri-state type. Test: unit + the Review-Focus-1 contract test.
-- [ ] **W0.4 Config and secrets.** Layered env loader, `.env.example`, fail-fast validation, no secret ever logged. Test: missing-secret boot failure is explicit and names the variable, never its value.
-- [ ] **W0.5 Database and migrations.** One alembic chain, schema-per-phase, migration ownership rules, seed fixtures. Test: `alembic upgrade head` then `downgrade base` round-trips.
-- [ ] **W0.6 Object storage.** MinIO client, prefix constants for C9, checksum + immutability enforcement, no-overwrite policy. Test: writing the same key twice fails loudly.
-- [ ] **W0.7 Temporal skeleton.** Worker, task-queue naming (`ph1.market`, `ph2.ar`, …), idempotency and retry conventions, schedule registration. Test: a sample durable workflow survives a worker restart mid-run.
-- [ ] **W0.8 Observability.** Structured JSON logging with correlation IDs, Prometheus metrics, per-run cost counters (`api_calls`, `llm_tokens`, `storage_bytes`, `render_seconds`). Test: a sample run emits one correlated log line and its counters.
-- [ ] **W0.9 Test harness.** Fixture conventions, contract-test template, mock HTTP/provider utilities, golden-file helpers. Test: the template contract test passes against a stub.
-- [ ] **W0.10 Documents and governance.** Move the ten `.md` files to `docs/`, write `PHASE_MAP.md` (dual numbering), `CONTRACT_REGISTRY.md` (skeleton with all ten seam entries and their rulings), `DECISION_LOG.md`, ADR template. Test: every `ARCH-Pnn` reference in the phase files resolves through `PHASE_MAP.md`.
-- [ ] **W0.11 CI.** GitHub Actions: lint, types, unit, contract, migration check. Test: CI green on the scaffold.
-- [ ] **W0.12 `plm` CLI.** Typer app, one subcommand group per phase, plus `plm doctor`. Test: `plm doctor` reports the health of Postgres, MinIO, Temporal and the migration head.
+- [x] **W0.1 Repo scaffold.** `git init`, `pyproject.toml`, `packages/` + `services/` trees, ruff/mypy/pytest config, `.gitignore` including `.superpowers/`. Test: `make lint` and `make test` run green on an empty tree.
+- [x] **W0.2 Docker Compose stack.** `postgres:16`, `minio`, `temporal`, `temporal-ui`, a worker image with pinned FFmpeg 7 and librosa deps. Test: `docker compose up -d` is healthy; FFmpeg version inside the image matches the pin.
+- [x] **W0.3 `plm_contracts` package.** Base event envelope, error shape (`code`, `field_paths`, `message` — P3 §81), cursor pagination, `as_of`/`*_version` envelope (P9 §89), canonical enums (dispositions, statuses, window, currency), `unknown`/`zero`/`not_ready` tri-state type. Test: unit + the Review-Focus-1 contract test.
+- [x] **W0.4 Config and secrets.** Layered env loader, `.env.example`, fail-fast validation, no secret ever logged. Test: missing-secret boot failure is explicit and names the variable, never its value.
+- [x] **W0.5 Database and migrations.** One alembic chain, schema-per-phase, migration ownership rules, seed fixtures. Test: `alembic upgrade head` then `downgrade base` round-trips.
+- [x] **W0.6 Object storage.** MinIO client, prefix constants for C9, checksum + immutability enforcement, no-overwrite policy. Test: writing the same key twice fails loudly.
+- [x] **W0.7 Temporal skeleton.** Worker, task-queue naming (`ph1.market`, `ph2.ar`, …), idempotency and retry conventions, schedule registration. Test: a sample durable workflow survives a worker restart mid-run.
+- [x] **W0.8 Observability.** Structured JSON logging with correlation IDs, Prometheus metrics, per-run cost counters (`api_calls`, `llm_tokens`, `storage_bytes`, `render_seconds`). Test: a sample run emits one correlated log line and its counters.
+- [x] **W0.9 Test harness.** Fixture conventions, contract-test template, mock HTTP/provider utilities, golden-file helpers. Test: the template contract test passes against a stub.
+- [x] **W0.10 Documents and governance.** Move the ten `.md` files to `docs/`, write `PHASE_MAP.md` (dual numbering), `CONTRACT_REGISTRY.md` (skeleton with all ten seam entries and their rulings), `DECISION_LOG.md`, ADR template. Test: every `ARCH-Pnn` reference in the phase files resolves through `PHASE_MAP.md`.
+- [x] **W0.11 CI.** GitHub Actions: lint, types, unit, contract, migration check. Test: CI green on the scaffold.
+- [x] **W0.12 `plm` CLI.** Typer app, one subcommand group per phase, plus `plm doctor`. Test: `plm doctor` reports the health of Postgres, MinIO, Temporal and the migration head.
 
 **Gate W0:** `docker compose up -d && make doctor` green, CI green, ten seam entries exist in the registry. Nothing proceeds until this holds.
 
