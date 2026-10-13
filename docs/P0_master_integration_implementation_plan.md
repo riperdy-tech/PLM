@@ -10,7 +10,13 @@
 
 **Spec:** `architecture.md` (master spec, parts I–XXVII) plus the nine phase specs `P1_market_intelligence_implementation_plan.md` … `P9_analytics_economics_engine_implementation_plan.md`. All ten move to `docs/` in Wave 0 (W0.10).
 
-**Status:** Awaiting human review. No code exists yet. Nothing in §5–§9 has been implemented.
+**Status (corrected 2026-10-13):** code for every wave has been committed, but the §1
+success criterion is **not yet met**: the phases do not yet run as one system, and the
+W6 end-to-end test exercises them in process with hand-built hand-offs. Checkboxes below
+record that a task's code was committed, not that its gate evidence holds. Verified
+capability lives in [`docs/STATUS.md`](STATUS.md). The remaining work is planned in
+[`docs/reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md).
+(The original status line read: "Awaiting human review. No code exists yet.")
 
 ---
 
@@ -234,8 +240,8 @@ Then:
 
 ### Wave 6 — Loop closure and end-to-end acceptance
 
-- [x] W6.1 Wire P9 → `POST /ar/results` (R11) and run the end-to-end chain: P1 fixture → P2 directive → P3 package → P4 candidate (mock provider) → P5 clearance → P6 media package → P7 publish (fully mocked YouTube) → P8 submission (mock distributor) → P9 facts → reward → P2 posterior update. Assert the second P2 cycle allocates differently.
-- [x] W6.2 The negative chain: a `REJECTED` candidate must not reach P6, a preflight failure must not reach YouTube, a duplicate webhook must not double-count revenue. These are Review Focus 3 and 4.
+- [~] *(partial — see STATUS.md: the reward is never sent over HTTP, the test runs in process with hand-built hand-offs, and no second allocation cycle runs)* W6.1 Wire P9 → `POST /ar/results` (R11) and run the end-to-end chain: P1 fixture → P2 directive → P3 package → P4 candidate (mock provider) → P5 clearance → P6 media package → P7 publish (fully mocked YouTube) → P8 submission (mock distributor) → P9 facts → reward → P2 posterior update. Assert the second P2 cycle allocates differently.
+- [~] *(partial — in-process only; the gate-bypass default in P6 `rendering/assembler.py` is still open, see STATUS.md)* W6.2 The negative chain: a `REJECTED` candidate must not reach P6, a preflight failure must not reach YouTube, a duplicate webhook must not double-count revenue. These are Review Focus 3 and 4.
 - [x] W6.3 Whole-program review on the most capable available model, then `superpowers:finishing-a-development-branch`.
 
 ---
