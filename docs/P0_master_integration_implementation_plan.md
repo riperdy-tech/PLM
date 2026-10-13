@@ -234,9 +234,9 @@ Then:
 
 ### Wave 6 — Loop closure and end-to-end acceptance
 
-- [ ] W6.1 Wire P9 → `POST /ar/results` (R11) and run the end-to-end chain: P1 fixture → P2 directive → P3 package → P4 candidate (mock provider) → P5 clearance → P6 media package → P7 publish (fully mocked YouTube) → P8 submission (mock distributor) → P9 facts → reward → P2 posterior update. Assert the second P2 cycle allocates differently.
-- [ ] W6.2 The negative chain: a `REJECTED` candidate must not reach P6, a preflight failure must not reach YouTube, a duplicate webhook must not double-count revenue. These are Review Focus 3 and 4.
-- [ ] W6.3 Whole-program review on the most capable available model, then `superpowers:finishing-a-development-branch`.
+- [x] W6.1 Wire P9 → `POST /ar/results` (R11) and run the end-to-end chain: P1 fixture → P2 directive → P3 package → P4 candidate (mock provider) → P5 clearance → P6 media package → P7 publish (fully mocked YouTube) → P8 submission (mock distributor) → P9 facts → reward → P2 posterior update. Assert the second P2 cycle allocates differently.
+- [x] W6.2 The negative chain: a `REJECTED` candidate must not reach P6, a preflight failure must not reach YouTube, a duplicate webhook must not double-count revenue. These are Review Focus 3 and 4.
+- [x] W6.3 Whole-program review on the most capable available model, then `superpowers:finishing-a-development-branch`.
 
 ---
 
