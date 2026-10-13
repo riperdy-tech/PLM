@@ -6,6 +6,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts import ExecutionPolicy
+from plm_platform.execution import (
+    ExternalWriteGuard,
+    GuardDecision,
+    WriteDecision,
+    provider_mode_of,
+)
 from sqlalchemy.orm import Session
 
 from .client.base import (
@@ -60,8 +67,18 @@ class PublishingEngineResult:
         return self.attempt.state in {PublishState.PUBLISHED, PublishState.VERIFIED, PublishState.SCHEDULED}
 
 
+CAPABILITY_UPLOAD = "youtube.upload"
+CAPABILITY_THUMBNAIL = "youtube.thumbnail"
+CAPABILITY_PLAYLIST = "youtube.playlist"
+
+
 class YouTubePublishingEngine:
-    """Core state machine executing the YouTube publishing pipeline."""
+    """Core state machine executing the YouTube publishing pipeline.
+
+    Every write to YouTube (upload, thumbnail, playlist placement) first passes the
+    platform :class:`~plm_platform.execution.ExternalWriteGuard`. ``OperatingMode.DRY_RUN``
+    caps the policy at dry-run, so it can never upload to a real channel.
+    """
 
     def __init__(
         self,
@@ -69,10 +86,52 @@ class YouTubePublishingEngine:
         *,
         chunk_size: int = 1024 * 1024,  # 1MB
         max_processing_polls: int = 5,
+        write_guard: ExternalWriteGuard | None = None,
     ) -> None:
         self.client = client
         self.chunk_size = chunk_size
         self.max_processing_polls = max_processing_polls
+        self.write_guard = write_guard or ExternalWriteGuard()
+        self.provider_mode = provider_mode_of(client)
+
+    def _authorize(
+        self, capability: str, manifest: PublishManifest, operating_mode: OperatingMode
+    ) -> GuardDecision:
+        ceiling = ExecutionPolicy.DRY_RUN if operating_mode is OperatingMode.DRY_RUN else None
+        return self.write_guard.authorize_external_write(
+            capability,
+            provider_mode=self.provider_mode,
+            idempotency_key=f"{manifest.idempotency_key}:{capability}",
+            policy_ceiling=ceiling,
+        )
+
+    def _halt_for(
+        self, session: Session, attempt: PublishAttempt, decision: GuardDecision
+    ) -> PublishingEngineResult:
+        """Stop before a write the guard did not permit, recording why on the attempt."""
+        message = f"{decision.capability}: {decision.decision.value} ({decision.reason})"
+        if decision.decision is WriteDecision.RECORD_INTENT:
+            update_publish_attempt(
+                session,
+                attempt.attempt_id,
+                state=PublishState.INTENT_RECORDED,
+                error_message=message,
+                updated_at=datetime.now(UTC),
+            )
+            session.commit()
+            updated = get_publish_attempt_by_id(session, attempt.attempt_id)
+            return PublishingEngineResult(attempt=updated or attempt)
+        update_publish_attempt(
+            session,
+            attempt.attempt_id,
+            state=PublishState.FAILED_RETRYABLE,
+            error_code=FailureReasonCode.EXTERNAL_WRITE_NOT_AUTHORIZED.value,
+            error_message=message,
+            updated_at=datetime.now(UTC),
+        )
+        session.commit()
+        updated = get_publish_attempt_by_id(session, attempt.attempt_id)
+        return PublishingEngineResult(attempt=updated or attempt, error=message)
 
     def execute_publish(
         self,
@@ -143,6 +202,9 @@ class YouTubePublishingEngine:
             # 3. Resumable Upload (if not already uploaded)
             youtube_video_id = attempt.youtube_video_id
             if not youtube_video_id:
+                decision = self._authorize(CAPABILITY_UPLOAD, manifest, operating_mode)
+                if not decision.decision.may_call_provider:
+                    return self._halt_for(session, attempt, decision)
                 # Step 3a: Create Upload Session
                 if not attempt.upload_session_uri:
                     update_publish_attempt(
@@ -244,6 +306,9 @@ class YouTubePublishingEngine:
                 )
 
             # 5. Thumbnail upload
+            decision = self._authorize(CAPABILITY_THUMBNAIL, manifest, operating_mode)
+            if not decision.decision.may_call_provider:
+                return self._halt_for(session, attempt, decision)
             thumb_bytes = thumbnail_data or b"MOCK_THUMBNAIL_BINARY_IMAGE"
             update_publish_attempt(
                 session,
@@ -267,6 +332,9 @@ class YouTubePublishingEngine:
             playlist_id = manifest.playlist_id
             playlist_item_id = None
             if playlist_id:
+                decision = self._authorize(CAPABILITY_PLAYLIST, manifest, operating_mode)
+                if not decision.decision.may_call_provider:
+                    return self._halt_for(session, attempt, decision)
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,

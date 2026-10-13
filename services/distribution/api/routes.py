@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from plm_contracts import ErrorShape
+from plm_platform.execution import ExternalWriteGuard, ExternalWriteRefusedError
 
 from ..artists.manager import get_or_create_artist
 from ..client.mock import MockDistributorClient
@@ -22,6 +24,15 @@ from .schemas import (
     ReportIngestRequest,
     ReportReferenceResponse,
 )
+
+
+def _refusal(exc: ExternalWriteRefusedError) -> dict[str, Any]:
+    decision = exc.decision
+    return ErrorShape(
+        code=f"external_write_{decision.decision.value}",
+        field_paths=[],
+        message=f"{decision.capability} not performed: {decision.reason}",
+    ).model_dump()
 
 
 def _to_release_response(rel: DistributionRelease) -> ReleaseResponse:
@@ -53,10 +64,12 @@ def build_distribution_router(
     session_factory: Any,
     auth_dependency: Any,
     engine: DistributionEngine | None = None,
+    *,
+    write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     """Build the distribution router configured with auth and dependencies."""
     router = APIRouter(prefix="/distribution", tags=["distribution"])
-    dist_engine = engine or DistributionEngine(MockDistributorClient())
+    dist_engine = engine or DistributionEngine(MockDistributorClient(), write_guard=write_guard)
 
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -130,6 +143,9 @@ def build_distribution_router(
                 return _to_release_response(result.release)
             except DistributionPreflightError as exc:
                 raise HTTPException(status_code=422, detail=exc.errors) from exc
+            except ExternalWriteRefusedError as exc:
+                session.rollback()
+                raise HTTPException(status_code=409, detail=_refusal(exc)) from exc
             except Exception as exc:
                 session.rollback()
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -180,6 +196,9 @@ def build_distribution_router(
                 result = dist_engine.request_takedown(session, release_id)
                 session.commit()
                 return _to_release_response(result.release)
+            except ExternalWriteRefusedError as exc:
+                session.rollback()
+                raise HTTPException(status_code=409, detail=_refusal(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except Exception as exc:
