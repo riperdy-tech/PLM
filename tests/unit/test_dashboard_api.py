@@ -88,3 +88,15 @@ def test_dashboard_root_html() -> None:
     r = client.get("/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
+    assert "CONTROL DECK" in r.text
+
+    # Test static assets
+    r_css = client.get("/static/app.css")
+    assert r_css.status_code == 200
+    assert "text/css" in r_css.headers["content-type"]
+    assert "--accent-violet" in r_css.text
+
+    r_js = client.get("/static/app.js")
+    assert r_js.status_code == 200
+    assert "javascript" in r_js.headers["content-type"]
+    assert "initTabs" in r_js.text

@@ -1,1 +1,407 @@
-<!DOCTYPE html><html><head><title>PLM Dashboard</title></head><body><h1>PLM Autonomous Engine</h1></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLM | Autonomous Music-Media Control Deck</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo">
+          <span class="logo-pulse"></span>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">PLM <span>CONTROL DECK</span></h1>
+          <p class="brand-subtitle">Autonomous Music & Video Publishing Engine</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-pill">
+          <span class="status-indicator online"></span>
+          <span class="status-text">SYSTEM OPERATIONAL</span>
+        </div>
+        <button id="header-run-btn" class="btn btn-primary glow-button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Run Autonomous Loop
+        </button>
+      </div>
+    </header>
+
+    <!-- Top KPI Overview Banner -->
+    <section class="kpi-banner">
+      <div class="kpi-card">
+        <span class="kpi-label">TOTAL CYCLES</span>
+        <div class="kpi-value" id="kpi-cycles">--</div>
+        <span class="kpi-meta">Autonomous loops</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">ACTIVE ARMS</span>
+        <div class="kpi-value cyan" id="kpi-arms">--</div>
+        <span class="kpi-meta">Multi-armed bandit</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">CANDIDATES</span>
+        <div class="kpi-value amber" id="kpi-candidates">--</div>
+        <span class="kpi-meta">Synthesized audio</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">CLEARED RELEASES</span>
+        <div class="kpi-value emerald" id="kpi-releases">--</div>
+        <span class="kpi-meta">P5 clearance gate</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">TOTAL REVENUE</span>
+        <div class="kpi-value violet" id="kpi-revenue">$0.00</div>
+        <span class="kpi-meta">Reconciled P9 DSP & YT</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">AVG REWARD (R11)</span>
+        <div class="kpi-value" id="kpi-reward">0.00</div>
+        <span class="kpi-meta">Normalized score</span>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="control-deck">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        Control Deck
+      </button>
+      <button class="tab-btn" data-tab="music-vault">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+        Music Vault
+      </button>
+      <button class="tab-btn" data-tab="bandit-intelligence">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"></path><path d="M12 20V4"></path><path d="M6 20v-6"></path></svg>
+        Bandit Intelligence
+      </button>
+      <button class="tab-btn" data-tab="qa-center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        QA Clearance Gate
+      </button>
+    </nav>
+
+    <!-- Main Workspace Views -->
+    <main class="tab-content-container">
+      <!-- Tab 1: Control Deck -->
+      <section id="view-control-deck" class="tab-pane active">
+        <!-- Pipeline Stepper Box -->
+        <div class="card stepper-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Autonomous Lifecycle Execution (10-Stage Pipeline)</h2>
+              <p class="card-desc">End-to-end autonomous flow: P1 Opportunity &rarr; P2 A&R Bandit &rarr; P3 Genome &rarr; P4 Audio &rarr; P5 Clearance &rarr; P6 Media &rarr; P7 YouTube &rarr; P8 DSP &rarr; P9 Analytics &rarr; P2 Loop Closure</p>
+            </div>
+            <div class="stepper-controls">
+              <span id="pipeline-status-text" class="badge badge-idle">STATUS: IDLE</span>
+              <button id="trigger-run-btn" class="btn btn-primary glow-button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Launch Loop
+              </button>
+            </div>
+          </div>
+
+          <!-- 10 Horizontal Nodes -->
+          <div class="pipeline-stepper" id="pipeline-stepper">
+            <div class="step-node" id="node-p1_market">
+              <div class="node-icon">01</div>
+              <div class="node-content">
+                <div class="node-title">P1 Market</div>
+                <div class="node-sub">Discovery</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p2_ar">
+              <div class="node-icon">02</div>
+              <div class="node-content">
+                <div class="node-title">P2 A&R</div>
+                <div class="node-sub">Bandit Directives</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p3_genome">
+              <div class="node-icon">03</div>
+              <div class="node-content">
+                <div class="node-title">P3 Genome</div>
+                <div class="node-sub">Track Specs</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p4_music">
+              <div class="node-icon">04</div>
+              <div class="node-content">
+                <div class="node-title">P4 Music</div>
+                <div class="node-sub">Audio Synthesis</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p5_qa">
+              <div class="node-icon">05</div>
+              <div class="node-content">
+                <div class="node-title">P5 QA</div>
+                <div class="node-sub">Rights Clearance</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p6_media">
+              <div class="node-icon">06</div>
+              <div class="node-content">
+                <div class="node-title">P6 Media</div>
+                <div class="node-sub">Video Packaging</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p7_youtube">
+              <div class="node-icon">07</div>
+              <div class="node-content">
+                <div class="node-title">P7 YouTube</div>
+                <div class="node-sub">Publish Intent</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p8_distribution">
+              <div class="node-icon">08</div>
+              <div class="node-content">
+                <div class="node-title">P8 DSP</div>
+                <div class="node-sub">Distributor ISRC</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p9_analytics">
+              <div class="node-icon">09</div>
+              <div class="node-content">
+                <div class="node-title">P9 Analytics</div>
+                <div class="node-sub">Unit Economics</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+
+            <div class="step-connector"></div>
+
+            <div class="step-node" id="node-p2_loop">
+              <div class="node-icon">10</div>
+              <div class="node-content">
+                <div class="node-title">P2 Update</div>
+                <div class="node-sub">Posterior Shift</div>
+              </div>
+              <div class="node-badge">Ready</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telemetry & Live Event Log -->
+        <div class="card terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <div class="terminal-title">LIVE TELEMETRY STREAM & LOGS (SSE: /api/pipeline/events)</div>
+            <button id="clear-terminal-btn" class="btn btn-secondary btn-sm">Clear Terminal</button>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="log-line system">[SYSTEM] Connected to PLM live event stream. Ready for autonomous triggers.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2: Music Vault -->
+      <section id="view-music-vault" class="tab-pane">
+        <div class="card-header-bar">
+          <div>
+            <h2 class="section-title">Music Candidates & Generated Audio</h2>
+            <p class="card-desc">Click any track to stream in the built-in waveform player or inspect its signed Seam C5 release manifest.</p>
+          </div>
+        </div>
+        <div class="candidates-grid" id="candidates-grid">
+          <!-- Filled by app.js -->
+        </div>
+
+        <div class="card-header-bar mt-4">
+          <div>
+            <h2 class="section-title">Distributed Media Packages & DSP Releases</h2>
+            <p class="card-desc">Published YouTube video links and DSP distributor packages with preserved R9 lineage IDs.</p>
+          </div>
+        </div>
+        <div class="releases-table-card">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Release ID</th>
+                <th>Title</th>
+                <th>Artist</th>
+                <th>ISRC</th>
+                <th>YouTube Status</th>
+                <th>DSP Status</th>
+                <th>Lineage Manifest</th>
+              </tr>
+            </thead>
+            <tbody id="releases-table-body">
+              <!-- Filled by app.js -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Tab 3: Bandit Intelligence -->
+      <section id="view-bandit-intelligence" class="tab-pane">
+        <div class="card-header-bar">
+          <div>
+            <h2 class="section-title">Multi-Armed Bandit Arms & Bayesian Posteriors</h2>
+            <p class="card-desc">Phase P2 Thompson Sampling and Bayesian posterior reward distributions across music niches.</p>
+          </div>
+        </div>
+        <div class="arms-grid" id="arms-grid">
+          <!-- Filled by app.js -->
+        </div>
+      </section>
+
+      <!-- Tab 4: QA Clearance Gate -->
+      <section id="view-qa-center" class="tab-pane">
+        <div class="card-header-bar">
+          <div>
+            <h2 class="section-title">Quality Gate Review & Quarantine Queue</h2>
+            <p class="card-desc">Inspect candidate evaluations, LUFS loudness, lyric screening, and perform auditor override resolutions.</p>
+          </div>
+        </div>
+        <div class="qa-container">
+          <div class="card qa-queue-card">
+            <h3 class="card-title">Quarantined Candidates Requiring Review</h3>
+            <div id="qa-cases-list" class="qa-cases-list">
+              <!-- Filled by app.js -->
+            </div>
+          </div>
+
+          <div class="card qa-standards-card">
+            <h3 class="card-title">Phase P5 Quality Standards (Ruling R6–R8)</h3>
+            <ul class="standards-list">
+              <li>
+                <span class="std-name">Technical Loudness:</span>
+                <span class="std-val">-14.0 LUFS &plusmn; 1.5 LUFS</span>
+              </li>
+              <li>
+                <span class="std-name">True Peak Ceiling:</span>
+                <span class="std-val">-1.0 dBFS Maximum</span>
+              </li>
+              <li>
+                <span class="std-name">Content Safety:</span>
+                <span class="std-val">Strictly CLEAN (no policy violations)</span>
+              </li>
+              <li>
+                <span class="std-name">Commercial License:</span>
+                <span class="std-val">Valid commercial rights tier snapshot attached</span>
+              </li>
+              <li>
+                <span class="std-name">Seam C5 Manifest:</span>
+                <span class="std-val">Signed release manifest (prefix: <code>rel_man_</code>)</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Persistent Bottom Audio Player -->
+    <footer class="audio-player-bar" id="audio-player-bar">
+      <div class="player-track-info">
+        <div class="track-artwork">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"></path>
+          </svg>
+        </div>
+        <div class="track-text">
+          <div class="track-title" id="player-title">No Track Selected</div>
+          <div class="track-meta" id="player-meta">Select a candidate from the Music Vault</div>
+        </div>
+      </div>
+
+      <div class="player-controls-center">
+        <div class="player-buttons">
+          <button id="player-play-btn" class="btn-circle play-btn" title="Play / Pause">
+            <svg id="play-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <svg id="pause-icon" class="hidden" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+          </button>
+        </div>
+
+        <div class="player-scrubber-row">
+          <span class="time-label" id="current-time">0:00</span>
+          <div class="scrub-container">
+            <canvas id="waveform-canvas" class="waveform-canvas" width="400" height="32"></canvas>
+            <input type="range" id="seek-slider" class="seek-slider" min="0" max="100" value="0">
+          </div>
+          <span class="time-label" id="total-time">0:00</span>
+        </div>
+      </div>
+
+      <div class="player-volume-group">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+        <input type="range" id="volume-slider" class="volume-slider" min="0" max="1" step="0.05" value="0.8">
+      </div>
+    </footer>
+
+    <!-- Manifest Inspector Modal -->
+    <div id="inspector-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title" id="modal-title">Release Manifest Inspector</h3>
+          <button id="modal-close-btn" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre id="modal-json" class="modal-pre"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="global-audio-element" preload="metadata"></audio>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
