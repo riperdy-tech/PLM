@@ -35,15 +35,15 @@ names first (see `tests/support/contract.py`).
 | Seam | Direction | Status before ruling | Rulings | Seam test |
 |---|---|---|---|---|
 | C1 | PHASE-P1 → PHASE-P2 (market opportunity) | compatible (two gaps) | R14, R15 | `test_c1_market_to_ar.py` — exists |
-| C2 | PHASE-P2 → PHASE-P3 (production directive) | broken (6 of 12 fields mismatch) | R4 | `test_c2_ar_to_experiments.py` — pending |
-| C3 | PHASE-P3 → PHASE-P4 (track spec) | drift (names and missing keys) | R5 | `test_c3_experiments_to_music.py` — pending |
-| C4 | PHASE-P4 → PHASE-P5 (candidate ready) | broken (event OK, retrieval missing) | R6 | `test_c4_music_to_qa.py` — pending |
+| C2 | PHASE-P2 → PHASE-P3 (production directive) | broken (6 of 12 fields mismatch) | R4 | `test_c2_ar_to_experiments.py` — exists |
+| C3 | PHASE-P3 → PHASE-P4 (track spec) | drift (names and missing keys) | R5 | `test_c3_experiments_to_music.py` — exists |
+| C4 | PHASE-P4 → PHASE-P5 (candidate ready) | broken (event OK, retrieval missing) | R6 | `test_c4_music_to_qa.py` — exists |
 | C5 | PHASE-P5 → PHASE-P6 (release manifest) | broken (different shapes entirely) | R7, R8 | `test_c5_qa_to_media.py` — exists |
 | C6 | PHASE-P6 → PHASE-P7 → PHASE-P8 (publish/distribution identity) | drift (linkage incomplete) | R9 | `test_c6_media_to_publishing.py` — exists |
 | C7 | PHASE-P8 → PHASE-P9 → PHASE-P2 (feedback loop) | open (loop does not close) | R10, R11 | `test_c7_distribution_to_analytics.py` — exists |
-| C8 | PHASE-P9 → PHASE-P10 (deferred feature seam) | out of scope (P10 deferred) | R12 | `test_c8_analytics_to_p10.py` — pending |
-| C9 | Cross-phase storage layout | drift (three divergent prefixes) | R13 | `test_c9_storage_namespace.py` — pending |
-| C10 | Missing engineering prelude (PHASE-P0) | missing (no P0 plan file) | R16 | `test_c10_engineering_prelude.py` — pending |
+| C8 | PHASE-P9 → PHASE-P10 (deferred feature seam) | out of scope (P10 deferred) | R12 | `test_c8_analytics_to_p10.py` — exists |
+| C9 | Cross-phase storage layout | drift (three divergent prefixes) | R13 | `test_c9_storage_namespace.py` — exists |
+| C10 | Missing engineering prelude (PHASE-P0) | missing (no P0 plan file) | R16 | `test_c10_engineering_prelude.py` — exists |
 
 ---
 
@@ -597,8 +597,7 @@ consumer.
 **Required amendments:** none for this build. P9 §86/§88 must still exist as
 frozen surfaces; P10 consumes them when it is scheduled.
 
-**Seam test:** `tests/contract/test_c8_analytics_to_p10.py` — **pending** (kept
-so the seam does not rot before P10 starts).
+**Seam test:** `tests/contract/test_c8_analytics_to_p10.py` — **exists**.
 
 ---
 
@@ -639,7 +638,7 @@ artifact and verified on read.
   **unspecified - must be resolved at the PHASE-P5 freeze** (its `qa/` subtree is
   already conformant).
 
-**Seam test:** `tests/contract/test_c9_storage_namespace.py` — **pending**.
+**Seam test:** `tests/contract/test_c9_storage_namespace.py` — **exists**.
 
 ---
 
@@ -666,5 +665,5 @@ FFmpeg, audit states.
 - The account/OAuth/audit half is the human task list in P0 §10 — it blocks only
   live-mode enablement, never the mock-first build.
 
-**Seam test:** `tests/contract/test_c10_engineering_prelude.py` — **pending**
+**Seam test:** `tests/contract/test_c10_engineering_prelude.py` — **exists**
 (asserts the Wave 0 platform surfaces the phases assume import and self-describe).
