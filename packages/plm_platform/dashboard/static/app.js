@@ -10,6 +10,41 @@ const API = {
   resolveQA: '/api/qa/resolve',
 };
 
+// Mutating routes require the platform service token (R15). It is asked for once per
+// browser session and kept only in sessionStorage.
+const TOKEN_HEADER = 'X-PLM-Service-Token';
+const TOKEN_KEY = 'plmServiceToken';
+
+function readToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+}
+
+function storeToken(token) {
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) { /* storage unavailable */ }
+}
+
+async function authedPost(url, body) {
+  const send = (token) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { [TOKEN_HEADER]: token } : {}) },
+    body: JSON.stringify(body),
+  });
+  let res = await send(readToken());
+  if (res.status === 401) {
+    const entered = window.prompt('Service token (PLM_SERVICE_TOKEN) required for this action:');
+    if (entered) {
+      storeToken(entered);
+      res = await send(entered);
+    }
+  }
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    const msg = (detail.detail && detail.detail.message) || res.statusText;
+    throw new Error(`${res.status}: ${msg}`);
+  }
+  return res.json();
+}
+
 // State
 let eventSource = null;
 let currentTrack = null;
@@ -87,7 +122,7 @@ async function loadStats() {
 async function loadArms() {
   try {
     const res = await fetch(API.arms);
-    const arms = await res.json();
+    const arms = (await res.json()).items;
     const container = document.getElementById('arms-grid');
     if (!container) return;
 
@@ -130,7 +165,7 @@ async function loadArms() {
 async function loadCandidates() {
   try {
     const res = await fetch(API.candidates);
-    const candidates = await res.json();
+    const candidates = (await res.json()).items;
     const container = document.getElementById('candidates-grid');
     if (!container) return;
 
@@ -190,7 +225,7 @@ async function loadCandidates() {
 async function loadReleases() {
   try {
     const res = await fetch(API.releases);
-    const releases = await res.json();
+    const releases = (await res.json()).items;
     const tbody = document.getElementById('releases-table-body');
     if (!tbody) return;
 
@@ -236,21 +271,17 @@ function loadQACases() {
   if (btn) {
     btn.addEventListener('click', async () => {
       try {
-        const res = await fetch(API.resolveQA, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            case_id: 'case_001',
-            resolution: 'CLEARED_BY_OVERRIDE',
-            notes: 'Auditor evaluated delta as acceptable fadeout tail.',
-          }),
+        const d = await authedPost(API.resolveQA, {
+          case_id: 'case_001',
+          resolution: 'CLEARED_BY_OVERRIDE',
+          notes: 'Auditor evaluated delta as acceptable fadeout tail.',
         });
-        const d = await res.json();
         logToTerminal(`[QA AUDITOR] Case ${d.case_id} resolved: ${d.resolution}`, 'success');
         casesList.innerHTML = `<div class="log-line success" style="padding: 16px; background: rgba(16,185,129,0.1); border-radius: 8px;">✓ All quarantined cases cleared by auditor. Review queue empty.</div>`;
         loadStats();
       } catch (err) {
         console.error('QA resolve failed:', err);
+        logToTerminal(`[QA AUDITOR] Resolve refused: ${err.message}`, 'error');
       }
     });
   }
@@ -276,16 +307,15 @@ async function triggerPipelineRun() {
   document.querySelectorAll('.step-connector').forEach((c) => c.classList.remove('completed'));
 
   try {
-    const res = await fetch(API.runPipeline, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'full' }),
-    });
-    const d = await res.json();
-    logToTerminal(`[ORCHESTRATOR] Autonomous pipeline run started (Run ID: ${d.run_id})`, 'info');
+    const d = await authedPost(API.runPipeline, { mode: 'full' });
+    logToTerminal(`[DEMO] Scripted playback started (Run ID: ${d.run_id})`, 'info');
   } catch (err) {
-    logToTerminal(`[ORCHESTRATOR ERROR] Trigger failed: ${err}`, 'error');
+    logToTerminal(`[DEMO] Trigger refused: ${err.message}`, 'error');
     runBtns.forEach((b) => { if (b) b.disabled = false; });
+    if (statusBadge) {
+      statusBadge.className = 'badge badge-idle';
+      statusBadge.textContent = 'STATUS: IDLE';
+    }
   }
 }
 
@@ -378,7 +408,7 @@ function logToTerminal(msg, level = 'info') {
 
   const div = document.createElement('div');
   div.className = `log-line ${level}`;
-  div.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+  div.textContent = `${new Date().toLocaleTimeString()} [DEMO] ${msg}`;
   terminal.appendChild(div);
   terminal.scrollTop = terminal.scrollHeight;
 }

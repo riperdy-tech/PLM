@@ -1,5 +1,14 @@
 # PLM Visual Control Deck & Monitoring Dashboard Design Spec
 
+> **Status correction (2026-10-13, R0 review):** as built, the dashboard does **not**
+> read from or drive the nine engines. `service.py` returns fixed literal KPIs, arms,
+> candidates and releases plus one synthesized audio loop, and the orchestrator
+> (now `DemoOrchestrator`) replays scripted stage messages on a timer without calling
+> any service. Every payload is labelled `data_source: "demo"` and the page shows a
+> persistent DEMO DATA banner. The design intent below remains the target; wiring it to
+> the phase repositories and implementing the six architecture PART XVII views is stage
+> R5 of `docs/reviews/2026-10-13-system-review-and-remediation-plan.md`.
+
 ## 1. Executive Summary
 
 The **PLM Visual Control Deck** provides a zero-setup, zero-external-dependency web dashboard for monitoring and orchestrating the autonomous music-media platform. Operating as a native subcommand of the platform CLI (`python -m plm_platform.cli dashboard --port 8000`), it bridges the 9 backend engines with an interactive, glassmorphic dark-mode web interface. Operators can trigger autonomous cycles with one click, watch stage execution live across a 10-step visual node stepper, listen to generated candidate audio directly in the browser, inspect multi-armed bandit posteriors, and review quality gate clearances.
@@ -31,7 +40,7 @@ The **PLM Visual Control Deck** provides a zero-setup, zero-external-dependency 
 ### 2.1 Backend Structure (`packages/plm_platform/dashboard/`)
 - `__init__.py`: Package export.
 - `app.py`: FastAPI app definition, static file mounts, REST routers, and CORS configuration.
-- `orchestrator.py`: In-process pipeline runner that executes the 10-step chain (P1 Market -> P2 A&R -> P3 Genome -> P4 Music -> P5 QA -> P6 Media -> P7 YouTube -> P8 Distribution -> P9 Analytics -> P2 Posterior update) and broadcasts execution events to SSE subscribers.
+- `orchestrator.py`: *(target design; as built it is a scripted demo playback, see the status note above)* In-process pipeline runner that executes the 10-step chain (P1 Market -> P2 A&R -> P3 Genome -> P4 Music -> P5 QA -> P6 Media -> P7 YouTube -> P8 Distribution -> P9 Analytics -> P2 Posterior update) and broadcasts execution events to SSE subscribers.
 - `service.py`: Data access service querying SQLite tables or in-memory fixtures for dashboard metrics, bandit arm parameters, candidate catalogs, and releases.
 - `static/`: Static web assets:
   - `index.html`: Modern semantic HTML structure with tab navigation, modal inspectors, and player controls.

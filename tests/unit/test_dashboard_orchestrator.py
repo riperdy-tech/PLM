@@ -6,12 +6,13 @@ import asyncio
 
 import pytest
 
-from packages.plm_platform.dashboard.orchestrator import PipelineOrchestrator
+from plm_platform.dashboard import DATA_SOURCE
+from plm_platform.dashboard.orchestrator import DemoOrchestrator
 
 
 @pytest.mark.asyncio
 async def test_pipeline_orchestrator_execution() -> None:
-    orchestrator = PipelineOrchestrator()
+    orchestrator = DemoOrchestrator()
     events = []
 
     async def listener() -> None:
@@ -47,10 +48,16 @@ async def test_pipeline_orchestrator_execution() -> None:
     }
     assert expected_stages.issubset(stages_seen)
 
+    # Playback is labelled demo on every event and never claims a real success.
+    assert all(e.get("data_source") == DATA_SOURCE for e in events)
+    complete = next(e for e in events if e.get("type") == "pipeline_complete")
+    assert complete["status"] == "DEMO_COMPLETE"
+
 
 @pytest.mark.asyncio
 async def test_pipeline_orchestrator_status() -> None:
-    orchestrator = PipelineOrchestrator()
+    orchestrator = DemoOrchestrator()
     status = orchestrator.get_status()
     assert "is_running" in status
     assert "last_run_id" in status
+    assert status["data_source"] == DATA_SOURCE
