@@ -56,6 +56,10 @@ class SchemaScopeError(ValueError):
     """The requested schema is not one of the nine phase schemas."""
 
 
+CONNECT_TIMEOUT_SECONDS: int = 5
+"""Upper bound on establishing one postgres connection."""
+
+
 def database_url(settings: Settings | None = None) -> URL:
     """The platform database URL, upgraded to the psycopg driver when needed.
 
@@ -80,12 +84,17 @@ def build_engine(settings: Settings | None = None) -> Engine:
     """Create an engine from configuration. Lazy: creating it does not connect.
 
     The redacted URL is logged at DEBUG; ``pool_pre_ping`` keeps long-lived
-    workers honest after postgres restarts.
+    workers honest after postgres restarts. A postgres connect gives up after
+    :data:`CONNECT_TIMEOUT_SECONDS`: an unreachable database fails fast and names
+    itself instead of blocking the caller (or a test run) indefinitely.
     """
     resolved = load_settings() if settings is None else settings
     url = database_url(resolved)
     logger.debug("creating database engine for %s", url.render_as_string(hide_password=True))
-    return create_engine(url, pool_pre_ping=True)
+    connect_args: dict[str, int] = {}
+    if url.drivername.startswith("postgresql"):
+        connect_args["connect_timeout"] = CONNECT_TIMEOUT_SECONDS
+    return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
 
 @cache
