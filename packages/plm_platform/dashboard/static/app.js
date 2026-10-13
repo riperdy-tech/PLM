@@ -308,9 +308,9 @@ async function triggerPipelineRun() {
 
   try {
     const d = await authedPost(API.runPipeline, { mode: 'full' });
-    logToTerminal(`[DEMO] Scripted playback started (Run ID: ${d.run_id})`, 'info');
+    logToTerminal(`Scripted playback started (Run ID: ${d.run_id})`, 'info');
   } catch (err) {
-    logToTerminal(`[DEMO] Trigger refused: ${err.message}`, 'error');
+    logToTerminal(`Trigger refused: ${err.message}`, 'error');
     runBtns.forEach((b) => { if (b) b.disabled = false; });
     if (statusBadge) {
       statusBadge.className = 'badge badge-idle';
