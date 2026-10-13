@@ -168,7 +168,7 @@ class PipelineOrchestrator:
                 "timestamp": time.time(),
                 "reward": 0.86,
             })
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             await self.broadcast({
                 "type": "pipeline_error",
                 "run_id": run_id,

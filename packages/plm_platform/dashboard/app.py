@@ -7,15 +7,26 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Response
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .orchestrator import PipelineOrchestrator
 from .service import DashboardService
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class PipelineRunRequest(BaseModel):
+    mode: str = "full"
+
+
+class QAResolveRequest(BaseModel):
+    case_id: str
+    resolution: str = "CLEARED_BY_OVERRIDE"
+    notes: str = ""
 
 
 def create_app(
@@ -62,8 +73,8 @@ def create_app(
         return srv.get_releases()
 
     @app.post("/api/pipeline/run")
-    async def run_pipeline(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-        mode = payload.get("mode", "full")
+    async def run_pipeline(payload: PipelineRunRequest | None = None) -> dict[str, Any]:
+        mode = payload.mode if payload else "full"
         run_id = await orch.start_run(mode=mode)
         return {"run_id": run_id, "status": "started", "mode": mode}
 
@@ -84,13 +95,12 @@ def create_app(
         )
 
     @app.post("/api/qa/resolve")
-    def resolve_qa(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        case_id = payload.get("case_id")
-        resolution = payload.get("resolution", "CLEARED_BY_OVERRIDE")
-        notes = payload.get("notes", "")
-        if not case_id:
-            raise HTTPException(status_code=400, detail="case_id required")
-        return srv.resolve_qa_case(case_id=case_id, resolution=resolution, notes=notes)
+    def resolve_qa(payload: QAResolveRequest) -> dict[str, Any]:
+        return srv.resolve_qa_case(
+            case_id=payload.case_id,
+            resolution=payload.resolution,
+            notes=payload.notes,
+        )
 
     # Static assets mounting
     STATIC_DIR.mkdir(parents=True, exist_ok=True)

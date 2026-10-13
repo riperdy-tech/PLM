@@ -30,7 +30,7 @@
 - Consumes: `packages/plm_platform/config.py`, domain models from `services/autonomous_ar`, `services/music_factory`, `services/quality_gate`, `services/distribution`, `services/analytics`.
 - Produces: `DashboardService.get_stats() -> dict`, `DashboardService.get_arms() -> list[dict]`, `DashboardService.get_candidates() -> list[dict]`, `DashboardService.get_releases() -> list[dict]`, `DashboardService.generate_audio_wav(candidate_id: str) -> bytes`, `DashboardService.resolve_qa_case(...) -> dict`.
 
-- [ ] **Step 1: Write the failing test for DashboardService**
+- [x] **Step 1: Write the failing test for DashboardService**
 
 ```python
 # tests/unit/test_dashboard_service.py
@@ -56,12 +56,12 @@ def test_dashboard_service_synthesizes_wav():
     assert b"WAVE" in wav_bytes[:16]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_service.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
-- [ ] **Step 3: Implement DashboardService**
+- [x] **Step 3: Implement DashboardService**
 
 Create `packages/plm_platform/dashboard/__init__.py` and `packages/plm_platform/dashboard/service.py` with:
 - `get_stats()` returning platform metrics.
@@ -71,12 +71,12 @@ Create `packages/plm_platform/dashboard/__init__.py` and `packages/plm_platform/
 - `get_releases()` returning published YouTube and DSP releases.
 - `resolve_qa_case()` updating quarantine cases.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_service.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/plm_platform/dashboard/__init__.py packages/plm_platform/dashboard/service.py tests/unit/test_dashboard_service.py
@@ -95,7 +95,7 @@ git commit -m "feat(dashboard): implement dashboard data service and audio synth
 - Consumes: All 9 phase domain engines (`market_intelligence`, `autonomous_ar`, `experiments`, `music_factory`, `quality_gate`, `media_factory`, `youtube_publishing`, `distribution`, `analytics`).
 - Produces: `PipelineOrchestrator.run_pipeline() -> str` (run_id), `PipelineOrchestrator.subscribe_events() -> AsyncGenerator[str, None]`.
 
-- [ ] **Step 1: Write the failing test for PipelineOrchestrator**
+- [x] **Step 1: Write the failing test for PipelineOrchestrator**
 
 ```python
 # tests/unit/test_dashboard_orchestrator.py
@@ -125,12 +125,12 @@ async def test_pipeline_orchestrator_execution():
     assert "pipeline_complete" in event_types
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_orchestrator.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
-- [ ] **Step 3: Implement PipelineOrchestrator**
+- [x] **Step 3: Implement PipelineOrchestrator**
 
 Create `packages/plm_platform/dashboard/orchestrator.py` with:
 - Async event broadcasting queue (`asyncio.Queue`).
@@ -147,12 +147,12 @@ Create `packages/plm_platform/dashboard/orchestrator.py` with:
   10. `p2_loop`: Bayesian posterior update & allocation shift.
 - Emits detailed SSE formatted payloads for each step.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_orchestrator.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/plm_platform/dashboard/orchestrator.py tests/unit/test_dashboard_orchestrator.py
@@ -171,7 +171,7 @@ git commit -m "feat(dashboard): implement in-process pipeline orchestrator and S
 - Consumes: `DashboardService`, `PipelineOrchestrator`, FastAPI, Starlette `EventSourceResponse` / SSE.
 - Produces: `create_app() -> FastAPI` mounting all REST endpoints and static files.
 
-- [ ] **Step 1: Write the failing test for Dashboard API**
+- [x] **Step 1: Write the failing test for Dashboard API**
 
 ```python
 # tests/unit/test_dashboard_api.py
@@ -207,12 +207,12 @@ def test_dashboard_api_endpoints():
     assert "run_id" in r_run.json()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_api.py -v`
 Expected: FAIL with ModuleNotFoundError.
 
-- [ ] **Step 3: Implement Dashboard FastAPI App**
+- [x] **Step 3: Implement Dashboard FastAPI App**
 
 Create `packages/plm_platform/dashboard/app.py`:
 - Initialize FastAPI app with title `"PLM Autonomous Music Engine"`.
@@ -227,12 +227,12 @@ Create `packages/plm_platform/dashboard/app.py`:
   - `POST /api/qa/resolve`
 - Mount static files directory `packages/plm_platform/dashboard/static` at `/static` and root route `/` returning `index.html`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_dashboard_api.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/plm_platform/dashboard/app.py tests/unit/test_dashboard_api.py
@@ -256,13 +256,13 @@ git commit -m "feat(dashboard): implement FastAPI dashboard REST and SSE endpoin
   3. **Bandit Intelligence Tab**: Visual cards of bandit arms, Bayesian posterior win rates, exploration vs exploitation indicators.
   4. **QA & Clearance Tab**: Review queue of cleared vs quarantined cases, one-click override action.
 
-- [ ] **Step 1: Create `static/index.html`**
+- [x] **Step 1: Create `static/index.html`**
 HTML5 structure with header branding, KPI overview banner, navigation tabs, view sections, modal inspector, and bottom fixed audio player.
 
-- [ ] **Step 2: Create `static/app.css`**
+- [x] **Step 2: Create `static/app.css`**
 Obsidian cyber-dark palette (`#070a11`), glassmorphism (`backdrop-filter: blur(16px)`), CSS grid layouts, glowing pulse animations for the pipeline stepper, clean typography using Google Fonts (Outfit, Inter, JetBrains Mono).
 
-- [ ] **Step 3: Create `static/app.js`**
+- [x] **Step 3: Create `static/app.js`**
 ES6 script providing:
 - Tab navigation.
 - Data fetching for stats, arms, candidates, releases.
@@ -270,10 +270,10 @@ ES6 script providing:
 - EventSource subscription to `/api/pipeline/events` updating stage stepper nodes and printing colorized logs to the telemetry console.
 - Pipeline execution trigger.
 
-- [ ] **Step 4: Verify static assets served via TestClient**
+- [x] **Step 4: Verify static assets served via TestClient**
 Test GET `/` and GET `/static/app.css` return 200 OK with proper content types.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/plm_platform/dashboard/static/
@@ -292,25 +292,25 @@ git commit -m "feat(dashboard): build interactive glassmorphic web dashboard fro
 - Consumes: `packages.plm_platform.dashboard.app:create_app`, `uvicorn`.
 - Produces: Subcommand `python -m plm_platform.cli dashboard [--host 127.0.0.1] [--port 8000]`.
 
-- [ ] **Step 1: Write test for dashboard CLI command**
+- [x] **Step 1: Write test for dashboard CLI command**
 
 Add `test_cli_dashboard_help()` to `tests/unit/test_cli.py`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_cli.py::test_cli_dashboard_help -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Add `dashboard` command to `cli.py`**
+- [x] **Step 3: Add `dashboard` command to `cli.py`**
 
 Define `dashboard_app = typer.Typer(help="Visual control deck & monitoring dashboard.")` and add `serve` / root command running `uvicorn.run(...)`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv\Scripts\pytest.exe tests/unit/test_cli.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/plm_platform/cli.py tests/unit/test_cli.py
@@ -324,21 +324,21 @@ git commit -m "feat(cli): add plm dashboard command group for visual web control
 **Files:**
 - None (verification suite)
 
-- [ ] **Step 1: Run full non-integration test suite**
+- [x] **Step 1: Run full non-integration test suite**
 Run: `pytest -m "not integration"`
 Expected: 100% green.
 
-- [ ] **Step 2: Run linter and formatting checks**
+- [x] **Step 2: Run linter and formatting checks**
 Run: `ruff check .`
 Expected: All checks passed!
 
-- [ ] **Step 3: Run strict type checking**
+- [x] **Step 3: Run strict type checking**
 Run: `mypy packages services`
 Expected: Success: no issues found.
 
-- [ ] **Step 4: Run dashboard smoke check**
+- [x] **Step 4: Run dashboard smoke check**
 Run: `python -m plm_platform.cli dashboard --help`
 Expected: Exits 0 and prints dashboard options.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 Final chore commit if any cleanup needed.

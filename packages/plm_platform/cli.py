@@ -923,6 +923,7 @@ def dashboard_main(
     """Launch the PLM Visual Control Deck web dashboard server."""
     if ctx.invoked_subcommand is None:
         import uvicorn
+
         from .dashboard.app import create_app
 
         typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")
@@ -938,6 +939,7 @@ def dashboard_serve(
 ) -> None:
     """Serve the PLM Visual Control Deck."""
     import uvicorn
+
     from .dashboard.app import create_app
 
     typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")

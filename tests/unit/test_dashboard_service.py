@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import wave
+
 from packages.plm_platform.dashboard.service import DashboardService
 
 
