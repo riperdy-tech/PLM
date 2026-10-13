@@ -38,8 +38,14 @@ def _output(result: Any) -> str:
 def test_help_lists_doctor_migrate_and_every_phase_group() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("doctor", "migrate", *PHASES_BY_GROUP):
+    for name in ("doctor", "migrate", "dashboard", *PHASES_BY_GROUP):
         assert name in result.output
+
+
+def test_dashboard_cli_help() -> None:
+    result = runner.invoke(app, ["dashboard", "--help"])
+    assert result.exit_code == 0
+    assert "dashboard" in result.output.lower()
 
 
 @pytest.mark.parametrize("group", list(PHASES_BY_GROUP))

@@ -907,6 +907,44 @@ def analytics_smoke() -> None:
         raise typer.Exit(code=BLOCKED_EXIT_CODE)
 
 
+dashboard_app = typer.Typer(
+    help="Visual control deck & monitoring dashboard.",
+    no_args_is_help=False,
+)
+
+
+@dashboard_app.callback(invoke_without_command=True)
+def dashboard_main(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
+) -> None:
+    """Launch the PLM Visual Control Deck web dashboard server."""
+    if ctx.invoked_subcommand is None:
+        import uvicorn
+        from .dashboard.app import create_app
+
+        typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")
+        dashboard_app_instance = create_app()
+        uvicorn.run(dashboard_app_instance, host=host, port=port, reload=reload)
+
+
+@dashboard_app.command(name="serve")
+def dashboard_serve(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
+) -> None:
+    """Serve the PLM Visual Control Deck."""
+    import uvicorn
+    from .dashboard.app import create_app
+
+    typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")
+    dashboard_app_instance = create_app()
+    uvicorn.run(dashboard_app_instance, host=host, port=port, reload=reload)
+
+
 app.add_typer(market_app, name="market")
 app.add_typer(ar_app, name="ar")
 app.add_typer(experiments_app, name="experiments")
@@ -916,6 +954,7 @@ app.add_typer(media_app, name="media")
 app.add_typer(youtube_app, name="youtube")
 app.add_typer(distribution_app, name="distribution")
 app.add_typer(analytics_app, name="analytics")
+app.add_typer(dashboard_app, name="dashboard")
 
 
 def main() -> None:
