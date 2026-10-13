@@ -107,9 +107,16 @@ def generate_and_post_reward(
     estimated_revenue: float = 0.0,
     http_client: Any = None,
     ar_results_url: str | None = None,
+    now: datetime | None = None,
 ) -> NormalizedRewardPayload:
-    """Construct Seam C7 Leg 2 payload and post to P2 (Ruling R11)."""
-    now = datetime.now(UTC)
+    """Construct Seam C7 Leg 2 payload and post to P2 (Ruling R11).
+
+    ``now`` stamps ``observed_at``. Pass it explicitly: P2 only ingests observations
+    at or before its own cycle clock, so a wall-clock stamp makes a replay drop the
+    reward. The wall-clock fallback remains for existing callers until R2 injects a
+    clock everywhere.
+    """
+    now = now or datetime.now(UTC)
 
     raw_metrics: dict[str, Any] = {
         "views": float(views),

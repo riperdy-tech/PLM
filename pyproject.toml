@@ -29,6 +29,7 @@ dev = [
     "freezegun>=1.5",
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.3",
     "pyyaml>=6.0",
     "ruff>=0.5",
     "mypy>=1.11",
@@ -60,6 +61,9 @@ mypy_path = ["$MYPY_CONFIG_FILE_DIR/packages", "$MYPY_CONFIG_FILE_DIR/services"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "services"]
+# A hung test fails instead of stalling the run (R0 baseline: the full suite once
+# blocked for >15 min on unreachable compose services).
+timeout = 120
 markers = [
     "integration: needs docker compose services (postgres, minio); skips cleanly when unreachable",
 ]

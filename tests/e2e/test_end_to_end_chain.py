@@ -427,6 +427,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         average_percentage_viewed=72.0,
         subscribers_gained=45,
         estimated_revenue=gross_revenue,
+        now=now,
     )
     assert reward_post.arm_id == "arm_synth_lofi_01"
     assert reward_post.normalized_reward == outcome.normalized_reward
