@@ -13,5 +13,9 @@ from tests.support.fixtures import (
     mock_http,
     seeded_rng,
 )
+from tests.support.platform_env import isolate_platform_env, platform_env
 
-__all__ = ["contract_registry", "frozen_clock", "mock_http", "seeded_rng"]
+__all__ = [
+    "contract_registry", "frozen_clock", "isolate_platform_env", "mock_http",
+    "platform_env", "seeded_rng",
+]

@@ -28,6 +28,9 @@ from plm_platform.storage import (
 
 from tests.support.contract import SeamRegistry
 
+# Exercises code that loads platform settings; the values are set explicitly.
+pytestmark = pytest.mark.usefixtures("platform_env")
+
 REGISTRY_ENTRY = "C9 · Cross-phase storage layout"
 
 FROZEN_PREFIXES: tuple[str, ...] = (

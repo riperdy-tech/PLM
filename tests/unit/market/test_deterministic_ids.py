@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from plm_platform.storage import StoredObject, sha256_digest
 from sqlalchemy.orm import Session
@@ -29,6 +30,9 @@ from services.market_intelligence.normalization.youtube import normalize_video_o
 from services.market_intelligence.storage import repositories
 from services.market_intelligence.storage.raw_store import store_raw_observation
 from tests.support.market_db import create_market_engine
+
+# Exercises code that loads platform settings; the values are set explicitly.
+pytestmark = pytest.mark.usefixtures("platform_env")
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

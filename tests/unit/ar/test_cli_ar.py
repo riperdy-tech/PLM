@@ -1,3 +1,5 @@
+import pytest
+
 # tests/unit/ar/test_cli_ar.py
 """P2.14: the CLI is a thin wrapper — the engine and the session factory are injected."""
 
@@ -6,6 +8,9 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session, sessionmaker
 
 from services.autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
+
+# Exercises code that loads platform settings; the values are set explicitly.
+pytestmark = pytest.mark.usefixtures("platform_env")
 
 
 def test_run_cycle_once_uses_the_injected_factory(
