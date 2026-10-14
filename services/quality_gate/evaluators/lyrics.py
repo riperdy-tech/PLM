@@ -1,7 +1,13 @@
-"""Lyric and vocal evaluator for Phase P5 (P5 §21-§25, §85).
+"""Lyric and vocal evaluator for Phase P5 (P5 §21-§25, §30, §85).
 
-Evaluates vocal presence versus intended vocal mode, lyric completeness,
-and prohibited keyword screening.
+Evaluates vocal presence versus intended vocal mode, lyric completeness, prohibited
+keyword screening, and (R4) shingled lyric similarity against the reference corpus:
+
+* MATCH is ``LYRIC_SIMILARITY_HIGH`` (P29 'copyrighted lyric similarity high', hard stop);
+* UNKNOWN (no corpus configured or readable, an empty corpus, lyrics too short to judge,
+  or a vocal track whose lyric text P5 was not given) is ``LYRIC_SIMILARITY_UNKNOWN``
+  (hard stop until the detector can run);
+* an instrumental with no lyrics is ``NOT_APPLICABLE``, which is not a hold.
 """
 
 from __future__ import annotations
@@ -9,10 +15,13 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from ..detectors.evidence import DetectorEvaluation, detector_records
+from ..detectors.outcome import DetectorOutcome, DetectorResult
+from ..detectors.reason_codes import LYRIC_SIMILARITY_HIGH, LYRIC_SIMILARITY_UNKNOWN
 from ..domain.enums import CheckSeverity, CheckStatus, GateCategory
 from ..domain.models import LyricCheck, RiskFinding
 
-__all__ = ["LyricEvaluationResult", "evaluate_lyrics"]
+__all__ = ["LyricEvaluationResult", "evaluate_lyric_similarity", "evaluate_lyrics"]
 
 # Policy prohibited toxic/hate words for automated screening
 PROHIBITED_WORDS = {
@@ -143,3 +152,52 @@ def evaluate_lyrics(
 
     is_clean = not any(f.blocking for f in findings)
     return LyricEvaluationResult(checks=checks, findings=findings, is_clean=is_clean)
+
+
+def evaluate_lyric_similarity(
+    evaluation_id: str, result: DetectorResult, *, now: datetime
+) -> DetectorEvaluation:
+    """Record the lyric-similarity result and raise a hold for MATCH or UNKNOWN."""
+    check, item = detector_records(
+        evaluation_id, result, check_type=f"lyric_similarity_{result.source}", now=now
+    )
+    findings: list[RiskFinding] = []
+    if result.outcome is DetectorOutcome.MATCH:
+        findings.append(
+            RiskFinding.create(
+                evaluation_id_str=evaluation_id,
+                finding_code=LYRIC_SIMILARITY_HIGH,
+                category=GateCategory.RIGHTS_RISK_GATE,
+                severity=CheckSeverity.CRITICAL,
+                status="FAIL",
+                confidence=result.score or 0.0,
+                message=(
+                    f"Lyrics overlap reference {result.matched_ref!r} (score {result.score}, "
+                    f"{result.metrics.get('shared_shingles')} shared shingles)."
+                ),
+                blocking=False,
+                evidence_item_ids=[item.id],
+                now=now,
+            )
+        )
+    elif result.outcome is DetectorOutcome.UNKNOWN:
+        findings.append(
+            RiskFinding.create(
+                evaluation_id_str=evaluation_id,
+                finding_code=LYRIC_SIMILARITY_UNKNOWN,
+                category=GateCategory.RIGHTS_RISK_GATE,
+                severity=CheckSeverity.CRITICAL,
+                status="FAIL",
+                confidence=0.0,
+                message=(
+                    "Lyric similarity check could not conclude, which is not clearance: "
+                    f"{result.reason}"
+                ),
+                blocking=False,
+                evidence_item_ids=[item.id],
+                now=now,
+            )
+        )
+    return DetectorEvaluation(
+        results=(result,), checks=(check,), findings=tuple(findings), evidence=(item,)
+    )

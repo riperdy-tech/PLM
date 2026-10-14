@@ -1,5 +1,14 @@
 """Storage package for Phase P5 (Quality, Rights, Provenance & Release-Gate Engine)."""
 
+# Registers the R4 detector-catalog tables on QA_METADATA (migration 0031).
+from .detector_catalog import (
+    SqlInternalCatalog,
+    SqlLyricCorpus,
+    SqlReferenceAudioSet,
+    candidate_audio_fingerprints_table,
+    reference_audio_fingerprints_table,
+    reference_lyrics_table,
+)
 from .models import (
     QA_METADATA,
     candidate_evaluations_table,
@@ -47,6 +56,10 @@ from .repositories import (
 
 __all__ = [
     "QA_METADATA",
+    "SqlInternalCatalog",
+    "SqlLyricCorpus",
+    "SqlReferenceAudioSet",
+    "candidate_audio_fingerprints_table",
     "candidate_evaluations_table",
     "evaluation_snapshots_table",
     "evidence_items_table",
@@ -80,6 +93,8 @@ __all__ = [
     "policy_checks_table",
     "provenance_checks_table",
     "quarantine_cases_table",
+    "reference_audio_fingerprints_table",
+    "reference_lyrics_table",
     "release_manifests_table",
     "resolve_quarantine_case",
     "rights_checks_table",

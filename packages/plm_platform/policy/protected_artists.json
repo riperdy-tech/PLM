@@ -1,0 +1,92 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "protected-artists-v1",
+  "notes": [
+    "Shared by P4 (services/music_factory/generation/prompts.py refuses to build a prompt that names a protected artist, before any provider call) and P5 (services/quality_gate/evaluators/policy.py screens the prompt, genre tags and lyrics). Loaded and validated by plm_platform.protected_artists.load_protected_artist_policy.",
+    "Matching is on normalised whole tokens: Unicode NFKD, combining marks dropped, casefolded, every run of non-alphanumeric characters becomes one space. A name matches only as a complete token sequence, so 'drake' matches 'drake' and 'Drake-style', not 'mandrake'.",
+    "This list is a screening control, not a register of every protected person. An artist absent from it is not cleared: P29 'artist reference detected' covers any real artist, and the list only catches the ones named here. Single-word names (e.g. 'drake') also match ordinary words; a match is a hard stop that rights counsel resolves.",
+    "ai_policy_conflict_markers are phrases that ask for voice cloning or impersonation; platforms' AI-content policies prohibit them whoever is named (P29 'AI policy conflict').",
+    "Citations: docs/architecture.md:906-921 (P29 'artist reference detected', 'AI policy conflict'); docs/reviews/2026-10-13-system-review-and-remediation-plan.md R4 ('the protected-artist policy file is shared by the P4 prompt builder (blocks before generation) and P5'); docs/adr/0034-rights-detectors-and-their-limits.md."
+  ],
+  "artist_reason_code": "PROTECTED_ARTIST_REFERENCE_DETECTED",
+  "ai_policy_reason_code": "AI_POLICY_CONFLICT",
+  "artists": [
+    {
+      "artist_id": "taylor_swift",
+      "names": [
+        "Taylor Swift"
+      ]
+    },
+    {
+      "artist_id": "drake",
+      "names": [
+        "Drake",
+        "Aubrey Graham"
+      ]
+    },
+    {
+      "artist_id": "the_weeknd",
+      "names": [
+        "The Weeknd",
+        "Abel Tesfaye"
+      ]
+    },
+    {
+      "artist_id": "billie_eilish",
+      "names": [
+        "Billie Eilish"
+      ]
+    },
+    {
+      "artist_id": "ed_sheeran",
+      "names": [
+        "Ed Sheeran"
+      ]
+    },
+    {
+      "artist_id": "ariana_grande",
+      "names": [
+        "Ariana Grande"
+      ]
+    },
+    {
+      "artist_id": "bad_bunny",
+      "names": [
+        "Bad Bunny"
+      ]
+    },
+    {
+      "artist_id": "beyonce",
+      "names": [
+        "Beyonce",
+        "Beyoncé"
+      ]
+    },
+    {
+      "artist_id": "eminem",
+      "names": [
+        "Eminem",
+        "Marshall Mathers"
+      ]
+    },
+    {
+      "artist_id": "rihanna",
+      "names": [
+        "Rihanna"
+      ]
+    }
+  ],
+  "ai_policy_conflict_markers": [
+    "voice clone",
+    "cloned voice",
+    "clone the voice",
+    "voice model of",
+    "ai cover",
+    "deepfake",
+    "soundalike",
+    "sound alike",
+    "impersonate",
+    "impersonating",
+    "impersonation"
+  ]
+}

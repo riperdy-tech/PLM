@@ -1,12 +1,13 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v3",
+  "policy_version": "hold-classes-v4",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
     "REVIEWABLE_QUARANTINE: resumes only for an actor holding reviewer_role and only with every required_evidence item. No entry has empty required_evidence, so there is no bare approve anywhere.",
     "A reason code missing from reason_codes is classified by 'unmapped' (HARD_STOP) and flagged on the case.",
-    "Citations: AGENTS.md:43; docs/P0_master_integration_implementation_plan.md:66 (human hard-stops); docs/architecture.md:906-921 (P29); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:183-187 (R3 exception queue); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (P5 section 49 quarantine semantics)."
+    "Citations: AGENTS.md:43; docs/P0_master_integration_implementation_plan.md:66 (human hard-stops); docs/architecture.md:906-921 (P29); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:183-187 (R3 exception queue); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (P5 section 49 quarantine semantics).",
+    "v4 (R4, ADR-0034): P5 rights detectors and P28 provenance. New codes INCOMPLETE_P28_PROVENANCE, REFERENCE_AUDIO_MATCH, INTERNAL_CATALOG_AUDIO_MATCH, AUDIO_FINGERPRINT_UNKNOWN, LYRIC_SIMILARITY_UNKNOWN; the P29 codes now name their P5 emitter. services/quality_gate/detectors/reason_codes.py lists every code P5 emits as a hold and the P29 category each reports."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -76,7 +77,7 @@
       "required_evidence": ["likeness_clearance_ref", "rights_counsel_opinion_ref"],
       "reviewer_role": "rights_counsel",
       "category": "p29_artist_reference",
-      "source": "docs/architecture.md:911 (P29 'artist reference detected'); emitted by services/quality_gate/evaluators/policy.py",
+      "source": "docs/architecture.md:911 (P29 'artist reference detected'); list in plm_platform/policy/protected_artists.json, shared with P4's prompt builder (refused before generation); emitted by services/quality_gate/evaluators/policy.py on the prompt, genre tags and lyrics",
       "description": "A prompt or metadata names a protected or living artist."
     },
     "LYRIC_SIMILARITY_HIGH": {
@@ -86,7 +87,7 @@
       "required_evidence": ["lyric_clearance_ref", "rights_counsel_opinion_ref"],
       "reviewer_role": "rights_counsel",
       "category": "p29_lyric_similarity",
-      "source": "docs/architecture.md:912 (P29 'copyrighted lyric similarity high'); detector is stage R4",
+      "source": "docs/architecture.md:912 (P29 'copyrighted lyric similarity high'); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:938-961 (section 30); emitted by services/quality_gate/evaluators/lyrics.py when the shingled similarity detector returns MATCH (ADR-0034)",
       "description": "Lyrics are highly similar to a copyrighted work."
     },
     "SAMPLE_PROVENANCE_UNCERTAIN": {
@@ -96,7 +97,7 @@
       "required_evidence": ["sample_license_ref", "sample_clearance_outcome_ref"],
       "reviewer_role": "rights_counsel",
       "category": "p29_sample_provenance",
-      "source": "docs/architecture.md:913 (P29 'sample provenance uncertain'); detector is stage R4",
+      "source": "docs/architecture.md:913 (P29 'sample provenance uncertain'); emitted by services/quality_gate/evaluators/rights.py for a declared source input with no license reference",
       "description": "The provenance of a sample in the audio cannot be established."
     },
     "COMMERCIAL_LICENSE_UNCERTAIN": {
@@ -106,7 +107,7 @@
       "required_evidence": ["provider_license_determination_ref", "rights_counsel_opinion_ref"],
       "reviewer_role": "rights_counsel",
       "category": "p29_commercial_license",
-      "source": "docs/architecture.md:914 (P29 'commercial license uncertain')",
+      "source": "docs/architecture.md:914 (P29 'commercial license uncertain'); emitted by services/quality_gate/evaluators/rights.py for a declared conditional or expired_or_unverified license",
       "description": "A commercial-use license was declared but its terms are in doubt (conflicting, conditional or contested) and need a determination outside PLM. Distinct from UNKNOWN_COMMERCIAL_LICENSE, where no usable declaration exists yet."
     },
     "UNAUTHORIZED_VOICE_CLONE_DETECTED": {
@@ -116,7 +117,7 @@
       "required_evidence": ["voice_authorization_ref", "rights_counsel_opinion_ref"],
       "reviewer_role": "rights_counsel",
       "category": "p29_voice_cloning",
-      "source": "docs/architecture.md:915 (P29 'unauthorized voice cloning detected'); detector is stage R4",
+      "source": "docs/architecture.md:915 (P29 'unauthorized voice cloning detected'); emitted by services/quality_gate/evaluators/rights.py for a declared voice input (voice_reference, voice_model, voice_sample, vocal_stem) with no authorization reference. There is no acoustic voice-similarity detector (ADR-0034).",
       "description": "The vocal imitates a real person without documented authorization."
     },
     "AI_POLICY_CONFLICT": {
@@ -126,7 +127,7 @@
       "required_evidence": ["platform_case_id", "platform_decision_ref"],
       "reviewer_role": "platform_liaison",
       "category": "p29_ai_policy",
-      "source": "docs/architecture.md:916 (P29 'AI policy conflict')",
+      "source": "docs/architecture.md:916 (P29 'AI policy conflict'); emitted by services/quality_gate/evaluators/policy.py when the prompt, tags or lyrics request voice cloning or impersonation (ai_policy_conflict_markers in protected_artists.json)",
       "description": "The asset conflicts with a platform's or distributor's AI-content policy."
     },
     "DISTRIBUTOR_REJECTION": {
@@ -157,7 +158,7 @@
       "reviewer_role": "rights_reviewer",
       "category": "unknown_rights",
       "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:187 ('Unknown rights stay quarantined'); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1430 ('provider API did not return commercial-use status'); emitted by services/quality_gate/evaluators/rights.py",
-      "description": "Commercial-use eligibility was not declared as eligible. Unknown rights are reviewable, but the only exit is the license evidence: a bare approve is refused."
+      "description": "No usable commercial-use declaration: no rights snapshot, or the provider declared 'unknown'. Unknown rights are reviewable, but the only exit is the license evidence: a bare approve is refused. A declared conditional or expired license is COMMERCIAL_LICENSE_UNCERTAIN instead."
     },
     "INCOMPLETE_R6_PROVENANCE": {
       "hold_class": "REVIEWABLE_QUARANTINE",
@@ -186,8 +187,8 @@
       "required_evidence": ["listening_review_ref"],
       "reviewer_role": "quality_reviewer",
       "category": "technical_quality",
-      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (HIGH, non-blocking) by services/quality_gate/evaluators/technical.py",
-      "description": "Clipping above the warning threshold. A quality reviewer may clear it with a recorded listening review."
+      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (blocking, policy p5-audio-qa-v1) by services/quality_gate/evaluators/technical.py",
+      "description": "A run of full-scale samples at or above the declared clipping threshold (quality_gate/audio/audio_qa_policy.json). It blocks; a quality reviewer may clear it with a recorded listening review."
     },
     "CAPABILITY_UNAVAILABLE": {
       "hold_class": "HARD_STOP",
@@ -198,6 +199,56 @@
       "category": "capability_unavailable",
       "source": "AGENTS.md:33 ('A missing required fact can never become a passing decision'); docs/reviews/2026-10-13-system-review-and-remediation-plan.md (R4/R5 own the missing pipeline steps)",
       "description": "A pipeline step has no implementation yet (the owning stage is named in the case). No approval can produce the missing work; the case closes only when the capability ships and the step is re-run."
+    },
+    "INCOMPLETE_P28_PROVENANCE": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["generation_attempt_ref", "provenance_record_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "unknown_provenance",
+      "source": "docs/architecture.md:883-901 (P28: twelve fields stored for every asset); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1429 ('license evidence missing' is a quarantine); emitted by services/quality_gate/evaluators/rights.py (validate_p28_provenance)",
+      "description": "A P28 field other than the rights-snapshot ones (model_version, generation_timestamp, source_inputs, human_contribution, or a C4 fact) was not declared. Never defaulted. Resumes only with the producing attempt and the recovered provenance record."
+    },
+    "REFERENCE_AUDIO_MATCH": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["sample_license_ref", "rights_counsel_opinion_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_sample_provenance",
+      "source": "docs/architecture.md:913 (P29 'sample provenance uncertain'); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1196-1215 (section 40, near-duplicate detection); emitted by services/quality_gate/evaluators/rights.py when the audio fingerprint matches the configured reference set (ADR-0034)",
+      "description": "The audio re-uses a reference recording (fingerprint MATCH). A risk signal, not a legal conclusion: rights counsel decides outside PLM."
+    },
+    "INTERNAL_CATALOG_AUDIO_MATCH": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["catalog_match_review_ref", "distinct_release_justification_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "duplicate_content",
+      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:161-163 (section 4.2, repetitive or mass-produced content) and 1196-1215 (section 40); emitted by services/quality_gate/evaluators/rights.py when the audio fingerprint matches a candidate P5 already released (ADR-0034)",
+      "description": "The audio duplicates a track already in PLM's own released catalog. PLM owns both, so this is not a third-party rights dispute: a rights reviewer may clear an intended re-release with the match review and the justification."
+    },
+    "AUDIO_FINGERPRINT_UNKNOWN": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["similarity_review_ref", "reference_set_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "detector_unknown",
+      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md R4 ('A detector that is unavailable or inconclusive returns UNKNOWN, which routes to quarantine. It is never treated as clearance'); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (section 49: quarantine, re-evaluable); emitted by services/quality_gate/evaluators/rights.py",
+      "description": "The audio fingerprint check could not conclude: reference set or catalog not configured or unreadable, an empty reference set, unreadable audio, a fingerprint-version mismatch, or too little signal. Never clearance. A rights reviewer resumes only with the similarity review done instead and the reference set it was checked against; re-evaluating once the detector can run is the normal exit."
+    },
+    "LYRIC_SIMILARITY_UNKNOWN": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["similarity_review_ref", "reference_set_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "detector_unknown",
+      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md R4 (UNKNOWN routes to quarantine, never clearance); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (section 49); emitted by services/quality_gate/evaluators/lyrics.py",
+      "description": "The lyric similarity check could not conclude: corpus not configured, unreadable or empty, a corpus-version mismatch, lyrics too short to judge, or a vocal track whose lyric text P5 was not given. Never clearance. Resumes only with a similarity review and the corpus it was checked against."
     }
   }
 }

@@ -24,7 +24,15 @@ from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
 
+from ..detectors import (
+    InMemoryFingerprintSource,
+    ReferenceFingerprint,
+    RightsDetectors,
+    fingerprint_samples,
+    load_detector_policy,
+)
 from ..domain.enums import GateDisposition
+from ..evaluators.rights import GenerationProvenanceFacts
 from ..gate.engine import run_candidate_evaluation
 from ..storage.repositories import (
     get_release_manifest_by_candidate,
@@ -58,6 +66,30 @@ def _create_temp_wav(
             frames.extend(sample_bytes)
         wf.writeframes(frames)
     return path
+
+
+def _smoke_detectors() -> RightsDetectors:
+    """Smoke-only detector sources, in memory and labelled as such (R4).
+
+    The smoke proves the gate's wiring and persistence, not detection, and must not write
+    synthetic references into the real reference tables. The reference set holds one
+    synthetic 523.25 Hz tone; the internal catalog is empty; the candidate is an
+    instrumental, so the lyric corpus is not consulted (NOT_APPLICABLE).
+    """
+    policy = load_detector_policy()
+    rate = 44100
+    tone = [math.sin(2.0 * math.pi * 523.25 * i / rate) * 0.5 for i in range(rate * 3)]
+    reference = ReferenceFingerprint(
+        ref_id="smoke_reference_tone",
+        fingerprint=fingerprint_samples(tone, rate, policy.audio_fingerprint),
+        label="synthetic smoke reference",
+    )
+    return RightsDetectors(
+        internal_catalog=InMemoryFingerprintSource([]),
+        reference_audio=InMemoryFingerprintSource([reference]),
+        lyric_corpus=None,
+        policy=policy,
+    )
 
 
 def run_smoke_test(*, clock: Clock | None = None) -> str | None:
@@ -119,8 +151,21 @@ def run_smoke_test(*, clock: Clock | None = None) -> str | None:
                     checked_at=now,
                     downloaded_at=now,
                 ),
+                # P28 facts for the synthetic smoke candidate, declared here because the
+                # smoke builds its own C4 event (no P4 attempt exists).
+                generation_provenance=GenerationProvenanceFacts(
+                    model_version="mock-v1",
+                    generation_timestamp=now,
+                    source_inputs=(),
+                    human_contribution="none (synthetic smoke candidate)",
+                ),
             )
-            result = run_candidate_evaluation(event=event, audio_path=wav_path, clock=clock)
+            result = run_candidate_evaluation(
+                event=event,
+                audio_path=wav_path,
+                clock=clock,
+                detectors=_smoke_detectors(),
+            )
 
             if result.disposition not in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS):
                 return f"smoke test evaluation failed with disposition: {result.disposition}"

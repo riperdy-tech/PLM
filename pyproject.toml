@@ -46,6 +46,8 @@ where = ["packages", "services"]
 [tool.setuptools.package-data]
 # Versioned policy data read at runtime through importlib.resources (R3 hold classes).
 plm_platform = ["policy/*.json"]
+# P5 audio-QA policy and rights-detector thresholds (R4, ADR-0034).
+quality_gate = ["audio/*.json", "detectors/*.json"]
 
 [tool.ruff]
 line-length = 100

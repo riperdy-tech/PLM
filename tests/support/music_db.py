@@ -6,6 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import sqlalchemy as sa
+from plm_platform.exceptions import EXCEPTIONS_METADATA
 from sqlalchemy.orm import Session, sessionmaker
 
 from services.music_factory.storage.models import MUSIC_METADATA
@@ -25,7 +26,9 @@ def create_music_engine(*, static_pool: bool = False) -> sa.Engine:
         engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS music")
+        connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS ops")
     MUSIC_METADATA.create_all(engine)
+    EXCEPTIONS_METADATA.create_all(engine)  # P4 raises P29 holds on refused prompts
     return engine
 
 

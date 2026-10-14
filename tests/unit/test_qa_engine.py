@@ -13,12 +13,20 @@ from plm_platform.clock import FixedClock
 from quality_gate.domain.enums import GateDisposition, QuarantineStatus
 from quality_gate.gate.engine import run_candidate_evaluation
 
+from tests.support.rights_detectors import (
+    configured_detectors,
+    synthetic_music,
+    write_wav,
+)
 from tests.support.seams import candidate_event, lineage_fields, rights_fields
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
-def _make_wav(duration: float = 1.0, amplitude: int = 15000) -> Path:
+# 7100 of 32768 at 440 Hz measures about -14 LUFS (BS.1770), the audio policy's loudness
+# target, so the default fixture is clean. 15000 measured -7.5 LUFS once loudness was
+# measured instead of approximated as RMS - 3 dB (R4).
+def _make_wav(duration: float = 1.0, amplitude: int = 7100) -> Path:
     temp_dir = tempfile.gettempdir()
     path = Path(temp_dir) / f"engine_test_{int(duration*1000)}_{amplitude}.wav"
     sample_rate = 44100
@@ -37,7 +45,7 @@ def _make_wav(duration: float = 1.0, amplitude: int = 15000) -> Path:
 
 
 def test_scenario_1_clean_candidate_passes() -> None:
-    wav_path = _make_wav(duration=1.0)
+    wav_path = _make_wav(duration=2.0)
     try:
         rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
@@ -53,6 +61,7 @@ def test_scenario_1_clean_candidate_passes() -> None:
             ),
             audio_path=wav_path,
             clock=FixedClock(NOW),
+            detectors=configured_detectors(),
         )
         assert res.disposition == GateDisposition.PASSED
         assert res.quarantine_case is None
@@ -66,8 +75,13 @@ def test_scenario_1_clean_candidate_passes() -> None:
 
 
 def test_scenario_2_soft_warning_passes_with_warnings() -> None:
-    # Use quiet amplitude to induce a loudness deviation warning
-    wav_path = _make_wav(duration=1.0, amplitude=200)
+    # Quiet audio induces a loudness deviation warning. Synthetic music rather than a
+    # pure tone: a quiet 16-bit tone has too few fingerprint landmarks to judge, which
+    # the rights detector rightly reports as UNKNOWN (ADR-0034).
+    wav_path = write_wav(
+        Path(tempfile.gettempdir()) / "engine_test_quiet_music.wav",
+        synthetic_music(seed=3, seconds=2.0, peak=200 / 32768),
+    )
     try:
         rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
@@ -83,6 +97,7 @@ def test_scenario_2_soft_warning_passes_with_warnings() -> None:
             ),
             audio_path=wav_path,
             clock=FixedClock(NOW),
+            detectors=configured_detectors(),
         )
         assert res.disposition == GateDisposition.PASSED_WITH_WARNINGS
         assert res.quarantine_case is None
@@ -189,7 +204,9 @@ def test_scenario_5_corrupt_or_missing_audio_hard_reject() -> None:
     assert res.release_manifest is None
 
 
-def test_scenario_6_protected_artist_likeness_hard_reject() -> None:
+def test_scenario_6_protected_artist_likeness_is_a_hard_stop_hold() -> None:
+    """A protected artist in the prompt is a P29 hard-stop hold (R4): quarantined, never a
+    manifest, and no approval can release it (plm_platform/policy/hold_classes.json)."""
     wav_path = _make_wav(duration=1.0)
     try:
         rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
@@ -206,7 +223,9 @@ def test_scenario_6_protected_artist_likeness_hard_reject() -> None:
             audio_path=wav_path,
             clock=FixedClock(NOW),
         )
-        assert res.disposition == GateDisposition.REJECTED
+        assert res.disposition == GateDisposition.QUARANTINED
+        assert res.quarantine_case is not None
+        assert "PROTECTED_ARTIST_REFERENCE_DETECTED" in res.quarantine_case.reason_codes
         assert res.evaluation.policy_status == "NON_COMPLIANT"
         assert res.release_manifest is None
     finally:

@@ -34,6 +34,7 @@ from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
+from services.quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
 from services.quality_gate.gate.engine import run_candidate_evaluation
 from services.quality_gate.ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
@@ -95,7 +96,16 @@ def test_real_event_reaches_the_p5_gate_intact(produced: tuple[dict[str, Any], b
     assert snapshot["lineage"] == wire["lineage"]
     # The vocabulary drift is gone: P4's declared "eligible" is eligible to P5.
     assert result.evaluation.rights_status == CommercialUseEligibility.ELIGIBLE.value
+    # C4 3.0 carries all 12 P28 fields from the producing attempt (ADR-0035): the mock
+    # reports its model version, P4 states no source inputs and no human edits.
     assert result.evaluation.provenance_status == "COMPLETE"
+    p28 = next(
+        c for c in result.evaluation.provenance_checks
+        if c.check_type == "p28_provenance_completeness"
+    )
+    assert p28.details["missing_fields"] == []
+    assert snapshot["generation_provenance"]["model_version"] == "mock-sine-synth-1"
+    assert snapshot["generation_provenance"]["source_inputs"] == []
     assert result.snapshot.license_snapshot["attempt_id"] == wire["rights"]["attempt_id"]
 
 
@@ -119,8 +129,17 @@ def test_mock_audio_for_a_three_minute_spec_passes_the_real_duration_gate(
     assert duration.expected_value == "[150, 220]"
     assert result.evaluation.technical_status == "PASSED"
     assert not any(f.blocking for f in result.evaluation.risk_findings)
-    assert result.disposition in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS)
-    assert result.release_manifest is not None
+    # Nothing technical holds it. Release still waits on rights (R4): with no detector
+    # sources configured, P5 quarantines on the detectors' holds only, never clears
+    # (ADR-0034).
+    assert result.disposition == GateDisposition.QUARANTINED
+    assert result.quarantine_case is not None
+    assert set(result.quarantine_case.reason_codes) <= P5_HOLD_REASON_CODES
+    # Provenance is complete (ADR-0035); with no detectors configured, the holds are
+    # the detectors' UNKNOWNs, never a clearance.
+    assert "INCOMPLETE_P28_PROVENANCE" not in result.quarantine_case.reason_codes
+    assert "AUDIO_FINGERPRINT_UNKNOWN" in result.quarantine_case.reason_codes
+    assert result.release_manifest is None
 
 
 def test_audio_outside_the_declared_range_is_rejected_by_the_real_gate(
@@ -149,15 +168,15 @@ def test_audio_outside_the_declared_range_is_rejected_by_the_real_gate(
 def test_p5_refuses_a_pre_adr_0032_event_without_a_duration_range(
     produced: tuple[dict[str, Any], bytes],
 ) -> None:
-    """A 1.0 event carried only a point; P5 refuses it rather than inventing a tolerance."""
+    """A 1.0 event carried only a point; P5 refuses it rather than inventing a tolerance.
+    Since C4 3.0 (ADR-0035) a 1.x event is refused by its version before any field."""
     wire, _ = produced
     legacy = with_value(without(wire, "requested_duration_range"), "schema_version", "1.0")
     exc = assert_refused(
         consume_c4_event, legacy, CandidateEventRejected, because="no duration range"
     )
     assert isinstance(exc, CandidateEventRejected)
-    assert exc.error.code == "missing_required_field"
-    assert exc.error.field_paths == ["requested_duration_range"]
+    assert exc.error.code == "unsupported_schema_version"
 
 
 def test_undeclared_rights_are_quarantined_never_cleared(
@@ -209,7 +228,7 @@ def test_p5_refuses_an_event_missing_any_required_fact(
         ("artifact_sha256", "not-a-digest"),
         ("genre_tags", []),
         ("event_type", "something_else"),
-        ("schema_version", "3.0"),
+        ("schema_version", "4.0"),
         ("requested_duration_range", {"min_seconds": 200, "max_seconds": 150}),
         ("requested_duration_range", {"min_seconds": 190, "max_seconds": 220}),
         ("surprise", True),

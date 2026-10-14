@@ -18,6 +18,7 @@ from __future__ import annotations
 from plm_contracts import ErrorShape
 from plm_contracts.seams.c4 import (
     CandidateReadyPayload,
+    GenerationProvenancePayload,
     MeasuredAudio,
     RightsSnapshotPayload,
 )
@@ -47,6 +48,10 @@ class CandidateExportError(ValueError):
         self.error = ErrorShape(code=code, field_paths=field_paths or [], message=message)
         super().__init__(f"{code}: {message}")
 
+
+
+HUMAN_CONTRIBUTION = "none: fully automated generation; no human edits in P4"
+"""P28 human_contribution for P4 output today: the pipeline has no human editing step."""
 
 def build_candidate_ready_event(session: Session, candidate_id: str) -> CandidateReadyPayload:
     """Assemble the C4 event for one candidate from stored facts, or refuse."""
@@ -147,6 +152,14 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
         vocal_mode=spec.vocal_mode,
         genre_tags=(spec.genre, *spec.moods),
         prompt_text=prompt.prompt,
-        lyrics_text=None,
+        lyrics_text=attempt.lyrics_text,
         rights=rights,
+        generation_provenance=GenerationProvenancePayload(
+            model_version=attempt.model_version,
+            generation_timestamp=attempt.completed_at,
+            # P4 sends providers a prompt and settings only: no samples, stems, voice or
+            # melody inputs. That is a declared fact, not a default.
+            source_inputs=(),
+            human_contribution=HUMAN_CONTRIBUTION,
+        ),
     )

@@ -95,6 +95,12 @@ class GenerationResponse(BaseModel):
     actual_duration_seconds: float | None = None
     cost_credits: float = 0.0
     error_message: str | None = None
+    model_version: str | None = None
+    """The model version the provider reports for this output (P28); ``None`` means it
+    reported none, which keeps the candidate out of P5 clearance."""
+    lyrics_text: str | None = None
+    """The lyrics the provider returned; ``None`` means it returned none (an instrumental,
+    or a vocal track whose lyrics P5 then cannot screen)."""
 
 
 class CreativeVariant(BaseModel):
@@ -147,6 +153,8 @@ class GenerationAttempt(BaseModel):
     provider_id: str
     model_id: str
     provider_job_id: str
+    model_version: str | None = None
+    lyrics_text: str | None = None
     attempt_type: AttemptType = AttemptType.INITIAL
     status: AttemptStatus = AttemptStatus.SUBMITTED
     request_hash: str
