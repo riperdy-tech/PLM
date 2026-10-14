@@ -70,6 +70,8 @@ class PublishManifestRow(Base):
     playlist_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     playlist_title: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     metadata_version: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="v1")
+    # NULL only on manifests stored before migration 0033; they are never cleared.
+    tracks_json: Mapped[list[dict[str, str]] | None] = mapped_column(sa.JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
 

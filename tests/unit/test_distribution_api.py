@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
+from tests.support.clearance import p5_holding
 from tests.support.distribution_db import create_distribution_engine
 from tests.support.seams import media_package, release_manifest
 
@@ -42,8 +43,15 @@ def client() -> TestClient:
     clock = FixedClock(NOW)
     dist_mock = MockDistributorClient(clock=clock)
     dist_engine = DistributionEngine(dist_mock)
+    # P5, the authority, holds a cleared manifest for cand_city and a quarantined one for
+    # cand_q; whatever a request claims, P8 re-asks it before writing.
+    p5 = p5_holding(
+        release_manifest(candidate_id="cand_city"),
+        release_manifest(candidate_id="cand_q", disposition="QUARANTINED"),
+    )
     app = create_app(
-        session_factory=session_factory, settings=settings, engine=dist_engine, clock=clock
+        session_factory=session_factory, settings=settings, engine=dist_engine, clock=clock,
+        clearance=p5,
     )
     return TestClient(app)
 
@@ -140,4 +148,22 @@ def test_release_submission_refuses_an_uncleared_track(client) -> None:
     }
     res = client.post("/distribution/releases", json=payload, headers=headers)
     assert res.status_code == 422
-    assert res.json()["detail"]["code"] == "track_not_cleared"
+    assert res.json()["detail"]["code"] == "release_not_cleared"
+
+
+def test_a_request_claiming_clearance_p5_never_gave_is_refused(client) -> None:
+    """Proves: the manifest on the request is a claim. It says PASSED, P5 says
+    QUARANTINED, and nothing is submitted (alternate path into P8 is closed)."""
+    headers = {SERVICE_TOKEN_HEADER: "test-dist-token"}
+    payload = {
+        "track_manifests": [release_manifest(candidate_id="cand_q").to_wire()],
+        "media_package": media_package("cand_q").to_wire(),
+        "artist_name": "API Neon Artist", "release_date": "2026-10-01",
+        "label_name": "Neon Records", "copyright_line": "2026 Neon Records",
+        "publisher_line": "2026 Neon Music Publishing", "territories": "WORLDWIDE",
+    }
+    res = client.post("/distribution/releases", json=payload, headers=headers)
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["code"] == "release_not_cleared"
+    assert "clearance_not_cleared" in detail["message"]

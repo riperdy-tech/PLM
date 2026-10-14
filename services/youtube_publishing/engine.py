@@ -7,6 +7,7 @@ from typing import Any
 
 from plm_contracts import ExecutionPolicy, ProviderMode
 from plm_contracts.seams import ExperimentLineage
+from plm_platform.clearance import ClearanceVerifier, TrackRef
 from plm_platform.clock import Clock
 from plm_platform.execution import (
     ExternalWriteGuard,
@@ -92,12 +93,14 @@ class YouTubePublishingEngine:
         client: YouTubeClientProtocol,
         *,
         clock: Clock,
+        clearance: ClearanceVerifier,
         chunk_size: int = 1024 * 1024,  # 1MB
         max_processing_polls: int = 5,
         write_guard: ExternalWriteGuard | None = None,
     ) -> None:
         self.client = client
         self._clock = clock
+        self._clearance = clearance
         self.chunk_size = chunk_size
         self.max_processing_polls = max_processing_polls
         self.write_guard = write_guard or ExternalWriteGuard()
@@ -136,6 +139,22 @@ class YouTubePublishingEngine:
             attempt.attempt_id,
             state=PublishState.FAILED_PERMANENT,
             error_code=FailureReasonCode.PREFLIGHT_ARTIFACT_MISSING.value,
+            error_message=message,
+            updated_at=self._clock.now(),
+        )
+        session.commit()
+        updated = get_publish_attempt_by_id(session, attempt.attempt_id)
+        return PublishingEngineResult(attempt=updated or attempt, error=message)
+
+    def _not_cleared(
+        self, session: Session, attempt: PublishAttempt, detail: str
+    ) -> PublishingEngineResult:
+        message = f"release not cleared; nothing was sent: {detail}"
+        update_publish_attempt(
+            session,
+            attempt.attempt_id,
+            state=PublishState.BLOCKED_PREFLIGHT,
+            error_code=FailureReasonCode.RELEASE_NOT_CLEARED.value,
             error_message=message,
             updated_at=self._clock.now(),
         )
@@ -237,6 +256,15 @@ class YouTubePublishingEngine:
             )
             insert_publish_attempt(session, attempt)
             session.commit()
+
+        if not attempt.youtube_video_id:
+            # The package is a claim; P5 and the exception queue are the authority. Asked
+            # again right before the upload, so a hold raised after packaging stops it.
+            report = self._clearance(
+                [TrackRef(t.candidate_id, t.artifact_id) for t in manifest.tracks]
+            )
+            if not report.cleared:
+                return self._not_cleared(session, attempt, report.summary())
 
         video_bytes = self._media_bytes(video_data, "placeholder_video_bytes")
         if video_bytes is None:

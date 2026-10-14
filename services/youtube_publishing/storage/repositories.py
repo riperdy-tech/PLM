@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..domain.enums import OperatingMode, PrivacyStatus, PublishState
 from ..domain.models import (
     ChannelProfile,
+    ManifestTrack,
     PublishAttempt,
     PublishManifest,
     YouTubePublicationRecord,
@@ -117,6 +118,7 @@ def _to_manifest_domain(row: PublishManifestRow) -> PublishManifest:
         playlist_id=row.playlist_id,
         playlist_title=row.playlist_title,
         metadata_version=row.metadata_version,
+        tracks=tuple(ManifestTrack(**t) for t in (row.tracks_json or [])),
         created_at=_utc(row.created_at),
     )
 
@@ -150,6 +152,7 @@ def insert_publish_manifest(session: Session, manifest: PublishManifest) -> None
         playlist_id=manifest.playlist_id,
         playlist_title=manifest.playlist_title,
         metadata_version=manifest.metadata_version,
+        tracks_json=[t.model_dump() for t in manifest.tracks],
         created_at=manifest.created_at,
     )
     session.add(row)

@@ -13,7 +13,8 @@ from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.models import ChannelProfile
 from youtube_publishing.storage.repositories import insert_channel_profile
 
-from tests.support.seams import media_package
+from tests.support.clearance import p5_holding
+from tests.support.seams import media_package, release_manifest
 from tests.support.youtube_db import create_youtube_engine
 
 MINIMAL_ENV = {
@@ -62,6 +63,7 @@ def client() -> TestClient:
         settings=settings,
         client=yt_mock,
         clock=FixedClock(T0),
+        clearance=p5_holding(release_manifest(candidate_id="cand_api_01")),
     )
     return TestClient(app)
 

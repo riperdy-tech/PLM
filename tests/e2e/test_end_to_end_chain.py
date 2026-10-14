@@ -87,6 +87,7 @@ from services.youtube_publishing.domain.models import ChannelProfile
 from services.youtube_publishing.engine import YouTubePublishingEngine
 from services.youtube_publishing.manifests import build_publish_manifest
 from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.clearance import p5_holding
 from tests.support.distribution_db import distribution_db_session
 from tests.support.experiments_factories import design_facts
 from tests.support.music_db import music_db_session
@@ -323,7 +324,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with youtube_db_session() as yt_db:
         insert_publish_manifest(yt_db, publish_manifest)
         yt_db.commit()
-        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now)).execute_publish(
+        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now), clearance=p5_holding(track_manifest)).execute_publish(
             yt_db, publish_manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -340,6 +341,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
             dist_db,
             DistributionEngine(MockDistributorClient(clock=FixedClock(now))),
             track_manifests=[track_manifest.to_wire()],
+            clearance=p5_holding(track_manifest),
             media_package=c6_hop1,
             publication=yt_event.to_wire(),
             metadata=ReleaseMetadata(

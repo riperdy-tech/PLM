@@ -45,6 +45,15 @@ class PreflightCheckResult(BaseModel):
     checked_at: datetime
 
 
+class ManifestTrack(BaseModel):
+    """One recording in the published video: re-verified with P5 before upload."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    candidate_id: str = Field(min_length=1)
+    artifact_id: str = Field(min_length=1)
+
+
 class PublishManifest(BaseModel):
     """Immutable frozen publish manifest (P7 §10)."""
 
@@ -77,6 +86,8 @@ class PublishManifest(BaseModel):
     playlist_id: str | None = None
     playlist_title: str | None = None
     metadata_version: str = "v1"
+    tracks: tuple[ManifestTrack, ...]
+    """The package's tracklist; an empty one is never cleared (a legacy manifest)."""
     created_at: datetime
 
     @property

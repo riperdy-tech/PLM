@@ -35,6 +35,7 @@ from youtube_publishing.domain.enums import FailureReasonCode, OperatingMode, Pu
 from youtube_publishing.engine import YouTubePublishingEngine
 from youtube_publishing.storage.repositories import insert_publish_manifest
 
+from tests.support.clearance import p5_clearing_test_track
 from tests.support.distribution_db import distribution_db_session
 from tests.support.youtube_db import youtube_db_session
 from tests.unit.test_distribution_engine import IDENTITY, _create_sample_package
@@ -281,7 +282,7 @@ _YT_WRITES = {"insert_resumable_session", "upload_video_chunk", "set_thumbnail",
 
 def _publish(guard: ExternalWriteGuard, mode: OperatingMode = OperatingMode.AUTONOMOUS) -> tuple[Any, SpyRealYouTubeClient]:
     client = SpyRealYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW))
+    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW), clearance=p5_clearing_test_track())
     manifest = _sample_manifest()
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -395,7 +396,7 @@ def test_p7_real_client_never_uploads_placeholder_bytes() -> None:
         {c: ExecutionPolicy.LIVE for c in caps}, grants=tuple(_grant(c) for c in caps), budget=AllowAll()
     )
     client = SpyRealYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW))
+    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW), clearance=p5_clearing_test_track())
     manifest = _sample_manifest()
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)

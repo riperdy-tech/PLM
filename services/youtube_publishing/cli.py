@@ -10,7 +10,9 @@ import typer
 import uvicorn
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clearance import clearance_verifier_for
 from plm_platform.clock import Clock, SystemClock
+from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 
 from .client.mock import MockYouTubeClient
@@ -73,7 +75,10 @@ def cli_publish(
         insert_publish_manifest(session, manifest)
         session.commit()
 
-        yt_engine = YouTubePublishingEngine(MockYouTubeClient(), clock=CLOCK)
+        yt_engine = YouTubePublishingEngine(
+            MockYouTubeClient(), clock=CLOCK,
+            clearance=clearance_verifier_for(load_settings(), factory),
+        )
         result = yt_engine.execute_publish(session, manifest, operating_mode=OperatingMode(mode))
 
         out: dict[str, Any] = {

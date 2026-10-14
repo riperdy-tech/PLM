@@ -39,6 +39,7 @@ from services.youtube_publishing.domain.models import ChannelProfile
 from services.youtube_publishing.engine import YouTubePublishingEngine
 from services.youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
 from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.clearance import p5_holding
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.distribution_db import distribution_db_session
 from tests.support.seams import lineage_fields, release_manifest
@@ -80,7 +81,7 @@ def hop2(hop1: dict[str, Any]) -> dict[str, Any]:
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
         session.commit()
-        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(NOW)).execute_publish(
+        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(NOW), clearance=p5_holding(*MANIFESTS)).execute_publish(
             session, manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -121,6 +122,7 @@ def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str
         result = submit_release_from_seams(
             session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            clearance=p5_holding(*MANIFESTS),
             publication=hop2, metadata=METADATA, now=NOW,
         )
         lineage, package_id = get_release_identity(session, result.release.release_id)
@@ -137,6 +139,7 @@ def test_p8_refuses_a_publication_from_another_package(
         submit_release_from_seams(
             session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            clearance=p5_holding(*MANIFESTS),
             publication=with_value(hop2, "media_package_id", "mpkg_other"),
             metadata=METADATA, now=NOW,
         )
