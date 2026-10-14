@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.domain.enums import PlanStatus
@@ -33,10 +35,12 @@ SAMPLE_SPEC = TrackSpecPayload.build(
     )
 ).to_wire()
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 
 def test_generation_planning_two_candidates() -> None:
     adapted = adapt_track_spec(SAMPLE_SPEC)
-    plan, variants = plan_generation(adapted)
+    plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
 
     assert plan.plan_id.startswith("gen_plan_")
     assert plan.track_spec_id == "trk_plan_01"
@@ -52,7 +56,7 @@ def test_generation_planning_two_candidates() -> None:
 def test_generation_planning_three_candidates() -> None:
     spec_3 = dict(SAMPLE_SPEC, candidate_target=3)
     adapted = adapt_track_spec(spec_3)
-    plan, variants = plan_generation(adapted)
+    plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
 
     assert plan.candidate_target == 3
     assert plan.max_attempts == 6

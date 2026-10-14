@@ -102,8 +102,8 @@ ar_experiment_result = sa.Table(
     sa.Column("reward_version", sa.Text, nullable=False),
     sa.Column("attribution_confidence", sa.Float, nullable=False),
     sa.Column("source_ids", _json, nullable=False),
-    sa.UniqueConstraint("experiment_id", "observation_window",
-                        name="uq_ar_experiment_result_window"),
+    sa.UniqueConstraint("experiment_id", "content_id", "observation_window", "status",
+                        name="uq_ar_experiment_result_fact"),
 )
 
 ar_reward_observation = sa.Table(
@@ -125,8 +125,8 @@ ar_reward_observation = sa.Table(
     sa.Column("quality_status", sa.Text, nullable=True),
     sa.Column("economic_terms_json", _json, nullable=True),   # reserved C7 terms, stored as-is
     sa.Column("received_at", _ts, nullable=False),
-    sa.UniqueConstraint("experiment_id", "observation_window",
-                        name="uq_ar_reward_observation_window"),
+    sa.UniqueConstraint("experiment_id", "content_id", "observation_window", "maturity",
+                        name="uq_ar_reward_observation_fact"),
 )
 
 ar_allocation_policy = sa.Table(
@@ -147,6 +147,8 @@ ar_allocation_policy = sa.Table(
     sa.Column("fatigue_config_json", _json, nullable=False),
     sa.Column("nonstationarity_config_json", _json, nullable=False),
     sa.Column("retirement_config_json", _json, nullable=False),
+    # ADR-0031: the whole validated config; the columns above stay for querying.
+    sa.Column("config_json", _json, nullable=True),
     sa.Column("created_at", _ts, nullable=False),
     sa.Column("active", sa.Boolean, nullable=False, server_default=sa.false()),
 )
@@ -217,6 +219,7 @@ ar_production_directive = sa.Table(
     sa.Column("policy_version", sa.Text, nullable=False),
     sa.Column("exploration_fraction", sa.Float, nullable=False),
     sa.Column("value_model", sa.Text, nullable=False),
+    sa.Column("outcome_horizon", sa.Text, nullable=True),  # NULL only on pre-ADR-0031 rows
 )
 
 ar_arm_similarity = sa.Table(

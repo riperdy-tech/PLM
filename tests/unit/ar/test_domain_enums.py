@@ -21,7 +21,8 @@ def test_lifecycle_and_cycle_statuses_match_the_spec() -> None:
     }
     assert {s.value for s in ObservationMaturity} == {"provisional", "mature", "closed"}
     assert {s.value for s in UpdateStatus} == {
-        "applied", "skipped_duplicate", "quarantined", "failed",
+        "applied", "provisional", "off_horizon", "skipped_duplicate", "quarantined",
+        "failed",
     }
 
 

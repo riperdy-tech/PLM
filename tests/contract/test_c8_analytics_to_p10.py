@@ -11,13 +11,13 @@ zeros, and that the model refuses incomplete or future views.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from plm_contracts import ObservationWindow
+from plm_contracts.money import FxTable, Money
 from plm_contracts.seams import SeamRejection, parse_seam
-from plm_contracts.seams.c7 import ObservationMaturity
 from plm_contracts.seams.c8 import P10FeatureViewPayload
 
 from services.analytics.evaluation.feedback import evaluate_experiment_outcome
@@ -40,9 +40,10 @@ def view() -> dict[str, Any]:
     with analytics_db_session() as session:
         outcome = evaluate_experiment_outcome(
             session, lineage=sample_lineage(), unit_id="pkg_c8_01",
-            net_contribution_usd=120.5, views=9000, watch_time_minutes=600.0,
-            window=ObservationWindow.D7, maturity=ObservationMaturity.MATURE,
-            attribution_confidence=0.98, quality_status=None, now=NOW,
+            net_contribution=Money.of("120.50", "USD"), reporting_currency="USD", fx=FxTable(),
+            views=9000, watch_time_minutes=600.0, window=ObservationWindow.D7,
+            published_at=NOW - timedelta(days=7), attribution_confidence=0.98,
+            quality_status=None, observed_at=NOW,
         )
     return json.loads(json.dumps(build_p10_feature_view(outcome, **UNMEASURED).to_wire()))
 

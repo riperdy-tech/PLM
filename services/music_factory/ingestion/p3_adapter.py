@@ -13,7 +13,7 @@ from typing import Any
 
 from plm_contracts import ErrorShape
 from plm_contracts.seams import ExperimentLineage, SeamRejection, parse_seam
-from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_contracts.seams.c3 import DurationRangeSeconds, TrackSpecPayload
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["AdaptedTrackSpec", "TrackSpecValidationError", "adapt_track_spec"]
@@ -44,6 +44,8 @@ class AdaptedTrackSpec(BaseModel):
     moods: tuple[str, ...]
     use_cases: tuple[str, ...]
     requested_duration: int = Field(ge=1)
+    duration_range: DurationRangeSeconds
+    """The genome's allowed duration (ADR-0032); forwarded to P5 on C4, never widened."""
     candidate_target: int = Field(ge=1)
     priority: int = Field(ge=1)
     budget_limit: float = Field(ge=0.0)
@@ -79,6 +81,7 @@ def adapt_track_spec(wire_payload: Mapping[str, Any]) -> AdaptedTrackSpec:
         moods=spec.bounded_preferences.mood,
         use_cases=spec.bounded_preferences.use_case,
         requested_duration=spec.requested_duration,
+        duration_range=spec.duration_range,
         candidate_target=spec.candidate_target,
         priority=spec.priority,
         budget_limit=spec.budget_limit,

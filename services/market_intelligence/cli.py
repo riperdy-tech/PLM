@@ -366,9 +366,10 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "market" / "youtube"
     search = json.loads((fixtures / "search_lofi_p1.json").read_text(encoding="utf-8"))
     videos = json.loads((fixtures / "videos_lofi_batch.json").read_text(encoding="utf-8"))
+    channels = json.loads((fixtures / "channels_lofi_batch.json").read_text(encoding="utf-8"))
     mock = MockHTTP(repeat_last=True)
-    for _ in load_bootstrap_seeds():  # one search + one hydration per bootstrap query
-        mock.enqueue_json(search).enqueue_json(videos)
+    for _ in load_bootstrap_seeds():  # search + videos.list + channels.list per query
+        mock.enqueue_json(search).enqueue_json(videos).enqueue_json(channels)
     return YouTubeDataAPIConnector(
         client=mock.client(base_url=BASE_URL), credentials=YouTubeCredentials(
             api_key=Secret("ci-mock")),

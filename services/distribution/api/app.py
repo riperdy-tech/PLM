@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from plm_contracts import ProviderMode
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import Settings, load_settings
 from plm_platform.execution import (
     ExecutionSettings,
@@ -27,6 +28,7 @@ def create_app(
     settings: Settings | None = None,
     engine: DistributionEngine | None = None,
     execution: ExecutionSettings | None = None,
+    clock: Clock | None = None,
 ) -> FastAPI:
     """Create a configured FastAPI application instance for the `/distribution` service.
 
@@ -62,6 +64,7 @@ def create_app(
         session_factory,
         auth_dep,
         engine=engine,
+        clock=SystemClock() if clock is None else clock,
         write_guard=ExternalWriteGuard(execution_settings),
     )
     app.include_router(router)

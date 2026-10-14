@@ -1,5 +1,6 @@
 # tests/contract/test_c3_experiments_to_music.py
-"""Seam C3 — PHASE-P3 → PHASE-P4 (track spec). FROZEN by Ruling R5, ADR-0025, ADR-0026.
+"""Seam C3 — PHASE-P3 → PHASE-P4 (track spec). FROZEN by Ruling R5, ADR-0025, ADR-0026,
+ADR-0032.
 
 Producer: P3's real ``materialize_package`` (``TrackSpec.to_wire()``).
 Consumer: P4's real ``adapt_track_spec`` and planner. Both use the shared
@@ -29,6 +30,9 @@ from services.music_factory.ingestion.p3_adapter import (
     adapt_track_spec,
 )
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
+from tests.support.experiments_factories import design_facts
+
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 REGISTRY_ENTRY = "C3 · PHASE-P3 → PHASE-P4"
 
@@ -67,6 +71,7 @@ def _experiment(*, target_bpm: int | None = 80) -> tuple[Experiment, Treatment, 
         treatments=(trt,),
         base_genome_fingerprint="fp_dummy",
         created_at=now,
+        **design_facts("exp_c3_01"),
     )
     return exp, trt, genome
 
@@ -106,6 +111,8 @@ def test_documented_derivation_rules_replace_invented_defaults() -> None:
     wire = _wire(target_bpm=None)
     assert wire["bounded_preferences"]["bpm"] == round((75 + 86) / 2)
     assert wire["requested_duration"] == round((160 + 221) / 2)
+    # ADR-0032: the genome's range itself travels, so P5 never invents a tolerance.
+    assert wire["duration_range"] == {"min_seconds": 160, "max_seconds": 221}
     assert wire["bounded_preferences"]["key_profile"] is None  # open, not "C_minor"
 
 
@@ -120,8 +127,9 @@ def test_real_producer_spec_reaches_the_p4_plan_with_its_lineage() -> None:
     assert adapted.brand_profile_id == wire["brand_profile_id"]
     assert adapted.playlist_spec_id == wire["playlist_spec_id"]
     assert list(adapted.allowed_providers) == wire["provider_policy"]["allowed_providers"]
+    assert adapted.duration_range.model_dump() == wire["duration_range"]
 
-    plan, _ = plan_generation(adapted)
+    plan, _ = plan_generation(adapted, created_at=FIXED_NOW)
     assert plan.lineage == adapted.lineage
 
 
@@ -134,6 +142,8 @@ REQUIRED_PATHS = (
     "bounded_preferences.bpm",
     "bounded_preferences.key_profile",
     "provider_policy.allowed_providers",
+    "duration_range.min_seconds",
+    "duration_range.max_seconds",
 )
 
 
@@ -148,6 +158,17 @@ def test_p4_refuses_a_spec_missing_any_required_fact(field: str) -> None:
     assert field in exc.error.field_paths
 
 
+def test_p4_refuses_a_pre_adr_0032_spec_without_a_duration_range() -> None:
+    """A 1.0 spec carried only a point; P4 refuses it rather than inventing a range."""
+    legacy = with_value(without(_wire(), "duration_range"), "schema_version", "1.0")
+    exc = assert_refused(
+        adapt_track_spec, legacy, TrackSpecValidationError, because="no duration range"
+    )
+    assert isinstance(exc, TrackSpecValidationError)
+    assert exc.error.code == "missing_required_field"
+    assert exc.error.field_paths == ["duration_range"]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -157,6 +178,9 @@ def test_p4_refuses_a_spec_missing_any_required_fact(field: str) -> None:
         ("hard_constraints.genre", " "),
         ("track_role", "standout_single"),
         ("requested_duration", 0),
+        ("requested_duration", 300),  # outside the declared duration_range
+        ("duration_range", {"min_seconds": 221, "max_seconds": 160}),
+        ("duration_range", {"min_seconds": 0, "max_seconds": 160}),
         ("budget_limit", -1.0),
     ],
 )
@@ -175,7 +199,7 @@ def test_p4_refuses_unknown_fields_and_future_majors() -> None:
     assert isinstance(unknown, TrackSpecValidationError)
     assert unknown.error.code == "unknown_field"
     future = assert_refused(
-        adapt_track_spec, with_value(_wire(), "schema_version", "2.0"), TrackSpecValidationError,
+        adapt_track_spec, with_value(_wire(), "schema_version", "3.0"), TrackSpecValidationError,
         because="future major",
     )
     assert isinstance(future, TrackSpecValidationError)

@@ -19,6 +19,7 @@ from plm_contracts.seams.c7 import RAW_REWARD_METRICS
 __all__ = [
     "candidate_event",
     "candidate_event_fields",
+    "directive_fields",
     "lineage_fields",
     "media_package",
     "media_package_fields",
@@ -30,6 +31,40 @@ __all__ = [
     "track_spec_fields",
     "unmeasured_raw_metrics",
 ]
+
+
+def directive_fields(**overrides: Any) -> dict[str, Any]:
+    """A complete C2 production directive (P2 -> P3)."""
+    fields: dict[str, Any] = {
+        "directive_id": "dir_fixture_001",
+        "decision_id": "dec_fixture_001",
+        "arm_id": "rnb_late_night_drive_english_vocal_45_75m",
+        "allocation_type": "exploit",
+        "priority": 1,
+        "quantity": 2,
+        "brief": {
+            "genre": "rnb",
+            "mood": ["melancholic", "intimate"],
+            "use_case": ["late_night_drive"],
+            "language": "english",
+            "vocal_mode": "vocal",
+            "duration_bucket": "45_75m",
+            "visual_world": "rainy_asian_city",
+        },
+        "expected_value": 88.0,
+        "uncertainty": 0.12,
+        "budget_limit": 100.0,
+        "market_context": {"brand_id": "neon_seoul"},
+        "selection_reason": ["high_demand_opportunity"],
+        "directive_version": "p2-dir-v1",
+        "policy_version": "p2-v1",
+        "expires_at": "2026-11-01T00:00:00Z",
+        "exploration_fraction": 0.25,
+        "value_model": "early-stage-proxy-v1",
+        "outcome_horizon": "28d",
+    }
+    fields.update(overrides)
+    return fields
 
 
 def lineage_fields(**overrides: str) -> dict[str, str]:
@@ -69,6 +104,7 @@ def track_spec_fields(**overrides: Any) -> dict[str, Any]:
         "production_style": "clean_modern",
         "track_role": "focus",
         "requested_duration": 180,
+        "duration_range": {"min_seconds": 60, "max_seconds": 240},
         "candidate_target": 2,
         "priority": 1,
         "budget_limit": 20.0,
@@ -111,6 +147,7 @@ def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
         "model_id": "mock-v1",
         "measured_audio": {"duration_seconds": 1.0, "sample_rate": 44100, "channels": 2},
         "requested_duration_seconds": 1,
+        "requested_duration_range": {"min_seconds": 1, "max_seconds": 2},
         "vocal_mode": "instrumental",
         "genre_tags": ["ambient"],
         "prompt_text": "ambient synth pad electronic chill",

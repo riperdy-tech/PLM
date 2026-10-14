@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from plm_contracts import ProviderMode
+from plm_platform.clock import Clock
 
 from ..domain.enums import DeliveryStatus, ReleaseStatus, StorePlatform
 from ..domain.models import CanonicalReleasePackage, DeliveryTarget
@@ -28,12 +27,14 @@ class MockDistributorClient(DistributorClientProtocol):
     def __init__(
         self,
         *,
+        clock: Clock,
         capabilities_override: set[DistributorCapability] | None = None,
         should_fail_auth: bool = False,
         should_reject: bool = False,
         rejection_reason: str = "Metadata policy violation",
         simulate_partial_delivery: bool = False,
     ) -> None:
+        self._clock = clock
         self._capabilities = (
             capabilities_override
             if capabilities_override is not None
@@ -79,7 +80,7 @@ class MockDistributorClient(DistributorClientProtocol):
                 "id": provider_release_id,
                 "status": "submitted",
                 "upc": f"UPC_{package.release_id}",
-                "timestamp": datetime.now(UTC).isoformat(),
+                "timestamp": self._clock.now().isoformat(),
             },
         )
 
@@ -90,7 +91,7 @@ class MockDistributorClient(DistributorClientProtocol):
         if not self.has_capability(DistributorCapability.STORE_STATUS):
             raise DistributorCapabilityError("Provider does not support STORE_STATUS")
 
-        now = datetime.now(UTC)
+        now = self._clock.now()
         stores = [
             StorePlatform.SPOTIFY,
             StorePlatform.APPLE_MUSIC,

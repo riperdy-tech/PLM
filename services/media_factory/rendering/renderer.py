@@ -9,8 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
+
+from plm_platform.clock import Clock
 
 from ..domain.enums import RenderJobStatus
 from ..domain.models import PlaylistSession, RenderJob, VisualSession
@@ -154,11 +155,18 @@ class DeterministicRenderer:
         playlist: PlaylistSession,
         visual_session: VisualSession,
         attempt: int = 1,
+        clock: Clock,
     ) -> RenderExecutionResult:
-        """Execute full deterministic render workflow (P6 §28)."""
+        """Execute full deterministic render workflow (P6 §28).
+
+        ``clock`` stamps the job's start and finish; it is injected so a replay with a
+        fixed clock reproduces the job record exactly.
+        """
+        started_at = clock.now()
         # 1. Preflight
         preflight = self.run_preflight(playlist, visual_session)
         if not preflight.passed:
+            failed_at = clock.now()
             failed_job = RenderJob(
                 id=f"rjob_{media_package_id_str}_{self.render_profile}_att{attempt}",
                 media_package_id=media_package_id_str,
@@ -170,7 +178,8 @@ class DeterministicRenderer:
                 input_manifest_hash=preflight.input_manifest_hash,
                 error_code="PREFLIGHT_FAILED",
                 error_detail="; ".join(preflight.reasons),
-                finished_at=datetime.now(UTC),
+                finished_at=failed_at,
+                created_at=started_at,
             )
             return RenderExecutionResult(
                 render_job=failed_job,
@@ -185,7 +194,6 @@ class DeterministicRenderer:
             )
 
         # 2. Deterministic Master Artifact Generation
-        started_at = datetime.now(UTC)
         duration = playlist.actual_duration_seconds or playlist.requested_duration_seconds
 
         # Video master URI & checksum
@@ -208,7 +216,7 @@ class DeterministicRenderer:
             actual_duration_seconds=duration,
         )
 
-        finished_at = datetime.now(UTC)
+        finished_at = clock.now()
 
         job_status = RenderJobStatus.COMPLETED if post_qa.passed else RenderJobStatus.FAILED
         render_job = RenderJob(
@@ -226,6 +234,7 @@ class DeterministicRenderer:
             output_checksum=video_checksum,
             error_code=None if post_qa.passed else "POST_RENDER_QA_FAILED",
             error_detail=None if post_qa.passed else "; ".join(post_qa.reasons),
+            created_at=started_at,
         )
 
         render_report = {

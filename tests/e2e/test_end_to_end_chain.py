@@ -11,17 +11,19 @@ R11 normalized reward post -> P2 posterior update -> next cycle allocation shift
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from plm_contracts import AllocationType, GateDisposition
+
+# P9
+from plm_contracts.money import FxTable, Money
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
-
-# P9
-from plm_contracts.seams.c7 import ObservationMaturity
+from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
 
-from services.analytics.domain.enums import ObservationWindow, PaybackStatus
+from services.analytics.domain.enums import PaybackStatus
 from services.analytics.economics.calculator import compute_unit_economics
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
@@ -73,9 +75,10 @@ from services.music_factory.api.events import build_candidate_ready_event
 from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 
 # P5
-from services.quality_gate.gate.manifest import build_release_manifest
+from services.quality_gate.gate.engine import run_candidate_evaluation
 from services.youtube_publishing.client.mock import MockYouTubeClient
 from services.youtube_publishing.domain.enums import OperatingMode
 
@@ -85,6 +88,7 @@ from services.youtube_publishing.engine import YouTubePublishingEngine
 from services.youtube_publishing.manifests import build_publish_manifest
 from services.youtube_publishing.storage.repositories import insert_publish_manifest
 from tests.support.distribution_db import distribution_db_session
+from tests.support.experiments_factories import design_facts
 from tests.support.music_db import music_db_session
 from tests.support.youtube_db import youtube_db_session
 
@@ -92,6 +96,7 @@ from tests.support.youtube_db import youtube_db_session
 def test_autonomous_music_engine_end_to_end_loop_closure(
     ar_db: Session,
     analytics_db: Session,
+    tmp_path: Path,
 ) -> None:
     """The master integration success criterion (P0 §1, Ruling R11, Seam C1–C7)."""
     now = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
@@ -198,6 +203,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         expires_at=now + timedelta(days=7),
         exploration_fraction=0.1,
         value_model="expected_economic_value",
+        outcome_horizon=DEFAULT_POLICY.outcome_horizon,
     )
     repositories.insert_directive(
         ar_db,
@@ -241,8 +247,9 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         treatments=(treatment,),
         base_genome_fingerprint="fp_lofi_tape",
         created_at=now,
+        **design_facts("exp_lofi_001", budget_limit=directive.budget_limit),
     )
-    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=1)
+    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=1, created_at=now)
     track_spec = package.track_specs[0]
     assert track_spec.track_spec_id.startswith("trk_")
     assert track_spec.requested_duration == 150
@@ -255,9 +262,10 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
 
     # Real P4 path: plan, generate with the mock provider, then build the C4 event
     # from the stored facts (ADR-0027) instead of hand-writing it.
-    plan, variants = plan_generation(adapted_spec)
+    plan, variants = plan_generation(adapted_spec, created_at=now)
+    storage = InMemoryArtifactStorage()
     with music_db_session() as music_db:
-        gen = GenerationEngine().execute_plan(
+        gen = GenerationEngine(clock=FixedClock(now), storage=storage).execute_plan(
             music_db, plan=plan, variants=variants, spec=adapted_spec
         )
         ready_event = build_candidate_ready_event(music_db, gen.candidates[0].candidate_id)
@@ -269,30 +277,17 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 5: P5 Quality & Release Gate — Verdict & Release Clearance (Seam C5)
     # =========================================================================
-    # Still hand-built (STATUS.md): a real P5 run would reject the mock's 30 s audio
-    # against the 150 s spec until R2 resolves the duration seam. Every fact below is
-    # taken from the real C4 event, including its lineage.
-    manifest = build_release_manifest(
-        candidate_id=candidate_id,
-        canonical_artifact_id=artifact_id,
-        artifact_uri=ready_event.artifact_uri,
-        artifact_sha256=ready_event.artifact_sha256,
-        measured_duration_seconds=ready_event.measured_audio.duration_seconds,
-        track_spec_id=ready_event.track_spec_id,
-        lineage=ready_event.lineage,
-        disposition=GateDisposition.PASSED,
-        override=None,
-        technical_status="PASSED",
-        commercial_use_status="eligible",
-        provenance_status="COMPLETE",
-        ai_disclosure_required=True,
-        rights_risk="LOW",
-        policy_status="COMPLIANT",
-        evaluation_id_str="eval_lofi_001",
-        evaluation_policy_version="p5-v1",
-        warning_codes=[],
-        evidence_bundle_id="evi_lofi_001",
-    )
+    # The real gate (R2 resolved the duration seam, ADR-0032): P5 reads the candidate's
+    # own bytes and judges it against the declared range carried on the C4 event.
+    audio = storage.get_artifact(ready_event.artifact_uri)
+    assert audio is not None
+    audio_path = tmp_path / "candidate.wav"
+    audio_path.write_bytes(audio)
+    gate = run_candidate_evaluation(event=ready_event, audio_path=audio_path,
+                                    clock=FixedClock(now))
+    assert gate.release_manifest is not None, gate.decision
+    manifest = gate.release_manifest
+    assert (manifest.candidate_id, manifest.canonical_artifact_id) == (candidate_id, artifact_id)
     assert manifest.disposition == GateDisposition.PASSED
     assert manifest.p5_manifest_id.startswith("rel_man_")
 
@@ -308,6 +303,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Lofi Study Session",
         render_profile="yt_longform_1080p_v1",
+        clock=FixedClock(now),
     )
     media_pkg = assembled.media_package
     c6_hop1 = media_pkg.to_c6_payload()
@@ -327,7 +323,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with youtube_db_session() as yt_db:
         insert_publish_manifest(yt_db, publish_manifest)
         yt_db.commit()
-        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512).execute_publish(
+        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now)).execute_publish(
             yt_db, publish_manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -342,7 +338,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with distribution_db_session() as dist_db:
         submitted = submit_release_from_seams(
             dist_db,
-            DistributionEngine(MockDistributorClient()),
+            DistributionEngine(MockDistributorClient(clock=FixedClock(now))),
             track_manifests=[track_manifest.to_wire()],
             media_package=c6_hop1,
             publication=yt_event.to_wire(),
@@ -366,21 +362,25 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     linked = lineage_for_isrc(analytics_db, c7_dist_payload.isrcs[0])
     assert linked is not None and linked[1] == ready_event.lineage
 
-    # Ingest facts: YouTube revenue $60.00, DSP royalties $50.00, production cost $15.00
-    # (still literals: real ingestion of these facts is stage R6)
-    gross_revenue = 110.0
-    allocated_cost = 15.0
-    net_contribution = gross_revenue - allocated_cost  # $95.00
+    # Ingest facts: realized revenue USD 110.00, production cost USD 15.00, reported in
+    # USD (still literals: real ingestion of these facts is stage R6)
+    gross_revenue = Money.of("110.00", "USD")
+    allocated_cost = Money.of("15.00", "USD")
 
     unit_econ = compute_unit_economics(
-        entity_id=media_pkg.media_package_id,
-        entity_type="package",
-        gross_revenue_usd=gross_revenue,
-        allocated_cost_usd=allocated_cost,
+        media_pkg.media_package_id,
+        "package",
+        reporting_currency="USD",
+        window=DEFAULT_POLICY.outcome_horizon,
+        estimated_revenue=None,
+        realized_revenue=gross_revenue,
+        allocated_cost=allocated_cost,
         views=28000,
         streams=14000,
+        as_of=now,
     )
-    assert unit_econ.net_contribution_usd == 95.0
+    assert unit_econ.net_contribution == Money.of("95.00", "USD")
+    assert unit_econ.roi is not None
     assert unit_econ.roi > 5.0
     assert unit_econ.payback_status == PaybackStatus.REPAID
 
@@ -389,14 +389,18 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         analytics_db,
         lineage=linked[1],
         unit_id=media_pkg.media_package_id,
-        net_contribution_usd=net_contribution,
+        net_contribution=unit_econ.net_contribution,
+        reporting_currency="USD",
+        fx=FxTable(),
         views=28000,
         watch_time_minutes=1400.0,
-        window=ObservationWindow.D7,
-        maturity=ObservationMaturity.MATURE,
+        window=DEFAULT_POLICY.outcome_horizon,
+        # The chain collapses time: the 7d outcome is measured a full window after
+        # publication, so its derived maturity is mature (ADR-0031).
+        published_at=now - timedelta(days=28),  # the declared horizon has elapsed
         attribution_confidence=1.0,
         quality_status=None,
-        now=now,
+        observed_at=now,
     )
     assert outcome.normalized_reward > 0.70  # Strong positive performance
 

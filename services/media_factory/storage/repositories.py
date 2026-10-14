@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
@@ -111,10 +111,12 @@ def update_playlist_session_status(
     status: PlaylistStatus,
     actual_duration: float | None = None,
     sequence_checksum: str | None = None,
+    *,
+    now: datetime,
 ) -> None:
     values: dict[str, Any] = {
         "status": status.value,
-        "updated_at": datetime.now(UTC),
+        "updated_at": now,
     }
     if actual_duration is not None:
         values["actual_duration_seconds"] = actual_duration
@@ -537,10 +539,12 @@ def update_media_package_status(
     package_id: str,
     status: PackageStatus,
     manifest_uri: str | None = None,
+    *,
+    now: datetime,
 ) -> None:
     values: dict[str, Any] = {
         "status": status.value,
-        "updated_at": datetime.now(UTC),
+        "updated_at": now,
     }
     if manifest_uri:
         values["manifest_uri"] = manifest_uri

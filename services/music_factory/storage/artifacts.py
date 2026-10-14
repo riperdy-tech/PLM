@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import wave
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Protocol, cast, runtime_checkable
 
 from ..domain.enums import ArtifactType
@@ -66,6 +66,7 @@ def create_audio_artifact(
     object_uri: str,
     measured: MeasuredAudio,
     artifact_type: ArtifactType = ArtifactType.FULL_MIX,
+    created_at: datetime,
 ) -> AudioArtifact:
     """Create an AudioArtifact model instance with probed audio properties."""
     return AudioArtifact(
@@ -81,7 +82,7 @@ def create_audio_artifact(
         channels=measured.channels,
         codec=measured.codec,
         probe_version=measured.probe_version,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
 
 

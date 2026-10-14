@@ -7,8 +7,9 @@ and validates artist metadata before release submission.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 
+from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
 from ..domain.enums import ArtistType
@@ -36,6 +37,7 @@ def get_or_create_artist(
     artist_type: ArtistType = ArtistType.VIRTUAL,
     spotify_artist_id: str | None = None,
     apple_artist_id: str | None = None,
+    now: datetime,
 ) -> ArtistProfile:
     """Retrieve existing artist by name or create a new artist profile.
 
@@ -57,7 +59,7 @@ def get_or_create_artist(
             )
         return existing
 
-    now = datetime.now(UTC)
+    now = require_aware(now)
     artist_id = f"art_{compute_sha256(f'{brand_id}|{normalized}')[:16]}"
     
     artist = ArtistProfile(

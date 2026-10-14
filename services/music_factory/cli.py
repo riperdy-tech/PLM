@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 import uvicorn
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 
@@ -52,7 +53,8 @@ def cli_generate(
         raise typer.Exit(code=1)
 
     spec = adapt_track_spec(data)
-    plan, variants = plan_generation(spec)
+    clock = SystemClock()
+    plan, variants = plan_generation(spec, created_at=clock.now())
 
     typer.echo(f"Created Generation Plan: {plan.plan_id} ({len(variants)} variants)")
 
@@ -60,7 +62,7 @@ def cli_generate(
     session = factory()
 
     adapter = get_provider_adapter(provider)
-    engine = GenerationEngine(default_provider_id=provider)
+    engine = GenerationEngine(clock=clock, default_provider_id=provider)
 
     try:
         result = engine.execute_plan(

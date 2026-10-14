@@ -344,8 +344,9 @@ def list_candidates_by_track(session: Session, track_spec_id: str) -> list[Gener
     ]
 
 
-def update_candidate_status(session: Session, candidate_id: str, status: CandidateStatus) -> None:
-    now = datetime.now(UTC)
+def update_candidate_status(
+    session: Session, candidate_id: str, status: CandidateStatus, *, now: datetime
+) -> None:
     session.execute(
         sa.update(generated_candidates_table)
         .where(generated_candidates_table.c.id == candidate_id)

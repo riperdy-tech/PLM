@@ -13,7 +13,7 @@ override faithfully.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from plm_contracts import GateOverrideStatus
 from plm_contracts.seams import ExperimentLineage
@@ -48,8 +48,14 @@ def resolve_quarantine(
     resolution: ResolutionCode,
     auditor_id: str,
     notes: str,
+    *,
+    now: datetime,
 ) -> tuple[QuarantineCase, ReleaseManifest | None]:
-    """Resolve a quarantine case and, on an audited override, issue its manifest."""
+    """Resolve a quarantine case and, on an audited override, issue its manifest.
+
+    ``now`` is the resolution instant: the case's ``resolved_at``, the override record's
+    ``resolved_at`` and the override manifest's ``created_at``.
+    """
     case = get_quarantine_case(session, case_id)
     if not case:
         raise ValueError(f"Quarantine case {case_id} not found.")
@@ -58,10 +64,10 @@ def resolve_quarantine(
     if resolution == ResolutionCode.CLEARED_BY_OVERRIDE:
         # Build the manifest first: an override that cannot produce a complete manifest
         # must not leave the case marked resolved.
-        manifest = _override_manifest(session, case, auditor_id)
+        manifest = _override_manifest(session, case, auditor_id, now=now)
 
-    resolve_quarantine_case(session, case_id, resolution, auditor_id, notes)
-    updated_case = case.resolve(resolution, auditor_id, notes)
+    resolve_quarantine_case(session, case_id, resolution, auditor_id, notes, resolved_at=now)
+    updated_case = case.resolve(resolution, auditor_id, notes, resolved_at=now)
 
     if manifest is not None:
         update_candidate_evaluation_status(
@@ -81,7 +87,7 @@ def resolve_quarantine(
 
 
 def _override_manifest(
-    session: Session, case: QuarantineCase, auditor_id: str
+    session: Session, case: QuarantineCase, auditor_id: str, *, now: datetime
 ) -> ReleaseManifest:
     evaluation = get_candidate_evaluation(session, case.evaluation_id)
     snapshot = get_evaluation_snapshot(session, case.evaluation_id)
@@ -127,7 +133,7 @@ def _override_manifest(
             status=GateOverrideStatus.CLEARED_BY_OVERRIDE,
             quarantine_case_id=case.id,
             auditor_id=auditor_id,
-            resolved_at=datetime.now(UTC),
+            resolved_at=now,
             reason_codes=tuple(case.reason_codes),
         ),
         technical_status=evaluation.technical_status,
@@ -141,6 +147,7 @@ def _override_manifest(
         evaluation_policy_version=evaluation.evaluation_policy_version,
         warning_codes=list(case.reason_codes),
         evidence_bundle_id=evidence[0].id,
+        now=now,
     )
 
 

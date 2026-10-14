@@ -11,10 +11,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock, SystemClock
 from sqlalchemy.orm import Session
 
 from ..config import ExperimentsSettings
 from ..domain.enums import ExperimentStatus
+from ..domain.errors import ExperimentStateError, LegacyExperimentError, P3RefusalError
 from ..domain.experiment import Experiment, Treatment
 from ..domain.package import ContentPackage
 from ..experiments.engine import design_experiment
@@ -26,7 +28,7 @@ from ..materialization.builder import (
 )
 from ..storage import repositories
 from ..storage.ids import deterministic_id
-from ..validation.engine import validate_experiment
+from ..validation.engine import promote_to_validated, validate_experiment
 from .schemas import (
     CreateExperimentRequest,
     CreateExperimentResponse,
@@ -47,9 +49,11 @@ def build_router(
     *,
     session_factory: SessionFactory | None,
     settings: ExperimentsSettings,
+    clock: Clock | None = None,
 ) -> APIRouter:
     """Build the experiments API router with fail-closed auth and session dependency."""
     router = APIRouter()
+    service_clock: Clock = clock or SystemClock()
     dependency = _dependencies(session_factory)
     auth = _auth(settings)
 
@@ -80,16 +84,24 @@ def build_router(
                 ).model_dump(),
             ) from err
 
-        base_genome = build_genome_from_directive(adapted)
-        gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
-        repositories.insert_genome(session, base_genome, genome_id=gid)
+        try:
+            base_genome = build_genome_from_directive(adapted)
+            exp = design_experiment(
+                adapted,
+                base_genome,
+                created_at=service_clock.now(),
+                experiment_type=req.experiment_type,
+                target_variable=req.target_variable,
+                factors=req.factors,
+                factor_design=req.factor_design,
+                seed=req.seed,
+            )
+        except P3RefusalError as err:
+            raise HTTPException(status_code=422, detail=err.error.model_dump()) from err
 
-        exp = design_experiment(
-            adapted,
-            base_genome,
-            experiment_type=req.experiment_type,
-            target_variable=req.target_variable,
-            seed=req.seed,
+        gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
+        repositories.insert_genome(
+            session, base_genome, genome_id=gid, created_at=service_clock.now()
         )
         repositories.insert_experiment(session, exp)
         session.commit()
@@ -112,7 +124,10 @@ def build_router(
         offset: int = Query(default=0, ge=0),
     ) -> ListExperimentsResponse:
         """List experiments ordered by creation time descending."""
-        exps = repositories.list_experiments(session, limit=limit, offset=offset)
+        try:
+            exps = repositories.list_experiments(session, limit=limit, offset=offset)
+        except LegacyExperimentError as err:
+            raise HTTPException(status_code=409, detail=err.error.model_dump()) from err
         return ListExperimentsResponse(experiments=exps, total=len(exps))
 
     @router.get(
@@ -130,7 +145,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> Experiment:
         """Retrieve an existing experiment definition by ID."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -157,7 +172,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> list[Treatment]:
         """Retrieve treatments for an experiment."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -184,7 +199,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> ValidateExperimentResponse:
         """Run preflight validation on an experiment."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -207,7 +222,14 @@ def build_router(
             )
 
         report = validate_experiment(exp, genome)
-        return ValidateExperimentResponse(report=report)
+        status = exp.status
+        if report.passed and exp.status is ExperimentStatus.DRAFT:
+            status = promote_to_validated(exp, report).status
+            repositories.update_experiment_status(
+                session, experiment_id, status, now=service_clock.now()
+            )
+            session.commit()
+        return ValidateExperimentResponse(report=report, status=status)
 
     @router.post(
         "/experiments/v1/experiments/{experiment_id}/materialize",
@@ -225,7 +247,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> MaterializePackageResponse:
         """Materialize a specific experiment treatment into a complete ContentPackage."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -263,23 +285,28 @@ def build_router(
                 exp,
                 treatment,
                 genome,
+                created_at=service_clock.now(),
                 brand_id=req.brand_id,
                 budget_envelope=req.budget_envelope,
                 track_count=req.track_count,
                 total_duration_minutes=req.total_duration_minutes,
             )
+        except ExperimentStateError as err:
+            raise HTTPException(status_code=409, detail=err.error.model_dump()) from err
         except BudgetEnvelopeExceededError as err:
             raise HTTPException(
                 status_code=422,
                 detail=ErrorShape(
-                    code="budget_envelope_error",
+                    code="budget_envelope_exceeds_limit",
                     field_paths=["budget_envelope"],
                     message=str(err),
                 ).model_dump(),
             ) from err
 
         repositories.insert_content_package(session, package)
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.MATERIALIZED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.MATERIALIZED, now=service_clock.now()
+        )
         session.commit()
 
         return MaterializePackageResponse(package=package)
@@ -299,7 +326,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> UpdateStatusResponse:
         """Cancel an experiment."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -309,7 +336,9 @@ def build_router(
                     message=f"Experiment '{experiment_id}' does not exist",
                 ).model_dump(),
             )
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.CANCELLED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.CANCELLED, now=service_clock.now()
+        )
         session.commit()
         return UpdateStatusResponse(experiment_id=experiment_id, status=ExperimentStatus.CANCELLED.value)
 
@@ -328,7 +357,7 @@ def build_router(
         session: Annotated[Session, Depends(dependency)],
     ) -> UpdateStatusResponse:
         """Close an experiment."""
-        exp = repositories.get_experiment(session, experiment_id)
+        exp = _load_experiment(session, experiment_id)
         if exp is None:
             raise HTTPException(
                 status_code=404,
@@ -338,7 +367,9 @@ def build_router(
                     message=f"Experiment '{experiment_id}' does not exist",
                 ).model_dump(),
             )
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.COMPLETED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.COMPLETED, now=service_clock.now()
+        )
         session.commit()
         return UpdateStatusResponse(experiment_id=experiment_id, status=ExperimentStatus.COMPLETED.value)
 
@@ -370,6 +401,14 @@ def build_router(
         return pkg
 
     return router
+
+
+def _load_experiment(session: Session, experiment_id: str) -> Experiment | None:
+    """Load an experiment; a legacy row without a measurement plan is a 409, not a guess."""
+    try:
+        return repositories.get_experiment(session, experiment_id)
+    except LegacyExperimentError as err:
+        raise HTTPException(status_code=409, detail=err.error.model_dump()) from err
 
 
 def _dependencies(session_factory: SessionFactory | None) -> Callable[[], Iterator[Session]]:

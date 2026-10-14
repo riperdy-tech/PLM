@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, ExternalWriteRefusedError
 
 from ..client.mock import MockDistributorClient
@@ -64,18 +64,21 @@ def build_distribution_router(
     auth_dependency: Any,
     engine: DistributionEngine | None = None,
     *,
+    clock: Clock,
     write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     """Build the distribution router configured with auth and dependencies."""
     router = APIRouter(prefix="/distribution", tags=["distribution"])
-    dist_engine = engine or DistributionEngine(MockDistributorClient(), write_guard=write_guard)
+    dist_engine = engine or DistributionEngine(
+        MockDistributorClient(clock=clock), write_guard=write_guard
+    )
 
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse(
             status="healthy",
             service="distribution",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=clock.now().isoformat(),
         )
 
     @router.post(
@@ -105,7 +108,7 @@ def build_distribution_router(
                         release_title=req.release_title,
                         release_version=req.release_version,
                     ),
-                    now=datetime.now(UTC),
+                    now=clock.now(),
                 )
                 session.commit()
                 return _to_release_response(result.release)
@@ -145,7 +148,7 @@ def build_distribution_router(
     ) -> ReleaseResponse:
         with session_factory() as session:
             try:
-                result = dist_engine.reconcile_status(session, release_id)
+                result = dist_engine.reconcile_status(session, release_id, now=clock.now())
                 session.commit()
                 return _to_release_response(result.release)
             except ValueError as exc:
@@ -164,7 +167,7 @@ def build_distribution_router(
     ) -> ReleaseResponse:
         with session_factory() as session:
             try:
-                result = dist_engine.request_takedown(session, release_id)
+                result = dist_engine.request_takedown(session, release_id, now=clock.now())
                 session.commit()
                 return _to_release_response(result.release)
             except ExternalWriteRefusedError as exc:
@@ -194,6 +197,7 @@ def build_distribution_router(
                 source_reference=req.source_reference,
                 raw_payload_uri=req.raw_payload_uri,
                 report_type=req.report_type,
+                now=clock.now(),
             )
             session.commit()
             return ReportReferenceResponse(

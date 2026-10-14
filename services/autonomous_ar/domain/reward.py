@@ -32,9 +32,16 @@ def tri_from_optional(value: float | None) -> Tri[float]:
     return Tri.unknown() if value is None else Tri.known(float(value))
 
 
-def observation_key(experiment_id: str, window: ObservationWindow) -> str:
-    """§73's idempotency identity: `experiment_id + observation_window`."""
-    return f"{experiment_id}|{window.value}"
+def observation_key(experiment_id: str, content_id: str, window: ObservationWindow,
+                    maturity: ObservationMaturity) -> str:
+    """§73's idempotency identity, extended by ADR-0031.
+
+    §73 keyed on `experiment_id + observation_window`. That made a mature 28d result a
+    duplicate of the provisional 28d result before it (§19 needs both), and made two
+    contents of one experiment collide. One fact is one (experiment, content, window,
+    maturity).
+    """
+    return f"{experiment_id}|{content_id}|{window.value}|{maturity.value}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,4 +80,5 @@ class RewardObservation:
 
     @property
     def key(self) -> str:
-        return observation_key(self.experiment_id, self.observation_window)
+        return observation_key(self.experiment_id, self.content_id, self.observation_window,
+                               self.maturity)

@@ -105,5 +105,6 @@ def build_directives(portfolio: Portfolio, *, cycle_id: str, policy: PolicyConfi
             expires_at=expires_at,
             exploration_fraction=_fraction_for(policy, selection.allocation_type),
             value_model=policy.value_model,
+            outcome_horizon=policy.outcome_horizon,
         ))
     return tuple(directives)

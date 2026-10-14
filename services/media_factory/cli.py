@@ -9,6 +9,7 @@ import typer
 import uvicorn
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 
@@ -56,6 +57,7 @@ def cli_assemble(
             playlist_concept=req.playlist_concept,
             render_profile=req.render_profile,
             sequence_version=req.sequence_version,
+            clock=SystemClock(),
         )
     except (ValueError, SeamRejection) as exc:
         typer.echo(f"Error: assembly refused: {exc}", err=True)
@@ -118,5 +120,5 @@ def serve(host: str = "127.0.0.1", port: int = 8006) -> None:
 
     from .api.app import create_app
 
-    app = create_app(session_factory=factory, settings=settings)
+    app = create_app(session_factory=factory, settings=settings, clock=SystemClock())
     uvicorn.run(app, host=host, port=port)

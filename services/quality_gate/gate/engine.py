@@ -6,10 +6,10 @@ GateDecision, QuarantineCase, and downstream ReleaseManifest.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from plm_contracts.seams.c4 import CandidateReadyPayload
+from plm_platform.clock import Clock
 
 from ..domain.enums import (
     CheckSeverity,
@@ -59,22 +59,25 @@ def run_candidate_evaluation(
     *,
     event: CandidateReadyPayload,
     audio_path: str | Path,
+    clock: Clock,
     evaluation_policy_version: str = "p5-v1",
     trigger: str = "candidate_ready",
 ) -> GateEngineResult:
     """Evaluate one candidate described by its Seam C4 event (ADR-0027).
 
-    Every candidate fact comes from the event: lineage, expected duration, vocal mode,
+    Every candidate fact comes from the event: lineage, declared duration range, vocal mode,
     genre tags, prompt, lyrics and the declared rights. ``evaluation_policy_version`` and
     ``trigger`` are P5's own settings. ``audio_path`` is where P5 can read the artifact;
-    fetching it from storage by URI and checksum is stage R4.
+    fetching it from storage by URI and checksum is stage R4. ``clock`` stamps the start
+    instant shared by every record of this evaluation, and the finish instant.
     """
+    now = clock.now()
     candidate_id = event.candidate_id
     artifact_id = event.artifact_id
     track_spec_id = event.track_spec_id
     experiment_id = event.lineage.experiment_id
     content_arm_id = event.lineage.content_arm_id
-    expected_duration_seconds = float(event.requested_duration_seconds)
+    duration_range = event.requested_duration_range
     vocal_mode = event.vocal_mode
     lyrics_text = event.lyrics_text
     prompt_text = event.prompt_text
@@ -86,6 +89,7 @@ def run_candidate_evaluation(
         artifact_id=artifact_id,
         evaluation_policy_version=evaluation_policy_version,
         trigger=trigger,
+        now=now,
     )
 
     # 2. Immutable Fact Snapshot: the C4 event as received, lineage included.
@@ -106,7 +110,8 @@ def run_candidate_evaluation(
             "audio_path": str(audio_path),
             "artifact_uri": event.artifact_uri,
             "artifact_sha256": event.artifact_sha256,
-            "expected_duration_seconds": expected_duration_seconds,
+            "requested_duration_seconds": event.requested_duration_seconds,
+            "requested_duration_range": duration_range.model_dump(mode="json"),
             "measured_audio": event.measured_audio.model_dump(mode="json"),
         },
         provider_snapshot={"provider_id": event.provider_id, "model_id": event.model_id},
@@ -114,6 +119,7 @@ def run_candidate_evaluation(
         p3_snapshot_ref=track_spec_id,
         p4_snapshot_ref=candidate_id,
         policy_snapshot_ref=evaluation_policy_version,
+        now=now,
     )
     evaluation.snapshot = snapshot
 
@@ -121,7 +127,8 @@ def run_candidate_evaluation(
     tech_res = validate_technical_audio(
         evaluation_id=evaluation.id,
         audio_path=audio_path,
-        expected_duration_seconds=expected_duration_seconds,
+        allowed_duration=duration_range,
+        now=now,
     )
     evaluation.technical_checks.extend(tech_res.checks)
     evaluation.risk_findings.extend(tech_res.findings)
@@ -130,6 +137,7 @@ def run_candidate_evaluation(
     musical_res = evaluate_musical_qualities(
         evaluation_id=evaluation.id,
         audio_path=audio_path,
+        now=now,
     )
     evaluation.musical_checks.extend(musical_res.checks)
     evaluation.risk_findings.extend(musical_res.findings)
@@ -141,6 +149,7 @@ def run_candidate_evaluation(
         vocal_mode=vocal_mode,
         lyrics_text=lyrics_text,
         prompt_text=prompt_text,
+        now=now,
     )
     evaluation.lyric_checks.extend(lyric_res.checks)
     evaluation.risk_findings.extend(lyric_res.findings)
@@ -148,6 +157,7 @@ def run_candidate_evaluation(
     rights_res = validate_provenance_and_rights(
         evaluation_id=evaluation.id,
         rights=event.rights,
+        now=now,
     )
     evaluation.rights_checks.extend(rights_res.rights_checks)
     evaluation.provenance_checks.extend(rights_res.provenance_checks)
@@ -160,6 +170,7 @@ def run_candidate_evaluation(
         genre_tags=genre_tags,
         is_ai_generated=True,
         policy_version=evaluation_policy_version,
+        now=now,
     )
     evaluation.policy_checks.extend(policy_res.checks)
     evaluation.risk_findings.extend(policy_res.findings)
@@ -193,6 +204,7 @@ def run_candidate_evaluation(
             candidate_id=candidate_id,
             evaluation_id_str=evaluation.id,
             reason_codes=reasons or ["QUARANTINE_REVIEW_REQUIRED"],
+            now=now,
         )
     elif warning_findings:
         disposition = GateDisposition.PASSED_WITH_WARNINGS
@@ -224,6 +236,7 @@ def run_candidate_evaluation(
         blocking_finding_ids=[f.id for f in blocking_findings],
         warning_finding_ids=[f.id for f in warning_findings],
         decision_version="v1.0",
+        now=now,
     )
     evaluation.gate_decision = decision
     evaluation.disposition = disposition
@@ -253,11 +266,12 @@ def run_candidate_evaluation(
             evaluation_policy_version=evaluation_policy_version,
             warning_codes=[f.finding_code for f in warning_findings],
             evidence_bundle_id=primary_evidence_id,
+            now=now,
         )
         evaluation.release_manifest = release_manifest
 
     evaluation.status = EvaluationStatus.COMPLETED
-    evaluation.finished_at = datetime.now(UTC)
+    evaluation.finished_at = clock.now()
 
     return GateEngineResult(
         evaluation=evaluation,

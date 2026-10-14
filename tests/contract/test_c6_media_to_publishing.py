@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
+from plm_platform.clock import FixedClock
 
 from services.distribution.client.mock import MockDistributorClient
 from services.distribution.engine import DistributionEngine
@@ -67,6 +68,7 @@ def hop1() -> dict[str, Any]:
         required_duration_seconds=360.0,
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Late Night Synthwave",
+        clock=FixedClock(NOW),
     )
     return json.loads(json.dumps(result.media_package.to_c6_payload()))
 
@@ -78,7 +80,7 @@ def hop2(hop1: dict[str, Any]) -> dict[str, Any]:
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
         session.commit()
-        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512).execute_publish(
+        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(NOW)).execute_publish(
             session, manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -117,7 +119,7 @@ def test_hop2_event_carries_the_lineage(hop1: dict[str, Any], hop2: dict[str, An
 def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str, Any]) -> None:
     with distribution_db_session() as session:
         result = submit_release_from_seams(
-            session, DistributionEngine(MockDistributorClient()),
+            session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
             publication=hop2, metadata=METADATA, now=NOW,
         )
@@ -133,7 +135,7 @@ def test_p8_refuses_a_publication_from_another_package(
 ) -> None:
     with distribution_db_session() as session, pytest.raises(SubmissionRefusedError) as exc:
         submit_release_from_seams(
-            session, DistributionEngine(MockDistributorClient()),
+            session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
             publication=with_value(hop2, "media_package_id", "mpkg_other"),
             metadata=METADATA, now=NOW,

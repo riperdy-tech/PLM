@@ -1,7 +1,9 @@
 """Unit tests for candidate bank lifecycle and querying (§4.5, §65, R6)."""
+from datetime import UTC, datetime
 
 import pytest
 from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
 
 from services.music_factory.candidates.bank import (
     CandidateNotFoundError,
@@ -44,11 +46,13 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
     )
 ).to_wire()
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 
 def test_candidate_bank_transitions_and_queries() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
-    plan, variants = plan_generation(spec)
-    engine = GenerationEngine()
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
 
     with music_db_session() as session:
         res = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
@@ -71,15 +75,15 @@ def test_candidate_bank_transitions_and_queries() -> None:
         assert len(by_trk) == len(res.candidates)
 
         # 3. Transitions
-        accepted = accept_candidate(session, cand_id)
+        accepted = accept_candidate(session, cand_id, now=FIXED_NOW)
         assert accepted.status == CandidateStatus.ACCEPTED
 
-        exported = mark_candidate_exported_to_p5(session, cand_id)
+        exported = mark_candidate_exported_to_p5(session, cand_id, now=FIXED_NOW)
         assert exported.status == CandidateStatus.EXPORTED_TO_P5
 
         # 4. Illegal transition: cannot reject already exported candidate
         with pytest.raises(InvalidCandidateTransitionError):
-            reject_candidate(session, cand_id)
+            reject_candidate(session, cand_id, now=FIXED_NOW)
 
         # 5. Nonexistent candidate
         with pytest.raises(CandidateNotFoundError):

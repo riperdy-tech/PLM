@@ -42,6 +42,7 @@ REGISTRY_FIELDS: tuple[str, ...] = (
     "expires_at",
     "exploration_fraction",
     "value_model",
+    "outcome_horizon",  # schema 2.0, ADR-0031
 )
 
 
@@ -137,6 +138,7 @@ def test_real_producer_payload_is_adapted_without_invention() -> None:
     assert adapted.expected_value == directive.expected_value
     assert adapted.uncertainty == directive.uncertainty
     assert adapted.value_model == directive.value_model
+    assert adapted.outcome_horizon == directive.outcome_horizon
     assert adapted.directive_version == directive.directive_version
     assert adapted.policy_version == directive.policy_version
     assert adapted.market_context == dict(directive.market_context)
@@ -165,7 +167,7 @@ def test_consumer_refuses_an_unknown_field() -> None:
 
 def test_consumer_refuses_a_future_major_version() -> None:
     exc = assert_refused(
-        adapt_directive, with_value(_wire(), "schema_version", "2.0"), DirectiveValidationError,
+        adapt_directive, with_value(_wire(), "schema_version", "3.0"), DirectiveValidationError,
         because="future major",
     )
     assert isinstance(exc, DirectiveValidationError)

@@ -105,7 +105,9 @@ def submit_release_from_seams(
                 )
             )
 
-    artist = get_or_create_artist(session, metadata.artist_name, brand_id=package.brand_id)
+    artist = get_or_create_artist(
+        session, metadata.artist_name, brand_id=package.brand_id, now=now
+    )
     try:
         release = compile_canonical_release_package(
             track_manifests=manifests,
@@ -131,4 +133,5 @@ def submit_release_from_seams(
         artist=artist,
         lineage=package.lineage,
         media_package_id=package.media_package_id,
+        now=now,
     )

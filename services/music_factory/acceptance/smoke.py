@@ -7,10 +7,9 @@ C3 track spec → generation plan → mock provider synthesis → artifact probe
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -45,7 +44,7 @@ def run_smoke_test() -> str | None:
 
     factory = session_factory(engine)
     with factory() as session:
-        now = datetime.now(UTC)
+        now = SystemClock().now()
         stamp = int(now.timestamp())
         wire_spec = TrackSpecPayload.build(
             track_spec_id=f"trk_smoke_{stamp}",
@@ -72,6 +71,7 @@ def run_smoke_test() -> str | None:
             production_style="lofi_contemporary",
             track_role="focus",
             requested_duration=60,
+            duration_range={"min_seconds": 45, "max_seconds": 75},
             candidate_target=1,
             priority=1,
             budget_limit=50.0,
@@ -82,12 +82,12 @@ def run_smoke_test() -> str | None:
         spec = adapt_track_spec(wire_spec)
 
         # 2. Plan generation
-        plan, variants = plan_generation(spec)
+        plan, variants = plan_generation(spec, created_at=now)
         assert len(variants) >= 1
 
         # 3. Execute generation with Mock provider
         storage = InMemoryArtifactStorage()
-        gen_engine = GenerationEngine(storage=storage)
+        gen_engine = GenerationEngine(clock=FixedClock(now), storage=storage)
         result = gen_engine.execute_plan(
             session,
             plan=plan,
@@ -114,7 +114,7 @@ def run_smoke_test() -> str | None:
 
         # 5. Build the Seam C4 event from stored facts, then mark the export
         event = build_candidate_ready_event(session, candidate.candidate_id)
-        exported = mark_candidate_exported_to_p5(session, candidate.candidate_id)
+        exported = mark_candidate_exported_to_p5(session, candidate.candidate_id, now=now)
         if exported.status != CandidateStatus.EXPORTED_TO_P5:
             return "failed: candidate could not be transitioned to EXPORTED_TO_P5"
         assert event.event_type == "music_candidate_ready_for_p5"

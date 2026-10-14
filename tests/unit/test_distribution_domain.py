@@ -69,7 +69,7 @@ def test_deterministic_ids_generation() -> None:
 
 
 def test_models_immutability() -> None:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     artist = ArtistProfile(
         id="art_1",
         canonical_name="Neon Soul",

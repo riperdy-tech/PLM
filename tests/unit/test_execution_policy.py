@@ -15,6 +15,7 @@ import pytest
 from distribution.client.mock import MockDistributorClient
 from distribution.engine import DistributionEngine
 from plm_contracts import ExecutionPolicy, ProviderMode
+from plm_platform.clock import FixedClock
 from plm_platform.config import SettingsError
 from plm_platform.execution import (
     BudgetVerdict,
@@ -73,13 +74,12 @@ def _guard(
         ExecutionSettings(policies=policies),
         authorizations=grants,
         budget=budget,
-        clock=lambda: NOW,
     )
 
 
 def _decide(guard: ExternalWriteGuard, mode: ProviderMode = ProviderMode.REAL, **kw: Any) -> WriteDecision:
     return guard.authorize_external_write(
-        "youtube.upload", provider_mode=mode, idempotency_key=kw.pop("key", "k1"), **kw
+        "youtube.upload", provider_mode=mode, idempotency_key=kw.pop("key", "k1"), now=NOW, **kw
     ).decision
 
 
@@ -113,7 +113,7 @@ def test_read_only_denies_writes() -> None:
 def test_live_without_authorization_is_refused() -> None:
     guard = _guard({"youtube.upload": ExecutionPolicy.LIVE}, budget=AllowAll())
     decision = guard.authorize_external_write(
-        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1"
+        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1", now=NOW
     )
     assert decision.decision is WriteDecision.DENY
     assert decision.reason == "no_authorization"
@@ -135,7 +135,7 @@ def test_expired_authorization_is_refused() -> None:
         budget=AllowAll(),
     )
     decision = guard.authorize_external_write(
-        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1"
+        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1", now=NOW
     )
     assert decision.reason == "authorization_expired"
 
@@ -143,7 +143,7 @@ def test_expired_authorization_is_refused() -> None:
 def test_live_authorized_without_budget_ledger_fails_closed() -> None:
     guard = _guard({"youtube.upload": ExecutionPolicy.LIVE}, grants=(_grant("youtube.upload"),))
     decision = guard.authorize_external_write(
-        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1"
+        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1", now=NOW
     )
     assert decision.decision is WriteDecision.DENY
     assert decision.reason == "budget_ledger_unavailable"
@@ -183,7 +183,7 @@ def test_every_decision_is_recorded() -> None:
 def test_undeclared_clients_count_as_real() -> None:
     assert provider_mode_of(object()) is ProviderMode.REAL
     assert provider_mode_of(MockYouTubeClient()) is ProviderMode.MOCK
-    assert provider_mode_of(MockDistributorClient()) is ProviderMode.MOCK
+    assert provider_mode_of(MockDistributorClient(clock=FixedClock(NOW))) is ProviderMode.MOCK
 
 
 # --- configuration ---------------------------------------------------------------------
@@ -281,7 +281,7 @@ _YT_WRITES = {"insert_resumable_session", "upload_video_chunk", "set_thumbnail",
 
 def _publish(guard: ExternalWriteGuard, mode: OperatingMode = OperatingMode.AUTONOMOUS) -> tuple[Any, SpyRealYouTubeClient]:
     client = SpyRealYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard)
+    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW))
     manifest = _sample_manifest()
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -338,7 +338,7 @@ class SpyRealDistributor(MockDistributorClient):
     provider_mode = ProviderMode.REAL
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(clock=FixedClock(NOW))
         self.writes: list[str] = []
 
     def submit_release(self, package: Any) -> Any:
@@ -356,7 +356,7 @@ def test_p8_real_client_under_dry_run_is_never_called_and_nothing_persists() -> 
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
         with pytest.raises(ExternalWriteRefusedError) as exc:
-            engine.submit_release(session, pkg, artist=artist, **IDENTITY)
+            engine.submit_release(session, pkg, artist=artist, now=NOW, **IDENTITY)
     assert exc.value.decision.decision is WriteDecision.RECORD_INTENT
     assert client.writes == []
 
@@ -368,7 +368,7 @@ def test_p8_live_without_authorization_is_refused() -> None:
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
         with pytest.raises(ExternalWriteRefusedError) as exc:
-            engine.submit_release(session, pkg, artist=artist, **IDENTITY)
+            engine.submit_release(session, pkg, artist=artist, now=NOW, **IDENTITY)
     assert exc.value.decision.reason == "no_authorization"
     assert client.writes == []
 
@@ -383,9 +383,9 @@ def test_p8_takedown_needs_its_own_grant() -> None:
     engine = DistributionEngine(client, write_guard=guard)
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
-        submitted = engine.submit_release(session, pkg, artist=artist, **IDENTITY)
+        submitted = engine.submit_release(session, pkg, artist=artist, now=NOW, **IDENTITY)
         with pytest.raises(ExternalWriteRefusedError):
-            engine.request_takedown(session, submitted.release.release_id)
+            engine.request_takedown(session, submitted.release.release_id, now=NOW)
     assert client.writes == ["submit_release"]
 
 
@@ -395,7 +395,7 @@ def test_p7_real_client_never_uploads_placeholder_bytes() -> None:
         {c: ExecutionPolicy.LIVE for c in caps}, grants=tuple(_grant(c) for c in caps), budget=AllowAll()
     )
     client = SpyRealYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard)
+    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard, clock=FixedClock(NOW))
     manifest = _sample_manifest()
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)

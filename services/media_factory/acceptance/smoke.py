@@ -9,11 +9,11 @@ C5 release manifest ingestion → playlist sequencing → visual session plannin
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 
 from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -51,8 +51,8 @@ def run_smoke_test() -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"blocked: database unreachable ({exc})"
 
-    now = datetime.now(UTC)
-    ts = int(now.timestamp())
+    clock = SystemClock()
+    ts = int(clock.now().timestamp())
 
     lineage = ExperimentLineage(
         experiment_id=f"exp_smoke_{ts}",
@@ -101,6 +101,7 @@ def run_smoke_test() -> str | None:
             visual_profile="brand_neon_rain_v1",
             playlist_concept="Midnight Study Session",
             render_profile="yt_longform_1080p_v1",
+            clock=clock,
         )
 
         if res.media_package.status != PackageStatus.READY_FOR_PUBLISH:

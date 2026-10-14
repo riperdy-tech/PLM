@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from plm_contracts import GateDisposition as SharedGateDisposition
@@ -66,7 +66,7 @@ class EvaluationSnapshot:
     policy_snapshot_ref: str
     catalog_snapshot_ref: str
     snapshot_hash: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -82,6 +82,8 @@ class EvaluationSnapshot:
         p4_snapshot_ref: str = "",
         policy_snapshot_ref: str = "",
         catalog_snapshot_ref: str = "",
+        *,
+        now: datetime,
     ) -> EvaluationSnapshot:
         content = json.dumps(
             {
@@ -109,6 +111,7 @@ class EvaluationSnapshot:
             policy_snapshot_ref=policy_snapshot_ref,
             catalog_snapshot_ref=catalog_snapshot_ref,
             snapshot_hash=s_hash,
+            created_at=now,
         )
 
 
@@ -129,7 +132,7 @@ class TechnicalCheck:
     tool_name: str = "internal_audio_validator"
     tool_version: str = "1.0"
     config_version: str = "1.0"
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -143,6 +146,8 @@ class TechnicalCheck:
         unit: str,
         start_seconds: float | None = None,
         end_seconds: float | None = None,
+        *,
+        now: datetime,
     ) -> TechnicalCheck:
         cid = check_id(evaluation_id_str, "tech", check_type)
         return cls(
@@ -156,6 +161,7 @@ class TechnicalCheck:
             unit=unit,
             start_seconds=start_seconds,
             end_seconds=end_seconds,
+            created_at=now,
         )
 
 
@@ -172,7 +178,7 @@ class MusicalCheck:
     method: str
     model_version: str
     segment_data: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -185,6 +191,8 @@ class MusicalCheck:
         method: str = "heuristic_analyzer",
         model_version: str = "1.0",
         segment_data: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> MusicalCheck:
         cid = check_id(evaluation_id_str, "music", check_type)
         return cls(
@@ -197,6 +205,7 @@ class MusicalCheck:
             method=method,
             model_version=model_version,
             segment_data=segment_data or {},
+            created_at=now,
         )
 
 
@@ -210,7 +219,7 @@ class LyricCheck:
     status: CheckStatus
     severity: CheckSeverity
     details: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -220,6 +229,8 @@ class LyricCheck:
         status: CheckStatus,
         severity: CheckSeverity,
         details: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> LyricCheck:
         cid = check_id(evaluation_id_str, "lyric", check_type)
         return cls(
@@ -229,6 +240,7 @@ class LyricCheck:
             status=status,
             severity=severity,
             details=details or {},
+            created_at=now,
         )
 
 
@@ -242,7 +254,7 @@ class ProvenanceCheck:
     status: CheckStatus
     severity: CheckSeverity
     details: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -252,6 +264,8 @@ class ProvenanceCheck:
         status: CheckStatus,
         severity: CheckSeverity,
         details: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> ProvenanceCheck:
         cid = check_id(evaluation_id_str, "prov", check_type)
         return cls(
@@ -261,6 +275,7 @@ class ProvenanceCheck:
             status=status,
             severity=severity,
             details=details or {},
+            created_at=now,
         )
 
 
@@ -279,7 +294,7 @@ class RightsCheck:
     matched_reference_id: str | None = None
     similarity_score: float = 0.0
     evidence_data: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -294,6 +309,8 @@ class RightsCheck:
         matched_reference_id: str | None = None,
         similarity_score: float = 0.0,
         evidence_data: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> RightsCheck:
         cid = check_id(evaluation_id_str, "rights", check_type)
         return cls(
@@ -308,6 +325,7 @@ class RightsCheck:
             matched_reference_id=matched_reference_id,
             similarity_score=similarity_score,
             evidence_data=evidence_data or {},
+            created_at=now,
         )
 
 
@@ -323,7 +341,7 @@ class PolicyCheck:
     status: CheckStatus
     severity: CheckSeverity
     evidence_data: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -335,6 +353,8 @@ class PolicyCheck:
         status: CheckStatus,
         severity: CheckSeverity,
         evidence_data: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> PolicyCheck:
         cid = check_id(evaluation_id_str, policy_namespace, rule_id)
         return cls(
@@ -346,6 +366,7 @@ class PolicyCheck:
             status=status,
             severity=severity,
             evidence_data=evidence_data or {},
+            created_at=now,
         )
 
 
@@ -361,7 +382,7 @@ class EvidenceItem:
     content_hash: str
     summary: str
     raw_pointer: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -373,6 +394,8 @@ class EvidenceItem:
         content_hash: str,
         summary: str,
         raw_pointer: str | None = None,
+        *,
+        now: datetime,
     ) -> EvidenceItem:
         eid = evidence_id(evaluation_id_str, evidence_type, content_hash)
         return cls(
@@ -384,6 +407,7 @@ class EvidenceItem:
             content_hash=content_hash,
             summary=summary,
             raw_pointer=raw_pointer,
+            created_at=now,
         )
 
 
@@ -404,7 +428,7 @@ class RiskFinding:
     evidence_item_ids: list[str] = field(default_factory=list)
     blocking: bool = False
     repairability: str = "UNKNOWN"
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -421,6 +445,8 @@ class RiskFinding:
         end_seconds: float | None = None,
         evidence_item_ids: list[str] | None = None,
         repairability: str = "UNKNOWN",
+        *,
+        now: datetime,
     ) -> RiskFinding:
         fid = risk_finding_id(evaluation_id_str, finding_code)
         return cls(
@@ -437,6 +463,7 @@ class RiskFinding:
             evidence_item_ids=evidence_item_ids or [],
             blocking=blocking,
             repairability=repairability,
+            created_at=now,
         )
 
 
@@ -452,7 +479,7 @@ class GateDecision:
     warning_finding_ids: list[str]
     decision_version: str
     decision_hash: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -463,6 +490,8 @@ class GateDecision:
         blocking_finding_ids: list[str],
         warning_finding_ids: list[str],
         decision_version: str = "v1.0",
+        *,
+        now: datetime,
     ) -> GateDecision:
         content = json.dumps(
             {
@@ -485,6 +514,7 @@ class GateDecision:
             warning_finding_ids=warning_finding_ids,
             decision_version=decision_version,
             decision_hash=d_hash,
+            created_at=now,
         )
 
 
@@ -499,7 +529,7 @@ class QuarantineCase:
     priority: str
     status: QuarantineStatus
     assigned_to: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
     resolved_at: datetime | None = None
     resolution: ResolutionCode | None = None
     resolution_notes: str | None = None
@@ -511,6 +541,8 @@ class QuarantineCase:
         evaluation_id_str: str,
         reason_codes: list[str],
         priority: str = "NORMAL",
+        *,
+        now: datetime,
     ) -> QuarantineCase:
         qid = quarantine_case_id(candidate_id, evaluation_id_str)
         return cls(
@@ -520,6 +552,7 @@ class QuarantineCase:
             reason_codes=reason_codes,
             priority=priority,
             status=QuarantineStatus.OPEN,
+            created_at=now,
         )
 
     def resolve(
@@ -527,6 +560,8 @@ class QuarantineCase:
         resolution: ResolutionCode,
         auditor_id: str,
         notes: str = "",
+        *,
+        resolved_at: datetime,
     ) -> QuarantineCase:
         return QuarantineCase(
             id=self.id,
@@ -537,7 +572,7 @@ class QuarantineCase:
             status=QuarantineStatus.RESOLVED,
             assigned_to=auditor_id,
             created_at=self.created_at,
-            resolved_at=datetime.now(UTC),
+            resolved_at=resolved_at,
             resolution=resolution,
             resolution_notes=notes,
         )
@@ -580,7 +615,7 @@ class ReleaseManifest:
     artifact_sha256: str | None = None
     measured_duration_seconds: float | None = None
     override: GateOverrideRecord | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -606,6 +641,7 @@ class ReleaseManifest:
         warning_codes: list[str],
         evidence_bundle_id: str,
         version: str = "1.0",
+        now: datetime,
     ) -> ReleaseManifest:
         content = json.dumps(
             {
@@ -661,6 +697,7 @@ class ReleaseManifest:
             artifact_sha256=artifact_sha256,
             measured_duration_seconds=measured_duration_seconds,
             override=override,
+            created_at=now,
         )
 
     def to_wire(self) -> dict[str, Any]:
@@ -731,9 +768,9 @@ class CandidateEvaluation:
     gate_decision: GateDecision | None = None
     quarantine_case: QuarantineCase | None = None
     release_manifest: ReleaseManifest | None = None
-    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime = field(kw_only=True)
     finished_at: datetime | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -742,6 +779,8 @@ class CandidateEvaluation:
         artifact_id: str,
         evaluation_policy_version: str = "p5-v1",
         trigger: str = "candidate_ready",
+        *,
+        now: datetime,
     ) -> CandidateEvaluation:
         eid = evaluation_id(candidate_id, evaluation_policy_version, trigger)
         return cls(
@@ -751,4 +790,6 @@ class CandidateEvaluation:
             evaluation_policy_version=evaluation_policy_version,
             trigger=trigger,
             status=EvaluationStatus.PENDING,
+            started_at=now,
+            created_at=now,
         )

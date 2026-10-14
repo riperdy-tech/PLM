@@ -56,20 +56,58 @@ from .models import (
 )
 
 __all__ = [
-    "PolicyImmutableError", "PosteriorVersionConflict", "activate_policy",
-    "finish_cycle", "get_channel_state", "increment_result_counts", "insert_cycle",
-    "insert_decision", "insert_directive", "insert_experiment_result", "insert_exposure",
-    "insert_feature_snapshot", "insert_override", "insert_policy",
-    "insert_posterior_update", "insert_reward_observation", "is_in_cooldown_state",
-    "latest_observation_instant", "list_queued_directives", "load_active_overrides",
-    "load_active_policy", "load_all_latest_feature_snapshots", "load_arm_state",
-    "load_arm_states", "load_baselines", "load_cycle", "load_decision", "load_decisions",
-    "load_directive", "load_directive_for_decision", "load_directives_for_cycle",
-    "load_exposure", "load_exposure_score",
-    "load_feature_snapshot", "load_latest_feature_snapshot", "load_pending_observations",
-    "load_policy", "load_posterior", "load_posterior_update", "load_similarity",
-    "record_selection", "replace_baselines", "replace_similarity", "set_arm_status",
-    "set_channel_state", "upsert_arm_state", "upsert_posterior",
+    "TERMINAL_UPDATE_STATUSES",
+    "LegacyPolicyError",
+    "PolicyImmutableError",
+    "PosteriorVersionConflict",
+    "activate_policy",
+    "finish_cycle",
+    "get_channel_state",
+    "has_applied_outcome",
+    "increment_result_counts",
+    "insert_cycle",
+    "insert_decision",
+    "insert_directive",
+    "insert_experiment_result",
+    "insert_exposure",
+    "insert_feature_snapshot",
+    "insert_override",
+    "insert_policy",
+    "insert_posterior_update",
+    "insert_reward_observation",
+    "is_in_cooldown_state",
+    "latest_observation_instant",
+    "list_queued_directives",
+    "load_active_overrides",
+    "load_active_policy",
+    "load_all_latest_feature_snapshots",
+    "load_applied_evidence",
+    "load_arm_state",
+    "load_arm_states",
+    "load_baselines",
+    "load_cycle",
+    "load_decision",
+    "load_decisions",
+    "load_directive",
+    "load_directive_for_decision",
+    "load_directives_for_cycle",
+    "load_exposure",
+    "load_exposure_score",
+    "load_feature_snapshot",
+    "load_latest_feature_snapshot",
+    "load_pending_observations",
+    "load_policy",
+    "load_posterior",
+    "load_posterior_update",
+    "load_similarity",
+    "load_terminal_update",
+    "record_selection",
+    "replace_baselines",
+    "replace_similarity",
+    "set_arm_status",
+    "set_channel_state",
+    "upsert_arm_state",
+    "upsert_posterior",
 ]
 
 
@@ -105,24 +143,25 @@ def _policy_row(config: PolicyConfig, *, brand_id: str | None,
         "fatigue_config_json": config.fatigue.model_dump(),
         "nonstationarity_config_json": config.nonstationarity.model_dump(),
         "retirement_config_json": config.retirement.model_dump(),
+        "config_json": config.model_dump(mode="json"),
         "created_at": created_at, "active": False,
     }
 
 
+class LegacyPolicyError(RuntimeError):
+    """A stored policy predates ADR-0031 and cannot be loaded without inventing values."""
+
+
 def _policy_from_row(row: sa.RowMapping) -> PolicyConfig:
-    return PolicyConfig(
-        name=row["name"], version=row["version"],
-        exploit_fraction=row["exploit_fraction"],
-        adjacent_explore_fraction=row["adjacent_explore_fraction"],
-        radical_explore_fraction=row["radical_explore_fraction"],
-        baseline_fraction=row["baseline_fraction"],
-        max_exact_arm_share=row["max_exact_arm_share"],
-        max_cluster_share=row["max_cluster_share"], max_genre_share=row["max_genre_share"],
-        max_use_case_share=row["max_use_case_share"],
-        max_language_share=row["max_language_share"],
-        fatigue=row["fatigue_config_json"], nonstationarity=row["nonstationarity_config_json"],
-        retirement=row["retirement_config_json"],
-    )
+    """The stored config, whole. Rebuilding it from the queryable columns lost every field
+    without a column (attribution floor, TTL, value model, outcome horizon, ...) and filled
+    it from code defaults — a code constant wearing a config's name (§92)."""
+    if row["config_json"] is None:
+        raise LegacyPolicyError(
+            f"policy {row['version']!r} was stored before ADR-0031 without its full config; "
+            "create and activate a new policy version"
+        )
+    return PolicyConfig.model_validate(row["config_json"])
 
 
 def insert_policy(session: Session, config: PolicyConfig, *, brand_id: str | None,
@@ -506,6 +545,7 @@ def insert_directive(session: Session, directive: ProductionDirective, *, brand_
         policy_version=directive.policy_version,
         exploration_fraction=directive.exploration_fraction,
         value_model=directive.value_model,
+        outcome_horizon=directive.outcome_horizon.value,
     ))
     return directive.directive_id
 
@@ -672,11 +712,65 @@ def load_posterior_update(session: Session, reward_observation_id: str) -> dict[
     return None if row is None else dict(row)
 
 
+TERMINAL_UPDATE_STATUSES: tuple[str, ...] = (
+    "applied", "provisional", "off_horizon", "skipped_duplicate",
+)
+"""Classifications that settle an observation for good (ADR-0031). `quarantined` and
+`failed` are retried: the missing fact or posterior row may arrive later."""
+
+
+def load_terminal_update(session: Session,
+                         reward_observation_id: str) -> dict[str, Any] | None:
+    row = session.execute(
+        sa.select(ar_posterior_update_log)
+        .where(ar_posterior_update_log.c.reward_observation_id == reward_observation_id,
+               ar_posterior_update_log.c.update_status.in_(TERMINAL_UPDATE_STATUSES))
+        .order_by(ar_posterior_update_log.c.id)
+    ).mappings().first()
+    return None if row is None else dict(row)
+
+
+def has_applied_outcome(session: Session, *, experiment_id: str, content_id: str,
+                        window: str) -> bool:
+    """Whether an outcome of this (experiment, content) at this window already moved the
+    posterior: the second mature fact for the same key is a duplicate (ADR-0031)."""
+    found = session.execute(
+        sa.select(ar_reward_observation.c.id)
+        .join(ar_posterior_update_log,
+              ar_posterior_update_log.c.reward_observation_id == ar_reward_observation.c.id)
+        .where(ar_reward_observation.c.experiment_id == experiment_id,
+               ar_reward_observation.c.content_id == content_id,
+               ar_reward_observation.c.observation_window == window,
+               ar_posterior_update_log.c.update_status == "applied")
+        .limit(1)
+    ).scalar_one_or_none()
+    return found is not None
+
+
+def load_applied_evidence(session: Session, arm_id: str, *,
+                          as_of: datetime) -> list[dict[str, Any]]:
+    """The arm's effective outcomes observed at or before `as_of`, in a fixed order.
+
+    This, with the prior, is the whole posterior: it is recomputed from these rows at
+    every draw, so decay is always measured from the draw's own instant (ADR-0031).
+    """
+    return [dict(row) for row in session.execute(
+        sa.select(ar_reward_observation.c.id, ar_reward_observation.c.normalized_reward,
+                  ar_reward_observation.c.observed_at)
+        .join(ar_posterior_update_log,
+              ar_posterior_update_log.c.reward_observation_id == ar_reward_observation.c.id)
+        .where(ar_reward_observation.c.arm_id == arm_id,
+               ar_reward_observation.c.observed_at <= as_of,
+               ar_posterior_update_log.c.update_status == "applied")
+        .order_by(ar_reward_observation.c.observed_at, ar_reward_observation.c.id)
+    ).mappings()]
+
+
 def increment_result_counts(session: Session, *, arm_id: str,
                             maturity: ObservationMaturity, now: datetime) -> None:
     """§38 evidence counter: an applied update increments the arm's result tally."""
     column = (ar_content_arm_state.c.mature_result_count
-              if maturity is ObservationMaturity.MATURE
+              if maturity in (ObservationMaturity.MATURE, ObservationMaturity.CLOSED)
               else ar_content_arm_state.c.provisional_result_count)
     session.execute(sa.update(ar_content_arm_state)
                     .where(ar_content_arm_state.c.arm_id == arm_id)

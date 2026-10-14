@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
 
 from services.music_factory.api.events import build_candidate_ready_event
 from services.music_factory.candidates.bank import (
@@ -49,6 +52,8 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
         provider_policy={'allowed_providers': ['mock']},
     )
 ).to_wire()
+
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 # AC-01: Ingest valid C3 TrackSpec
@@ -111,7 +116,7 @@ def test_ac04_deterministic_prompt_compilation() -> None:
 # AC-05: Creative variant planning
 def test_ac05_creative_variant_planning() -> None:
     adapted = adapt_track_spec(SAMPLE_C3_SPEC)
-    plan, variants = plan_generation(adapted)
+    plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
 
     assert plan.candidate_target == 2
     assert len(variants) == 2
@@ -141,10 +146,10 @@ def test_ac07_durable_attempt_logging_and_retry() -> None:
         "vocal_mode": "vocal",
     }
     spec = adapt_track_spec(raw_spec)
-    plan, variants = plan_generation(spec)
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
 
     storage = InMemoryArtifactStorage()
-    engine = GenerationEngine(storage=storage)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=storage)
 
     with music_db_session() as session:
         result = engine.execute_plan(
@@ -164,8 +169,8 @@ def test_ac07_durable_attempt_logging_and_retry() -> None:
 # AC-08: Ruling R6 compliance: full rights snapshot created
 def test_ac08_ruling_r6_rights_snapshot() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
-    plan, variants = plan_generation(spec)
-    engine = GenerationEngine()
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
 
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
@@ -184,27 +189,27 @@ def test_ac08_ruling_r6_rights_snapshot() -> None:
 # AC-09: Candidate bank lifecycle
 def test_ac09_candidate_bank_lifecycle() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
-    plan, variants = plan_generation(spec)
-    engine = GenerationEngine()
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
 
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
         cand_id = result.candidates[0].candidate_id
 
         # 1. GENERATED -> ACCEPTED
-        c_acc = accept_candidate(session, cand_id)
+        c_acc = accept_candidate(session, cand_id, now=FIXED_NOW)
         assert c_acc.status == CandidateStatus.ACCEPTED
 
         # 2. ACCEPTED -> EXPORTED_TO_P5
-        c_exp = mark_candidate_exported_to_p5(session, cand_id)
+        c_exp = mark_candidate_exported_to_p5(session, cand_id, now=FIXED_NOW)
         assert c_exp.status == CandidateStatus.EXPORTED_TO_P5
 
 
 # AC-10: Seam C4 event generation from stored facts (ADR-0027)
 def test_ac10_seam_c4_event_generation() -> None:
     adapted = adapt_track_spec(SAMPLE_C3_SPEC)
-    plan, variants = plan_generation(adapted)
-    engine = GenerationEngine()
+    plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=adapted)
         cand = result.candidates[0]
@@ -213,8 +218,9 @@ def test_ac10_seam_c4_event_generation() -> None:
 
     wire = event.to_wire()
     assert wire["event_type"] == "music_candidate_ready_for_p5"
-    assert wire["schema_version"] == "1.0"
+    assert wire["schema_version"] == "2.0"  # ADR-0032
     assert wire["lineage"] == SAMPLE_C3_SPEC["lineage"]
     assert wire["requested_duration_seconds"] == SAMPLE_C3_SPEC["requested_duration"]
+    assert wire["requested_duration_range"] == SAMPLE_C3_SPEC["duration_range"]
     assert wire["rights"]["commercial_use_status"] == "eligible"
     assert wire["rights"]["attempt_id"] == cand.source_attempt_id

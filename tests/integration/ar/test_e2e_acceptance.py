@@ -85,20 +85,23 @@ def test_snapshot_cycle_rewards_update_second_cycle_changes(engine: sa.Engine) -
             "§83: the stale arm is refused as ineligible, on the record"
         )
 
-        # synthetic results for two arms, then the approved §74 update path
+        # synthetic results for two arms at the policy's declared outcome horizon (only
+        # that window's mature outcome moves a posterior, ADR-0031), then §74's update path
+        horizon = DEFAULT_POLICY.outcome_horizon
+        measured_at = NOW + timedelta(days=28)
         rewarded = [directive.arm_id for directive in first.directives[:2]]
         freshly_stored = 0
         for offset, arm_id in enumerate(rewarded):
             stored = store_result(session, {
                 "schema_version": "1.0", "experiment_id": f"p215-cycle-{offset}", "arm_id": arm_id,
-                "content_id": f"p215-content-{arm_id}", "observation_window": "7d",
+                "content_id": f"p215-content-{arm_id}", "observation_window": horizon.value,
                 "status": "mature",
-                "observed_at": (NOW + timedelta(days=7)).isoformat(), "raw_metrics": unmeasured_raw_metrics(),
+                "observed_at": measured_at.isoformat(), "raw_metrics": unmeasured_raw_metrics(),
                 "normalized_reward": 0.85, "reward_version": "p9-reward-v1",
                 "attribution_confidence": 0.99,
-            }, brand_id=BRAND_ID, now=NOW + timedelta(days=7))
+            }, brand_id=BRAND_ID, now=measured_at)
             freshly_stored += int(stored.stored)
-        summary = apply_pending_updates(session, settings=settings, now=NOW + timedelta(days=7),
+        summary = apply_pending_updates(session, settings=settings, now=measured_at,
                                         policy=DEFAULT_POLICY)
         assert summary.applied == freshly_stored, (
             "§73/§74: each newly ingested result applies exactly once (both, on a clean "
@@ -106,7 +109,7 @@ def test_snapshot_cycle_rewards_update_second_cycle_changes(engine: sa.Engine) -
         )
         assert summary.failed == 0 and summary.quarantined == 0
 
-        later = NOW + timedelta(days=14)
+        later = measured_at + timedelta(days=7)
         second = run_allocation_cycle(
             session,
             CycleRequest(brand_id=BRAND_ID, as_of=later, slot_count=10, budget=10.0,

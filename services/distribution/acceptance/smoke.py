@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 
 from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -37,7 +37,8 @@ def run_smoke_test() -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"blocked: database unreachable ({exc})"
 
-    now = datetime.now(UTC)
+    clock = SystemClock()
+    now = clock.now()
     ts = int(now.timestamp())
 
     try:
@@ -124,7 +125,7 @@ def run_smoke_test() -> str | None:
             )
             result = submit_release_from_seams(
                 session,
-                DistributionEngine(MockDistributorClient()),
+                DistributionEngine(MockDistributorClient(clock=clock)),
                 track_manifests=[manifest.to_wire()],
                 media_package=package.to_wire(),
                 publication=None,
@@ -149,6 +150,7 @@ def run_smoke_test() -> str | None:
                 provider_period=f"2026-{ts % 12 + 1:02d}",
                 raw_content=f"smoke_statement_data_{ts}",
                 source_reference=f"smoke_sftp_{ts}.csv",
+                now=now,
             )
 
             if not report.report_id:

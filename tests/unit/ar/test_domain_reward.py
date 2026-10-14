@@ -33,7 +33,8 @@ def test_reserved_economic_terms_are_kept_and_never_invented() -> None:
         economic_terms={"revenue": Tri.unknown()},
     )
     assert observation.economic_terms["revenue"].state.value == "unknown"
-    assert observation.key == observation_key("exp-1", ObservationWindow.D7)
+    assert observation.key == observation_key("exp-1", "c", ObservationWindow.D7,
+                                             ObservationMaturity.MATURE)
     with pytest.raises(ValueError, match="reserved"):
         RewardObservation(
             experiment_id="exp-1", arm_id="a", content_id="c",

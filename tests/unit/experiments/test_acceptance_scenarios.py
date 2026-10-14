@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from plm_contracts.seams.c2 import ProductionDirectivePayload
@@ -26,8 +28,10 @@ from services.experiments.materialization.builder import (
     materialize_package,
 )
 from services.experiments.storage import repositories
-from services.experiments.validation.engine import validate_experiment
+from services.experiments.validation.engine import promote_to_validated, validate_experiment
 from tests.support.experiments_db import create_experiments_engine
+
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 SAMPLE_WIRE_DIRECTIVE = ProductionDirectivePayload.build(
     directive_id="dir_ac_001", decision_id="dec_ac_001", arm_id="rnb_late_night_drive_english_vocal_45_75m", allocation_type="exploit", priority=1, quantity=2, brief={
@@ -38,8 +42,13 @@ SAMPLE_WIRE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=88.0, uncertainty=0.12, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand_opportunity"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-11-01T00:00:00Z", exploration_fraction=0.25, value_model="early-stage-proxy-v1"
+    }, expected_value=88.0, uncertainty=0.12, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand_opportunity"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-11-01T00:00:00Z", exploration_fraction=0.25, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
+
+
+def _validated(adapted, genome, *, seed: int):  # type: ignore[no-untyped-def]
+    exp = design_experiment(adapted, genome, seed=seed, created_at=FIXED_NOW)
+    return promote_to_validated(exp, validate_experiment(exp, genome))
 
 
 @pytest.fixture
@@ -54,16 +63,18 @@ def test_ac_01_basic_materialization(session) -> None:
     """AC-01: Given a valid P2 directive, P3 creates one validated experiment and one content package."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    repositories.insert_genome(session, genome, genome_id="gen_ac01")
+    repositories.insert_genome(session, genome, genome_id="gen_ac01", created_at=FIXED_NOW)
 
-    exp = design_experiment(adapted, genome, seed=1)
+    exp = design_experiment(adapted, genome, seed=1, created_at=FIXED_NOW)
+    assert exp.status is ExperimentStatus.DRAFT
     repositories.insert_experiment(session, exp)
 
     report = validate_experiment(exp, genome)
     assert report.passed is True
+    exp = promote_to_validated(exp, report)
 
     treatment = exp.treatments[0]
-    pkg = materialize_package(exp, treatment, genome, brand_id="neon_seoul", budget_envelope=80.0)
+    pkg = materialize_package(exp, treatment, genome, brand_id="neon_seoul", budget_envelope=80.0, created_at=FIXED_NOW)
     repositories.insert_content_package(session, pkg)
     session.commit()
 
@@ -81,7 +92,7 @@ def test_ac_02_multiple_treatments() -> None:
     """AC-02: A two-treatment experiment creates distinct, correctly isolated treatment specifications."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=2)
+    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=2, created_at=FIXED_NOW)
 
     assert len(exp.treatments) == 2
     t0, t1 = exp.treatments[0], exp.treatments[1]
@@ -95,7 +106,7 @@ def test_ac_03_controlled_variable() -> None:
     """AC-03: A controlled variable remains identical across all treatments."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=3)
+    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=3, created_at=FIXED_NOW)
 
     # In single factor on bpm, track_duration is controlled
     ctrl_var = next(v for v in exp.variables if v.variable_class == VariableClass.CONTROLLED)
@@ -111,7 +122,7 @@ def test_ac_04_experimental_variable() -> None:
     """AC-04: An experimental variable differs only where the experiment specifies it."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=4)
+    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=4, created_at=FIXED_NOW)
 
     exp_var = next(v for v in exp.variables if v.variable_class == VariableClass.EXPERIMENTAL)
     assert exp_var.name == "bpm"
@@ -123,8 +134,8 @@ def test_ac_05_creative_freedom() -> None:
     """AC-05: Unspecified creative fields remain open rather than receiving arbitrary hard-coded values."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    exp = design_experiment(adapted, genome, seed=5)
-    pkg = materialize_package(exp, exp.treatments[0], genome, brand_id="neon_seoul", budget_envelope=90.0)
+    exp = _validated(adapted, genome, seed=5)
+    pkg = materialize_package(exp, exp.treatments[0], genome, brand_id="neon_seoul", budget_envelope=90.0, created_at=FIXED_NOW)
 
     # Track specs must contain open creative latitude and bounded preferences
     for trk in pkg.track_specs:
@@ -138,8 +149,8 @@ def test_ac_06_duplicate_prevention(session) -> None:
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
 
-    gid1 = repositories.insert_genome(session, genome, genome_id="gen_dup_1")
-    gid2 = repositories.insert_genome(session, genome, genome_id="gen_dup_2")
+    gid1 = repositories.insert_genome(session, genome, genome_id="gen_dup_1", created_at=FIXED_NOW)
+    gid2 = repositories.insert_genome(session, genome, genome_id="gen_dup_2", created_at=FIXED_NOW)
     session.commit()
     # Identical content fingerprint returns the existing genome ID
     assert gid1 == gid2
@@ -149,9 +160,9 @@ def test_ac_07_replication(session) -> None:
     """AC-07: A replication creates a new experiment with lineage to the original."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    repositories.insert_genome(session, genome, genome_id="gen_rep")
+    repositories.insert_genome(session, genome, genome_id="gen_rep", created_at=FIXED_NOW)
 
-    exp_orig = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=7)
+    exp_orig = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=7, created_at=FIXED_NOW)
     repositories.insert_experiment(session, exp_orig)
 
     exp_rep = design_experiment(
@@ -159,6 +170,7 @@ def test_ac_07_replication(session) -> None:
         genome,
         experiment_type=ExperimentType.REPLICATION,
         seed=77,
+        created_at=FIXED_NOW,
     )
     # Lineage / replication experiment type is explicitly set
     assert exp_rep.experiment_type == ExperimentType.REPLICATION
@@ -170,9 +182,9 @@ def test_ac_08_schema_versioning(session) -> None:
     """AC-08: Historical experiments remain readable after a new genome version is introduced."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    _ = repositories.insert_genome(session, genome, genome_id="gen_v1")
+    _ = repositories.insert_genome(session, genome, genome_id="gen_v1", created_at=FIXED_NOW)
 
-    exp = design_experiment(adapted, genome, seed=8)
+    exp = design_experiment(adapted, genome, seed=8, created_at=FIXED_NOW)
     repositories.insert_experiment(session, exp)
     session.commit()
 
@@ -192,7 +204,7 @@ def test_ac_09_invalid_constraint() -> None:
     contradictory_genome = genome.model_copy(
         update={"vocal_mode": VocalMode.INSTRUMENTAL, "vocal_gender": VocalGender.FEMALE}
     )
-    exp = design_experiment(adapted, contradictory_genome, seed=9)
+    exp = design_experiment(adapted, contradictory_genome, seed=9, created_at=FIXED_NOW)
     report = validate_experiment(exp, contradictory_genome)
 
     assert report.passed is False
@@ -204,15 +216,15 @@ def test_ac_10_idempotency(session) -> None:
     """AC-10: Retrying creation/materialization does not duplicate child objects."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    repositories.insert_genome(session, genome, genome_id="gen_idem")
+    repositories.insert_genome(session, genome, genome_id="gen_idem", created_at=FIXED_NOW)
 
-    exp1 = design_experiment(adapted, genome, seed=10)
-    exp2 = design_experiment(adapted, genome, seed=10)
+    exp1 = _validated(adapted, genome, seed=10)
+    exp2 = _validated(adapted, genome, seed=10)
     assert exp1.experiment_id == exp2.experiment_id
 
     # Materializing twice produces identical hash and component spec counts
-    pkg1 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul")
-    pkg2 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul")
+    pkg1 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul", created_at=FIXED_NOW)
+    pkg2 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul", created_at=FIXED_NOW)
     assert pkg1.package_hash == pkg2.package_hash
     assert len(pkg1.track_specs) == len(pkg2.track_specs)
 
@@ -221,20 +233,20 @@ def test_ac_11_failure_recovery(session) -> None:
     """AC-11: A failed materialization can resume without recreating already committed objects."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    repositories.insert_genome(session, genome, genome_id="gen_rec")
+    repositories.insert_genome(session, genome, genome_id="gen_rec", created_at=FIXED_NOW)
 
-    exp = design_experiment(adapted, genome, seed=11)
+    exp = _validated(adapted, genome, seed=11)
     repositories.insert_experiment(session, exp)
     session.commit()
 
     # Budget exceeded (< 0.0) fails cleanly without corrupting experiment
     with pytest.raises(BudgetEnvelopeExceededError):
-        materialize_package(exp, exp.treatments[0], genome, budget_envelope=-5.0)
+        materialize_package(exp, exp.treatments[0], genome, budget_envelope=500.0, created_at=FIXED_NOW)
 
     # Experiment remains intact and can be materialized successfully with proper envelope
-    pkg = materialize_package(exp, exp.treatments[0], genome, budget_envelope=100.0)
+    pkg = materialize_package(exp, exp.treatments[0], genome, budget_envelope=100.0, created_at=FIXED_NOW)
     repositories.insert_content_package(session, pkg)
-    repositories.update_experiment_status(session, exp.experiment_id, ExperimentStatus.MATERIALIZED)
+    repositories.update_experiment_status(session, exp.experiment_id, ExperimentStatus.MATERIALIZED, now=FIXED_NOW)
     session.commit()
 
     loaded = repositories.get_experiment(session, exp.experiment_id)
@@ -270,6 +282,18 @@ def test_ac_12_p4_handoff() -> None:
     assert create_resp.status_code == 200
     exp_id = create_resp.json()["experiment"]["experiment_id"]
     trt_id = create_resp.json()["experiment"]["treatments"][0]["treatment_id"]
+    assert create_resp.json()["experiment"]["status"] == "draft"
+
+    # Not materializable until the validator has promoted it.
+    early = client.post(
+        f"/experiments/v1/experiments/{exp_id}/materialize",
+        json={"treatment_id": trt_id, "brand_id": "neon_seoul"},
+        headers=headers,
+    )
+    assert early.status_code == 409
+    assert early.json()["detail"]["code"] == "experiment_not_validated"
+    val_resp = client.post(f"/experiments/v1/experiments/{exp_id}/validate", headers=headers)
+    assert val_resp.json()["status"] == "validated"
 
     mat_resp = client.post(
         f"/experiments/v1/experiments/{exp_id}/materialize",
@@ -292,9 +316,9 @@ def test_ac_13_audit_trail(session) -> None:
     """AC-13: Every experiment can be traced back to P2 and the source market arm."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    repositories.insert_genome(session, genome, genome_id="gen_audit")
+    repositories.insert_genome(session, genome, genome_id="gen_audit", created_at=FIXED_NOW)
 
-    exp = design_experiment(adapted, genome, seed=13)
+    exp = design_experiment(adapted, genome, seed=13, created_at=FIXED_NOW)
     repositories.insert_experiment(session, exp)
     session.commit()
 
@@ -308,10 +332,13 @@ def test_ac_14_budget_ceiling() -> None:
     """AC-14: P3 rejects a package that exceeds configured hard constraints before it enters production."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
-    exp = design_experiment(adapted, genome, seed=14)
+    exp = _validated(adapted, genome, seed=14)
 
-    with pytest.raises(BudgetEnvelopeExceededError, match="non-negative"):
-        materialize_package(exp, exp.treatments[0], genome, budget_envelope=-10.0)
+    with pytest.raises(BudgetEnvelopeExceededError, match="positive"):
+        materialize_package(exp, exp.treatments[0], genome, budget_envelope=-10.0, created_at=FIXED_NOW)
+    # The directive's budget_limit (100.0) is the ceiling: a request may not raise it.
+    with pytest.raises(BudgetEnvelopeExceededError, match="exceeds the directive's budget limit"):
+        materialize_package(exp, exp.treatments[0], genome, budget_envelope=100.01, created_at=FIXED_NOW)
 
 
 def test_ac_15_experiment_contamination() -> None:
@@ -320,7 +347,7 @@ def test_ac_15_experiment_contamination() -> None:
     genome = build_genome_from_directive(adapted)
 
     # Design single factor (which targets 'bpm')
-    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=15)
+    exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=15, created_at=FIXED_NOW)
 
     # Introduce contamination: manually add an unexpected secondary variable override to treatment_1
     contaminated_assignments = dict(exp.treatments[1].variable_assignments)

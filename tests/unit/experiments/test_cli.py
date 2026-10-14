@@ -17,6 +17,7 @@ from services.experiments.cli import (
     validate_experiment_cli,
 )
 from services.experiments.domain.enums import ExperimentType
+from services.experiments.domain.errors import ExperimentStateError
 from services.experiments.experiments.engine import design_experiment
 from services.experiments.genome.engine import build_genome_from_directive
 from services.experiments.ingestion.p2_adapter import adapt_directive
@@ -33,6 +34,8 @@ from services.experiments.storage import repositories
 from services.experiments.storage.ids import deterministic_id
 from tests.support.experiments_db import create_experiments_engine
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 runner = CliRunner()
 
 SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
@@ -44,7 +47,7 @@ SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1"
+    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
 
 
@@ -55,9 +58,9 @@ def _setup_seeded_db() -> tuple[sessionmaker, str, str]:
         adapted = adapt_directive(SAMPLE_DIRECTIVE)
         genome = build_genome_from_directive(adapted)
         gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
-        repositories.insert_genome(session, genome, genome_id=gid)
+        repositories.insert_genome(session, genome, genome_id=gid, created_at=FIXED_NOW)
 
-        exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=42)
+        exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=42, created_at=FIXED_NOW)
         repositories.insert_experiment(session, exp)
         session.commit()
         return factory, exp.experiment_id, exp.treatments[0].treatment_id
@@ -95,6 +98,10 @@ def test_cli_validate() -> None:
 
 def test_cli_materialize() -> None:
     factory, exp_id, trt_id = _setup_seeded_db()
+
+    with pytest.raises(ExperimentStateError):  # draft: not validated yet
+        materialize_treatment_cli(exp_id, trt_id, session_factory=factory)
+    assert "status: validated" in validate_experiment_cli(exp_id, session_factory=factory)
 
     mat_out = materialize_treatment_cli(
         exp_id,

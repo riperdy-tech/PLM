@@ -1,9 +1,11 @@
-"""Seam C4 · PHASE-P4 → PHASE-P5: a candidate is ready for the release gate (R6, ADR-0027).
+"""Seam C4 · PHASE-P4 → PHASE-P5: a candidate is ready for the release gate (R6, ADR-0027,
+ADR-0032).
 
 The event carries everything P5 needs to judge the candidate without guessing:
 
 * its lineage (ADR-0026), so the gate decision stays attributable;
-* the measured audio and the duration the spec asked for;
+* the measured audio, the duration the spec asked for, and the spec's declared duration
+  range, which is what P5 judges the measured duration against (ADR-0032);
 * how it was generated (vocal mode, genre tags, the prompt), because P5's lyric and
   policy checks depend on them, and a defaulted ``instrumental`` silently skipped them;
 * the rights snapshot the provider adapter *declared* for the attempt that produced
@@ -15,10 +17,18 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from ..enums import CommercialUseEligibility
 from .base import SeamModel
+from .c3 import DurationRangeSeconds
 from .lineage import ExperimentLineage
 
 __all__ = [
@@ -68,7 +78,8 @@ class CandidateReadyPayload(SeamModel):
     """``music_candidate_ready_for_p5``: one candidate, everything P5 judges it on."""
 
     SEAM: ClassVar[str] = "C4"
-    SCHEMA_VERSION: ClassVar[str] = "1.0"
+    SCHEMA_VERSION: ClassVar[str] = "2.0"
+    """2.0 adds the required ``requested_duration_range`` (ADR-0032)."""
 
     event_type: Literal["music_candidate_ready_for_p5"]
     candidate_id: NonEmpty
@@ -82,6 +93,9 @@ class CandidateReadyPayload(SeamModel):
     model_id: NonEmpty
     measured_audio: MeasuredAudio
     requested_duration_seconds: int = Field(ge=1)
+    """The point the C3 spec asked the provider for; informational, not the gate."""
+    requested_duration_range: DurationRangeSeconds
+    """The C3 spec's ``duration_range``: P5 passes a measured duration inside it only."""
     vocal_mode: NonEmpty
     genre_tags: tuple[NonEmpty, ...] = Field(min_length=1)
     prompt_text: NonEmpty
@@ -89,3 +103,13 @@ class CandidateReadyPayload(SeamModel):
     """``None`` means the provider returned no lyrics, not that lyrics were checked."""
     rights: RightsSnapshotPayload | None
     """``None`` means the provider declared no terms: commercial use is unknown."""
+
+    @model_validator(mode="after")
+    def _requested_inside_range(self) -> CandidateReadyPayload:
+        if not self.requested_duration_range.contains(self.requested_duration_seconds):
+            rng = self.requested_duration_range
+            raise ValueError(
+                f"requested_duration_seconds {self.requested_duration_seconds} lies outside "
+                f"requested_duration_range [{rng.min_seconds}, {rng.max_seconds}]"
+            )
+        return self

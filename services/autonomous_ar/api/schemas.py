@@ -121,3 +121,5 @@ class UpdateSummaryOut(_Frozen):
     skipped_duplicate: Annotated[int, Field(ge=0)]
     quarantined: Annotated[int, Field(ge=0)]
     failed: Annotated[int, Field(ge=0)]
+    provisional: Annotated[int, Field(ge=0)] = 0
+    off_horizon: Annotated[int, Field(ge=0)] = 0

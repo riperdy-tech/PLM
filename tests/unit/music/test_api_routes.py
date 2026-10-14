@@ -143,6 +143,7 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     export_data = res_export.json()
     assert export_data["candidate"]["status"] == "exported_to_p5"
     assert export_data["event"]["event_type"] == "music_candidate_ready_for_p5"
-    assert export_data["event"]["schema_version"] == "1.0"
+    assert export_data["event"]["schema_version"] == "2.0"  # ADR-0032
     assert export_data["event"]["lineage"]["content_arm_id"] == "arm_01"  # not a placeholder
-    assert export_data["event"]["measured_audio"]["duration_seconds"] > 0
+    # The mock honours the requested duration (ADR-0032); it no longer clamps to 30 s.
+    assert export_data["event"]["measured_audio"]["duration_seconds"] == 90.0

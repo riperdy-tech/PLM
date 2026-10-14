@@ -4,6 +4,10 @@ P2's directive is the wire format. P3 parses it with :class:`ProductionDirective
 and maps names on its own side (``quantity`` → ``requested_experiment_count``,
 ``allocation_type`` → ``exploration_level``, ``expires_at`` → ``production_deadline``).
 Every field is required: P3 may not invent ``expected_value``, versions or context.
+
+Schema 2.0 (ADR-0031) adds ``outcome_horizon``: the one observation window whose mature
+outcome P2 will learn from. P3 records it in the experiment's measurement plan at design
+time, so the horizon is declared before any result exists.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from typing import Annotated, Any, ClassVar
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from ..enums import AllocationType
+from ..enums import AllocationType, ObservationWindow
 from .base import SeamModel
 
 __all__ = ["C2_WIRE_FIELDS", "DirectiveBrief", "ProductionDirectivePayload"]
@@ -38,10 +42,10 @@ class DirectiveBrief(BaseModel):
 
 
 class ProductionDirectivePayload(SeamModel):
-    """The seventeen frozen C2 fields plus ``schema_version``."""
+    """The seventeen frozen C2 fields, ``outcome_horizon`` (2.0) and ``schema_version``."""
 
     SEAM: ClassVar[str] = "C2"
-    SCHEMA_VERSION: ClassVar[str] = "1.0"
+    SCHEMA_VERSION: ClassVar[str] = "2.0"
 
     directive_id: str = Field(min_length=1)
     decision_id: str = Field(min_length=1)
@@ -61,7 +65,9 @@ class ProductionDirectivePayload(SeamModel):
     expires_at: AwareDatetime
     exploration_fraction: float = Field(ge=0.0, le=1.0)
     value_model: str = Field(min_length=1)
+    outcome_horizon: ObservationWindow
 
 
 C2_WIRE_FIELDS: tuple[str, ...] = tuple(ProductionDirectivePayload.model_fields)
-"""``schema_version`` followed by the seventeen registry fields, in registry order."""
+"""``schema_version``, the seventeen registry fields in registry order, then
+``outcome_horizon`` (schema 2.0, ADR-0031)."""

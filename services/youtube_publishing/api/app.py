@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from plm_contracts import ProviderMode
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import Settings, load_settings
 from plm_platform.execution import (
     ExecutionSettings,
@@ -26,12 +27,16 @@ def create_app(
     settings: Settings | None = None,
     client: Any = None,
     execution: ExecutionSettings | None = None,
+    clock: Clock | None = None,
 ) -> FastAPI:
     """Create a configured FastAPI application instance for the `/youtube` service.
 
     Fails at boot when the configured YouTube provider mode has no implementation
-    (only the mock exists today, unless a client is injected).
+    (only the mock exists today, unless a client is injected). ``clock`` is the one time
+    source for every route, engine run and write-guard decision; the wall clock is used
+    only when none is injected.
     """
+    service_clock = SystemClock() if clock is None else clock
     platform_settings = load_settings() if settings is None else settings
     execution_settings = load_execution_settings() if execution is None else execution
     implemented = frozenset({ProviderMode.MOCK if client is None else provider_mode_of(client)})
@@ -59,6 +64,7 @@ def create_app(
         session_factory,
         auth_dep,
         client=client,
+        clock=service_clock,
         write_guard=ExternalWriteGuard(execution_settings),
     )
     app.include_router(router)

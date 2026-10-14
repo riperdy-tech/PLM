@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any
 
+from plm_platform.clock import Clock, stable_seed
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -71,9 +71,11 @@ class GenerationEngine:
     def __init__(
         self,
         *,
+        clock: Clock,
         storage: ArtifactStorageProtocol | None = None,
         default_provider_id: str = "mock",
     ) -> None:
+        self.clock = clock
         self.storage = storage or InMemoryArtifactStorage()
         self.default_provider_id = default_provider_id
 
@@ -88,7 +90,7 @@ class GenerationEngine:
         max_retries_per_variant: int = 1,
     ) -> GenerationEngineResult:
         """Run generation loop across all variants within plan constraints."""
-        now = datetime.now(UTC)
+        now = self.clock.now()
         from ..storage.repositories import get_generation_plan, list_creative_variants
 
         if get_generation_plan(session, plan.plan_id) is None:
@@ -117,7 +119,7 @@ class GenerationEngine:
             prompt_obj = build_generation_prompt(spec, variant_delta=variant.prompt_delta)
             retry_count = 0
             transport_parent: str | None = None
-            base_seed = abs(hash(f"{spec.track_spec_id}:{variant.variant_code}")) % 100000
+            base_seed = stable_seed("p4.generation", spec.track_spec_id, variant.variant_code)
 
             while retry_count <= max_retries_per_variant and total_attempts < plan.max_attempts:
                 total_attempts += 1
@@ -144,8 +146,8 @@ class GenerationEngine:
                     request_hash=req_hash,
                     request_payload_hash=req_hash,
                     status=AttemptStatus.SUBMITTED,
-                    started_at=datetime.now(UTC),
-                    submitted_at=datetime.now(UTC),
+                    started_at=self.clock.now(),
+                    submitted_at=self.clock.now(),
                 )
 
                 gen_req = GenerationRequest(
@@ -182,7 +184,7 @@ class GenerationEngine:
                         status=AttemptStatus.SUCCEEDED,
                         started_at=attempt.started_at,
                         submitted_at=attempt.submitted_at,
-                        completed_at=datetime.now(UTC),
+                        completed_at=self.clock.now(),
                         actual_cost=gen_res.cost_credits * 0.05,
                         actual_credits=gen_res.cost_credits,
                     )
@@ -204,8 +206,8 @@ class GenerationEngine:
                         status=CandidateStatus.GENERATED,
                         provider_id=adapter.provider_id,
                         model_id=adapter.model_id,
-                        created_at=datetime.now(UTC),
-                        updated_at=datetime.now(UTC),
+                        created_at=self.clock.now(),
+                        updated_at=self.clock.now(),
                         source_attempt_id=completed_attempt.attempt_id,
                     )
                     insert_candidate(session, cand)
@@ -224,6 +226,7 @@ class GenerationEngine:
                         object_uri=obj_uri,
                         measured=measured,
                         artifact_type=ArtifactType.FULL_MIX,
+                        created_at=self.clock.now(),
                     )
                     insert_audio_artifact(session, art)
                     artifacts.append(art)
@@ -231,7 +234,7 @@ class GenerationEngine:
                     # Ruling R6 rights snapshot: what the provider declared, or nothing.
                     terms = adapter.license_terms()
                     if terms is not None:
-                        recorded_at = datetime.now(UTC)
+                        recorded_at = self.clock.now()
                         rgt = RightsSnapshot(
                             snapshot_id=rights_snapshot_id(
                                 completed_attempt.attempt_id, adapter.provider_id
@@ -259,7 +262,7 @@ class GenerationEngine:
                         cost_type=CostType.API_CREDIT,
                         actual_amount=completed_attempt.actual_cost,
                         credits_actual=completed_attempt.actual_credits,
-                        created_at=datetime.now(UTC),
+                        created_at=self.clock.now(),
                     )
                     insert_cost_record(session, cost)
 
@@ -282,7 +285,7 @@ class GenerationEngine:
                         else "UNKNOWN_ERROR",
                         started_at=attempt.started_at,
                         submitted_at=attempt.submitted_at,
-                        completed_at=datetime.now(UTC),
+                        completed_at=self.clock.now(),
                     )
                     insert_generation_attempt(session, failed_attempt)
                     attempts.append(failed_attempt)
@@ -296,7 +299,7 @@ class GenerationEngine:
             if candidate_count >= plan.candidate_target
             else (PlanStatus.COMPLETED if candidate_count > 0 else PlanStatus.FAILED)
         )
-        update_plan_status(session, plan.plan_id, final_status, finished_at=datetime.now(UTC))
+        update_plan_status(session, plan.plan_id, final_status, finished_at=self.clock.now())
         session.flush()
 
         return GenerationEngineResult(

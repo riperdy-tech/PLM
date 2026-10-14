@@ -46,6 +46,7 @@ def _features(market_session, *, views: int, subscribers: int, fingerprint: str,
         NormalizedObservation(
             entity_id=f"{fingerprint}-e1", source_id="s1", raw_observation_id="r1",
             observed_at=AS_OF - timedelta(days=20), published_at=AS_OF - timedelta(days=50),
+            channel_id=f"{fingerprint}-channel",
             views=Tri.known(views // 2), subscriber_count=Tri.known(subscribers),
         ),
         NormalizedObservation(
@@ -56,6 +57,7 @@ def _features(market_session, *, views: int, subscribers: int, fingerprint: str,
         NormalizedObservation(
             entity_id=f"{fingerprint}-e2", source_id="s1", raw_observation_id="r3",
             observed_at=AS_OF - timedelta(days=5), published_at=AS_OF - timedelta(days=40),
+            channel_id=f"{fingerprint}-channel",
             views=Tri.known(views // 3), subscriber_count=Tri.known(subscribers),
         ),
     ]

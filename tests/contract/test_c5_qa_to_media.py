@@ -21,6 +21,7 @@ import math
 import struct
 import tempfile
 import wave
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ import pytest
 from plm_contracts import GateDisposition
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import FixedClock
 
 from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from services.media_factory.rendering.assembler import assemble_media_package
@@ -39,6 +41,8 @@ from services.quality_gate.gate.quarantine import resolve_quarantine
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.qa_db import qa_db_session
 from tests.support.seams import candidate_event, lineage_fields, rights_fields
+
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 REGISTRY_ENTRY = "C5 · PHASE-P5 → PHASE-P6"
 BRAND = BrandProfile(brand_id="brand_neon", brand_name="Neon Records")
@@ -67,6 +71,7 @@ def _passed_manifest(tmp: Path, candidate_id: str, **event_kw: Any) -> dict[str,
             **event_kw,
         ),
         audio_path=path,
+        clock=FixedClock(FIXED_NOW),
     )
     assert result.release_manifest is not None, result.disposition
     return json.loads(json.dumps(result.release_manifest.to_wire()))
@@ -104,6 +109,7 @@ def test_real_manifests_assemble_into_a_package_with_their_lineage(
         required_duration_seconds=4.0,
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Contract Session",
+        clock=FixedClock(FIXED_NOW),
     )
     pkg = result.media_package
     assert pkg.lineage is not None
@@ -125,6 +131,7 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
             rights=rights_fields(commercial_use_status="unknown"),
         ),
         audio_path=path,
+        clock=FixedClock(FIXED_NOW),
     )
     assert result.disposition.value == "QUARANTINED"
     assert result.quarantine_case is not None and result.release_manifest is None
@@ -134,6 +141,7 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
         _, manifest = resolve_quarantine(
             session, result.quarantine_case.id, ResolutionCode.CLEARED_BY_OVERRIDE,
             "auditor_01", "reviewed",
+            now=FIXED_NOW,
         )
     assert manifest is not None
     wire = json.loads(json.dumps(manifest.to_wire()))
@@ -145,11 +153,11 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
     # P6 admits it only because of the override record.
     parsed = parse_seam(ReleaseManifestPayload, wire)
     assert assemble_playlist(
-        manifests=[parsed], brand_id="brand_neon", required_duration_seconds=2.0
+        manifests=[parsed], brand_id="brand_neon", required_duration_seconds=2.0, now=FIXED_NOW
     ).tracks
     stripped = parse_seam(ReleaseManifestPayload, with_value(wire, "override", None))
     with pytest.raises(PlaylistAssemblyError):
-        assemble_playlist(manifests=[stripped], brand_id="brand_neon", required_duration_seconds=2.0)
+        assemble_playlist(manifests=[stripped], brand_id="brand_neon", required_duration_seconds=2.0, now=FIXED_NOW)
 
 
 @pytest.mark.parametrize(
@@ -208,5 +216,5 @@ def test_p6_refuses_tracks_from_two_arms(tmp: Path, passed: dict[str, Any]) -> N
     other = _passed_manifest(tmp, "cand_c5_other", lineage=lineage_fields(content_arm_id="arm_b"))
     manifests = [parse_seam(ReleaseManifestPayload, m) for m in (passed, other)]
     with pytest.raises(PlaylistAssemblyError) as exc:
-        assemble_playlist(manifests=manifests, brand_id="brand_neon", required_duration_seconds=4.0)
+        assemble_playlist(manifests=manifests, brand_id="brand_neon", required_duration_seconds=4.0, now=FIXED_NOW)
     assert exc.value.error.code == "mixed_lineage"

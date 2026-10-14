@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from datetime import datetime
 
 from plm_contracts import ErrorShape
 from plm_contracts.seams import ExperimentLineage
@@ -90,6 +91,7 @@ def assemble_playlist(
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     sequence_version: str = "v1",
+    now: datetime,
 ) -> PlaylistAssemblerResult:
     """Assemble a cleared, sequenced playlist session from P5 manifests."""
     # 1. R7/R8: every track cleared, one lineage.
@@ -111,6 +113,7 @@ def assemble_playlist(
         brand_id=brand_id,
         requested_duration_seconds=required_duration_seconds,
         sequence_version=sequence_version,
+        now=now,
     )
 
     playlist_tracks: list[PlaylistTrack] = []
@@ -134,6 +137,7 @@ def assemble_playlist(
                 title=f"Track {pos + 1}",
                 audio_uri=manifest.artifact_uri,
                 audio_checksum=manifest.artifact_sha256,
+                now=now,
             )
         )
         current_offset = next_offset

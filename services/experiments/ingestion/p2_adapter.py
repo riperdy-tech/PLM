@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from plm_contracts import AllocationType, ErrorShape
+from plm_contracts import AllocationType, ErrorShape, ObservationWindow
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,6 +59,7 @@ class AdaptedDirective(BaseModel):
     value_model: str
     directive_version: str
     policy_version: str
+    outcome_horizon: ObservationWindow
 
 
 def adapt_directive(wire_payload: Mapping[str, Any]) -> AdaptedDirective:
@@ -91,4 +92,5 @@ def adapt_directive(wire_payload: Mapping[str, Any]) -> AdaptedDirective:
         value_model=wire.value_model,
         directive_version=wire.directive_version,
         policy_version=wire.policy_version,
+        outcome_horizon=wire.outcome_horizon,
     )

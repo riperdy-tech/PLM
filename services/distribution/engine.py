@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from plm_contracts.seams import ExperimentLineage
+from plm_platform.clock import require_aware
 from plm_platform.execution import (
     ExternalWriteGuard,
     ExternalWriteRefusedError,
@@ -97,11 +98,12 @@ class DistributionEngine:
         self.write_guard = write_guard or ExternalWriteGuard()
         self.provider_mode = provider_mode_of(client)
 
-    def _require_write(self, capability: str, idempotency_key: str) -> None:
+    def _require_write(self, capability: str, idempotency_key: str, *, now: datetime) -> None:
         decision = self.write_guard.authorize_external_write(
             capability,
             provider_mode=self.provider_mode,
             idempotency_key=idempotency_key,
+            now=now,
         )
         if not decision.decision.may_call_provider:
             raise ExternalWriteRefusedError(decision)
@@ -114,13 +116,14 @@ class DistributionEngine:
         artist: ArtistProfile | None = None,
         lineage: ExperimentLineage,
         media_package_id: str,
+        now: datetime,
     ) -> DistributionEngineResult:
         """Submit a canonical release package to the distributor.
 
         Guarantees idempotency: duplicate submissions with matching fingerprint
         return the existing release without re-submitting to the distributor (P8 §19).
         """
-        now = datetime.now(UTC)
+        now = require_aware(now)
 
         # 1. Idempotency Check (P8 §19)
         existing = get_release_by_fingerprint(session, package.submission_fingerprint)
@@ -145,7 +148,9 @@ class DistributionEngine:
             raise DistributionPreflightError(errors)
 
         # 3. External-write gate: nothing is persisted for a write that will not happen.
-        self._require_write(CAPABILITY_SUBMIT, f"{package.submission_fingerprint}:submit")
+        self._require_write(
+            CAPABILITY_SUBMIT, f"{package.submission_fingerprint}:submit", now=now
+        )
 
         # 4. Persist Tracks
         for track in package.tracks:
@@ -212,9 +217,11 @@ class DistributionEngine:
         self,
         session: Session,
         release_id: str,
+        *,
+        now: datetime,
     ) -> DistributionEngineResult:
         """Query remote distributor status and reconcile local delivery states."""
-        now = datetime.now(UTC)
+        now = require_aware(now)
         release = get_release_by_id(session, release_id)
         if not release:
             raise ValueError(f"Release not found: {release_id}")
@@ -252,9 +259,11 @@ class DistributionEngine:
         self,
         session: Session,
         release_id: str,
+        *,
+        now: datetime,
     ) -> DistributionEngineResult:
         """Request takedown of a release from the distributor and mark taken down."""
-        now = datetime.now(UTC)
+        now = require_aware(now)
         release = get_release_by_id(session, release_id)
         if not release:
             raise ValueError(f"Release not found: {release_id}")
@@ -263,7 +272,7 @@ class DistributionEngine:
             raise ValueError(f"Release {release_id} has no provider_release_id")
 
         self._require_write(
-            CAPABILITY_TAKEDOWN, f"{release.submission_fingerprint}:takedown"
+            CAPABILITY_TAKEDOWN, f"{release.submission_fingerprint}:takedown", now=now
         )
         takedown_res = self.client.request_takedown(release.provider_release_id)
 

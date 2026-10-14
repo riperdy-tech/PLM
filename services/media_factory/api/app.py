@@ -7,6 +7,7 @@ from collections.abc import Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock
 from plm_platform.correlation import CorrelationIdMiddleware
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ def create_app(
     *,
     session_factory: Callable[[], Session] | None,
     settings: MediaFactorySettings,
+    clock: Clock,
 ) -> FastAPI:
     """Create FastAPI application for Playlist, Visual & Video Factory service."""
     app = FastAPI(title="plm-media-factory", version="p6")
@@ -28,6 +30,7 @@ def create_app(
         build_router(
             session_factory=session_factory,
             settings=settings,
+            clock=clock,
         )
     )
 

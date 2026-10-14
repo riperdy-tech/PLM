@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c3 import (
     BoundedPreferences,
+    DurationRangeSeconds,
     HardConstraints,
     ProviderPolicy,
 )
 
-from ..domain.enums import PackageStatus, TrackRole
+from ..domain.enums import ExperimentStatus, PackageStatus, TrackRole
+from ..domain.errors import ExperimentStateError
 from ..domain.fingerprint import compute_package_hash
 from ..domain.genome import BpmRange, ContentGenome, DurationRange
 from ..domain.package import (
@@ -34,6 +36,27 @@ class BudgetEnvelopeExceededError(Exception):
     """Raised when a package's budget allocation is invalid or exceeds ceilings."""
 
 
+MATERIALIZABLE_STATUSES = frozenset({ExperimentStatus.VALIDATED, ExperimentStatus.MATERIALIZED})
+"""Only a validated experiment (or one with treatments already materialized) is built."""
+
+
+def effective_budget(experiment: Experiment, requested: float | None) -> float:
+    """The package budget: the directive's ceiling, or a positive request below it (§34)."""
+    ceiling = experiment.budget_limit
+    if requested is None:
+        budget = ceiling
+    elif requested > ceiling:
+        raise BudgetEnvelopeExceededError(
+            f"Requested budget envelope {requested} exceeds the directive's budget limit "
+            f"{ceiling} for experiment {experiment.experiment_id}"
+        )
+    else:
+        budget = requested
+    if budget <= 0.0:
+        raise BudgetEnvelopeExceededError(f"Budget envelope must be positive; got {budget}")
+    return budget
+
+
 def derived_bpm(bpm: BpmRange) -> int:
     """R5 rule: the genome's target BPM, else the rounded midpoint of its range."""
     if bpm.target_bpm is not None:
@@ -46,6 +69,11 @@ def derived_duration_seconds(duration: DurationRange) -> int:
     if duration.target_seconds is not None:
         return duration.target_seconds
     return round((duration.min_seconds + duration.max_seconds) / 2)
+
+
+def duration_range_seconds(duration: DurationRange) -> DurationRangeSeconds:
+    """ADR-0032: the genome's track-duration range, carried as declared on C3."""
+    return DurationRangeSeconds(min_seconds=duration.min_seconds, max_seconds=duration.max_seconds)
 
 
 def content_genome_id(genome: ContentGenome) -> str:
@@ -73,20 +101,34 @@ def materialize_package(
     base_genome: ContentGenome,
     *,
     brand_id: str = "neon_seoul",
-    budget_envelope: float = 100.0,
+    budget_envelope: float | None = None,
     track_count: int = 5,
     total_duration_minutes: int = 60,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> ContentPackage:
-    """Compile an experiment treatment and genome into an immutable ContentPackage."""
-    if budget_envelope < 0.0:
-        raise BudgetEnvelopeExceededError(
-            f"Budget envelope must be non-negative; got {budget_envelope}"
+    """Compile a validated experiment's treatment into an immutable ContentPackage.
+
+    ``budget_envelope`` may lower the directive's ``budget_limit`` but never raise it;
+    ``None`` means the ceiling itself.
+    """
+    if experiment.status not in MATERIALIZABLE_STATUSES:
+        raise ExperimentStateError(
+            "experiment_not_validated",
+            f"Experiment {experiment.experiment_id!r} is {experiment.status.value!r}; only a "
+            "validated experiment is materialized",
+            field_paths=["status"],
         )
+    if all(t.treatment_id != treatment.treatment_id for t in experiment.treatments):
+        raise ExperimentStateError(
+            "treatment_not_in_experiment",
+            f"Treatment {treatment.treatment_id!r} is not part of {experiment.experiment_id!r}",
+            field_paths=["treatment_id"],
+        )
+    budget = effective_budget(experiment, budget_envelope)
     if track_count < 1:
         raise ValueError(f"track_count must be at least 1; got {track_count}")
 
-    now = created_at or datetime.now(UTC)
+    now = created_at
     effective_genome = _apply_genome_delta(base_genome, treatment.genome_delta)
 
     pkg_id = package_id(experiment.experiment_id, treatment.treatment_id)
@@ -102,7 +144,7 @@ def materialize_package(
         content_genome_id=content_genome_id(effective_genome),
         production_directive_id=experiment.production_directive_id,
     )
-    track_budget = round(budget_envelope / track_count, 2)
+    track_budget = round(budget / track_count, 2)
     track_specs: list[TrackSpec] = []
     track_spec_ids: list[str] = []
 
@@ -159,6 +201,7 @@ def materialize_package(
                 production_style=effective_genome.production_style,
                 track_role=role,
                 requested_duration=duration,
+                duration_range=duration_range_seconds(effective_genome.track_duration),
                 candidate_target=2,
                 priority=1,
                 budget_limit=track_budget,
@@ -214,6 +257,6 @@ def materialize_package(
         thumbnail_spec=thumbnail_spec,
         title_spec=title_spec,
         package_hash=pkg_hash,
-        budget_envelope=budget_envelope,
+        budget_envelope=budget,
         created_at=now,
     )

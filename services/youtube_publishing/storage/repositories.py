@@ -27,6 +27,10 @@ def _utc(value: datetime) -> datetime:
     """SQLite drops ``tzinfo`` on read-back; P7 stores aware-UTC instants only."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
+
+def _utc_or_none(value: datetime | None) -> datetime | None:
+    return None if value is None else _utc(value)
+
 def _to_channel_domain(row: ChannelProfileRow) -> ChannelProfile:
     return ChannelProfile(
         id=row.id,
@@ -43,8 +47,8 @@ def _to_channel_domain(row: ChannelProfileRow) -> ChannelProfile:
         default_publish_timezone=row.default_publish_timezone,
         active=row.active,
         operating_mode=OperatingMode(row.operating_mode),
-        created_at=row.created_at,
-        updated_at=row.updated_at,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
     )
 
 
@@ -107,13 +111,13 @@ def _to_manifest_domain(row: PublishManifestRow) -> PublishManifest:
         tags=list(row.tags) if isinstance(row.tags, list) else [],
         category_id=row.category_id,
         privacy_status=PrivacyStatus(row.privacy_status),
-        publish_at=row.publish_at,
+        publish_at=_utc_or_none(row.publish_at),
         contains_synthetic_media=row.contains_synthetic_media,
         made_for_kids=row.made_for_kids,
         playlist_id=row.playlist_id,
         playlist_title=row.playlist_title,
         metadata_version=row.metadata_version,
-        created_at=row.created_at,
+        created_at=_utc(row.created_at),
     )
 
 
@@ -185,9 +189,9 @@ def _to_attempt_domain(row: PublishAttemptRow) -> PublishAttempt:
         error_code=row.error_code,
         error_message=row.error_message,
         retry_count=row.retry_count,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        completed_at=row.completed_at,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
+        completed_at=_utc_or_none(row.completed_at),
     )
 
 
@@ -308,8 +312,8 @@ def _to_record_domain(row: PublicationRecordRow) -> YouTubePublicationRecord:
         video_url=row.video_url,
         thumbnail_url=row.thumbnail_url,
         playlist_id=row.playlist_id,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
+        created_at=_utc(row.created_at),
+        updated_at=_utc(row.updated_at),
     )
 
 

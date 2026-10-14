@@ -19,6 +19,7 @@ from .ids import (
 from .models import (
     CostItem,
     ExperimentOutcomeRecord,
+    FxProvenance,
     NormalizedRewardPayload,
     P10FeatureView,
     RevenueStatement,
@@ -32,6 +33,7 @@ __all__ = [
     "CostItem",
     "DataFreshness",
     "ExperimentOutcomeRecord",
+    "FxProvenance",
     "MetricSource",
     "MetricStatus",
     "NormalizedRewardPayload",

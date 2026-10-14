@@ -13,12 +13,13 @@ import math
 import struct
 import tempfile
 import wave
-from datetime import UTC, datetime
 from pathlib import Path
 
 from plm_contracts import CommercialUseEligibility
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c4 import CandidateReadyPayload, MeasuredAudio, RightsSnapshotPayload
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -38,10 +39,12 @@ __all__ = ["run_smoke_test"]
 _TOKEN_REASON = "blocked: pending quality gate service token (PLM_SERVICE_TOKEN)"
 
 
-def _create_temp_wav(duration_seconds: float = 2.0, sample_rate: int = 44100) -> Path:
+def _create_temp_wav(
+    *, stamp: int, duration_seconds: float = 2.0, sample_rate: int = 44100
+) -> Path:
     """Create a deterministic clean PCM 16-bit stereo WAV tone for test."""
     temp_dir = tempfile.gettempdir()
-    path = Path(temp_dir) / f"p5_smoke_{int(datetime.now(UTC).timestamp())}.wav"
+    path = Path(temp_dir) / f"p5_smoke_{stamp}.wav"
     total_frames = int(duration_seconds * sample_rate)
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(2)
@@ -57,8 +60,10 @@ def _create_temp_wav(duration_seconds: float = 2.0, sample_rate: int = 44100) ->
     return path
 
 
-def run_smoke_test() -> str | None:
+def run_smoke_test(*, clock: Clock | None = None) -> str | None:
     """Run the P5 dry-run smoke test. Returns None on success, or blocked reason string."""
+    clock = clock or SystemClock()
+    now = clock.now()
     platform = load_settings()
     if platform.service_token is None:
         return _TOKEN_REASON
@@ -71,11 +76,10 @@ def run_smoke_test() -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"blocked: database unreachable ({exc})"
 
-    wav_path = _create_temp_wav(duration_seconds=2.0)
+    wav_path = _create_temp_wav(stamp=int(now.timestamp()), duration_seconds=2.0)
     try:
         factory = session_factory(engine)
         with factory() as session:
-            now = datetime.now(UTC)
             candidate_id = f"cand_smoke_{int(now.timestamp())}"
             artifact_id = f"art_smoke_{int(now.timestamp())}"
 
@@ -97,6 +101,7 @@ def run_smoke_test() -> str | None:
                 model_id="mock-v1",
                 measured_audio=MeasuredAudio(duration_seconds=2.0, sample_rate=44100, channels=2),
                 requested_duration_seconds=2,
+                requested_duration_range=DurationRangeSeconds(min_seconds=1, max_seconds=3),
                 vocal_mode="instrumental",
                 genre_tags=("ambient",),
                 prompt_text="ambient electronic relaxing beat",
@@ -115,7 +120,7 @@ def run_smoke_test() -> str | None:
                     downloaded_at=now,
                 ),
             )
-            result = run_candidate_evaluation(event=event, audio_path=wav_path)
+            result = run_candidate_evaluation(event=event, audio_path=wav_path, clock=clock)
 
             if result.disposition not in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS):
                 return f"smoke test evaluation failed with disposition: {result.disposition}"

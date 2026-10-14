@@ -1,8 +1,19 @@
-"""Persistence repositories for Phase P9 Analytics & Economics Engine."""
+"""Persistence repositories for Phase P9 Analytics & Economics Engine.
+
+Money is written as (amount, currency) and read back as `Money`. A row whose currency
+is NULL (stored before ADR-0031) is loaded with its amount in the ``*_unreconciled``
+field and no `Money`, so no aggregation can silently treat it as USD.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from decimal import Decimal
+
 from plm_contracts import QualityStatus
+from plm_contracts.measurement import ObservationKind
+from plm_contracts.money import FxRate, FxTable, Money
 from plm_contracts.seams.c7 import ObservationMaturity
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +25,7 @@ from ..domain.enums import (
     ObservationWindow,
     RevenueStatus,
 )
+from ..domain.ids import build_fx_rate_id
 from ..domain.models import (
     CostItem,
     ExperimentOutcomeRecord,
@@ -25,27 +37,68 @@ from ..domain.models import (
 from .models import (
     CostItemRow,
     ExperimentOutcomeRow,
+    FxRateRow,
     RevenueStatementRow,
     RewardPostedRow,
     TrackMetricRow,
     VideoMetricRow,
 )
 
+__all__ = [
+    "FxRateConflictError",
+    "get_costs_for_entity",
+    "get_experiment_outcomes",
+    "get_revenue_statement_by_hash",
+    "get_track_metrics",
+    "get_video_metrics",
+    "insert_cost_item",
+    "insert_experiment_outcome",
+    "insert_fx_rate",
+    "insert_posted_reward",
+    "insert_revenue_statement",
+    "insert_track_metric",
+    "insert_video_metric",
+    "load_fx_rates",
+    "load_fx_table",
+]
+
+
+class FxRateConflictError(ValueError):
+    """A rate for the same pair, instant and source is already recorded with another value."""
+
+
+def _utc(moment: datetime) -> datetime:
+    """Stored instants are UTC; a backend that drops the zone (SQLite) gets it back."""
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+
+
+def _money(amount: Decimal | None, currency: str | None) -> Money | None:
+    if amount is None or currency is None:
+        return None
+    return Money.of(amount, currency)
+
+
+def _unreconciled(amount: Decimal | None, currency: str | None) -> Decimal | None:
+    return amount if amount is not None and currency is None else None
+
 
 def insert_video_metric(session: Session, obs: VideoMetricObservation) -> None:
+    revenue = obs.estimated_revenue
     row = VideoMetricRow(
         id=obs.id,
         video_id=obs.video_id,
         channel_id=obs.channel_id,
         window=obs.window.value,
         date_str=obs.date_str,
+        observation_kind=obs.observation_kind.value,
         views=obs.views,
         watch_time_minutes=obs.watch_time_minutes,
         average_view_duration_seconds=obs.average_view_duration_seconds,
         average_percentage_viewed=obs.average_percentage_viewed,
         subscribers_gained=obs.subscribers_gained,
         subscribers_lost=obs.subscribers_lost,
-        estimated_revenue_usd=obs.estimated_revenue_usd,
+        estimated_revenue_amount=revenue.amount if revenue is not None else None,
+        estimated_revenue_currency=revenue.currency if revenue is not None else None,
         revenue_status=obs.revenue_status.value,
         source=obs.source.value,
         status=obs.status.value,
@@ -56,7 +109,9 @@ def insert_video_metric(session: Session, obs: VideoMetricObservation) -> None:
 
 def get_video_metrics(session: Session, video_id: str) -> list[VideoMetricObservation]:
     rows = session.execute(
-        select(VideoMetricRow).where(VideoMetricRow.video_id == video_id).order_by(VideoMetricRow.observed_at.desc())
+        select(VideoMetricRow)
+        .where(VideoMetricRow.video_id == video_id)
+        .order_by(VideoMetricRow.observed_at.desc(), VideoMetricRow.id)
     ).scalars().all()
     return [
         VideoMetricObservation(
@@ -65,32 +120,40 @@ def get_video_metrics(session: Session, video_id: str) -> list[VideoMetricObserv
             channel_id=r.channel_id,
             window=ObservationWindow(r.window),
             date_str=r.date_str,
+            observation_kind=ObservationKind(r.observation_kind),
             views=r.views,
             watch_time_minutes=r.watch_time_minutes,
             average_view_duration_seconds=r.average_view_duration_seconds,
             average_percentage_viewed=r.average_percentage_viewed,
             subscribers_gained=r.subscribers_gained,
             subscribers_lost=r.subscribers_lost,
-            estimated_revenue_usd=r.estimated_revenue_usd,
+            estimated_revenue=_money(r.estimated_revenue_amount, r.estimated_revenue_currency),
+            estimated_revenue_unreconciled=_unreconciled(
+                r.estimated_revenue_amount, r.estimated_revenue_currency
+            ),
             revenue_status=RevenueStatus(r.revenue_status),
             source=MetricSource(r.source),
             status=MetricStatus(r.status),
-            observed_at=r.observed_at,
+            observed_at=_utc(r.observed_at),
         )
         for r in rows
     ]
 
 
 def insert_track_metric(session: Session, obs: TrackMetricObservation) -> None:
+    if obs.reported_revenue is None:
+        raise ValueError("a statement line is stored only with its declared currency")
     row = TrackMetricRow(
         id=obs.id,
         isrc=obs.isrc,
         track_id=obs.track_id,
         release_id=obs.release_id,
-        window=obs.window.value,
+        window=obs.window.value if obs.window is not None else None,
         date_str=obs.date_str,
+        observation_kind=obs.observation_kind.value,
         streams=obs.streams,
-        reported_revenue_usd=obs.reported_revenue_usd,
+        reported_revenue_amount=obs.reported_revenue.amount,
+        reported_revenue_currency=obs.reported_revenue.currency,
         provider=obs.provider,
         revenue_status=obs.revenue_status.value,
         source=obs.source.value,
@@ -102,7 +165,9 @@ def insert_track_metric(session: Session, obs: TrackMetricObservation) -> None:
 
 def get_track_metrics(session: Session, track_id: str) -> list[TrackMetricObservation]:
     rows = session.execute(
-        select(TrackMetricRow).where(TrackMetricRow.track_id == track_id).order_by(TrackMetricRow.observed_at.desc())
+        select(TrackMetricRow)
+        .where(TrackMetricRow.track_id == track_id)
+        .order_by(TrackMetricRow.observed_at.desc(), TrackMetricRow.id)
     ).scalars().all()
     return [
         TrackMetricObservation(
@@ -110,15 +175,19 @@ def get_track_metrics(session: Session, track_id: str) -> list[TrackMetricObserv
             isrc=r.isrc,
             track_id=r.track_id,
             release_id=r.release_id,
-            window=ObservationWindow(r.window),
+            window=ObservationWindow(r.window) if r.window is not None else None,
             date_str=r.date_str,
+            observation_kind=ObservationKind(r.observation_kind),
             streams=r.streams,
-            reported_revenue_usd=r.reported_revenue_usd,
+            reported_revenue=_money(r.reported_revenue_amount, r.reported_revenue_currency),
+            reported_revenue_unreconciled=_unreconciled(
+                r.reported_revenue_amount, r.reported_revenue_currency
+            ),
             provider=r.provider,
             revenue_status=RevenueStatus(r.revenue_status),
             source=MetricSource(r.source),
             status=MetricStatus(r.status),
-            observed_at=r.observed_at,
+            observed_at=_utc(r.observed_at),
         )
         for r in rows
     ]
@@ -129,12 +198,13 @@ def insert_revenue_statement(session: Session, stmt: RevenueStatement) -> None:
         id=stmt.id,
         provider=stmt.provider,
         period=stmt.period,
-        total_revenue_usd=stmt.total_revenue_usd,
+        currency=stmt.currency,
+        total_revenue_amount=stmt.total_revenue_amount,
         total_streams=stmt.total_streams,
         file_hash=stmt.file_hash,
         source_reference=stmt.source_reference,
         received_at=stmt.received_at,
-        unattributed_revenue_usd=stmt.unattributed_revenue_usd,
+        unattributed_revenue_amount=stmt.unattributed_revenue_amount,
         unattributed_row_count=stmt.unattributed_row_count,
     )
     session.merge(row)
@@ -150,23 +220,27 @@ def get_revenue_statement_by_hash(session: Session, file_hash: str) -> RevenueSt
         id=row.id,
         provider=row.provider,
         period=row.period,
-        total_revenue_usd=row.total_revenue_usd,
+        currency=row.currency,
+        total_revenue_amount=row.total_revenue_amount,
         total_streams=row.total_streams,
         file_hash=row.file_hash,
         source_reference=row.source_reference,
-        received_at=row.received_at,
-        unattributed_revenue_usd=row.unattributed_revenue_usd,
+        received_at=_utc(row.received_at),
+        unattributed_revenue_amount=row.unattributed_revenue_amount,
         unattributed_row_count=row.unattributed_row_count,
     )
 
 
 def insert_cost_item(session: Session, cost: CostItem) -> None:
+    if cost.amount is None:
+        raise ValueError("a cost is stored only with its declared currency")
     row = CostItemRow(
         id=cost.id,
         entity_id=cost.entity_id,
         entity_type=cost.entity_type,
         category=cost.category.value,
-        amount_usd=cost.amount_usd,
+        amount=cost.amount.amount,
+        currency=cost.amount.currency,
         period=cost.period,
         description=cost.description,
         incurred_at=cost.incurred_at,
@@ -176,7 +250,7 @@ def insert_cost_item(session: Session, cost: CostItem) -> None:
 
 def get_costs_for_entity(session: Session, entity_id: str) -> list[CostItem]:
     rows = session.execute(
-        select(CostItemRow).where(CostItemRow.entity_id == entity_id)
+        select(CostItemRow).where(CostItemRow.entity_id == entity_id).order_by(CostItemRow.id)
     ).scalars().all()
     return [
         CostItem(
@@ -184,13 +258,56 @@ def get_costs_for_entity(session: Session, entity_id: str) -> list[CostItem]:
             entity_id=r.entity_id,
             entity_type=r.entity_type,
             category=CostCategory(r.category),
-            amount_usd=r.amount_usd,
+            amount=_money(r.amount, r.currency),
+            amount_unreconciled=_unreconciled(r.amount, r.currency),
             period=r.period,
             description=r.description,
-            incurred_at=r.incurred_at,
+            incurred_at=_utc(r.incurred_at),
         )
         for r in rows
     ]
+
+
+def insert_fx_rate(session: Session, rate: FxRate, *, recorded_at: datetime) -> str:
+    """Record one rate; replaying the same rate is a no-op, a different value is refused."""
+    as_of = _utc(rate.as_of)
+    rate_row_id = build_fx_rate_id(rate.base, rate.quote, as_of.isoformat(), rate.source)
+    existing = session.get(FxRateRow, rate_row_id)
+    if existing is not None:
+        if Decimal(existing.rate) != rate.rate:
+            raise FxRateConflictError(
+                f"{rate.rate_id} is already recorded as {existing.rate}, not {rate.rate}"
+            )
+        return rate_row_id
+    session.add(
+        FxRateRow(
+            id=rate_row_id,
+            base=rate.base,
+            quote=rate.quote,
+            rate=rate.rate,
+            source=rate.source,
+            as_of=as_of,
+            recorded_at=_utc(recorded_at),
+        )
+    )
+    session.flush()
+    return rate_row_id
+
+
+def load_fx_rates(session: Session, currencies: Iterable[str] | None = None) -> list[FxRate]:
+    stmt = select(FxRateRow).order_by(FxRateRow.base, FxRateRow.quote, FxRateRow.as_of, FxRateRow.id)
+    if currencies is not None:
+        wanted = sorted(set(currencies))
+        stmt = stmt.where(FxRateRow.base.in_(wanted), FxRateRow.quote.in_(wanted))
+    return [
+        FxRate(base=r.base, quote=r.quote, rate=Decimal(r.rate), source=r.source, as_of=_utc(r.as_of))
+        for r in session.execute(stmt).scalars().all()
+    ]
+
+
+def load_fx_table(session: Session, currencies: Iterable[str] | None = None) -> FxTable:
+    """Every recorded rate (optionally only between ``currencies``) as an `FxTable`."""
+    return FxTable(load_fx_rates(session, currencies))
 
 
 def insert_experiment_outcome(session: Session, outc: ExperimentOutcomeRecord) -> None:
@@ -204,10 +321,12 @@ def insert_experiment_outcome(session: Session, outc: ExperimentOutcomeRecord) -
         observation_window=outc.observation_window.value,
         primary_metric=outc.primary_metric,
         primary_value=outc.primary_value,
+        primary_value_currency=outc.primary_value_currency,
         normalized_reward=outc.normalized_reward,
         reward_version=outc.reward_version,
         attribution_confidence=outc.attribution_confidence,
         maturity=outc.maturity.value,
+        published_at=outc.published_at,
         quality_status=outc.quality_status.value if outc.quality_status else None,
         created_at=outc.created_at,
     )
@@ -216,7 +335,9 @@ def insert_experiment_outcome(session: Session, outc: ExperimentOutcomeRecord) -
 
 def get_experiment_outcomes(session: Session, experiment_id: str) -> list[ExperimentOutcomeRecord]:
     rows = session.execute(
-        select(ExperimentOutcomeRow).where(ExperimentOutcomeRow.experiment_id == experiment_id)
+        select(ExperimentOutcomeRow)
+        .where(ExperimentOutcomeRow.experiment_id == experiment_id)
+        .order_by(ExperimentOutcomeRow.id)
     ).scalars().all()
     return [
         ExperimentOutcomeRecord(
@@ -229,12 +350,14 @@ def get_experiment_outcomes(session: Session, experiment_id: str) -> list[Experi
             observation_window=ObservationWindow(r.observation_window),
             primary_metric=r.primary_metric,
             primary_value=r.primary_value,
+            primary_value_currency=r.primary_value_currency,
             normalized_reward=r.normalized_reward,
             reward_version=r.reward_version,
             attribution_confidence=r.attribution_confidence,
             maturity=ObservationMaturity(r.maturity),
+            published_at=_utc(r.published_at) if r.published_at is not None else None,
             quality_status=QualityStatus(r.quality_status) if r.quality_status else None,
-            created_at=r.created_at,
+            created_at=_utc(r.created_at),
         )
         for r in rows
     ]

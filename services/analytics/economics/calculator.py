@@ -1,94 +1,134 @@
-"""Financial ledger arithmetic and unit-economics calculations (P9 §19, §20, §21, §23).
+"""Unit-economics arithmetic in the reporting currency (P9 §19–§23, §96, §97, ADR-0031).
 
-Handles all edge cases: zero revenue, zero costs, negative margins, null divisors.
+Every amount is `Money` already converted into ``reporting_currency``; an amount in any
+other currency is refused (`CurrencyMismatchError`), never coerced. Estimated revenue
+(YouTube platform estimates) is reported next to realized revenue (reported or final
+statements) and never enters the net contribution. A ratio whose inputs are unknown or
+whose divisor is zero is ``None``, not a sentinel such as ``-1`` or ``1``.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Sequence
+from datetime import datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 
-from ..domain.enums import PaybackStatus
-from ..domain.models import UnitEconomics
+from plm_contracts.money import CurrencyMismatchError, Money
+from plm_platform.clock import require_aware
+
+from ..domain.enums import ObservationWindow, PaybackStatus
+from ..domain.models import FxProvenance, UnitEconomics
+
+__all__ = ["RATIO_QUANTUM", "compute_unit_economics"]
+
+RATIO_QUANTUM = Decimal("0.000001")
+
+
+def _ratio(numerator: Decimal, denominator: Decimal) -> Decimal | None:
+    if denominator == 0:
+        return None
+    return (numerator / denominator).quantize(RATIO_QUANTUM, rounding=ROUND_HALF_EVEN)
+
+
+def _require_currency(name: str, money: Money | None, currency: str) -> None:
+    if money is not None and money.currency != currency:
+        raise CurrencyMismatchError(
+            f"{name} is in {money.currency}; convert to the reporting currency {currency} first"
+        )
 
 
 def compute_unit_economics(
     entity_id: str,
     entity_type: str,
     *,
-    gross_revenue_usd: float,
-    allocated_cost_usd: float,
+    reporting_currency: str,
+    window: ObservationWindow,
+    estimated_revenue: Money | None,
+    realized_revenue: Money | None,
+    allocated_cost: Money | None,
     views: int | None = None,
     streams: int | None = None,
-    daily_revenue_rate_usd: float | None = None,
-    as_of: datetime | None = None,
+    daily_realized_revenue_rate: Money | None = None,
+    blocked_reason: str | None = None,
+    conversions: Sequence[FxProvenance] = (),
+    unreconciled_record_ids: Sequence[str] = (),
+    as_of: datetime,
 ) -> UnitEconomics:
-    """Calculate canonical unit economics, P&L, ROI, and payback metrics.
+    """Compute unit economics from amounts already in ``reporting_currency``.
 
     Args:
-        entity_id: Identifier of the subject (video, track, release, arm).
-        entity_type: Entity classification.
-        gross_revenue_usd: Total gross monetary revenue earned.
-        allocated_cost_usd: Total allocated production, distribution, and compute costs.
-        views: Optional view count for YouTube video RPM computation.
-        streams: Optional stream count for DSP revenue per stream computation.
-        daily_revenue_rate_usd: Optional recent daily run-rate for payback day estimation.
-        as_of: Computation timestamp.
-
-    Returns:
-        Immutable UnitEconomics record.
+        estimated_revenue: Latest platform estimate for ``window``; shown, never booked.
+        realized_revenue: Reported/final statement revenue; ``None`` when none reported.
+        allocated_cost: Allocated costs; ``None`` when no cost was recorded.
+        blocked_reason: Set by the caller when the inputs are known to be incomplete
+            (e.g. unreconciled records); the net contribution is then withheld.
+        conversions: FX provenance of every converted amount (P9 §23).
+        as_of: Computation timestamp, supplied by the caller.
     """
-    now = as_of or datetime.now(UTC)
+    now = require_aware(as_of)
+    for name, money in (
+        ("estimated_revenue", estimated_revenue),
+        ("realized_revenue", realized_revenue),
+        ("allocated_cost", allocated_cost),
+        ("daily_realized_revenue_rate", daily_realized_revenue_rate),
+    ):
+        _require_currency(name, money, reporting_currency)
 
-    # 1. Net contribution
-    net_contribution = round(gross_revenue_usd - allocated_cost_usd, 4)
+    reason = blocked_reason
+    if reason is None and realized_revenue is None:
+        reason = "realized_revenue_not_reported"
+    if reason is None and allocated_cost is None:
+        reason = "cost_not_recorded"
 
-    # 2. Profit margin (net / gross)
-    if gross_revenue_usd > 0:
-        profit_margin = round(net_contribution / gross_revenue_usd, 4)
-    else:
-        profit_margin = -1.0 if allocated_cost_usd > 0 else 0.0
-
-    # 3. ROI (net / cost)
-    if allocated_cost_usd > 0:
-        roi = round(net_contribution / allocated_cost_usd, 4)
-    else:
-        roi = 1.0 if gross_revenue_usd > 0 else 0.0
-
-    # 4. RPM (revenue per 1,000 views)
-    rpm_usd: float | None = None
-    if views is not None and views > 0:
-        rpm_usd = round((gross_revenue_usd / views) * 1000.0, 4)
-
-    # 5. Revenue per stream
-    rev_per_stream: float | None = None
-    if streams is not None and streams > 0:
-        rev_per_stream = round(gross_revenue_usd / streams, 6)
-
-    # 6. Payback status and payback days
-    if allocated_cost_usd <= 0:
-        payback_status = PaybackStatus.NOT_APPLICABLE
-        payback_days = 0
-    elif gross_revenue_usd >= allocated_cost_usd:
-        payback_status = PaybackStatus.REPAID
-        if daily_revenue_rate_usd and daily_revenue_rate_usd > 0:
-            payback_days = max(1, int(allocated_cost_usd / daily_revenue_rate_usd))
+    net: Money | None = None
+    profit_margin: Decimal | None = None
+    roi: Decimal | None = None
+    payback_status: PaybackStatus | None = None
+    payback_days: int | None = None
+    if reason is None and realized_revenue is not None and allocated_cost is not None:
+        net = realized_revenue - allocated_cost
+        profit_margin = _ratio(net.amount, realized_revenue.amount)
+        roi = _ratio(net.amount, allocated_cost.amount)
+        if allocated_cost.amount <= 0:
+            payback_status = PaybackStatus.NOT_APPLICABLE
+            payback_days = 0
+        elif realized_revenue.compare(allocated_cost) >= 0:
+            payback_status = PaybackStatus.REPAID
+            if daily_realized_revenue_rate is not None and daily_realized_revenue_rate.amount > 0:
+                days = allocated_cost.amount / daily_realized_revenue_rate.amount
+                payback_days = max(1, int(days))
         else:
-            payback_days = None
-    else:
-        payback_status = PaybackStatus.NOT_REPAID
-        payback_days = None
+            payback_status = PaybackStatus.NOT_REPAID
 
+    estimated_rpm: Money | None = None
+    if estimated_revenue is not None and views is not None and views > 0:
+        estimated_rpm = Money(amount=estimated_revenue.amount * 1000 / views, currency=reporting_currency)
+
+    per_stream: Money | None = None
+    if realized_revenue is not None and streams is not None and streams > 0:
+        per_stream = Money(amount=realized_revenue.amount / streams, currency=reporting_currency)
+
+    rate_ids = sorted({c.rate_id for c in conversions if c.rate_id is not None})
     return UnitEconomics(
         entity_id=entity_id,
         entity_type=entity_type,
-        gross_revenue_usd=round(gross_revenue_usd, 4),
-        allocated_cost_usd=round(allocated_cost_usd, 4),
-        net_contribution_usd=net_contribution,
+        reporting_currency=reporting_currency,
+        window=window,
+        estimated_revenue=estimated_revenue,
+        realized_revenue=realized_revenue,
+        allocated_cost=allocated_cost,
+        net_contribution=net,
+        net_contribution_blocked_reason=None if net is not None else reason,
         profit_margin=profit_margin,
         roi=roi,
-        rpm_usd=rpm_usd,
-        revenue_per_stream_usd=rev_per_stream,
+        views=views,
+        streams=streams,
+        estimated_rpm=estimated_rpm,
+        realized_revenue_per_stream=per_stream,
         payback_days=payback_days,
         payback_status=payback_status,
+        fx_rate_ids=rate_ids,
+        conversions=list(conversions),
+        unreconciled_record_ids=sorted(unreconciled_record_ids),
         as_of=now,
     )

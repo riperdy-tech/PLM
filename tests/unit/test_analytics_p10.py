@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from analytics.domain.enums import ObservationWindow
 from analytics.evaluation.feedback import evaluate_experiment_outcome
 from analytics.projection.p10_features import build_p10_feature_view
-from plm_contracts.seams.c7 import ObservationMaturity
+from plm_contracts.money import FxTable, Money
 
 from tests.support.analytics_db import analytics_db_session
 from tests.support.seams import sample_lineage
@@ -23,14 +23,16 @@ def test_build_p10_feature_view_conforms_to_c8() -> None:
                 content_arm_id="arm_synth_01", content_genome_id="genome_synth_01",
             ),
             unit_id="video_synth_01",
-            net_contribution_usd=143.21,
+            net_contribution=Money.of("143.21", "USD"),
+            reporting_currency="USD",
+            fx=FxTable(),
             views=85000,
             watch_time_minutes=612.4 * 60,
             window=ObservationWindow.D7,
-            maturity=ObservationMaturity.MATURE,
+            published_at=NOW - timedelta(days=7),
             attribution_confidence=1.0,
             quality_status=None,
-            now=NOW,
+            observed_at=NOW,
         )
 
         view = build_p10_feature_view(

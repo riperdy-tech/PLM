@@ -21,6 +21,7 @@ from services.experiments.domain.genome import BpmRange, ContentGenome, Duration
 from services.experiments.validation.engine import (
     validate_experiment,
 )
+from tests.support.experiments_factories import design_facts
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -50,6 +51,7 @@ def _sample_valid_experiment() -> tuple[Experiment, ContentGenome]:
         treatment_index=1,
         name="low_bpm",
         variable_assignments={"bpm": 70},
+        genome_delta={"bpm": 70},
     )
     var = ExperimentVariable(
         name="bpm",
@@ -68,14 +70,16 @@ def _sample_valid_experiment() -> tuple[Experiment, ContentGenome]:
         treatments=(t1, t2),
         base_genome_fingerprint="fp_val",
         created_at=NOW,
+        **design_facts("exp_val_01"),
     )
     return exp, genome
 
 
 def test_valid_experiment_passes_validation() -> None:
     exp, genome = _sample_valid_experiment()
-    report = validate_experiment(exp, genome, budget_limit=100.0)
+    report = validate_experiment(exp, genome)
     assert report.passed
+    assert report.experiment_id == exp.experiment_id
     assert len(report.errors) == 0
 
 
@@ -96,8 +100,8 @@ def test_duplicate_treatments_detected() -> None:
 
 def test_budget_ceiling_enforcement() -> None:
     exp, genome = _sample_valid_experiment()
-    # If budget_limit is 50.0 and cost or ceiling is checked:
-    report = validate_experiment(exp, genome, budget_limit=-5.0)
+    # The ceiling is the experiment's own (from the directive); zero cannot fund anything.
+    report = validate_experiment(exp.model_copy(update={"budget_limit": 0.0}), genome)
     assert not report.passed
     assert any("Budget" in err or "budget" in err for err in report.errors)
 
@@ -116,3 +120,36 @@ def test_uncontrolled_variable_mutation_detected() -> None:
     report = validate_experiment(bad_exp, genome)
     assert not report.passed
     assert any("undeclared" in err or "uncontrolled" in err for err in report.errors)
+
+
+def test_two_variables_changed_together_is_contamination() -> None:
+    exp, genome = _sample_valid_experiment()
+    var2 = ExperimentVariable(
+        name="visual_world",
+        variable_class=VariableClass.EXPERIMENTAL,
+        baseline_value="rainy_asian_city",
+    )
+    control = Treatment(
+        treatment_id="t1",
+        treatment_index=0,
+        name="control",
+        variable_assignments={"bpm": 80, "visual_world": "rainy_asian_city"},
+    )
+    both = Treatment(
+        treatment_id="t2",
+        treatment_index=1,
+        name="both",
+        variable_assignments={"bpm": 70, "visual_world": "tokyo_cyberpunk"},
+        genome_delta={"bpm": 70, "visual_world": "tokyo_cyberpunk"},
+    )
+    bad = exp.model_copy(update={"variables": (*exp.variables, var2), "treatments": (control, both)})
+    report = validate_experiment(bad, genome)
+    assert not report.passed
+    assert any("contamination" in err for err in report.errors)
+
+
+def test_treatment_identical_to_control_is_refused() -> None:
+    exp, genome = _sample_valid_experiment()
+    same = exp.treatments[1].model_copy(update={"variable_assignments": {"bpm": 80}})
+    report = validate_experiment(exp.model_copy(update={"treatments": (exp.treatments[0], same)}), genome)
+    assert not report.passed

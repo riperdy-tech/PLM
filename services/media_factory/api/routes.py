@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import Clock
 from sqlalchemy.orm import Session
 
 from ..config import MediaFactorySettings
@@ -46,6 +47,7 @@ def build_router(
     *,
     session_factory: Callable[[], Session] | None,
     settings: MediaFactorySettings,
+    clock: Clock,
 ) -> APIRouter:
     """Build the authenticated router for the media factory."""
     router = APIRouter(prefix="/media", tags=["media_factory"])
@@ -113,6 +115,7 @@ def build_router(
                 playlist_concept=payload.playlist_concept,
                 render_profile=payload.render_profile,
                 sequence_version=payload.sequence_version,
+                clock=clock,
             )
         except PlaylistAssemblyError as exc:
             raise HTTPException(

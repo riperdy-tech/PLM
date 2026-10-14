@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock, SystemClock
 from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
@@ -33,7 +34,12 @@ from .schemas import (
 )
 from .service_token import require_service_token
 
-__all__ = ["build_router"]
+__all__ = ["build_router", "get_clock"]
+
+
+def get_clock() -> Clock:
+    """The wall clock for request handling; tests override this dependency."""
+    return SystemClock()
 
 
 def build_router(
@@ -104,6 +110,7 @@ def build_router(
     def evaluate_candidate_endpoint(
         req: EvaluationRequest,
         session: Annotated[Session, Depends(_require_session)],
+        clock: Annotated[Clock, Depends(get_clock)],
     ) -> EvaluationResponse:
         try:
             event = consume_c4_event(req.candidate_event)
@@ -119,6 +126,7 @@ def build_router(
         result = run_candidate_evaluation(
             event=event,
             audio_path=req.audio_path,
+            clock=clock,
             evaluation_policy_version=req.evaluation_policy_version,
             trigger=req.trigger,
         )
@@ -212,6 +220,7 @@ def build_router(
         case_id: str,
         req: QuarantineResolutionRequest,
         session: Annotated[Session, Depends(_require_session)],
+        clock: Annotated[Clock, Depends(get_clock)],
     ) -> QuarantineCaseResponse:
         try:
             res_code = ResolutionCode(req.resolution)
@@ -243,6 +252,7 @@ def build_router(
                 resolution=res_code,
                 auditor_id=req.auditor_id,
                 notes=req.notes,
+                now=clock.now(),
             )
         except OverrideNotPossibleError as exc:
             session.rollback()

@@ -51,9 +51,16 @@ ObservationMaturity = _SharedObservationMaturity
 
 
 class UpdateStatus(StrEnum):
-    """§74's persisted update state; `applied` is unique per reward observation."""
+    """§74's persisted update state; `applied` is unique per reward observation.
+
+    ADR-0031: only one outcome per (experiment, content) is `applied`, the mature one at
+    the policy's outcome horizon. Every other stored result is recorded with the reason
+    it did not move the posterior.
+    """
 
     APPLIED = "applied"
+    PROVISIONAL = "provisional"
+    OFF_HORIZON = "off_horizon"
     SKIPPED_DUPLICATE = "skipped_duplicate"
     QUARANTINED = "quarantined"
     FAILED = "failed"

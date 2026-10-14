@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from ..domain.enums import PlanStatus
 from ..domain.ids import plan_id, variant_id
@@ -16,10 +16,10 @@ def plan_generation(
     track_spec: AdaptedTrackSpec,
     *,
     policy_version: str = "p4-v1",
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> tuple[GenerationPlan, list[CreativeVariant]]:
     """Construct a batch GenerationPlan and creative variants from an adapted TrackSpec."""
-    now = created_at or datetime.now(UTC)
+    now = created_at
     pid = plan_id(track_spec.track_spec_id, track_spec.experiment_id, policy_version)
 
     candidate_target = max(1, track_spec.candidate_target)

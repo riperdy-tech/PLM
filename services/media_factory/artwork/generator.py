@@ -6,6 +6,7 @@ Generates cover artwork and multiple thumbnail variants for A/B testing.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 
 from ..domain.models import ThumbnailVariant
 from ..visuals.planner import BrandProfile
@@ -33,6 +34,7 @@ def generate_artwork_and_thumbnails(
     brand_profile: BrandProfile,
     playlist_title: str,
     variant_keys: list[str] | None = None,
+    now: datetime,
 ) -> ArtworkResult:
     """Generate cover art and thumbnail candidate variants."""
     keys = variant_keys or ["thumb_a_hero", "thumb_b_bold_text", "thumb_c_minimal"]
@@ -60,6 +62,7 @@ def generate_artwork_and_thumbnails(
             width=1280,
             height=720,
             layout_version=brand_profile.version,
+            now=now,
         )
         thumbnails.append(variant)
 

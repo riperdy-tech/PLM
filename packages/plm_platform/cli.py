@@ -521,11 +521,15 @@ def experiments_materialize(
     experiment_id: str,
     treatment_id: str,
     brand_id: str = "neon_seoul",
-    budget_envelope: float = 100.0,
+    budget_envelope: float | None = None,
     track_count: int = 5,
     total_duration_minutes: int = 60,
 ) -> None:
-    """Materialize an experiment treatment into a ContentPackage (P3)."""
+    """Materialize an experiment treatment into a ContentPackage (P3).
+
+    Without ``--budget-envelope`` the directive's budget limit is used; a larger one is
+    refused.
+    """
     from experiments.cli import materialize_treatment_cli
 
     typer.echo(
@@ -832,11 +836,19 @@ def distribution_smoke() -> None:
 def analytics_ingest(
     source: str = typer.Option("distributor", "--source", "-s", help="Source type: youtube, distributor, cost"),
     file_path: str = typer.Option(..., "--file", "-f", help="Path to data file"),
+    provider: str | None = typer.Option(None, "--provider", help="Statement provider (distributor)"),
+    period: str | None = typer.Option(None, "--period", help="Statement period (distributor)"),
+    currency: str | None = typer.Option(None, "--currency", help="Statement currency (distributor)"),
 ) -> None:
-    """Ingest a metrics, statement, or cost file into the analytics ledger (P9)."""
+    """Ingest a metrics, statement, or cost file into the analytics ledger (P9).
+
+    A distributor statement needs ``--provider``, ``--period`` and ``--currency``; a
+    missing one is refused (exit 2), never filled in.
+    """
     from analytics.cli import cli_ingest
 
-    cli_ingest(source=source, file_path=file_path)
+    cli_ingest(source=source, file_path=file_path, provider=provider, period=period,
+               currency=currency)
 
 
 @analytics_app.command(name="report")

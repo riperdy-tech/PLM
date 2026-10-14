@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from plm_contracts import ErrorShape
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard
 
 from ..client.mock import MockYouTubeClient
@@ -35,6 +35,7 @@ def create_youtube_router(
     auth_dependency: Any,
     client: Any = None,
     *,
+    clock: Clock,
     write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/youtube", tags=["youtube"])
@@ -46,12 +47,12 @@ def create_youtube_router(
         return HealthResponse(
             status="healthy",
             version="v1",
-            timestamp=datetime.now(UTC),
+            timestamp=clock.now(),
         )
 
     @router.post("/publish", response_model=PublishResponse, dependencies=[Depends(auth_dependency)])
     def publish_package(req: PublishRequest) -> PublishResponse:
-        now = datetime.now(UTC)
+        now = clock.now()
         try:
             pkg = parse_seam(MediaPackagePayload, req.media_package)
         except SeamRejection as exc:
@@ -93,7 +94,7 @@ def create_youtube_router(
                     ).model_dump(),
                 ) from exc
             passed, results, reason = evaluate_preflight_all(
-                profile, pkg.to_wire(), preflight_metadata(pkg), req.publish_at
+                profile, pkg.to_wire(), preflight_metadata(pkg), req.publish_at, now=now
             )
             if not passed:
                 diags = [d for r in results for d in r.diagnostics]
@@ -109,7 +110,7 @@ def create_youtube_router(
             session.commit()
 
             # 4. Execute Publishing Engine
-            engine = YouTubePublishingEngine(yt_client, write_guard=guard)
+            engine = YouTubePublishingEngine(yt_client, clock=clock, write_guard=guard)
             result = engine.execute_publish(
                 session,
                 manifest,

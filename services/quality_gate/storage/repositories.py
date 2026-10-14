@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
@@ -567,6 +567,8 @@ def resolve_quarantine_case(
     resolution: ResolutionCode,
     auditor_id: str,
     notes: str,
+    *,
+    resolved_at: datetime,
 ) -> None:
     session.execute(
         quarantine_cases_table.update()
@@ -575,7 +577,7 @@ def resolve_quarantine_case(
             status=QuarantineStatus.RESOLVED.value,
             resolution=resolution.value,
             assigned_to=auditor_id,
-            resolved_at=datetime.now(UTC),
+            resolved_at=resolved_at,
             resolution_notes=notes,
         )
     )

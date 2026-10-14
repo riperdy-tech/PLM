@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from plm_platform.clock import Clock, SystemClock
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -47,9 +48,11 @@ def build_router(
     *,
     session_factory: Callable[[], Session] | None,
     settings: MusicFactorySettings,
+    clock: Clock | None = None,
 ) -> APIRouter:
     """Build the Music Factory router with fail-closed dependencies."""
     router = APIRouter(prefix="/music", tags=["music"])
+    service_clock: Clock = clock or SystemClock()
     auth_dep = require_service_token(settings.platform)
 
     def _require_session() -> Session:
@@ -92,7 +95,7 @@ def build_router(
                 detail=exc.error.model_dump(),
             ) from exc
 
-        plan, variants = plan_generation(spec)
+        plan, variants = plan_generation(spec, created_at=service_clock.now())
         from ..storage.repositories import insert_creative_variant, insert_generation_plan
 
         try:
@@ -135,7 +138,7 @@ def build_router(
             ) from exc
 
         variants = list_creative_variants(session, plan_id)
-        engine = GenerationEngine(default_provider_id=settings.default_provider)
+        engine = GenerationEngine(clock=service_clock, default_provider_id=settings.default_provider)
 
         result = engine.execute_plan(
             session,
@@ -283,7 +286,7 @@ def build_router(
         session: Annotated[Session, Depends(_require_session)],
     ) -> dict[str, Any]:
         try:
-            cand = accept_candidate(session, candidate_id)
+            cand = accept_candidate(session, candidate_id, now=service_clock.now())
             session.commit()
             return cand.model_dump(mode="json")
         except CandidateNotFoundError as exc:
@@ -301,7 +304,7 @@ def build_router(
     ) -> dict[str, Any]:
         reason = payload.reason if payload else None
         try:
-            cand = reject_candidate(session, candidate_id, reason=reason)
+            cand = reject_candidate(session, candidate_id, now=service_clock.now(), reason=reason)
             session.commit()
             return cand.model_dump(mode="json")
         except CandidateNotFoundError as exc:
@@ -332,7 +335,7 @@ def build_router(
             )
             raise HTTPException(status_code=code, detail=exc.error.model_dump()) from exc
         try:
-            cand = mark_candidate_exported_to_p5(session, candidate_id)
+            cand = mark_candidate_exported_to_p5(session, candidate_id, now=service_clock.now())
         except InvalidCandidateTransitionError as exc:
             session.rollback()
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

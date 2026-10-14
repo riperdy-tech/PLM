@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from media_factory.api.app import create_app
 from media_factory.config import MediaFactorySettings
+from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.media_db import create_media_engine, media_session
@@ -19,11 +22,12 @@ MINIMAL_ENV = {
     "MINIO_BUCKET": "plm-media",
     "TEMPORAL_HOST": "127.0.0.1:9",
 }
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def test_media_api_health_endpoint() -> None:
     settings = MediaFactorySettings()
-    app = create_app(session_factory=None, settings=settings)
+    app = create_app(session_factory=None, settings=settings, clock=FixedClock(NOW))
     client = TestClient(app)
 
     response = client.get("/media/health")
@@ -35,7 +39,7 @@ def test_media_api_auth_enforcement() -> None:
     # 1. No service token configured -> 503
     platform_no_token = load_settings(env=MINIMAL_ENV)
     settings_no_token = MediaFactorySettings(platform=platform_no_token)
-    app_no_token = create_app(session_factory=None, settings=settings_no_token)
+    app_no_token = create_app(session_factory=None, settings=settings_no_token, clock=FixedClock(NOW))
     client = TestClient(app_no_token)
 
     resp = client.get("/media/packages/mp_123")
@@ -49,7 +53,7 @@ def test_media_api_auth_enforcement() -> None:
     settings_with_token = MediaFactorySettings(platform=platform_with_token)
     engine = create_media_engine(static_pool=True)
     factory = lambda: media_session(engine)
-    app = create_app(session_factory=factory, settings=settings_with_token)
+    app = create_app(session_factory=factory, settings=settings_with_token, clock=FixedClock(NOW))
     client = TestClient(app)
 
     resp_no_hdr = client.get("/media/packages/mp_123")
@@ -70,7 +74,7 @@ def test_media_api_assemble_and_query_package() -> None:
     settings = MediaFactorySettings(platform=platform)
     engine = create_media_engine(static_pool=True)
     factory = lambda: media_session(engine)
-    app = create_app(session_factory=factory, settings=settings)
+    app = create_app(session_factory=factory, settings=settings, clock=FixedClock(NOW))
     client = TestClient(app)
 
     headers = {SERVICE_TOKEN_HEADER: token}
@@ -126,6 +130,7 @@ def test_media_api_refuses_an_incomplete_track_manifest() -> None:
     app = create_app(
         session_factory=lambda: media_session(create_media_engine(static_pool=True)),
         settings=MediaFactorySettings(platform=platform),
+        clock=FixedClock(NOW),
     )
     manifest = release_manifest().to_wire()
     del manifest["disposition"]

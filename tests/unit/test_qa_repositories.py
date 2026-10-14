@@ -46,6 +46,7 @@ def test_candidate_evaluation_and_snapshot_crud() -> None:
             evaluation_policy_version="p5-v1",
             trigger="candidate_ready",
             status=EvaluationStatus.PENDING,
+            started_at=NOW,
             created_at=NOW,
         )
         repositories.insert_candidate_evaluation(session, ev)
@@ -58,6 +59,7 @@ def test_candidate_evaluation_and_snapshot_crud() -> None:
             artifact_snapshot={"duration": 60.0},
             provider_snapshot={"provider": "mock"},
             license_snapshot={"tier": "pro"},
+            now=NOW,
         )
         repositories.insert_evaluation_snapshot(session, snap)
         session.commit()
@@ -100,6 +102,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             measured_value=120.0,
             expected_value=120.0,
             unit="seconds",
+            now=NOW,
         )
         repositories.insert_technical_check(session, tc)
 
@@ -109,6 +112,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             score=0.9,
             confidence=0.85,
             severity=CheckSeverity.INFO,
+            now=NOW,
         )
         repositories.insert_musical_check(session, mc)
 
@@ -117,6 +121,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             check_type="profanity",
             status=CheckStatus.PASS,
             severity=CheckSeverity.INFO,
+            now=NOW,
         )
         repositories.insert_lyric_check(session, lc)
 
@@ -125,6 +130,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             check_type="r6",
             status=CheckStatus.PASS,
             severity=CheckSeverity.INFO,
+            now=NOW,
         )
         repositories.insert_provenance_check(session, pc)
 
@@ -136,6 +142,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             confidence=0.9,
             source_type="provider",
             source_ref="mock",
+            now=NOW,
         )
         repositories.insert_rights_check(session, rc)
 
@@ -146,6 +153,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             rule_version="1.0",
             status=CheckStatus.PASS,
             severity=CheckSeverity.INFO,
+            now=NOW,
         )
         repositories.insert_policy_check(session, pol)
 
@@ -157,6 +165,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             status="WARN",
             confidence=0.8,
             message="Test message",
+            now=NOW,
         )
         repositories.insert_risk_finding(session, rf)
 
@@ -167,6 +176,7 @@ def test_checks_findings_and_evidence_crud() -> None:
             source_reference="ref",
             content_hash="hash123",
             summary="test summary",
+            now=NOW,
         )
         repositories.insert_evidence_item(session, ev_item)
         session.commit()
@@ -194,6 +204,7 @@ def test_gate_decision_quarantine_and_manifest_crud() -> None:
             gate_results={"test": "pass"},
             blocking_finding_ids=[],
             warning_finding_ids=[],
+            now=NOW,
         )
         repositories.insert_gate_decision(session, dec)
 
@@ -201,6 +212,7 @@ def test_gate_decision_quarantine_and_manifest_crud() -> None:
             candidate_id="cand_003",
             evaluation_id_str="eval_003",
             reason_codes=["REASON_1"],
+            now=NOW,
         )
         repositories.insert_quarantine_case(session, qcase)
 
@@ -224,6 +236,7 @@ def test_gate_decision_quarantine_and_manifest_crud() -> None:
             evaluation_policy_version="p5-v1",
             warning_codes=[],
             evidence_bundle_id="evi_003",
+            now=NOW,
         )
         repositories.insert_release_manifest(session, manifest)
         session.commit()
@@ -244,6 +257,7 @@ def test_gate_decision_quarantine_and_manifest_crud() -> None:
             resolution=ResolutionCode.CLEARED_BY_OVERRIDE,
             auditor_id="auditor_test",
             notes="override notes",
+            resolved_at=NOW,
         )
         session.commit()
 

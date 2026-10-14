@@ -42,7 +42,7 @@ def _seed_arm_and_posterior(session, *, mean: float = 0.5, variance: float = 0.0
 def _payload(*, reward: float = 0.9, observed_at: datetime = NOW,
              attribution: float = 0.99) -> dict[str, object]:
     return {"schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-1", "content_id": "c-1",
-            "observation_window": "7d", "status": "mature",
+            "observation_window": "28d", "status": "mature",
             "observed_at": observed_at.isoformat(), "raw_metrics": unmeasured_raw_metrics(),
             "normalized_reward": reward, "reward_version": "p9-reward-v1",
             "attribution_confidence": attribution}
@@ -87,8 +87,8 @@ def test_unmeasured_reward_is_quarantined_and_never_treated_as_zero() -> None:
             session,
             RewardObservation(
                 experiment_id="exp-nr", arm_id="rnb-1", content_id="c-1",
-                observation_window=ObservationWindow.H24,
-                maturity=ObservationMaturity.PROVISIONAL, observed_at=NOW, raw_metrics={},
+                observation_window=ObservationWindow.D28,
+                maturity=ObservationMaturity.MATURE, observed_at=NOW, raw_metrics={},
                 normalized_reward=Tri.not_ready(), reward_version="p9-reward-v1",
                 attribution_confidence=0.99,
             ),

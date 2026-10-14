@@ -14,8 +14,10 @@ from datetime import UTC, datetime
 
 import pytest
 from plm_contracts import GateDisposition
+from plm_contracts.money import Money
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
 
 # P9
@@ -45,6 +47,8 @@ from services.youtube_publishing.preflight.gates import (
 )
 from tests.support.seams import media_package, release_manifest, sample_lineage
 
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 
 def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
     """Review Focus 4: A REJECTED candidate must not reach publication or packaging."""
@@ -69,13 +73,14 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
         evaluation_policy_version="p5-v1",
         warning_codes=["COPYRIGHT_SIMILARITY_EXCEEDED"],
         evidence_bundle_id="evi_fail_001",
+        now=NOW,
     )
     assert rejected_manifest.disposition == GateDisposition.REJECTED
     track = parse_seam(ReleaseManifestPayload, rejected_manifest.to_wire())
 
     # 2. P6 playlist assembly hard-blocks the unapproved candidate (Rulings R7, R8)
     with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
-        assemble_playlist(manifests=[track], brand_id="brand_neon", required_duration_seconds=120.0)
+        assemble_playlist(manifests=[track], brand_id="brand_neon", required_duration_seconds=120.0, now=NOW)
 
     # 3. P6 top-level media package assembler also refuses it
     with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
@@ -85,13 +90,14 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
             required_duration_seconds=120.0,
             visual_profile="brand_neon_rain_v1",
             playlist_concept="Never Published",
+            clock=FixedClock(NOW),
         )
 
 
 def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
     """Review Focus 4: Corrupted, missing disclosure, or inactive channel blocks publishing."""
     # Gate A fails if channel profile is inactive
-    now = datetime.now(UTC)
+    now = NOW
     inactive_channel = ChannelProfile(
         id="prof_inactive",
         channel_id="UC_inactive",
@@ -104,7 +110,7 @@ def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
         created_at=now,
         updated_at=now,
     )
-    gate_a_result = evaluate_gate_a_channel(inactive_channel)
+    gate_a_result = evaluate_gate_a_channel(inactive_channel, now=NOW)
     assert not gate_a_result.passed
     assert "channel profile is inactive" in gate_a_result.diagnostics
 
@@ -117,7 +123,7 @@ def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
         },
         "thumbnails": [],
     }
-    gate_b_result = evaluate_gate_b_artifact(bad_artifact_payload)
+    gate_b_result = evaluate_gate_b_artifact(bad_artifact_payload, now=NOW)
     assert not gate_b_result.passed
 
     # Gate C fails if metadata title is empty or synthetic media disclosure is invalid
@@ -126,15 +132,15 @@ def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
         "description": "Missing title test",
         "contains_synthetic_media": None,
     }
-    gate_c_result = evaluate_gate_c_metadata(bad_metadata)
+    gate_c_result = evaluate_gate_c_metadata(bad_metadata, now=NOW)
     assert not gate_c_result.passed
     assert any("title" in d for d in gate_c_result.diagnostics)
 
 
 def test_p8_duplicate_submission_is_strictly_idempotent(distribution_db: Session) -> None:
     """Review Focus 2: Double submission to distributor is strictly idempotent."""
-    artist = get_or_create_artist(distribution_db, "Neon Resident", "brand_neon")
-    now = datetime(2026, 10, 1, tzinfo=UTC)
+    artist = get_or_create_artist(distribution_db, "Neon Resident", "brand_neon", now=NOW)
+    now = NOW
     pkg = compile_canonical_release_package(
         track_manifests=[release_manifest(candidate_id="cand_idem")],
         media_package=media_package("cand_idem"),
@@ -151,18 +157,18 @@ def test_p8_duplicate_submission_is_strictly_idempotent(distribution_db: Session
     )
     identity = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
 
-    client = MockDistributorClient()
+    client = MockDistributorClient(clock=FixedClock(NOW))
     engine = DistributionEngine(client)
 
     # First submission succeeds
-    sub1 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
+    sub1 = engine.submit_release(distribution_db, pkg, artist=artist, now=NOW, **identity)
     assert sub1.is_success
     assert not sub1.is_duplicate
     first_release_id = sub1.release.release_id
     assert len(client.submitted_packages) == 1
 
     # Second submission with exact same package / fingerprint
-    sub2 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
+    sub2 = engine.submit_release(distribution_db, pkg, artist=artist, now=NOW, **identity)
     assert sub2.is_success
     assert sub2.is_duplicate
     assert sub2.release.release_id == first_release_id
@@ -183,10 +189,12 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
         analytics_db,
         provider="spotify",
         period="2026-10",
+        currency="USD",
         raw_content=raw_statement_csv,
         source_reference="spotify_royalty_2026_10.csv",
+        now=NOW,
     )
-    assert stmt1.total_revenue_usd == 120.0
+    assert stmt1.total_revenue == Money.of("120.00", "USD")
     assert stmt1.total_streams == 30000
     assert len(tracks1) == 2
 
@@ -195,8 +203,10 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
         analytics_db,
         provider="spotify",
         period="2026-10",
+        currency="USD",
         raw_content=raw_statement_csv,
         source_reference="spotify_royalty_2026_10.csv",
+        now=NOW,
     )
     # Deduplicated at statement level
     assert stmt2.id == stmt1.id
@@ -207,4 +217,4 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
     metrics_trk1 = get_track_metrics(analytics_db, "trk_lofi_01")
     assert len(metrics_trk1) == 1
     assert metrics_trk1[0].streams == 20000
-    assert metrics_trk1[0].reported_revenue_usd == 80.00
+    assert metrics_trk1[0].reported_revenue == Money.of("80.00", "USD")

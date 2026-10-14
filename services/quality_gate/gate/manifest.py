@@ -6,6 +6,8 @@ candidate's C4 event and its evaluation; nothing is defaulted.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c5 import GateOverrideRecord
 
@@ -37,6 +39,7 @@ def build_release_manifest(
     warning_codes: list[str],
     evidence_bundle_id: str,
     manifest_version: str = "1.0",
+    now: datetime,
 ) -> ReleaseManifest:
     """Build an immutable, hashed release manifest for downstream P6."""
     return ReleaseManifest.create(
@@ -60,4 +63,5 @@ def build_release_manifest(
         warning_codes=warning_codes,
         evidence_bundle_id=evidence_bundle_id,
         version=manifest_version,
+        now=now,
     )
