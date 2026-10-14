@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 import uvicorn
+from plm_platform.clock import SystemClock, require_aware
 from plm_platform.db import build_engine, session_factory
 
 from .api.app import create_app
@@ -16,6 +19,18 @@ from .ingestion.cost import ingest_cost_entry
 from .ingestion.distributor import ingest_distributor_statement
 from .ingestion.youtube import ingest_youtube_metrics
 from .storage.repositories import get_costs_for_entity, get_experiment_outcomes, get_video_metrics
+
+
+def _required_instant(data: dict[str, Any], key: str) -> datetime:
+    raw = data.get(key)
+    if not raw:
+        typer.echo(f"Error: {key} is required (timezone-aware ISO-8601)", err=True)
+        raise typer.Exit(code=2)
+    try:
+        return require_aware(datetime.fromisoformat(str(raw)))
+    except ValueError as exc:
+        typer.echo(f"Error: {key} is not a timezone-aware ISO-8601 instant: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
 
 def cli_ingest(
@@ -40,6 +55,7 @@ def cli_ingest(
                 period="2026-09",
                 raw_content=content,
                 source_reference=path.name,
+                now=SystemClock().now(),
             )
             session.commit()
             typer.echo(f"Ingested distributor statement: {stmt.id} ({len(tracks)} tracks, ${stmt.total_revenue_usd})")
@@ -53,6 +69,7 @@ def cli_ingest(
                 views=int(data.get("views", 0)),
                 watch_time_minutes=float(data.get("watch_time_minutes", 0.0)),
                 estimated_revenue_usd=float(data.get("estimated_revenue_usd", 0.0)),
+                observed_at=_required_instant(data, "observed_at"),
             )
             session.commit()
             typer.echo(f"Ingested YouTube metrics: {obs.id} (views={obs.views}, rev=${obs.estimated_revenue_usd})")
@@ -65,6 +82,7 @@ def cli_ingest(
                 category=CostCategory(data.get("category", "compute")),
                 amount_usd=float(data.get("amount_usd", 0.0)),
                 period=data.get("period", "2026-09"),
+                incurred_at=_required_instant(data, "incurred_at"),
             )
             session.commit()
             typer.echo(f"Ingested cost item: {cost.id} (${cost.amount_usd})")
@@ -92,6 +110,7 @@ def cli_report(entity_id: str) -> None:
             gross_revenue_usd=gross_rev,
             allocated_cost_usd=total_cost,
             views=views if views > 0 else None,
+            as_of=SystemClock().now(),
         )
 
         typer.echo(f"Economics for Entity: {entity_id}")

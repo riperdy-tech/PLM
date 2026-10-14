@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ import typer
 import uvicorn
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.db import build_engine, session_factory
 
 from .client.mock import MockYouTubeClient
@@ -23,6 +23,9 @@ from .storage.repositories import (
     get_publish_attempt_by_id,
     insert_publish_manifest,
 )
+
+CLOCK: Clock = SystemClock()
+"""The CLI's time source; the only wall-clock read in the P7 command line."""
 
 
 def cli_publish(
@@ -41,7 +44,7 @@ def cli_publish(
         typer.echo(f"Error: media package refused: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
-    now = datetime.now(UTC)
+    now = CLOCK.now()
     engine = build_engine()
     factory = session_factory(engine)
 
@@ -60,7 +63,7 @@ def cli_publish(
             raise typer.Exit(code=1) from exc
 
         passed, results, reason = evaluate_preflight_all(
-            profile, pkg.to_wire(), preflight_metadata(pkg)
+            profile, pkg.to_wire(), preflight_metadata(pkg), now=now
         )
         if not passed:
             diags = [d for r in results for d in r.diagnostics]
@@ -70,7 +73,7 @@ def cli_publish(
         insert_publish_manifest(session, manifest)
         session.commit()
 
-        yt_engine = YouTubePublishingEngine(MockYouTubeClient())
+        yt_engine = YouTubePublishingEngine(MockYouTubeClient(), clock=CLOCK)
         result = yt_engine.execute_publish(session, manifest, operating_mode=OperatingMode(mode))
 
         out: dict[str, Any] = {

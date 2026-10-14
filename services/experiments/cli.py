@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Final
 
 import uvicorn
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 from sqlalchemy.orm import Session
@@ -133,10 +134,12 @@ def materialize_treatment_cli(
         if genome is None:
             raise LookupError(f"genome fingerprint {exp.base_genome_fingerprint!r} not found")
 
+        now = SystemClock().now()
         package = materialize_package(
             exp,
             treatment,
             genome,
+            created_at=now,
             brand_id=brand_id,
             budget_envelope=budget_envelope,
             track_count=track_count,
@@ -144,7 +147,9 @@ def materialize_treatment_cli(
         )
 
         repositories.insert_content_package(session, package)
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.MATERIALIZED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.MATERIALIZED, now=now
+        )
         session.commit()
         record_package_materialized(brand_id=brand_id)
 

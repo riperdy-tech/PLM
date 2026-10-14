@@ -7,9 +7,8 @@ Zero external music/video provider calls; hermetic fail-closed verification.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from plm_contracts.seams.c2 import ProductionDirectivePayload
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -49,7 +48,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
 
     factory = session_factory(engine)
     with factory() as session:
-        now = datetime.now(UTC)
+        now = SystemClock().now()
         wire_directive = ProductionDirectivePayload.build(directive_id=f"dir_smoke_{int(now.timestamp())}", decision_id=f"dec_smoke_{int(now.timestamp())}", arm_id="rnb_late_night_drive_english_vocal_45_75m", allocation_type="exploit", priority=1, quantity=1, brief={
                 "genre": "rnb",
                 "mood": ["melancholic", "intimate"],
@@ -66,10 +65,10 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
         # 2. Base genome
         base_genome = build_genome_from_directive(adapted)
         gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
-        repositories.insert_genome(session, base_genome, genome_id=gid)
+        repositories.insert_genome(session, base_genome, genome_id=gid, created_at=now)
 
         # 3. Design experiment
-        exp = design_experiment(adapted, base_genome, seed=123)
+        exp = design_experiment(adapted, base_genome, seed=123, created_at=now)
         repositories.insert_experiment(session, exp)
 
         # 4. Validate
@@ -83,13 +82,16 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
             exp,
             target_treatment,
             base_genome,
+            created_at=now,
             brand_id=brand,
             budget_envelope=50.0,
             track_count=3,
             total_duration_minutes=45,
         )
         repositories.insert_content_package(session, pkg)
-        repositories.update_experiment_status(session, exp.experiment_id, ExperimentStatus.MATERIALIZED)
+        repositories.update_experiment_status(
+            session, exp.experiment_id, ExperimentStatus.MATERIALIZED, now=now
+        )
 
         # 6. Retrieve package
         stored_pkg = repositories.get_content_package(session, pkg.package_id)

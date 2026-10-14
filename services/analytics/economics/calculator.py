@@ -5,7 +5,9 @@ Handles all edge cases: zero revenue, zero costs, negative margins, null divisor
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+
+from plm_platform.clock import require_aware
 
 from ..domain.enums import PaybackStatus
 from ..domain.models import UnitEconomics
@@ -20,7 +22,7 @@ def compute_unit_economics(
     views: int | None = None,
     streams: int | None = None,
     daily_revenue_rate_usd: float | None = None,
-    as_of: datetime | None = None,
+    as_of: datetime,
 ) -> UnitEconomics:
     """Calculate canonical unit economics, P&L, ROI, and payback metrics.
 
@@ -32,12 +34,12 @@ def compute_unit_economics(
         views: Optional view count for YouTube video RPM computation.
         streams: Optional stream count for DSP revenue per stream computation.
         daily_revenue_rate_usd: Optional recent daily run-rate for payback day estimation.
-        as_of: Computation timestamp.
+        as_of: Computation timestamp, supplied by the caller.
 
     Returns:
         Immutable UnitEconomics record.
     """
-    now = as_of or datetime.now(UTC)
+    now = require_aware(as_of)
 
     # 1. Net contribution
     net_contribution = round(gross_revenue_usd - allocated_cost_usd, 4)

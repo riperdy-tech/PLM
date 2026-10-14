@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import pytest
 from analytics.domain.enums import CostCategory, ObservationWindow
 from analytics.ingestion.cost import ingest_cost_entry
 from analytics.ingestion.distributor import ingest_distributor_statement
@@ -13,6 +16,8 @@ from analytics.storage.repositories import (
 )
 
 from tests.support.analytics_db import analytics_db_session
+
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def test_youtube_metrics_ingestion() -> None:
@@ -30,10 +35,12 @@ def test_youtube_metrics_ingestion() -> None:
             subscribers_lost=3,
             estimated_revenue_usd=82.40,
             window=ObservationWindow.H24,
+            observed_at=NOW,
         )
 
         assert obs.video_id == "vid_yt_001"
         assert obs.views == 25000
+        assert obs.observed_at == NOW
 
         # Retrieve
         fetched = get_video_metrics(session, "vid_yt_001")
@@ -52,11 +59,14 @@ def test_distributor_statement_ingestion_and_deduplication() -> None:
             period="2026-09",
             raw_content=csv_data,
             source_reference="spotify_statement_09.csv",
+            now=NOW,
         )
 
         assert stmt1.total_revenue_usd == 60.0
         assert stmt1.total_streams == 15000
         assert len(tracks1) == 2
+        assert stmt1.received_at == NOW
+        assert all(t.observed_at == NOW for t in tracks1)
 
         # Second ingestion of identical content is deduplicated
         stmt2, tracks2 = ingest_distributor_statement(
@@ -65,6 +75,7 @@ def test_distributor_statement_ingestion_and_deduplication() -> None:
             period="2026-09",
             raw_content=csv_data,
             source_reference="spotify_statement_09.csv",
+            now=NOW,
         )
         assert stmt2.id == stmt1.id
         assert len(tracks2) == 0  # no duplicates inserted
@@ -86,10 +97,25 @@ def test_cost_item_ingestion() -> None:
             amount_usd=15.75,
             period="2026-09",
             description="GPU rendering compute cost",
+            incurred_at=NOW,
         )
 
         assert cost.amount_usd == 15.75
+        assert cost.incurred_at == NOW
 
         costs = get_costs_for_entity(session, "vid_yt_001")
         assert len(costs) == 1
         assert costs[0].category == CostCategory.COMPUTE
+
+
+def test_ingestion_refuses_a_naive_timestamp() -> None:
+    with analytics_db_session() as session, pytest.raises(ValueError, match="timezone-aware"):
+        ingest_youtube_metrics(
+            session,
+            video_id="vid_naive",
+            channel_id="chan_001",
+            date_str="2026-09-26",
+            views=1,
+            watch_time_minutes=1.0,
+            observed_at=datetime(2026, 10, 1, 12, 0),
+        )

@@ -4,8 +4,9 @@
 commit messages and the dashboard record intent or progress; this file records verified
 capability. Update it in the same change that alters a capability.
 
-- Last verified: 2026-10-14, branch `review/r1-fail-closed-seams` (R1 of the remediation
-  plan; R0 on `review/r0-truth-baseline`).
+- Last verified: 2026-10-14, branch `review/r2-correctness-determinism` (R2 of the
+  remediation plan, in progress; R1 on `review/r1-fail-closed-seams`, R0 on
+  `review/r0-truth-baseline`).
 - Evidence: the review in
   [`reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md),
   which has file:line references for every finding.
@@ -57,6 +58,7 @@ separately against its own evidence gate.
 | Decision log (PART XXI) | absent | R3 |
 | Seam payloads C1–C8 | real | One shared, versioned model per seam in `plm_contracts/seams/` (ADR-0025). Producers serialise and consumers parse with it; missing, unknown, placeholder and future-major payloads are refused with a reason code. |
 | Experiment lineage | real | `ExperimentLineage` (ADR-0026) travels from P3 through C3–C7 to P9's ISRC links and P2's reward. Placeholder ids are refused. |
+| Injected time and derived seeds | real | `plm_platform/clock.py`: `Clock`/`SystemClock`/`FixedClock`, `stable_seed` (sha256). P3–P9 domain and engine code take `now` or a `Clock`; only API routes, CLIs, smoke scripts and connectors read the wall clock. The external-write guard takes `now` per decision. Enforced by `tests/unit/test_no_ambient_nondeterminism.py` (static) and `tests/unit/test_cross_process_determinism.py` (two interpreters with different `PYTHONHASHSEED` produce identical P2 draws, P3 experiments/track specs, and P4 plans, seeds, attempt/candidate ids and artifact digests). |
 | Fail-open regression guard | real | `tests/contract/test_no_fail_open_defaults.py`, a narrow static scan that supplements the behavioural seam tests |
 | Dashboard | demo | `plm_platform/dashboard/`: literal data and a scripted playback, labelled `data_source: "demo"` with a page banner. The six PART XVII views are absent (R5). |
 
@@ -107,7 +109,7 @@ separately against its own evidence gate.
 | Generation engine, planner, candidate bank | partial | At most 3 variants; no funnel or ranking; plan marked complete when short |
 | Mock provider | mock | Sine-wave audio capped at 30 s |
 | Suno / ElevenLabs adapters | stub | Always return FAILED (R6) |
-| Seed determinism | stub | `abs(hash(...))` varies per process (R2) |
+| Seed determinism | real | `stable_seed("p4.generation", track_spec_id, variant_code)`; identical across processes (R2) |
 | Artifact storage via API | stub | In-memory; stored URIs point at nothing (R4) |
 | Rights snapshot | real | Records the terms the provider adapter declares (`license_terms()`, ADR-0027). The mock declares PLM-owned synthesis; Suno and ElevenLabs declare nothing, which means unknown. |
 | C4 event | real | Built only from stored facts (plan spec, the candidate's own attempt, its single full-mix artifact); refused with 409 when a fact is missing |
@@ -137,7 +139,7 @@ separately against its own evidence gate.
 ### P7 YouTube publishing
 | Capability | Status | Where / gap |
 |---|---|---|
-| Publish state machine, idempotency | real | `engine.py` |
+| Publish state machine, idempotency | real | `engine.py`; timestamps come from the injected clock and are read back as UTC (stored timestamps used to come back naive) |
 | YouTube client | mock | `client/mock.py` only (R6) |
 | External-write guard, dry-run enforcement | real | A real client under dry_run/shadow ends `INTENT_RECORDED`; live writes need an authorization |
 | Synthetic-media disclosure field | real | Comes from P5's finding carried on C6 (no hardcoded `True`); so far sent only to the mock |
@@ -162,7 +164,8 @@ separately against its own evidence gate.
 |---|---|---|
 | Unit economics calculator | real | `economics/calculator.py` |
 | Economics endpoint aggregation | stub | Sums overlapping window snapshots (R2) |
-| YouTube Analytics ingestion | stub | Stores caller-supplied numbers; no API client (R6) |
+| YouTube Analytics ingestion | stub | Stores caller-supplied numbers; no API client (R6). `observed_at` and cost `incurred_at` are required facts of the measurement (HTTP 422 when missing), never stamped at receipt. |
+| Analytics CLI ingest | stub | `cli_ingest` still fills missing facts (`period`, `provider`, `views` = 0), which breaks the missing-fact rule (R2 measurement item) |
 | Distributor statement ingestion | real | No invented ids. Rows without an ISRC are counted as unattributed revenue; an ISRC's release comes from its C7 link (ADR-0030). |
 | C7 leg-1 release links | real | `ingestion/releases.py` links each (release, ISRC) to its lineage, idempotently |
 | Outcome measurement inputs | partial | Window, maturity, attribution and quality are explicit inputs with the shared vocabulary; deriving maturity from publish time is R2 |

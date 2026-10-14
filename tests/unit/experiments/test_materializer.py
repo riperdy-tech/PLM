@@ -18,6 +18,8 @@ from services.experiments.materialization.builder import (
     materialize_package,
 )
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
 
@@ -63,6 +65,7 @@ def test_materialize_package_creates_all_specs() -> None:
         budget_envelope=150.0,
         track_count=3,
         total_duration_minutes=45,
+        created_at=FIXED_NOW,
     )
 
     assert pkg.status == PackageStatus.MATERIALIZED
@@ -82,4 +85,4 @@ def test_materialize_package_creates_all_specs() -> None:
 def test_budget_envelope_must_be_positive() -> None:
     exp, trt, genome = _sample_experiment()
     with pytest.raises(BudgetEnvelopeExceededError):
-        materialize_package(exp, trt, genome, budget_envelope=-10.0)
+        materialize_package(exp, trt, genome, budget_envelope=-10.0, created_at=FIXED_NOW)

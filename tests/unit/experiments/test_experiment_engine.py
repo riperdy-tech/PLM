@@ -13,6 +13,8 @@ from services.experiments.experiments.engine import design_experiment
 from services.experiments.genome.engine import build_genome_from_directive
 from services.experiments.ingestion.p2_adapter import AdaptedDirective
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
 
@@ -56,6 +58,7 @@ def test_design_single_factor_experiment() -> None:
         experiment_type=ExperimentType.SINGLE_FACTOR,
         target_variable="bpm",
         seed=42,
+        created_at=FIXED_NOW,
     )
 
     assert exp.experiment_type == ExperimentType.SINGLE_FACTOR
@@ -76,8 +79,8 @@ def test_experiment_design_is_deterministic() -> None:
     directive = _sample_directive()
     base_genome = build_genome_from_directive(directive)
 
-    exp1 = design_experiment(directive, base_genome, seed=123)
-    exp2 = design_experiment(directive, base_genome, seed=123)
+    exp1 = design_experiment(directive, base_genome, seed=123, created_at=FIXED_NOW)
+    exp2 = design_experiment(directive, base_genome, seed=123, created_at=FIXED_NOW)
 
     assert exp1.experiment_id == exp2.experiment_id
     assert exp1.treatments == exp2.treatments
@@ -93,6 +96,7 @@ def test_radical_exploration_enables_multi_factor() -> None:
         base_genome,
         experiment_type=ExperimentType.MULTI_FACTOR,
         seed=999,
+        created_at=FIXED_NOW,
     )
 
     exp_vars = [v for v in exp.variables if v.variable_class == VariableClass.EXPERIMENTAL]

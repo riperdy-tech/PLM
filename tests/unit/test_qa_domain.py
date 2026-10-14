@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from quality_gate.domain.enums import (
     GateDisposition,
     QuarantineStatus,
@@ -20,6 +22,8 @@ from quality_gate.domain.models import (
 )
 
 from tests.support.seams import sample_lineage
+
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def test_id_determinism_and_collision_resistance() -> None:
@@ -48,6 +52,7 @@ def test_evaluation_snapshot_hash_reproducibility() -> None:
         artifact_snapshot={"duration": 120.0},
         provider_snapshot={"provider": "mock"},
         license_snapshot={"plan": "pro"},
+        now=NOW,
     )
     snap2 = EvaluationSnapshot.create(
         evaluation_id_str="eval_01",
@@ -57,6 +62,7 @@ def test_evaluation_snapshot_hash_reproducibility() -> None:
         artifact_snapshot={"duration": 120.0},
         provider_snapshot={"provider": "mock"},
         license_snapshot={"plan": "pro"},
+        now=NOW,
     )
     assert snap1.snapshot_hash == snap2.snapshot_hash
     assert len(snap1.snapshot_hash) == 64
@@ -70,6 +76,7 @@ def test_gate_decision_and_manifest_hashes() -> None:
         blocking_finding_ids=[],
         warning_finding_ids=["warn_01"],
         decision_version="v1.0",
+        now=NOW,
     )
     assert dec.decision_hash is not None
     assert len(dec.decision_hash) == 64
@@ -94,6 +101,7 @@ def test_gate_decision_and_manifest_hashes() -> None:
         evaluation_policy_version="p5-v1",
         warning_codes=[],
         evidence_bundle_id="evi_01",
+        now=NOW,
     )
     assert man.p5_manifest_id.startswith("rel_man_")
     assert len(man.manifest_hash) == 64
@@ -105,6 +113,7 @@ def test_quarantine_case_resolution() -> None:
         evaluation_id_str="eval_01",
         reason_codes=["UNKNOWN_COMMERCIAL_LICENSE"],
         priority="HIGH",
+        now=NOW,
     )
     assert case.status == QuarantineStatus.OPEN
     assert case.resolution is None
@@ -113,9 +122,10 @@ def test_quarantine_case_resolution() -> None:
         resolution=ResolutionCode.CLEARED_BY_OVERRIDE,
         auditor_id="auditor_jane",
         notes="Verified enterprise master license.",
+        resolved_at=NOW,
     )
     assert resolved.status == QuarantineStatus.RESOLVED
     assert resolved.resolution == ResolutionCode.CLEARED_BY_OVERRIDE
     assert resolved.assigned_to == "auditor_jane"
     assert resolved.resolution_notes == "Verified enterprise master license."
-    assert resolved.resolved_at is not None
+    assert resolved.resolved_at == NOW

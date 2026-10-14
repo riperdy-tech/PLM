@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import struct
 import wave
+from datetime import datetime
 from pathlib import Path
 
 from ..domain.enums import CheckSeverity, CheckStatus, GateCategory
@@ -50,6 +51,8 @@ def validate_technical_audio(
     expected_sample_rate: int = 44100,
     expected_channels: int = 2,
     duration_tolerance_seconds: float = 1.0,
+    *,
+    now: datetime,
 ) -> TechnicalValidationResult:
     """Perform deterministic technical checks on an audio file."""
     path = Path(audio_path)
@@ -68,6 +71,7 @@ def validate_technical_audio(
             confidence=1.0,
             message=f"Audio file not found at {path}",
             blocking=True,
+            now=now,
         )
         check = TechnicalCheck.create(
             evaluation_id_str=evaluation_id,
@@ -77,6 +81,7 @@ def validate_technical_audio(
             measured_value=False,
             expected_value=True,
             unit="boolean",
+            now=now,
         )
         return TechnicalValidationResult(
             checks=[check],
@@ -100,6 +105,7 @@ def validate_technical_audio(
         source_reference=str(path),
         content_hash=file_sha256,
         summary=f"Audio file size: {file_size_bytes} bytes, sha256: {file_sha256}",
+        now=now,
     )
     evidence.append(evidence_item)
 
@@ -112,6 +118,7 @@ def validate_technical_audio(
             measured_value=file_sha256,
             expected_value="valid_sha256",
             unit="hash",
+            now=now,
         )
     )
 
@@ -134,6 +141,7 @@ def validate_technical_audio(
             message=f"Failed to parse audio container as WAV: {exc}",
             blocking=True,
             evidence_item_ids=[evidence_item.id],
+            now=now,
         )
         check = TechnicalCheck.create(
             evaluation_id_str=evaluation_id,
@@ -143,6 +151,7 @@ def validate_technical_audio(
             measured_value="corrupt",
             expected_value="valid_wav",
             unit="container",
+            now=now,
         )
         return TechnicalValidationResult(
             checks=checks + [check],
@@ -163,6 +172,7 @@ def validate_technical_audio(
             measured_value="wav",
             expected_value="wav",
             unit="container",
+            now=now,
         )
     )
 
@@ -178,6 +188,7 @@ def validate_technical_audio(
             measured_value=framerate,
             expected_value=expected_sample_rate,
             unit="Hz",
+            now=now,
         )
     )
 
@@ -193,6 +204,7 @@ def validate_technical_audio(
             measured_value=num_channels,
             expected_value=expected_channels,
             unit="channels",
+            now=now,
         )
     )
 
@@ -217,6 +229,7 @@ def validate_technical_audio(
                 ),
                 blocking=True,
                 evidence_item_ids=[evidence_item.id],
+                now=now,
             )
         )
     else:
@@ -232,6 +245,7 @@ def validate_technical_audio(
             measured_value=round(measured_duration, 3),
             expected_value=round(expected_duration_seconds, 3),
             unit="seconds",
+            now=now,
         )
     )
 
@@ -259,6 +273,7 @@ def validate_technical_audio(
                     message="The audio file contains total digital silence (zero amplitude).",
                     blocking=True,
                     evidence_item_ids=[evidence_item.id],
+                    now=now,
                 )
             )
             checks.append(
@@ -270,6 +285,7 @@ def validate_technical_audio(
                     measured_value=0,
                     expected_value=">0",
                     unit="amplitude",
+                    now=now,
                 )
             )
         else:
@@ -282,6 +298,7 @@ def validate_technical_audio(
                     measured_value=max_amplitude,
                     expected_value=">0",
                     unit="amplitude",
+                    now=now,
                 )
             )
 
@@ -301,6 +318,7 @@ def validate_technical_audio(
                     message=f"Severe digital clipping detected in {clip_ratio * 100:.1f}% of analyzed samples.",
                     blocking=False,
                     evidence_item_ids=[evidence_item.id],
+                    now=now,
                 )
             )
             checks.append(
@@ -312,6 +330,7 @@ def validate_technical_audio(
                     measured_value=round(clip_ratio, 4),
                     expected_value="<0.05",
                     unit="ratio",
+                    now=now,
                 )
             )
         else:
@@ -324,6 +343,7 @@ def validate_technical_audio(
                     measured_value=round(clip_ratio, 4),
                     expected_value="<0.05",
                     unit="ratio",
+                    now=now,
                 )
             )
 

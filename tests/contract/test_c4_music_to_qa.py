@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ import pytest
 from plm_contracts import CommercialUseEligibility, GateDisposition
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_contracts.seams.c4 import CandidateReadyPayload
+from plm_platform.clock import FixedClock
 
 from services.music_factory.api.events import build_candidate_ready_event
 from services.music_factory.generation.engine import GenerationEngine
@@ -35,6 +37,8 @@ from tests.support.contract import SeamRegistry, assert_refused, with_value, wit
 from tests.support.music_db import music_db_session
 from tests.support.seams import track_spec_fields
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 REGISTRY_ENTRY = "C4 · PHASE-P4 → PHASE-P5"
 SPEC = TrackSpecPayload.build(**track_spec_fields(requested_duration=20)).to_wire()
 
@@ -42,9 +46,9 @@ SPEC = TrackSpecPayload.build(**track_spec_fields(requested_duration=20)).to_wir
 def _produce(storage: InMemoryArtifactStorage) -> tuple[dict[str, Any], bytes]:
     """Run the real P4 path and return the serialised event plus the artifact bytes."""
     adapted = adapt_track_spec(SPEC)
-    plan, variants = plan_generation(adapted)
+    plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
     with music_db_session() as session:
-        result = GenerationEngine(storage=storage).execute_plan(
+        result = GenerationEngine(storage=storage, clock=FixedClock(FIXED_NOW)).execute_plan(
             session, plan=plan, variants=variants, spec=adapted
         )
         cand = result.candidates[0]
@@ -77,7 +81,7 @@ def test_real_event_reaches_the_p5_gate_intact(produced: tuple[dict[str, Any], b
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "candidate.wav"
         path.write_bytes(audio)
-        result = run_candidate_evaluation(event=event, audio_path=path)
+        result = run_candidate_evaluation(event=event, audio_path=path, clock=FixedClock(FIXED_NOW))
 
     snapshot = result.snapshot.candidate_snapshot
     assert snapshot["lineage"] == wire["lineage"]
@@ -95,7 +99,7 @@ def test_undeclared_rights_are_quarantined_never_cleared(
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "candidate.wav"
         path.write_bytes(audio)
-        result = run_candidate_evaluation(event=event, audio_path=path)
+        result = run_candidate_evaluation(event=event, audio_path=path, clock=FixedClock(FIXED_NOW))
     assert result.evaluation.rights_status == CommercialUseEligibility.UNKNOWN.value
     assert result.disposition in (GateDisposition.QUARANTINED, GateDisposition.REJECTED)
     assert result.release_manifest is None

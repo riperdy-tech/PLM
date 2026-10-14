@@ -24,6 +24,7 @@ from plm_contracts.seams.c7 import (
     ObservationMaturity,
     RewardResultPayload,
 )
+from plm_platform.clock import FixedClock
 
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
@@ -54,7 +55,7 @@ NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 def leg1() -> dict[str, Any]:
     with distribution_db_session() as session:
         result = submit_release_from_seams(
-            session, DistributionEngine(MockDistributorClient()),
+            session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[release_manifest(candidate_id=c).to_wire() for c in ("c_a", "c_b")],
             media_package=media_package("c_a", "c_b").to_wire(),
             publication=None,
@@ -115,6 +116,7 @@ def test_leg1_p9_links_each_isrc_to_the_lineage_and_attributes_revenue(
                 {"isrc": isrc_b, "streams": 50, "revenue_usd": 0.5},
                 {"isrc": "", "streams": 10, "revenue_usd": 0.25},  # no recording named
             ],
+            now=NOW,
         )
     assert link is not None
     assert link[0] == leg1["release_id"]

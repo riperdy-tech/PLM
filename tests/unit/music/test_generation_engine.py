@@ -1,6 +1,8 @@
 """Unit tests for durable generation engine (§4.4, §65, §111, R6)."""
+from datetime import UTC, datetime
 
 from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
 
 from services.music_factory.domain.enums import (
     AttemptStatus,
@@ -46,13 +48,15 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
     )
 ).to_wire()
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 
 def test_generation_engine_successful_execution() -> None:
     spec = adapt_track_spec(dict(SAMPLE_C3_SPEC))
-    plan, variants = plan_generation(spec)
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
 
     storage = InMemoryArtifactStorage()
-    engine = GenerationEngine(storage=storage)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=storage)
 
     with music_db_session() as session:
         result = engine.execute_plan(
@@ -106,10 +110,10 @@ def test_generation_engine_retry_on_failure() -> None:
         "vocal_mode": "vocal",
     }
     spec = adapt_track_spec(raw_spec)
-    plan, variants = plan_generation(spec)
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
 
     storage = InMemoryArtifactStorage()
-    engine = GenerationEngine(storage=storage)
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=storage)
 
     with music_db_session() as session:
         result = engine.execute_plan(

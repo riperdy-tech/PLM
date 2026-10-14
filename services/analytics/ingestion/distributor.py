@@ -5,9 +5,10 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
+from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
 from ..domain.enums import MetricSource, MetricStatus, ObservationWindow, RevenueStatus
@@ -31,12 +32,13 @@ def ingest_distributor_statement(
     raw_content: bytes | str,
     source_reference: str,
     rows: list[dict[str, Any]] | None = None,
+    now: datetime,
 ) -> tuple[RevenueStatement, list[TrackMetricObservation]]:
     """Parse raw distributor statement into canonical facts and archive (Ruling R10, P9 §53, §54).
 
     Deduplicates by file hash so identical statements are never double-counted.
     """
-    now = datetime.now(UTC)
+    now = require_aware(now)
     content_bytes = raw_content.encode("utf-8") if isinstance(raw_content, str) else raw_content
     file_hash = compute_sha256(content_bytes)
 

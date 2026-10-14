@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c7 import ObservationMaturity
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -36,7 +35,7 @@ def run_smoke_test() -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"blocked: database unreachable ({exc})"
 
-    now = datetime.now(UTC)
+    now = SystemClock().now()
     ts = int(now.timestamp())
     video_id = f"smoke_vid_{ts}"
     arm_id = f"smoke_arm_{ts}"
@@ -54,6 +53,7 @@ def run_smoke_test() -> str | None:
                 views=15000,
                 watch_time_minutes=420.5,
                 estimated_revenue_usd=45.20,
+                observed_at=now,
             )
 
             # 2. Ingest distributor statement
@@ -64,6 +64,7 @@ def run_smoke_test() -> str | None:
                 period="2026-09",
                 raw_content=csv_content,
                 source_reference=f"smoke_dist_{ts}.csv",
+                now=now,
             )
 
             # 3. Ingest cost item
@@ -74,6 +75,7 @@ def run_smoke_test() -> str | None:
                 category=CostCategory.COMPUTE,
                 amount_usd=12.50,
                 period="2026-09",
+                incurred_at=now,
             )
 
             # 4. Compute unit economics
@@ -83,6 +85,7 @@ def run_smoke_test() -> str | None:
                 gross_revenue_usd=obs_yt.estimated_revenue_usd,
                 allocated_cost_usd=cost.amount_usd,
                 views=obs_yt.views,
+                as_of=now,
             )
             if econ.net_contribution_usd <= 0:
                 return f"Unexpected unit economics calculation: net={econ.net_contribution_usd}"

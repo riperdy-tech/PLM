@@ -10,7 +10,7 @@ from distribution.preflight.validators import validate_canonical_package
 
 
 def _build_valid_package() -> CanonicalReleasePackage:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     track = DistributionTrack(
         id="rec_trk_01",
         track_id="trk_01",
@@ -76,7 +76,7 @@ def test_invalid_package_detects_errors() -> None:
 
 def test_track_numbering_gap_detected() -> None:
     pkg = _build_valid_package()
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     t1 = pkg.tracks[0]
     t3 = DistributionTrack(
         id="rec_trk_03",

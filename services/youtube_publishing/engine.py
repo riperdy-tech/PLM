@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from plm_contracts import ExecutionPolicy, ProviderMode
 from plm_contracts.seams import ExperimentLineage
+from plm_platform.clock import Clock
 from plm_platform.execution import (
     ExternalWriteGuard,
     GuardDecision,
@@ -79,17 +79,22 @@ class YouTubePublishingEngine:
     Every write to YouTube (upload, thumbnail, playlist placement) first passes the
     platform :class:`~plm_platform.execution.ExternalWriteGuard`. ``OperatingMode.DRY_RUN``
     caps the policy at dry-run, so it can never upload to a real channel.
+
+    Every timestamp the engine records comes from the injected ``clock``, so a run
+    replays to identical attempt and publication records under a ``FixedClock``.
     """
 
     def __init__(
         self,
         client: YouTubeClientProtocol,
         *,
+        clock: Clock,
         chunk_size: int = 1024 * 1024,  # 1MB
         max_processing_polls: int = 5,
         write_guard: ExternalWriteGuard | None = None,
     ) -> None:
         self.client = client
+        self._clock = clock
         self.chunk_size = chunk_size
         self.max_processing_polls = max_processing_polls
         self.write_guard = write_guard or ExternalWriteGuard()
@@ -104,6 +109,7 @@ class YouTubePublishingEngine:
             provider_mode=self.provider_mode,
             idempotency_key=f"{manifest.idempotency_key}:{capability}",
             policy_ceiling=ceiling,
+            now=self._clock.now(),
         )
 
     def _media_bytes(self, supplied: bytes | None, placeholder_attr: str) -> bytes | None:
@@ -128,7 +134,7 @@ class YouTubePublishingEngine:
             state=PublishState.FAILED_PERMANENT,
             error_code=FailureReasonCode.PREFLIGHT_ARTIFACT_MISSING.value,
             error_message=message,
-            updated_at=datetime.now(UTC),
+            updated_at=self._clock.now(),
         )
         session.commit()
         updated = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -145,7 +151,7 @@ class YouTubePublishingEngine:
                 attempt.attempt_id,
                 state=PublishState.INTENT_RECORDED,
                 error_message=message,
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
             updated = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -156,7 +162,7 @@ class YouTubePublishingEngine:
             state=PublishState.FAILED_RETRYABLE,
             error_code=FailureReasonCode.EXTERNAL_WRITE_NOT_AUTHORIZED.value,
             error_message=message,
-            updated_at=datetime.now(UTC),
+            updated_at=self._clock.now(),
         )
         session.commit()
         updated = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -172,7 +178,7 @@ class YouTubePublishingEngine:
         operating_mode: OperatingMode = OperatingMode.DRY_RUN,
     ) -> PublishingEngineResult:
         """Execute or resume publishing for the given manifest."""
-        now = datetime.now(UTC)
+        now = self._clock.now()
 
         # 1. Idempotency Check (P7 §11.1, §11.2)
         existing_rec = get_publication_record_by_package_id(session, manifest.media_package_id)
@@ -248,7 +254,7 @@ class YouTubePublishingEngine:
                         attempt.attempt_id,
                         state=PublishState.UPLOAD_SESSION_CREATING,
                         total_bytes=total_bytes,
-                        updated_at=datetime.now(UTC),
+                        updated_at=self._clock.now(),
                     )
                     session.commit()
 
@@ -276,7 +282,7 @@ class YouTubePublishingEngine:
                         attempt.attempt_id,
                         state=PublishState.UPLOADING,
                         upload_session_uri=session_uri,
-                        updated_at=datetime.now(UTC),
+                        updated_at=self._clock.now(),
                     )
                     session.commit()
                 else:
@@ -299,7 +305,7 @@ class YouTubePublishingEngine:
                         session,
                         attempt.attempt_id,
                         bytes_uploaded=bytes_sent,
-                        updated_at=datetime.now(UTC),
+                        updated_at=self._clock.now(),
                     )
                     session.commit()
 
@@ -312,7 +318,7 @@ class YouTubePublishingEngine:
                     attempt.attempt_id,
                     state=PublishState.UPLOADED,
                     youtube_video_id=youtube_video_id,
-                    updated_at=datetime.now(UTC),
+                    updated_at=self._clock.now(),
                 )
                 session.commit()
 
@@ -321,7 +327,7 @@ class YouTubePublishingEngine:
                 session,
                 attempt.attempt_id,
                 state=PublishState.PROCESSING,
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
 
@@ -334,7 +340,7 @@ class YouTubePublishingEngine:
                     state=PublishState.FAILED_RETRYABLE,
                     error_code=FailureReasonCode.REMOTE_NOT_FOUND.value,
                     error_message=f"Remote video {youtube_video_id} not found",
-                    updated_at=datetime.now(UTC),
+                    updated_at=self._clock.now(),
                 )
                 session.commit()
                 return PublishingEngineResult(
@@ -352,7 +358,7 @@ class YouTubePublishingEngine:
                 session,
                 attempt.attempt_id,
                 state=PublishState.THUMBNAIL_PENDING,
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
 
@@ -362,7 +368,7 @@ class YouTubePublishingEngine:
                 attempt.attempt_id,
                 state=PublishState.THUMBNAIL_SET,
                 thumbnail_uploaded=True,
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
 
@@ -377,7 +383,7 @@ class YouTubePublishingEngine:
                     session,
                     attempt.attempt_id,
                     state=PublishState.PLAYLIST_PENDING,
-                    updated_at=datetime.now(UTC),
+                    updated_at=self._clock.now(),
                 )
                 session.commit()
 
@@ -389,13 +395,13 @@ class YouTubePublishingEngine:
                     state=PublishState.PLAYLIST_ATTACHED,
                     youtube_playlist_id=playlist_id,
                     youtube_playlist_item_id=playlist_item_id,
-                    updated_at=datetime.now(UTC),
+                    updated_at=self._clock.now(),
                 )
                 session.commit()
 
             # 7. Final State: Scheduled or Published
             final_state = PublishState.SCHEDULED if manifest.publish_at else PublishState.VERIFIED
-            completed_time = datetime.now(UTC)
+            completed_time = self._clock.now()
 
             update_publish_attempt(
                 session,
@@ -462,7 +468,7 @@ class YouTubePublishingEngine:
                 state=PublishState.FAILED_PERMANENT,
                 error_code=FailureReasonCode.AUTH_TOKEN_EXPIRED.value,
                 error_message=str(exc),
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
             updated_attempt = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -476,7 +482,7 @@ class YouTubePublishingEngine:
                 state=PublishState.FAILED_RETRYABLE,
                 error_code=FailureReasonCode.QUOTA_EXCEEDED.value,
                 error_message=str(exc),
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
             updated_attempt = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -491,7 +497,7 @@ class YouTubePublishingEngine:
                 error_code=FailureReasonCode.UPLOAD_FAILED.value,
                 error_message=str(exc),
                 retry_count=attempt.retry_count + 1,
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
             updated_attempt = get_publish_attempt_by_id(session, attempt.attempt_id)
@@ -505,7 +511,7 @@ class YouTubePublishingEngine:
                 state=PublishState.FAILED_PERMANENT,
                 error_code=FailureReasonCode.UPLOAD_FAILED.value,
                 error_message=str(exc),
-                updated_at=datetime.now(UTC),
+                updated_at=self._clock.now(),
             )
             session.commit()
             updated_attempt = get_publish_attempt_by_id(session, attempt.attempt_id)

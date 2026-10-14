@@ -55,7 +55,7 @@ def test_deterministic_ids_generation() -> None:
 
 
 def test_domain_models_creation() -> None:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
     obs = VideoMetricObservation(
         id="obs_01",

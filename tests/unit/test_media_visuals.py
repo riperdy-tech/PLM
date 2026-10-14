@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from media_factory.artwork.generator import generate_artwork_and_thumbnails
 from media_factory.domain.models import PlaylistTrack
 from media_factory.metadata.compiler import compile_metadata_and_chapters
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
 
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 def test_visual_planner() -> None:
     brand = BrandProfile(
@@ -22,6 +25,7 @@ def test_visual_planner() -> None:
         visual_profile="neon_cyber_v1",
         total_duration_seconds=180.0,
         scene_length_seconds=60.0,
+        now=NOW,
     )
 
     assert res.visual_session.brand_id == "brand_neon"
@@ -43,6 +47,7 @@ def test_artwork_and_thumbnail_generator() -> None:
         media_package_id_str="mp_test_01",
         brand_profile=brand,
         playlist_title="Midnight Synth",
+        now=NOW,
     )
 
     assert res.cover_art_uri.endswith("_cover.webp")
@@ -64,6 +69,7 @@ def test_metadata_compiler_starts_at_zero() -> None:
             start_offset_seconds=5.0,  # Even if track starts at offset > 0, YouTube chapter 0 must be 00:00
             end_offset_seconds=120.0,
             title="Opening Melody",
+            now=NOW,
         ),
         PlaylistTrack.create(
             session_id="ps_01",
@@ -73,6 +79,7 @@ def test_metadata_compiler_starts_at_zero() -> None:
             start_offset_seconds=120.0,
             end_offset_seconds=250.0,
             title="Night Flight",
+            now=NOW,
         ),
     ]
 

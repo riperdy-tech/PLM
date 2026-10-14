@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clock import Clock
 
 from ..artwork.generator import generate_artwork_and_thumbnails
 from ..domain.enums import PackageStatus, TransitionType
@@ -56,14 +57,18 @@ def assemble_media_package(
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     renderer: DeterministicRenderer | None = None,
+    clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble a media package from P5's per-track C5 manifests (R7, R9, ADR-0028).
 
     ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
     P3's playlist, visual and title specs; they have no defaults here. Track facts and
     lineage come from the manifests; see :mod:`..playlist.assembler` for the refusals.
+    ``clock`` stamps each step: planning records carry the start instant, the render job
+    its own start and finish, and the thumbnails and package the instant they were made.
     """
     brand_id = brand_profile.brand_id
+    planned_at = clock.now()
 
     # 1-3. Clearance, lineage and sequencing (Rulings R7, R8)
     playlist_res = assemble_playlist(
@@ -73,6 +78,7 @@ def assemble_media_package(
         transition_type=transition_type,
         transition_duration_seconds=transition_duration_seconds,
         sequence_version=sequence_version,
+        now=planned_at,
     )
     playlist_session = playlist_res.session
     tracks = playlist_res.tracks
@@ -87,6 +93,7 @@ def assemble_media_package(
         brand_profile=brand_profile,
         visual_profile=visual_profile,
         total_duration_seconds=playlist_res.total_duration_seconds,
+        now=planned_at,
     )
     visual_session = visual_res.visual_session
     visual_assets = visual_res.assets
@@ -99,13 +106,16 @@ def assemble_media_package(
         media_package_id_str=pkg_id_seed,
         playlist=playlist_session,
         visual_session=visual_session,
+        clock=clock,
     )
+    packaged_at = clock.now()
 
     # 6. Artwork & Thumbnail Generation (P6 §8.5, §17, §18)
     artwork_res = generate_artwork_and_thumbnails(
         media_package_id_str=pkg_id_seed,
         brand_profile=brand_profile,
         playlist_title=playlist_concept,
+        now=packaged_at,
     )
     thumbnail_variants = artwork_res.thumbnails
 
@@ -174,6 +184,7 @@ def assemble_media_package(
         lineage=lineage,
         package_version=sequence_version,
         status=package_status,
+        now=packaged_at,
     )
 
     return AssemblyPipelineResult(

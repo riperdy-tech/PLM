@@ -30,7 +30,7 @@ from tests.support.youtube_db import youtube_db_session
 
 
 def test_channel_profile_repository_roundtrip() -> None:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     profile = ChannelProfile(
         id="prof_01",
         channel_id="UC_01",
@@ -56,7 +56,7 @@ def test_channel_profile_repository_roundtrip() -> None:
 
 
 def test_manifest_and_attempt_repositories_roundtrip() -> None:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     manifest = PublishManifest(
         manifest_id="pub_man_01",
         channel_id="UC_01",
@@ -128,7 +128,7 @@ def test_manifest_and_attempt_repositories_roundtrip() -> None:
 
 
 def test_publication_record_repository_roundtrip() -> None:
-    now = datetime.now(UTC)
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
     record = YouTubePublicationRecord(
         publication_record_id="pub_rec_01",
         youtube_video_id="yt_01",

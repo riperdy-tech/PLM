@@ -33,6 +33,8 @@ from services.experiments.storage import repositories
 from services.experiments.storage.ids import deterministic_id
 from tests.support.experiments_db import create_experiments_engine
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 runner = CliRunner()
 
 SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
@@ -55,9 +57,9 @@ def _setup_seeded_db() -> tuple[sessionmaker, str, str]:
         adapted = adapt_directive(SAMPLE_DIRECTIVE)
         genome = build_genome_from_directive(adapted)
         gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
-        repositories.insert_genome(session, genome, genome_id=gid)
+        repositories.insert_genome(session, genome, genome_id=gid, created_at=FIXED_NOW)
 
-        exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=42)
+        exp = design_experiment(adapted, genome, experiment_type=ExperimentType.SINGLE_FACTOR, seed=42, created_at=FIXED_NOW)
         repositories.insert_experiment(session, exp)
         session.commit()
         return factory, exp.experiment_id, exp.treatments[0].treatment_id

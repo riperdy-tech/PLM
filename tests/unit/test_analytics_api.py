@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from analytics.api.app import create_app
 from fastapi.testclient import TestClient
+from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.analytics_db import create_analytics_engine
 from tests.support.seams import lineage_fields
+
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",
@@ -32,7 +37,7 @@ def client() -> TestClient:
         return sessionmaker(bind=engine)()
 
     settings = load_settings(env=MINIMAL_ENV)
-    app = create_app(session_factory=session_factory, settings=settings)
+    app = create_app(session_factory=session_factory, settings=settings, clock=FixedClock(NOW))
     return TestClient(app)
 
 
@@ -41,12 +46,38 @@ def test_health_endpoint_is_unauthenticated(client: TestClient) -> None:
     assert res.status_code == 200
     assert res.json()["status"] == "healthy"
     assert res.json()["service"] == "analytics"
+    assert res.json()["timestamp"] == NOW.isoformat()
 
 
 def test_ingest_rejects_unauthenticated(client: TestClient) -> None:
     res = client.post("/analytics/ingest/youtube", json={})
     assert res.status_code == 401
     assert res.json()["detail"]["code"] == "invalid_service_token"
+
+
+def test_ingest_without_observation_time_is_refused(client: TestClient) -> None:
+    headers = {SERVICE_TOKEN_HEADER: "test-analytics-token"}
+    yt_payload = {
+        "video_id": "vid_api_02",
+        "channel_id": "chan_api_01",
+        "date_str": "2026-09-26",
+        "views": 10,
+        "watch_time_minutes": 1.0,
+    }
+    res = client.post("/analytics/ingest/youtube", json=yt_payload, headers=headers)
+    assert res.status_code == 422
+    assert any(e["loc"][-1] == "observed_at" for e in res.json()["detail"])
+
+    cost_payload = {
+        "entity_id": "vid_api_02",
+        "entity_type": "video",
+        "category": "compute",
+        "amount_usd": 1.0,
+        "period": "2026-09",
+    }
+    res = client.post("/analytics/ingest/cost", json=cost_payload, headers=headers)
+    assert res.status_code == 422
+    assert any(e["loc"][-1] == "incurred_at" for e in res.json()["detail"])
 
 
 def test_analytics_api_lifecycle_roundtrip(client: TestClient) -> None:
@@ -61,6 +92,7 @@ def test_analytics_api_lifecycle_roundtrip(client: TestClient) -> None:
         "watch_time_minutes": 320.0,
         "estimated_revenue_usd": 35.0,
         "window": "24h",
+        "observed_at": "2026-10-01T11:00:00+00:00",
     }
     res_yt = client.post("/analytics/ingest/youtube", json=yt_payload, headers=headers)
     assert res_yt.status_code == 201, res_yt.text
@@ -73,6 +105,7 @@ def test_analytics_api_lifecycle_roundtrip(client: TestClient) -> None:
         "category": "compute",
         "amount_usd": 10.0,
         "period": "2026-09",
+        "incurred_at": "2026-09-30T00:00:00+00:00",
     }
     res_cost = client.post("/analytics/ingest/cost", json=cost_payload, headers=headers)
     assert res_cost.status_code == 201, res_cost.text
@@ -84,6 +117,7 @@ def test_analytics_api_lifecycle_roundtrip(client: TestClient) -> None:
     assert econ_data["gross_revenue_usd"] == 35.0
     assert econ_data["allocated_cost_usd"] == 10.0
     assert econ_data["net_contribution_usd"] == 25.0
+    assert datetime.fromisoformat(econ_data["as_of"]) == NOW
 
     # 4. Post feedback
     fb_payload = {

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from youtube_publishing.api.app import create_app
 from youtube_publishing.client.mock import MockYouTubeClient
@@ -25,6 +26,8 @@ MINIMAL_ENV = {
     "TEMPORAL_HOST": "127.0.0.1:9",
     "PLM_SERVICE_TOKEN": "test-secret-token",
 }
+
+T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -46,15 +49,20 @@ def client() -> TestClient:
                 channel_name="Neon API Test",
                 brand_id="brand_neon",
                 oauth_credential_ref="sec_oauth_test",
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
+                created_at=T0,
+                updated_at=T0,
             ),
         )
         session.commit()
 
     settings = load_settings(env=MINIMAL_ENV)
     yt_mock = MockYouTubeClient()
-    app = create_app(session_factory=session_factory, settings=settings, client=yt_mock)
+    app = create_app(
+        session_factory=session_factory,
+        settings=settings,
+        client=yt_mock,
+        clock=FixedClock(T0),
+    )
     return TestClient(app)
 
 
@@ -62,6 +70,7 @@ def test_health_endpoint_is_unauthenticated(client: TestClient) -> None:
     res = client.get("/youtube/health")
     assert res.status_code == 200
     assert res.json()["status"] == "healthy"
+    assert datetime.fromisoformat(res.json()["timestamp"]) == T0
 
 
 def test_publish_endpoint_rejects_unauthenticated_request(client: TestClient) -> None:
@@ -93,6 +102,7 @@ def test_publish_and_status_roundtrip(client: TestClient) -> None:
     att_data = res_att.json()
     assert att_data["state"] == "verified"
     assert att_data["youtube_video_id"] == data["youtube_video_id"]
+    assert datetime.fromisoformat(att_data["completed_at"]) == T0
 
     # Reconcile attempt
     res_rec = client.post(f"/youtube/reconcile/{attempt_id}", headers=headers)

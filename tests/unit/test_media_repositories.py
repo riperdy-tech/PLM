@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from media_factory.domain.enums import (
     PackageStatus,
     PlaylistStatus,
@@ -34,14 +36,15 @@ from media_factory.storage.repositories import (
 from tests.support.media_db import media_db_session
 from tests.support.seams import sample_lineage
 
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 def test_playlist_session_and_tracks_repository() -> None:
     with media_db_session() as session:
-        pl = PlaylistSession.create("rm_01", "exp_01", "arm_01", "brand_01", 300.0)
+        pl = PlaylistSession.create("rm_01", "exp_01", "arm_01", "brand_01", 300.0, now=NOW)
         insert_playlist_session(session, pl)
 
-        t1 = PlaylistTrack.create(pl.id, "song_01", "art_01", 0, 0.0, 150.0, title="T1")
-        t2 = PlaylistTrack.create(pl.id, "song_02", "art_02", 1, 148.0, 300.0, title="T2")
+        t1 = PlaylistTrack.create(pl.id, "song_01", "art_01", 0, 0.0, 150.0, title="T1", now=NOW)
+        t2 = PlaylistTrack.create(pl.id, "song_02", "art_02", 1, 148.0, 300.0, title="T2", now=NOW)
         insert_playlist_track(session, t1)
         insert_playlist_track(session, t2)
 
@@ -51,7 +54,7 @@ def test_playlist_session_and_tracks_repository() -> None:
         assert len(fetched.tracks) == 2
         assert fetched.tracks[0].title == "T1"
 
-        update_playlist_session_status(session, pl.id, PlaylistStatus.ASSEMBLED)
+        update_playlist_session_status(session, pl.id, PlaylistStatus.ASSEMBLED, now=NOW)
         refetched = get_playlist_session(session, pl.id)
         assert refetched is not None
         assert refetched.status == PlaylistStatus.ASSEMBLED
@@ -60,11 +63,11 @@ def test_playlist_session_and_tracks_repository() -> None:
 def test_visual_session_and_assets_repository() -> None:
     with media_db_session() as session:
         vs = VisualSession.create(
-            "ps_01", "brand_01", "v1", "cyber_v1", visual_plan_json={"scenes": []}
+            "ps_01", "brand_01", "v1", "cyber_v1", visual_plan_json={"scenes": []}, now=NOW
         )
         insert_visual_session(session, vs)
 
-        a1 = VisualAsset.create(vs.id, VisualAssetType.BACKGROUND, "media/bg1.svg", "chk_1")
+        a1 = VisualAsset.create(vs.id, VisualAssetType.BACKGROUND, "media/bg1.svg", "chk_1", now=NOW)
         insert_visual_asset(session, a1)
 
         fetched = get_visual_session(session, vs.id)
@@ -97,10 +100,11 @@ def test_media_package_and_render_job_repository() -> None:
             render_report={"status": "passed"},
             lineage=sample_lineage(),
             status=PackageStatus.READY_FOR_PUBLISH,
+            now=NOW,
         )
         insert_media_package(session, pkg)
 
-        rjob = RenderJob.create(pkg.media_package_id, "yt_longform_1080p_v1")
+        rjob = RenderJob.create(pkg.media_package_id, "yt_longform_1080p_v1", now=NOW)
         insert_render_job(session, rjob)
 
         fetched_pkg = get_media_package_by_id(session, pkg.media_package_id)
@@ -116,7 +120,9 @@ def test_media_package_and_render_job_repository() -> None:
         assert fetched_rj is not None
         assert fetched_rj.id == rjob.id
 
-        update_media_package_status(session, pkg.media_package_id, PackageStatus.PUBLISHED)
+        update_media_package_status(
+            session, pkg.media_package_id, PackageStatus.PUBLISHED, now=NOW
+        )
         refetched_pkg = get_media_package_by_id(session, pkg.media_package_id)
         assert refetched_pkg is not None
         assert refetched_pkg.status == PackageStatus.PUBLISHED

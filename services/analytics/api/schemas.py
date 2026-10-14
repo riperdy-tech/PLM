@@ -32,6 +32,7 @@ class YouTubeIngestRequest(BaseModel):
     subscribers_lost: int = 0
     estimated_revenue_usd: float = 0.0
     window: str = "24h"
+    observed_at: AwareDatetime
 
 
 class DistributorIngestRequest(BaseModel):
@@ -53,6 +54,7 @@ class CostIngestRequest(BaseModel):
     amount_usd: float
     period: str
     description: str = ""
+    incurred_at: AwareDatetime
 
 
 class FeedbackRequest(BaseModel):

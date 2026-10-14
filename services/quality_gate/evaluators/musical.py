@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import struct
 import wave
+from datetime import datetime
 from pathlib import Path
 
 from ..domain.enums import CheckSeverity, GateCategory
@@ -38,6 +39,8 @@ def evaluate_musical_qualities(
     audio_path: str | Path,
     target_lufs: float = -14.0,
     lufs_tolerance: float = 6.0,
+    *,
+    now: datetime,
 ) -> MusicalEvaluationResult:
     """Analyze audio waveform for musical, loudness, and structural attributes."""
     path = Path(audio_path)
@@ -103,6 +106,7 @@ def evaluate_musical_qualities(
                 confidence=0.8,
                 message=f"Estimated loudness {est_lufs} LUFS deviates from target {target_lufs} LUFS by {lufs_diff:.1f} dB",
                 blocking=False,
+                now=now,
             )
         )
         lufs_severity = CheckSeverity.LOW
@@ -122,6 +126,7 @@ def evaluate_musical_qualities(
                 "target_lufs": target_lufs,
                 "peak_dbfs": round(peak_dbfs, 2),
             },
+            now=now,
         )
     )
 
@@ -137,6 +142,7 @@ def evaluate_musical_qualities(
             severity=CheckSeverity.INFO,
             method="crest_factor",
             segment_data={"crest_factor_db": crest_factor},
+            now=now,
         )
     )
 
@@ -152,6 +158,7 @@ def evaluate_musical_qualities(
             confidence=confidence,
             severity=CheckSeverity.INFO,
             method="heuristic_blender",
+            now=now,
         )
     )
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
+from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
 from ..domain.enums import CostCategory
@@ -21,10 +22,10 @@ def ingest_cost_entry(
     amount_usd: float,
     period: str,
     description: str = "",
-    incurred_at: datetime | None = None,
+    incurred_at: datetime,
 ) -> CostItem:
     """Ingest a cost ledger record."""
-    now = incurred_at or datetime.now(UTC)
+    now = require_aware(incurred_at)
     cost_id = build_cost_id(entity_id, category.value, period)
 
     item = CostItem(

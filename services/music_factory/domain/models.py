@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
@@ -109,7 +109,7 @@ class CreativeVariant(BaseModel):
     changed_dimensions: dict[str, Any] = Field(default_factory=dict)
     change_reason: str = "initial_seed"
     prompt_delta: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime
 
 
 class GenerationPlan(BaseModel):
@@ -131,7 +131,7 @@ class GenerationPlan(BaseModel):
     credit_limit: float = Field(default=100.0, ge=0.0)
     policy_version: str = "p4-v1"
     status: PlanStatus = PlanStatus.PLANNED
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -151,8 +151,8 @@ class GenerationAttempt(BaseModel):
     status: AttemptStatus = AttemptStatus.SUBMITTED
     request_hash: str
     request_payload_hash: str
-    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    submitted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime
+    submitted_at: datetime
     completed_at: datetime | None = None
     cost_estimate: float = 0.0
     actual_cost: float = 0.0
@@ -174,8 +174,8 @@ class GeneratedCandidate(BaseModel):
     status: CandidateStatus = CandidateStatus.GENERATED
     provider_id: str
     model_id: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime
+    updated_at: datetime
     parent_candidate_id: str | None = None
     source_attempt_id: str | None
     """The attempt that produced this candidate; ``None`` only for rows stored before
@@ -199,7 +199,7 @@ class AudioArtifact(BaseModel):
     channels: int = 2
     codec: str = "pcm_s16le"
     probe_version: str = "probe-v1"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime
 
 
 class RightsSnapshot(BaseModel):
@@ -240,4 +240,4 @@ class CostRecord(BaseModel):
     credits_estimated: float = 0.0
     credits_actual: float = 0.0
     pricing_version: str = "price-v1"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime

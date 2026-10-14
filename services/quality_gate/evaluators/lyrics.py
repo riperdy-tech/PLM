@@ -7,6 +7,7 @@ and prohibited keyword screening.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from ..domain.enums import CheckSeverity, CheckStatus, GateCategory
 from ..domain.models import LyricCheck, RiskFinding
@@ -39,6 +40,8 @@ def evaluate_lyrics(
     vocal_mode: str,
     lyrics_text: str | None,
     prompt_text: str | None = None,
+    *,
+    now: datetime,
 ) -> LyricEvaluationResult:
     """Perform deterministic checks on vocal configuration and lyrics."""
     checks: list[LyricCheck] = []
@@ -58,6 +61,7 @@ def evaluate_lyrics(
                     confidence=0.9,
                     message="Lyrics provided for track specified as instrumental.",
                     blocking=False,
+                    now=now,
                 )
             )
             checks.append(
@@ -67,6 +71,7 @@ def evaluate_lyrics(
                     status=CheckStatus.WARN,
                     severity=CheckSeverity.MEDIUM,
                     details={"vocal_mode": vocal_mode, "lyrics_length": len(lyrics_text)},
+                    now=now,
                 )
             )
         else:
@@ -77,6 +82,7 @@ def evaluate_lyrics(
                     status=CheckStatus.PASS,
                     severity=CheckSeverity.INFO,
                     details={"vocal_mode": vocal_mode},
+                    now=now,
                 )
             )
     else:
@@ -89,6 +95,7 @@ def evaluate_lyrics(
                 status=CheckStatus.PASS if has_lyrics else CheckStatus.WARN,
                 severity=CheckSeverity.INFO if has_lyrics else CheckSeverity.LOW,
                 details={"vocal_mode": vocal_mode, "has_lyrics": has_lyrics},
+                now=now,
             )
         )
 
@@ -109,6 +116,7 @@ def evaluate_lyrics(
                 confidence=1.0,
                 message=f"Found prohibited keywords in lyrics/prompt: {', '.join(found_prohibited)}",
                 blocking=True,
+                now=now,
             )
         )
         checks.append(
@@ -118,6 +126,7 @@ def evaluate_lyrics(
                 status=CheckStatus.FAIL,
                 severity=CheckSeverity.CRITICAL,
                 details={"prohibited_words_found": found_prohibited},
+                now=now,
             )
         )
     else:
@@ -128,6 +137,7 @@ def evaluate_lyrics(
                 status=CheckStatus.PASS,
                 severity=CheckSeverity.INFO,
                 details={"status": "clean"},
+                now=now,
             )
         )
 

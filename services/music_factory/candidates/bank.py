@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -93,7 +94,7 @@ def get_candidate_detail(session: Session, candidate_id: str) -> FullCandidateDe
     )
 
 
-def accept_candidate(session: Session, candidate_id: str) -> GeneratedCandidate:
+def accept_candidate(session: Session, candidate_id: str, *, now: datetime) -> GeneratedCandidate:
     """Transition candidate from GENERATED to ACCEPTED."""
     cand = get_candidate(session, candidate_id)
     if cand is None:
@@ -104,7 +105,7 @@ def accept_candidate(session: Session, candidate_id: str) -> GeneratedCandidate:
             f"Cannot accept candidate in status {cand.status.value!r}"
         )
 
-    update_candidate_status(session, candidate_id, CandidateStatus.ACCEPTED)
+    update_candidate_status(session, candidate_id, CandidateStatus.ACCEPTED, now=now)
     updated = get_candidate(session, candidate_id)
     assert updated is not None
     return updated
@@ -114,6 +115,7 @@ def reject_candidate(
     session: Session,
     candidate_id: str,
     *,
+    now: datetime,
     reason: str | None = None,
 ) -> GeneratedCandidate:
     """Transition candidate to REJECTED."""
@@ -126,13 +128,15 @@ def reject_candidate(
             "Cannot reject a candidate that has already been exported to P5"
         )
 
-    update_candidate_status(session, candidate_id, CandidateStatus.REJECTED)
+    update_candidate_status(session, candidate_id, CandidateStatus.REJECTED, now=now)
     updated = get_candidate(session, candidate_id)
     assert updated is not None
     return updated
 
 
-def mark_candidate_exported_to_p5(session: Session, candidate_id: str) -> GeneratedCandidate:
+def mark_candidate_exported_to_p5(
+    session: Session, candidate_id: str, *, now: datetime
+) -> GeneratedCandidate:
     """Transition candidate to EXPORTED_TO_P5."""
     cand = get_candidate(session, candidate_id)
     if cand is None:
@@ -143,7 +147,7 @@ def mark_candidate_exported_to_p5(session: Session, candidate_id: str) -> Genera
             f"Cannot export candidate to P5 from status {cand.status.value!r}"
         )
 
-    update_candidate_status(session, candidate_id, CandidateStatus.EXPORTED_TO_P5)
+    update_candidate_status(session, candidate_id, CandidateStatus.EXPORTED_TO_P5, now=now)
     updated = get_candidate(session, candidate_id)
     assert updated is not None
     return updated

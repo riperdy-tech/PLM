@@ -42,6 +42,8 @@ from services.experiments.storage import repositories
 from tests.support.experiments_db import create_experiments_engine, experiments_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
 
@@ -132,7 +134,7 @@ def test_experiment_persistence_and_status_update() -> None:
 
         # Status transition
         repositories.update_experiment_status(
-            session, "exp_test_01", ExperimentStatus.MATERIALIZED
+            session, "exp_test_01", ExperimentStatus.MATERIALIZED, now=FIXED_NOW
         )
         session.commit()
 

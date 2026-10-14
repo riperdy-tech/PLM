@@ -19,6 +19,7 @@ from plm_contracts.seams.c6 import MediaPackagePayload
 
 # P9
 from plm_contracts.seams.c7 import ObservationMaturity
+from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
 
 from services.analytics.domain.enums import ObservationWindow, PaybackStatus
@@ -242,7 +243,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         base_genome_fingerprint="fp_lofi_tape",
         created_at=now,
     )
-    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=1)
+    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=1, created_at=now)
     track_spec = package.track_specs[0]
     assert track_spec.track_spec_id.startswith("trk_")
     assert track_spec.requested_duration == 150
@@ -255,9 +256,9 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
 
     # Real P4 path: plan, generate with the mock provider, then build the C4 event
     # from the stored facts (ADR-0027) instead of hand-writing it.
-    plan, variants = plan_generation(adapted_spec)
+    plan, variants = plan_generation(adapted_spec, created_at=now)
     with music_db_session() as music_db:
-        gen = GenerationEngine().execute_plan(
+        gen = GenerationEngine(clock=FixedClock(now)).execute_plan(
             music_db, plan=plan, variants=variants, spec=adapted_spec
         )
         ready_event = build_candidate_ready_event(music_db, gen.candidates[0].candidate_id)
@@ -292,6 +293,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         evaluation_policy_version="p5-v1",
         warning_codes=[],
         evidence_bundle_id="evi_lofi_001",
+        now=now,
     )
     assert manifest.disposition == GateDisposition.PASSED
     assert manifest.p5_manifest_id.startswith("rel_man_")
@@ -308,6 +310,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Lofi Study Session",
         render_profile="yt_longform_1080p_v1",
+        clock=FixedClock(now),
     )
     media_pkg = assembled.media_package
     c6_hop1 = media_pkg.to_c6_payload()
@@ -327,7 +330,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with youtube_db_session() as yt_db:
         insert_publish_manifest(yt_db, publish_manifest)
         yt_db.commit()
-        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512).execute_publish(
+        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now)).execute_publish(
             yt_db, publish_manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -342,7 +345,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with distribution_db_session() as dist_db:
         submitted = submit_release_from_seams(
             dist_db,
-            DistributionEngine(MockDistributorClient()),
+            DistributionEngine(MockDistributorClient(clock=FixedClock(now))),
             track_manifests=[track_manifest.to_wire()],
             media_package=c6_hop1,
             publication=yt_event.to_wire(),
@@ -379,6 +382,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         allocated_cost_usd=allocated_cost,
         views=28000,
         streams=14000,
+        as_of=now,
     )
     assert unit_econ.net_contribution_usd == 95.0
     assert unit_econ.roi > 5.0

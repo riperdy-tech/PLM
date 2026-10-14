@@ -6,12 +6,16 @@ import math
 import struct
 import tempfile
 import wave
+from datetime import UTC, datetime
 from pathlib import Path
 
+from plm_platform.clock import FixedClock
 from quality_gate.domain.enums import GateDisposition, QuarantineStatus
 from quality_gate.gate.engine import run_candidate_evaluation
 
 from tests.support.seams import candidate_event, lineage_fields, rights_fields
+
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def _make_wav(duration: float = 1.0, amplitude: int = 15000) -> Path:
@@ -48,6 +52,7 @@ def test_scenario_1_clean_candidate_passes() -> None:
                 rights=rights_snap,
             ),
             audio_path=wav_path,
+            clock=FixedClock(NOW),
         )
         assert res.disposition == GateDisposition.PASSED
         assert res.quarantine_case is None
@@ -77,6 +82,7 @@ def test_scenario_2_soft_warning_passes_with_warnings() -> None:
                 rights=rights_snap,
             ),
             audio_path=wav_path,
+            clock=FixedClock(NOW),
         )
         assert res.disposition == GateDisposition.PASSED_WITH_WARNINGS
         assert res.quarantine_case is None
@@ -103,6 +109,7 @@ def test_scenario_3_unknown_license_routes_to_quarantine() -> None:
                 rights=rights_snap,
             ),
             audio_path=wav_path,
+            clock=FixedClock(NOW),
         )
         assert res.disposition == GateDisposition.QUARANTINED
         assert res.quarantine_case is not None
@@ -127,6 +134,7 @@ def test_scenario_4_free_tier_hard_reject() -> None:
                 rights=rights_snap,
             ),
             audio_path=wav_path,
+            clock=FixedClock(NOW),
         )
         assert res.disposition == GateDisposition.REJECTED
         assert res.release_manifest is None
@@ -147,6 +155,7 @@ def test_scenario_5_corrupt_or_missing_audio_hard_reject() -> None:
                 rights=None,
             ),
             audio_path="missing_file.wav",
+            clock=FixedClock(NOW),
         )
     assert res.disposition == GateDisposition.REJECTED
     assert res.evaluation.technical_status == "FAILED"
@@ -168,6 +177,7 @@ def test_scenario_6_protected_artist_likeness_hard_reject() -> None:
                 rights=rights_snap,
             ),
             audio_path=wav_path,
+            clock=FixedClock(NOW),
         )
         assert res.disposition == GateDisposition.REJECTED
         assert res.evaluation.policy_status == "NON_COMPLIANT"

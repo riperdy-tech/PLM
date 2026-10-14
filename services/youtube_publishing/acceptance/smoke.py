@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -26,7 +26,7 @@ __all__ = ["run_smoke_test"]
 _TOKEN_REASON = "blocked: pending youtube publisher service token (PLM_SERVICE_TOKEN)"
 
 
-def run_smoke_test() -> str | None:
+def run_smoke_test(*, clock: Clock | None = None) -> str | None:
     """Run the P7 dry-run smoke test. Returns None on success, or blocked reason string."""
     platform = load_settings()
     if platform.service_token is None:
@@ -40,7 +40,8 @@ def run_smoke_test() -> str | None:
     except Exception as exc:  # noqa: BLE001
         return f"blocked: database unreachable ({exc})"
 
-    now = datetime.now(UTC)
+    smoke_clock = SystemClock() if clock is None else clock
+    now = smoke_clock.now()
     ts = int(now.timestamp())
     channel_id = f"UC_smoke_{ts}"
 
@@ -101,7 +102,7 @@ def run_smoke_test() -> str | None:
                 "tags": ["lofi", "chill", "study"],
                 "category_id": "10",
             }
-            passed, _results, reason = evaluate_preflight_all(profile, package_payload, meta)
+            passed, _results, reason = evaluate_preflight_all(profile, package_payload, meta, now=now)
             if not passed:
                 return f"preflight failed: {reason}"
 
@@ -142,7 +143,7 @@ def run_smoke_test() -> str | None:
 
             # 4. Engine publish with mock client
             client = MockYouTubeClient()
-            engine_runner = YouTubePublishingEngine(client)
+            engine_runner = YouTubePublishingEngine(client, clock=smoke_clock)
             res = engine_runner.execute_publish(session, manifest)
 
             if not res.is_success:

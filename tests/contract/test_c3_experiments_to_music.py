@@ -30,6 +30,8 @@ from services.music_factory.ingestion.p3_adapter import (
 )
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 REGISTRY_ENTRY = "C3 · PHASE-P3 → PHASE-P4"
 
 LINEAGE_FIELDS = (
@@ -121,7 +123,7 @@ def test_real_producer_spec_reaches_the_p4_plan_with_its_lineage() -> None:
     assert adapted.playlist_spec_id == wire["playlist_spec_id"]
     assert list(adapted.allowed_providers) == wire["provider_policy"]["allowed_providers"]
 
-    plan, _ = plan_generation(adapted)
+    plan, _ = plan_generation(adapted, created_at=FIXED_NOW)
     assert plan.lineage == adapted.lineage
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from plm_platform.clock import FixedClock
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.enums import OperatingMode, PrivacyStatus, PublishState
 from youtube_publishing.domain.ids import build_idempotency_key, build_manifest_id
@@ -15,9 +16,11 @@ from youtube_publishing.storage.repositories import (
 
 from tests.support.youtube_db import youtube_db_session
 
+T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 
 def _sample_manifest(*, publish_at: datetime | None = None) -> PublishManifest:
-    now = datetime.now(UTC)
+    now = T0
     channel_id = "UC_neon_official"
     media_pkg_id = "pkg_synth_001"
     video_chk = "chk_vid_synth_001"
@@ -58,7 +61,8 @@ def _sample_manifest(*, publish_at: datetime | None = None) -> PublishManifest:
 def test_engine_publishes_end_to_end_successfully() -> None:
     manifest = _sample_manifest()
     client = MockYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=512)
+    clock = FixedClock(T0)
+    engine = YouTubePublishingEngine(client, clock=clock, chunk_size=512)
 
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -78,6 +82,10 @@ def test_engine_publishes_end_to_end_successfully() -> None:
         assert result.attempt.youtube_playlist_item_id is not None
         assert result.publication_record is not None
         assert result.publication_record.youtube_video_id == result.attempt.youtube_video_id
+        # Every recorded instant is the injected clock's, never the wall clock's.
+        assert result.attempt.created_at == T0
+        assert result.attempt.completed_at == T0
+        assert result.publication_record.published_at == T0
 
         # Verify Hop 2 event carries all R9 identity fields
         event = result.event
@@ -92,7 +100,7 @@ def test_engine_publishes_end_to_end_successfully() -> None:
 def test_engine_idempotency_prevents_duplicate_remote_upload() -> None:
     manifest = _sample_manifest()
     client = MockYouTubeClient()
-    engine = YouTubePublishingEngine(client, chunk_size=1024)
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0), chunk_size=1024)
 
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -114,7 +122,7 @@ def test_engine_idempotency_prevents_duplicate_remote_upload() -> None:
 def test_engine_handles_auth_failure_permanently() -> None:
     manifest = _sample_manifest()
     client = MockYouTubeClient(fail_auth=True)
-    engine = YouTubePublishingEngine(client)
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0))
 
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -127,7 +135,7 @@ def test_engine_handles_auth_failure_permanently() -> None:
 def test_engine_handles_transient_failure_retryably() -> None:
     manifest = _sample_manifest()
     client = MockYouTubeClient(transient_failures_remaining=1)
-    engine = YouTubePublishingEngine(client)
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0))
 
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
@@ -135,3 +143,30 @@ def test_engine_handles_transient_failure_retryably() -> None:
         assert not res.is_success
         assert res.attempt.state == PublishState.FAILED_RETRYABLE
         assert res.attempt.retry_count == 1
+
+
+def test_engine_stamps_come_from_the_injected_clock_and_replay() -> None:
+    """Two runs under the same fixed clock produce identical records and events."""
+    published_at = T0 + timedelta(minutes=5)
+
+    def run() -> tuple[object, object]:
+        clock = FixedClock(T0)
+        manifest = _sample_manifest()
+        engine = YouTubePublishingEngine(MockYouTubeClient(), clock=clock, chunk_size=512)
+        with youtube_db_session() as session:
+            insert_publish_manifest(session, manifest)
+            clock.advance(timedelta(minutes=5))
+            result = engine.execute_publish(
+                session, manifest, video_data=b"0" * 1024, thumbnail_data=b"IMAGE"
+            )
+        assert result.is_success
+        assert result.attempt.created_at == published_at
+        assert result.attempt.updated_at == published_at
+        assert result.publication_record is not None
+        assert result.event is not None
+        return result.publication_record, result.event.to_wire()
+
+    first_record, first_event = run()
+    second_record, second_event = run()
+    assert first_record == second_record
+    assert first_event == second_event

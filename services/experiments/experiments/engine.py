@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..domain.enums import ExperimentStatus, ExperimentType, VariableClass
@@ -28,10 +28,10 @@ def design_experiment(
     experiment_type: ExperimentType | None = None,
     target_variable: str | None = None,
     seed: int = 0,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> Experiment:
     """Design a structured, reproducible experiment from an adapted P2 directive."""
-    now = created_at or datetime.now(UTC)
+    now = created_at
     _ = seed
 
     # 1. Determine experiment type

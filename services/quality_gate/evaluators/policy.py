@@ -9,6 +9,7 @@ Enforces:
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from ..domain.enums import CheckSeverity, CheckStatus, GateCategory
 from ..domain.models import PolicyCheck, RiskFinding
@@ -56,6 +57,8 @@ def screen_policy_and_risk(
     genre_tags: list[str] | None,
     is_ai_generated: bool = True,
     policy_version: str = "p5-v1",
+    *,
+    now: datetime,
 ) -> PolicyValidationResult:
     """Screen track metadata and prompts for platform policy compliance."""
     checks: list[PolicyCheck] = []
@@ -76,6 +79,7 @@ def screen_policy_and_risk(
                 "is_ai_generated": is_ai_generated,
                 "ai_disclosure_required": ai_disclosure_required,
             },
+            now=now,
         )
     )
 
@@ -98,6 +102,7 @@ def screen_policy_and_risk(
                 confidence=0.95,
                 message=f"Prompt or metadata contains protected artist reference: {', '.join(found_artists)}",
                 blocking=True,
+                now=now,
             )
         )
         checks.append(
@@ -109,6 +114,7 @@ def screen_policy_and_risk(
                 status=CheckStatus.FAIL,
                 severity=CheckSeverity.HIGH,
                 evidence_data={"detected_artists": found_artists},
+                now=now,
             )
         )
         policy_status = "NON_COMPLIANT"
@@ -122,6 +128,7 @@ def screen_policy_and_risk(
                 status=CheckStatus.PASS,
                 severity=CheckSeverity.INFO,
                 evidence_data={"detected_artists": []},
+                now=now,
             )
         )
         policy_status = "COMPLIANT"

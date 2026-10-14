@@ -14,6 +14,7 @@ Commercial-use eligibility stays separate from copyright status (P5 §34).
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Final
 
 from plm_contracts import CommercialUseEligibility, ProvenanceStatus
@@ -69,6 +70,8 @@ class RightsValidationResult:
 def validate_provenance_and_rights(
     evaluation_id: str,
     rights: RightsSnapshotPayload | None,
+    *,
+    now: datetime,
 ) -> RightsValidationResult:
     """Judge the declared rights snapshot (or its absence) for one candidate."""
     rights_checks: list[RightsCheck] = []
@@ -89,6 +92,7 @@ def validate_provenance_and_rights(
                 confidence=1.0,
                 message="The provider declared no license terms for the producing attempt.",
                 blocking=False,  # quarantine for review, not rejection
+                now=now,
             )
         )
         provenance_checks.append(
@@ -98,6 +102,7 @@ def validate_provenance_and_rights(
                 status=CheckStatus.FAIL,
                 severity=CheckSeverity.HIGH,
                 details={"rights_snapshot": None},
+                now=now,
             )
         )
     else:
@@ -109,6 +114,7 @@ def validate_provenance_and_rights(
                 status=CheckStatus.PASS,
                 severity=CheckSeverity.INFO,
                 details={"attempt_id": rights.attempt_id, "terms_version": rights.terms_version},
+                now=now,
             )
         )
 
@@ -135,6 +141,7 @@ def validate_provenance_and_rights(
                 confidence=1.0,
                 message=f"Output is not commercially usable (tier={tier!r}, declared={declared}).",
                 blocking=True,
+                now=now,
             )
         )
         check_status, risk_level, confidence = CheckStatus.FAIL, "CRITICAL", 1.0
@@ -156,6 +163,7 @@ def validate_provenance_and_rights(
                 confidence=0.7,
                 message=f"Commercial-use eligibility is {declared.value!r}, not 'eligible'.",
                 blocking=False,
+                now=now,
             )
         )
         check_status, risk_level, confidence = CheckStatus.WARN, "MEDIUM", 0.5
@@ -170,6 +178,7 @@ def validate_provenance_and_rights(
             source_type="provider_license_snapshot",
             source_ref=source_ref,
             evidence_data={"plan_or_tier": tier, "status": commercial_use_status.value},
+            now=now,
         )
     )
 
@@ -185,6 +194,7 @@ def validate_provenance_and_rights(
                 f"Commercial status: {commercial_use_status.value}, "
                 f"Provenance: {provenance_status.value}"
             ),
+            now=now,
         )
     )
 

@@ -10,8 +10,9 @@ strictly to Phase P9 (Analytics & Economics Feedback Engine).
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
+from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
 from ..domain.ids import compute_sha256
@@ -30,6 +31,7 @@ def ingest_provider_report(
     source_reference: str,
     raw_payload_uri: str | None = None,
     report_type: str = "streaming_statement",
+    now: datetime,
 ) -> DistributionReportReference:
     """Ingest and version a raw distributor statement or report.
 
@@ -48,7 +50,7 @@ def ingest_provider_report(
         logger.info("Found existing raw report %s for period %s", report_id, provider_period)
         return existing
 
-    now = datetime.now(UTC)
+    now = require_aware(now)
     resolved_uri = raw_payload_uri or f"reports/raw/{clean_provider}/{clean_period}_{checksum[:8]}.csv"
 
     ref = DistributionReportReference(

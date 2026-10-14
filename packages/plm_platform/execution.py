@@ -27,15 +27,17 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, Protocol
 
 from plm_contracts import ExecutionPolicy, ProviderMode
+
+from plm_platform.clock import require_aware
 
 from .config import SettingsError
 from .dotenv import load_env_file
@@ -220,12 +222,10 @@ class ExternalWriteGuard:
         *,
         authorizations: Iterable[WriteAuthorization] = (),
         budget: BudgetGate | None = None,
-        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings or ExecutionSettings()
         self._authorizations = {a.capability: a for a in authorizations}
         self._budget: BudgetGate = budget or NoBudgetLedger()
-        self._clock = clock or (lambda: datetime.now(UTC))
         self.decisions: list[GuardDecision] = []
 
     def authorize_external_write(
@@ -236,9 +236,10 @@ class ExternalWriteGuard:
         idempotency_key: str,
         cost_estimate: Decimal = Decimal(0),
         policy_ceiling: ExecutionPolicy | None = None,
+        now: datetime,
     ) -> GuardDecision:
-        """Decide one write. ``policy_ceiling`` lets a caller tighten, never loosen, policy."""
-        now = self._clock()
+        """Decide one write at ``now``. ``policy_ceiling`` lets a caller tighten, never loosen, policy."""
+        now = require_aware(now)
         policy = self._settings.policy(capability)
         if policy_ceiling is not None and _rank(policy_ceiling) < _rank(policy):
             policy = policy_ceiling

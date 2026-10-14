@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
@@ -57,7 +57,7 @@ class PlaylistTrack:
     title: str = ""
     audio_uri: str = ""
     audio_checksum: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -74,6 +74,8 @@ class PlaylistTrack:
         title: str = "",
         audio_uri: str = "",
         audio_checksum: str = "",
+        *,
+        now: datetime,
     ) -> PlaylistTrack:
         tid = playlist_track_id(session_id, song_id, position)
         return cls(
@@ -90,6 +92,7 @@ class PlaylistTrack:
             title=title,
             audio_uri=audio_uri,
             audio_checksum=audio_checksum,
+            created_at=now,
         )
 
 
@@ -108,8 +111,8 @@ class PlaylistSession:
     sequence_version: str
     sequence_checksum: str
     tracks: list[PlaylistTrack] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
+    updated_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -120,6 +123,8 @@ class PlaylistSession:
         brand_id: str,
         requested_duration_seconds: float,
         sequence_version: str = "v1",
+        *,
+        now: datetime,
     ) -> PlaylistSession:
         sid = playlist_session_id(release_manifest_id, brand_id, sequence_version)
         return cls(
@@ -133,6 +138,8 @@ class PlaylistSession:
             actual_duration_seconds=0.0,
             sequence_version=sequence_version,
             sequence_checksum="",
+            created_at=now,
+            updated_at=now,
         )
 
 
@@ -154,7 +161,7 @@ class VisualAsset:
     fps: float
     license_status: str
     provenance_id: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -172,6 +179,8 @@ class VisualAsset:
         provider_asset_id: str = "ast_01",
         license_status: str = "cleared",
         provenance_id: str = "prov_01",
+        *,
+        now: datetime,
     ) -> VisualAsset:
         aid = visual_asset_id(session_id, asset_type.value, checksum)
         return cls(
@@ -189,6 +198,7 @@ class VisualAsset:
             fps=fps,
             license_status=license_status,
             provenance_id=provenance_id,
+            created_at=now,
         )
 
 
@@ -205,8 +215,8 @@ class VisualSession:
     visual_plan_json: dict[str, Any]
     status: str
     assets: list[VisualAsset] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
+    updated_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -217,6 +227,8 @@ class VisualSession:
         visual_profile: str,
         visual_profile_version: str = "v1",
         visual_plan_json: dict[str, Any] | None = None,
+        *,
+        now: datetime,
     ) -> VisualSession:
         vsid = visual_session_id(playlist_session_id_str, visual_profile)
         return cls(
@@ -228,6 +240,8 @@ class VisualSession:
             visual_profile_version=visual_profile_version,
             visual_plan_json=visual_plan_json or {},
             status="planned",
+            created_at=now,
+            updated_at=now,
         )
 
 
@@ -247,7 +261,7 @@ class ThumbnailVariant:
     text_payload: str
     predicted_ctr_score: float | None = None
     status: str = "ready"
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -262,6 +276,8 @@ class ThumbnailVariant:
         height: int = 720,
         layout_version: str = "v1",
         predicted_ctr_score: float | None = None,
+        *,
+        now: datetime,
     ) -> ThumbnailVariant:
         tid = thumbnail_variant_id(media_package_id_str, variant_key)
         return cls(
@@ -276,6 +292,7 @@ class ThumbnailVariant:
             height=height,
             text_payload=text_payload,
             predicted_ctr_score=predicted_ctr_score,
+            created_at=now,
         )
 
 
@@ -318,7 +335,7 @@ class RenderJob:
     output_checksum: str | None = None
     error_code: str | None = None
     error_detail: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -329,6 +346,8 @@ class RenderJob:
         priority: str = "NORMAL",
         input_manifest_hash: str = "",
         attempt: int = 1,
+        *,
+        now: datetime,
     ) -> RenderJob:
         rjid = render_job_id(media_package_id_str, render_profile, attempt)
         return cls(
@@ -340,6 +359,7 @@ class RenderJob:
             priority=priority,
             attempt_count=attempt,
             input_manifest_hash=input_manifest_hash,
+            created_at=now,
         )
 
 
@@ -376,8 +396,8 @@ class MediaPackage:
     package_version: str = "v1"
     manifest_uri: str = ""
     manifest_hash: str = ""
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(kw_only=True)
+    updated_at: datetime = field(kw_only=True)
 
     @classmethod
     def create(
@@ -403,6 +423,8 @@ class MediaPackage:
         lineage: ExperimentLineage,
         package_version: str = "v1",
         status: PackageStatus = PackageStatus.READY_FOR_PUBLISH,
+        *,
+        now: datetime,
     ) -> MediaPackage:
         mpid = media_package_id(release_manifest_id, brand_id, package_version)
         content = json.dumps(
@@ -445,6 +467,8 @@ class MediaPackage:
             lineage=lineage,
             package_version=package_version,
             manifest_hash=m_hash,
+            created_at=now,
+            updated_at=now,
         )
 
     def to_c6_payload(self) -> dict[str, Any]:

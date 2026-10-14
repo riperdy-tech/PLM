@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock
 
 from ..domain.enums import CostCategory, ObservationWindow
 from ..domain.models import NormalizedRewardPayload, P10FeatureView
@@ -34,6 +34,8 @@ from .schemas import (
 def build_analytics_router(
     session_factory: Any,
     auth_dependency: Any,
+    *,
+    clock: Clock,
 ) -> APIRouter:
     """Build the analytics API router configured with auth and dependencies."""
     router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -43,7 +45,7 @@ def build_analytics_router(
         return HealthResponse(
             status="healthy",
             service="analytics",
-            timestamp=datetime.now(UTC).isoformat(),
+            timestamp=clock.now().isoformat(),
         )
 
     @router.post(
@@ -66,6 +68,7 @@ def build_analytics_router(
                 subscribers_lost=req.subscribers_lost,
                 estimated_revenue_usd=req.estimated_revenue_usd,
                 window=ObservationWindow(req.window),
+                observed_at=req.observed_at,
             )
             session.commit()
             return obs.model_dump()
@@ -84,6 +87,7 @@ def build_analytics_router(
                 raw_content=req.raw_content,
                 source_reference=req.source_reference,
                 rows=req.rows,
+                now=clock.now(),
             )
             session.commit()
             return {
@@ -106,6 +110,7 @@ def build_analytics_router(
                 amount_usd=req.amount_usd,
                 period=req.period,
                 description=req.description,
+                incurred_at=req.incurred_at,
             )
             session.commit()
             return cost.model_dump()
@@ -159,6 +164,7 @@ def build_analytics_router(
                 allocated_cost_usd=total_cost,
                 views=views if views > 0 else None,
                 streams=streams if streams > 0 else None,
+                as_of=clock.now(),
             )
             return econ.model_dump()
 

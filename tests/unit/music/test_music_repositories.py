@@ -26,6 +26,8 @@ from services.music_factory.storage import repositories
 from tests.support.music_db import create_music_engine, music_session
 from tests.support.seams import sample_lineage
 
+FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
 
@@ -191,7 +193,9 @@ def test_attempt_and_candidate_and_artifact_crud() -> None:
         assert loaded_snap.terms_version == "2026_01"
 
         # Update candidate status
-        repositories.update_candidate_status(session, "cand_001", CandidateStatus.ACCEPTED)
+        repositories.update_candidate_status(
+            session, "cand_001", CandidateStatus.ACCEPTED, now=FIXED_NOW
+        )
         session.commit()
         updated_cand = repositories.get_candidate(session, "cand_001")
         assert updated_cand is not None

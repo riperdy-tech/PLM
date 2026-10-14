@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from ..domain.enums import VisualAssetType
@@ -55,6 +56,7 @@ def plan_visual_session(
     total_duration_seconds: float,
     visual_profile_version: str = "v1",
     scene_length_seconds: float = 60.0,
+    now: datetime,
 ) -> VisualPlannerResult:
     """Generate structured visual session and scene timeline for a playlist."""
     # 1. Determine number of scenes
@@ -105,6 +107,7 @@ def plan_visual_session(
         visual_profile=visual_profile,
         visual_profile_version=visual_profile_version,
         visual_plan_json=visual_plan,
+        now=now,
     )
 
     # 2. Materialize primary visual assets (Tier A/B procedural backgrounds)
@@ -123,6 +126,7 @@ def plan_visual_session(
             source_type="procedural_shader",
             provider="internal_compositor",
             provider_asset_id=f"scene_{idx}_{scene['motif']}",
+            now=now,
         )
         assets.append(asset)
 

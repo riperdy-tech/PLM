@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 import uvicorn
+from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 
@@ -46,7 +47,7 @@ def cli_evaluate(
         typer.echo(f"Error: C4 event refused: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
-    result = run_candidate_evaluation(event=event, audio_path=path)
+    result = run_candidate_evaluation(event=event, audio_path=path, clock=SystemClock())
 
     typer.echo(f"Evaluation ID: {result.evaluation.id}")
     typer.echo(f"Disposition:   {result.decision.disposition.value}")
@@ -121,6 +122,7 @@ def cli_resolve(
             resolution=res_code,
             auditor_id=auditor_id,
             notes=notes,
+            now=SystemClock().now(),
         )
         session.commit()
         typer.echo(f"Case {case.id} resolved with {case.resolution.value if case.resolution else 'none'}")

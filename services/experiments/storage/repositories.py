@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -61,12 +61,12 @@ def insert_genome(
     *,
     genome_id: str,
     envelope: ConstraintEnvelope | None = None,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> str:
     """Store a ContentGenome and its first version immutably."""
     from ..domain.fingerprint import compute_genome_fingerprint
 
-    now = created_at or datetime.now(UTC)
+    now = created_at
     fp = compute_genome_fingerprint(genome)
     env = envelope or ConstraintEnvelope()
 
@@ -259,12 +259,11 @@ def list_experiments(
 
 
 def update_experiment_status(
-    session: Session, experiment_id: str, status: ExperimentStatus
+    session: Session, experiment_id: str, status: ExperimentStatus, *, now: datetime
 ) -> None:
     """Update status of an experiment."""
     from sqlalchemy.engine import CursorResult
 
-    now = datetime.now(UTC)
     result = session.execute(
         sa.update(experiments_table)
         .where(experiments_table.c.experiment_id == experiment_id)
@@ -450,10 +449,10 @@ def record_event(
     experiment_id: str,
     event_type: str,
     payload: dict[str, Any],
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> None:
     """Record an immutable experiment event into the audit trail (§63, §77)."""
-    now = created_at or datetime.now(UTC)
+    now = created_at
     session.execute(
         sa.insert(experiment_events_table).values(
             event_id=event_id,

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from analytics.domain.enums import PaybackStatus
 from analytics.economics.calculator import compute_unit_economics
+
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
 def test_standard_profitable_unit_economics() -> None:
@@ -14,6 +18,7 @@ def test_standard_profitable_unit_economics() -> None:
         allocated_cost_usd=25.0,
         views=20000,
         daily_revenue_rate_usd=5.0,
+        as_of=NOW,
     )
     assert econ.net_contribution_usd == 75.0
     assert econ.profit_margin == 0.75
@@ -21,6 +26,7 @@ def test_standard_profitable_unit_economics() -> None:
     assert econ.rpm_usd == 5.0  # (100 / 20000) * 1000
     assert econ.payback_status == PaybackStatus.REPAID
     assert econ.payback_days == 5  # 25 / 5
+    assert econ.as_of == NOW
 
 
 def test_unprofitable_unit_economics() -> None:
@@ -30,6 +36,7 @@ def test_unprofitable_unit_economics() -> None:
         gross_revenue_usd=10.0,
         allocated_cost_usd=50.0,
         views=5000,
+        as_of=NOW,
     )
     assert econ.net_contribution_usd == -40.0
     assert econ.profit_margin == -4.0
@@ -45,6 +52,7 @@ def test_zero_revenue_and_zero_cost_edge_cases() -> None:
         "video",
         gross_revenue_usd=15.0,
         allocated_cost_usd=0.0,
+        as_of=NOW,
     )
     assert econ_free.net_contribution_usd == 15.0
     assert econ_free.profit_margin == 1.0
@@ -57,6 +65,7 @@ def test_zero_revenue_and_zero_cost_edge_cases() -> None:
         "video",
         gross_revenue_usd=0.0,
         allocated_cost_usd=0.0,
+        as_of=NOW,
     )
     assert econ_zero.net_contribution_usd == 0.0
     assert econ_zero.profit_margin == 0.0
@@ -70,5 +79,6 @@ def test_dsp_revenue_per_stream() -> None:
         gross_revenue_usd=400.0,
         allocated_cost_usd=50.0,
         streams=100000,
+        as_of=NOW,
     )
     assert econ_dsp.revenue_per_stream_usd == 0.004

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from plm_contracts.seams import ExperimentLineage
@@ -76,7 +76,7 @@ def materialize_package(
     budget_envelope: float = 100.0,
     track_count: int = 5,
     total_duration_minutes: int = 60,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> ContentPackage:
     """Compile an experiment treatment and genome into an immutable ContentPackage."""
     if budget_envelope < 0.0:
@@ -86,7 +86,7 @@ def materialize_package(
     if track_count < 1:
         raise ValueError(f"track_count must be at least 1; got {track_count}")
 
-    now = created_at or datetime.now(UTC)
+    now = created_at
     effective_genome = _apply_genome_delta(base_genome, treatment.genome_delta)
 
     pkg_id = package_id(experiment.experiment_id, treatment.treatment_id)

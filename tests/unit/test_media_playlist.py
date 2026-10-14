@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from media_factory.domain.enums import PlaylistStatus, TransitionType
 from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 
 from tests.support.seams import lineage_fields, release_manifest
 
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 OVERRIDE = {
     "status": "CLEARED_BY_OVERRIDE",
     "quarantine_case_id": "qc_01",
@@ -39,6 +42,7 @@ def test_assemble_playlist_success() -> None:
         required_duration_seconds=450.0,
         transition_type=TransitionType.SHORT_CROSSFADE,
         transition_duration_seconds=2.0,
+        now=NOW,
     )
 
     assert res.session.status == PlaylistStatus.ASSEMBLED
@@ -62,7 +66,9 @@ def test_uncleared_track_without_override_is_refused(disposition: str) -> None:
         release_manifest(candidate_id="cand_blocked", disposition=disposition),
     ]
     with pytest.raises(PlaylistAssemblyError) as exc:
-        assemble_playlist(manifests=manifests, brand_id="brand_lofi", required_duration_seconds=240.0)
+        assemble_playlist(
+            manifests=manifests, brand_id="brand_lofi", required_duration_seconds=240.0, now=NOW
+        )
     assert exc.value.error.code == "track_not_cleared"
     assert "cand_blocked" in exc.value.error.message
 
@@ -73,11 +79,15 @@ def test_tracks_from_different_arms_are_refused() -> None:
         release_manifest(candidate_id="cand_02", lineage=lineage_fields(content_arm_id="arm_other")),
     ]
     with pytest.raises(PlaylistAssemblyError) as exc:
-        assemble_playlist(manifests=manifests, brand_id="brand_lofi", required_duration_seconds=240.0)
+        assemble_playlist(
+            manifests=manifests, brand_id="brand_lofi", required_duration_seconds=240.0, now=NOW
+        )
     assert exc.value.error.code == "mixed_lineage"
 
 
 def test_empty_playlist_is_refused() -> None:
     with pytest.raises(PlaylistAssemblyError) as exc:
-        assemble_playlist(manifests=[], brand_id="brand_lofi", required_duration_seconds=60.0)
+        assemble_playlist(
+            manifests=[], brand_id="brand_lofi", required_duration_seconds=60.0, now=NOW
+        )
     assert exc.value.error.code == "empty_playlist"

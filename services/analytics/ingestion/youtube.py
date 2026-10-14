@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
+from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
 from ..domain.enums import MetricSource, MetricStatus, ObservationWindow, RevenueStatus
@@ -28,10 +29,10 @@ def ingest_youtube_metrics(
     window: ObservationWindow = ObservationWindow.H24,
     source: MetricSource = MetricSource.YOUTUBE_ANALYTICS,
     status: MetricStatus = MetricStatus.VALID,
-    observed_at: datetime | None = None,
+    observed_at: datetime,
 ) -> VideoMetricObservation:
     """Ingest and normalize YouTube video metrics."""
-    now = observed_at or datetime.now(UTC)
+    now = require_aware(observed_at)
     obs_id = build_observation_id(video_id, "views", window.value, date_str)
 
     obs = VideoMetricObservation(

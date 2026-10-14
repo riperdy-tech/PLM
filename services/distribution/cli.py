@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 import uvicorn
+from plm_platform.clock import SystemClock
 from plm_platform.db import build_engine, session_factory
 
 from .api.app import create_app
@@ -31,13 +31,14 @@ def cli_submit(package_path: str) -> None:
         typer.echo(f"Error: request refused: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    clock = SystemClock()
     engine = build_engine()
     factory = session_factory(engine)
     with factory() as session:
         try:
             result = submit_release_from_seams(
                 session,
-                DistributionEngine(MockDistributorClient()),
+                DistributionEngine(MockDistributorClient(clock=clock)),
                 track_manifests=req.track_manifests,
                 media_package=req.media_package,
                 publication=req.publication,
@@ -51,7 +52,7 @@ def cli_submit(package_path: str) -> None:
                     release_title=req.release_title,
                     release_version=req.release_version,
                 ),
-                now=datetime.now(UTC),
+                now=clock.now(),
             )
         except SubmissionRefusedError as exc:
             typer.echo(f"Error: release refused: {exc}", err=True)

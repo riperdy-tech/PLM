@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock, SystemClock
 from sqlalchemy.orm import Session
 
 from ..config import ExperimentsSettings
@@ -47,9 +48,11 @@ def build_router(
     *,
     session_factory: SessionFactory | None,
     settings: ExperimentsSettings,
+    clock: Clock | None = None,
 ) -> APIRouter:
     """Build the experiments API router with fail-closed auth and session dependency."""
     router = APIRouter()
+    service_clock: Clock = clock or SystemClock()
     dependency = _dependencies(session_factory)
     auth = _auth(settings)
 
@@ -82,11 +85,14 @@ def build_router(
 
         base_genome = build_genome_from_directive(adapted)
         gid = deterministic_id("gen", adapted.arm_id, adapted.directive_id)
-        repositories.insert_genome(session, base_genome, genome_id=gid)
+        repositories.insert_genome(
+            session, base_genome, genome_id=gid, created_at=service_clock.now()
+        )
 
         exp = design_experiment(
             adapted,
             base_genome,
+            created_at=service_clock.now(),
             experiment_type=req.experiment_type,
             target_variable=req.target_variable,
             seed=req.seed,
@@ -263,6 +269,7 @@ def build_router(
                 exp,
                 treatment,
                 genome,
+                created_at=service_clock.now(),
                 brand_id=req.brand_id,
                 budget_envelope=req.budget_envelope,
                 track_count=req.track_count,
@@ -279,7 +286,9 @@ def build_router(
             ) from err
 
         repositories.insert_content_package(session, package)
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.MATERIALIZED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.MATERIALIZED, now=service_clock.now()
+        )
         session.commit()
 
         return MaterializePackageResponse(package=package)
@@ -309,7 +318,9 @@ def build_router(
                     message=f"Experiment '{experiment_id}' does not exist",
                 ).model_dump(),
             )
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.CANCELLED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.CANCELLED, now=service_clock.now()
+        )
         session.commit()
         return UpdateStatusResponse(experiment_id=experiment_id, status=ExperimentStatus.CANCELLED.value)
 
@@ -338,7 +349,9 @@ def build_router(
                     message=f"Experiment '{experiment_id}' does not exist",
                 ).model_dump(),
             )
-        repositories.update_experiment_status(session, experiment_id, ExperimentStatus.COMPLETED)
+        repositories.update_experiment_status(
+            session, experiment_id, ExperimentStatus.COMPLETED, now=service_clock.now()
+        )
         session.commit()
         return UpdateStatusResponse(experiment_id=experiment_id, status=ExperimentStatus.COMPLETED.value)
 

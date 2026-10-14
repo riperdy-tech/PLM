@@ -1,17 +1,23 @@
-"""Preflight gates A, B, and C for P7 YouTube Publishing Engine (P7 §13)."""
+"""Preflight gates A, B, and C for P7 YouTube Publishing Engine (P7 §13).
+
+Every gate takes the caller's ``now``; none reads the wall clock, so a decision replays.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+
+from plm_platform.clock import require_aware
 
 from ..domain.enums import FailureReasonCode
 from ..domain.models import ChannelProfile, PreflightCheckResult
 
 
-def evaluate_gate_a_channel(profile: ChannelProfile | None) -> PreflightCheckResult:
+def evaluate_gate_a_channel(
+    profile: ChannelProfile | None, *, now: datetime
+) -> PreflightCheckResult:
     """Gate A: Validate channel configuration, activity, and credential reference (P7 §13)."""
-    now = datetime.now(UTC)
     diagnostics: list[str] = []
 
     if profile is None:
@@ -40,9 +46,10 @@ def evaluate_gate_a_channel(profile: ChannelProfile | None) -> PreflightCheckRes
     )
 
 
-def evaluate_gate_b_artifact(package_payload: dict[str, Any]) -> PreflightCheckResult:
+def evaluate_gate_b_artifact(
+    package_payload: dict[str, Any], *, now: datetime
+) -> PreflightCheckResult:
     """Gate B: Validate video/audio/thumbnail artifacts and checksums (P7 §13)."""
-    now = datetime.now(UTC)
     diagnostics: list[str] = []
 
     video = package_payload.get("video")
@@ -76,9 +83,10 @@ def evaluate_gate_b_artifact(package_payload: dict[str, Any]) -> PreflightCheckR
 def evaluate_gate_c_metadata(
     metadata: dict[str, Any],
     publish_at: datetime | None = None,
+    *,
+    now: datetime,
 ) -> PreflightCheckResult:
     """Gate C: Validate title length, description length, tags limit, category, and scheduling (P7 §13)."""
-    now = datetime.now(UTC)
     diagnostics: list[str] = []
 
     title = str(metadata.get("title", "")).strip()
@@ -103,8 +111,12 @@ def evaluate_gate_c_metadata(
     if cat_id != "10":
         diagnostics.append(f"unsupported category_id {cat_id!r}: expected '10' (Music)")
 
-    if publish_at is not None and publish_at <= now:
-        diagnostics.append(f"scheduled publish_at {publish_at} must be in the future")
+    now = require_aware(now)
+    if publish_at is not None:
+        if publish_at.tzinfo is None or publish_at.utcoffset() is None:
+            diagnostics.append(f"scheduled publish_at {publish_at} must be timezone-aware")
+        elif publish_at <= now:
+            diagnostics.append(f"scheduled publish_at {publish_at} must be in the future")
 
     return PreflightCheckResult(
         passed=len(diagnostics) == 0,
@@ -119,17 +131,19 @@ def evaluate_preflight_all(
     package_payload: dict[str, Any],
     metadata: dict[str, Any],
     publish_at: datetime | None = None,
+    *,
+    now: datetime,
 ) -> tuple[bool, list[PreflightCheckResult], FailureReasonCode | None]:
     """Run all preflight gates. Returns (passed, results, failure_code)."""
-    gate_a = evaluate_gate_a_channel(channel_profile)
+    gate_a = evaluate_gate_a_channel(channel_profile, now=now)
     if not gate_a.passed:
         return False, [gate_a], FailureReasonCode.PREFLIGHT_CHANNEL_MISSING
 
-    gate_b = evaluate_gate_b_artifact(package_payload)
+    gate_b = evaluate_gate_b_artifact(package_payload, now=now)
     if not gate_b.passed:
         return False, [gate_a, gate_b], FailureReasonCode.PREFLIGHT_ARTIFACT_MISSING
 
-    gate_c = evaluate_gate_c_metadata(metadata, publish_at)
+    gate_c = evaluate_gate_c_metadata(metadata, publish_at, now=now)
     if not gate_c.passed:
         return False, [gate_a, gate_b, gate_c], FailureReasonCode.PREFLIGHT_METADATA_INVALID
 

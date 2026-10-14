@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from media_factory.domain.enums import (
     PackageStatus,
@@ -23,6 +25,7 @@ from media_factory.domain.models import (
 
 from tests.support.seams import media_package_fields, sample_lineage
 
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 def test_deterministic_identifiers() -> None:
     ps_id1 = playlist_session_id("exp_01", "brand_01", "v1")
@@ -84,6 +87,7 @@ def test_media_package_creation_and_c6_payload() -> None:
         lineage=sample_lineage(),
         package_version="v1",
         status=PackageStatus.READY_FOR_PUBLISH,
+        now=NOW,
     )
 
     assert pkg.media_package_id.startswith("mpkg_")
@@ -105,7 +109,7 @@ def test_legacy_package_without_lineage_has_no_c6_wire() -> None:
         video_master_uri="u", video_checksum="c", video_duration_seconds=1.0,
         render_profile="r", audio_master_uri="u", audio_checksum="c", thumbnails=[],
         tracklist=[], chapters=[], metadata_candidates=[], short_source_assets=[],
-        render_report={}, status=PackageStatus.READY_FOR_PUBLISH,
+        render_report={}, status=PackageStatus.READY_FOR_PUBLISH, created_at=NOW, updated_at=NOW,
     )
     with pytest.raises(LegacyPackageError):
         pkg.to_c6_payload()
