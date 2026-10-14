@@ -10,12 +10,13 @@ import uvicorn
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
+from plm_platform.exceptions import NO_REVIEWERS, ExceptionQueue, StaticReviewerDirectory
 
 from .config import load_quality_gate_settings
 from .domain.enums import ResolutionCode
 from .gate.engine import run_candidate_evaluation
 from .gate.persistence import persist_gate_result
-from .gate.quarantine import resolve_quarantine
+from .gate.quarantine import OverrideRefusedError, resolve_quarantine
 from .ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from .storage.repositories import (
     get_release_manifest_by_candidate,
@@ -103,27 +104,54 @@ def cli_review() -> None:
 @qa_cli.command(name="resolve")
 def cli_resolve(
     case_id: str = typer.Option(..., "--case-id", help="Quarantine case ID"),
-    resolution: str = typer.Option("CLEARED_BY_OVERRIDE", "--resolution", help="Resolution: CLEARED_BY_OVERRIDE or CONFIRMED_REJECTED"),
-    auditor_id: str = typer.Option("auditor_cli", "--auditor", help="Auditor identity"),
+    resolution: str = typer.Option("CLEARED_BY_OVERRIDE", "--resolution", help="Resolution: CLEARED_BY_OVERRIDE, CONFIRMED_REJECTED or RE_EVALUATE"),
+    auditor_id: str = typer.Option(..., "--auditor", help="Reviewer identity (must hold --role in --reviewers)"),
     notes: str = typer.Option("", "--notes", help="Audit notes"),
+    role: str | None = typer.Option(None, "--role", help="Reviewer role the auditor acts in"),
+    evidence: list[str] = typer.Option([], "--evidence", help="Evidence item as name=reference; repeatable"),  # noqa: B008
+    reviewers_file: Path | None = typer.Option(None, "--reviewers", help="JSON file mapping actor to roles"),  # noqa: B008
 ) -> None:
-    """Resolve an open quarantine case."""
+    """Resolve an open quarantine case.
+
+    An override is authorized per hold by the platform exception queue: a hard stop is
+    always refused, and a reviewable hold needs ``--role`` granted to ``--auditor`` in the
+    ``--reviewers`` file plus every required ``--evidence`` item.
+    """
     try:
         res_code = ResolutionCode(resolution)
     except ValueError:
         typer.echo(f"Invalid resolution: {resolution}", err=True)
         raise typer.Exit(code=1)
+    evidence_map: dict[str, str] = {}
+    for item in evidence:
+        name, sep, reference = item.partition("=")
+        if not sep or not name.strip() or not reference.strip():
+            typer.echo(f"Invalid --evidence {item!r}: expected name=reference", err=True)
+            raise typer.Exit(code=1)
+        evidence_map[name.strip()] = reference.strip()
+    reviewers = (
+        StaticReviewerDirectory.from_json_file(reviewers_file) if reviewers_file else NO_REVIEWERS
+    )
+    queue = ExceptionQueue(reviewers=reviewers)
 
     factory = platform_session_factory()
     with factory() as session:
-        case, manifest = resolve_quarantine(
-            session=session,
-            case_id=case_id,
-            resolution=res_code,
-            auditor_id=auditor_id,
-            notes=notes,
-            now=SystemClock().now(),
-        )
+        try:
+            case, manifest = resolve_quarantine(
+                session=session,
+                case_id=case_id,
+                resolution=res_code,
+                auditor_id=auditor_id,
+                notes=notes,
+                now=SystemClock().now(),
+                queue=queue,
+                reviewer_role=role,
+                evidence=evidence_map,
+            )
+        except OverrideRefusedError as exc:
+            session.commit()  # keep the queue's record of the refused attempt
+            typer.echo(f"Override refused ({exc.refusal.code.value}): {exc}", err=True)
+            raise typer.Exit(code=3) from exc
         session.commit()
         typer.echo(f"Case {case.id} resolved with {case.resolution.value if case.resolution else 'none'}")
         if manifest:

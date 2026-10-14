@@ -1,0 +1,183 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "hold-classes-v1",
+  "notes": [
+    "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
+    "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
+    "REVIEWABLE_QUARANTINE: resumes only for an actor holding reviewer_role and only with every required_evidence item. No entry has empty required_evidence, so there is no bare approve anywhere.",
+    "A reason code missing from reason_codes is classified by 'unmapped' (HARD_STOP) and flagged on the case.",
+    "Citations: AGENTS.md:43; docs/P0_master_integration_implementation_plan.md:66 (human hard-stops); docs/architecture.md:906-921 (P29); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:183-187 (R3 exception queue); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (P5 section 49 quarantine semantics)."
+  ],
+  "unmapped": {
+    "hold_class": "HARD_STOP",
+    "severity": "CRITICAL",
+    "override_permitted": false,
+    "required_evidence": ["external_process_ref", "external_outcome_ref"],
+    "reviewer_role": "policy_owner",
+    "category": "unmapped_reason_code",
+    "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:185 (fail closed: a code the policy does not classify is never assumed reviewable)",
+    "description": "No policy entry for this reason code. Treated as a hard stop until the policy classifies it."
+  },
+  "reason_codes": {
+    "COPYRIGHT_DISPUTE": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["dispute_id", "dispute_outcome_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "copyright_dispute",
+      "source": "docs/P0_master_integration_implementation_plan.md:66 ('copyright disputes'); AGENTS.md:43",
+      "description": "A copyright dispute is open against a published or submitted asset."
+    },
+    "PLATFORM_POLICY_DISPUTE": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["platform_case_id", "platform_decision_ref"],
+      "reviewer_role": "platform_liaison",
+      "category": "platform_policy_dispute",
+      "source": "docs/P0_master_integration_implementation_plan.md:66 ('platform-policy disputes'); AGENTS.md:43",
+      "description": "A platform has opened a policy dispute (strike, policy violation notice)."
+    },
+    "KYC_REQUIRED": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["kyc_case_id", "kyc_completion_ref"],
+      "reviewer_role": "account_owner",
+      "category": "kyc",
+      "source": "docs/P0_master_integration_implementation_plan.md:66 ('KYC'); AGENTS.md:43",
+      "description": "A provider requires identity verification before it will continue."
+    },
+    "ACCOUNT_SECURITY_EVENT": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["security_incident_id", "account_recovery_ref"],
+      "reviewer_role": "account_owner",
+      "category": "account_security",
+      "source": "docs/P0_master_integration_implementation_plan.md:66 ('account-security events'); AGENTS.md:43",
+      "description": "An account-security event (suspicious login, credential revocation, lockout) on a provider account."
+    },
+    "PAYMENT_METHOD_CHANGE": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["payment_change_request_id", "account_owner_confirmation_ref"],
+      "reviewer_role": "account_owner",
+      "category": "payment_change",
+      "source": "docs/P0_master_integration_implementation_plan.md:66 ('payment method changes'); AGENTS.md:43",
+      "description": "A payment method or payout destination change was requested or detected."
+    },
+    "PROTECTED_ARTIST_REFERENCE_DETECTED": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["likeness_clearance_ref", "rights_counsel_opinion_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_artist_reference",
+      "source": "docs/architecture.md:911 (P29 'artist reference detected'); emitted by services/quality_gate/evaluators/policy.py",
+      "description": "A prompt or metadata names a protected or living artist."
+    },
+    "LYRIC_SIMILARITY_HIGH": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["lyric_clearance_ref", "rights_counsel_opinion_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_lyric_similarity",
+      "source": "docs/architecture.md:912 (P29 'copyrighted lyric similarity high'); detector is stage R4",
+      "description": "Lyrics are highly similar to a copyrighted work."
+    },
+    "SAMPLE_PROVENANCE_UNCERTAIN": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["sample_license_ref", "sample_clearance_outcome_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_sample_provenance",
+      "source": "docs/architecture.md:913 (P29 'sample provenance uncertain'); detector is stage R4",
+      "description": "The provenance of a sample in the audio cannot be established."
+    },
+    "COMMERCIAL_LICENSE_UNCERTAIN": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["provider_license_determination_ref", "rights_counsel_opinion_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_commercial_license",
+      "source": "docs/architecture.md:914 (P29 'commercial license uncertain')",
+      "description": "A commercial-use license was declared but its terms are in doubt (conflicting, conditional or contested) and need a determination outside PLM. Distinct from UNKNOWN_COMMERCIAL_LICENSE, where no usable declaration exists yet."
+    },
+    "UNAUTHORIZED_VOICE_CLONE_DETECTED": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["voice_authorization_ref", "rights_counsel_opinion_ref"],
+      "reviewer_role": "rights_counsel",
+      "category": "p29_voice_cloning",
+      "source": "docs/architecture.md:915 (P29 'unauthorized voice cloning detected'); detector is stage R4",
+      "description": "The vocal imitates a real person without documented authorization."
+    },
+    "AI_POLICY_CONFLICT": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["platform_case_id", "platform_decision_ref"],
+      "reviewer_role": "platform_liaison",
+      "category": "p29_ai_policy",
+      "source": "docs/architecture.md:916 (P29 'AI policy conflict')",
+      "description": "The asset conflicts with a platform's or distributor's AI-content policy."
+    },
+    "DISTRIBUTOR_REJECTION": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["distributor_ticket_id", "distributor_decision_ref"],
+      "reviewer_role": "distribution_liaison",
+      "category": "p29_distributor_rejection",
+      "source": "docs/architecture.md:917 (P29 'distributor rejection'); PART XVIII example at docs/architecture.md:971-977",
+      "description": "The distributor rejected a release; it resumes only on the distributor's recorded decision."
+    },
+    "PLATFORM_CLAIM": {
+      "hold_class": "HARD_STOP",
+      "severity": "CRITICAL",
+      "override_permitted": false,
+      "required_evidence": ["platform_claim_id", "claim_outcome_ref"],
+      "reviewer_role": "platform_liaison",
+      "category": "p29_platform_claim",
+      "source": "docs/architecture.md:918 (P29 'platform claim')",
+      "description": "A platform claim (for example a Content ID claim) was raised on a published asset."
+    },
+    "UNKNOWN_COMMERCIAL_LICENSE": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["provider_license_document_ref", "license_terms_version", "commercial_use_confirmation_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "unknown_rights",
+      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:187 ('Unknown rights stay quarantined'); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1430 ('provider API did not return commercial-use status'); emitted by services/quality_gate/evaluators/rights.py",
+      "description": "Commercial-use eligibility was not declared as eligible. Unknown rights are reviewable, but the only exit is the license evidence: a bare approve is refused."
+    },
+    "INCOMPLETE_R6_PROVENANCE": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["provider_license_document_ref", "license_terms_version", "generation_attempt_ref"],
+      "reviewer_role": "rights_reviewer",
+      "category": "unknown_rights",
+      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1429 ('license evidence missing'); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:187; emitted by services/quality_gate/evaluators/rights.py",
+      "description": "The provider declared no license terms for the producing attempt. Resumes only with the recovered license terms."
+    },
+    "SEVERE_CLIPPING_DETECTED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "MEDIUM",
+      "override_permitted": true,
+      "required_evidence": ["listening_review_ref"],
+      "reviewer_role": "quality_reviewer",
+      "category": "technical_quality",
+      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (HIGH, non-blocking) by services/quality_gate/evaluators/technical.py",
+      "description": "Clipping above the warning threshold. A quality reviewer may clear it with a recorded listening review."
+    }
+  }
+}

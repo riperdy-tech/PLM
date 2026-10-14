@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
+from plm_platform.exceptions import StaticReviewerDirectory
 from quality_gate.api.app import create_app
 from quality_gate.config import load_quality_gate_settings
 
@@ -38,7 +39,12 @@ def qa_engine():
 @pytest.fixture
 def qa_client(qa_engine):
     platform = load_settings(env=ENV_WITH_TOKEN)
-    settings = load_quality_gate_settings(platform=platform)
+    settings = load_quality_gate_settings(
+        platform=platform,
+        reviewers=StaticReviewerDirectory(
+            {"auditor_bob": ["rights_reviewer"], "admin_root": ["admin", "rights_counsel"]}
+        ),
+    )
     app = create_app(
         session_factory=lambda: qa_session(qa_engine),
         settings=settings,
@@ -155,10 +161,20 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
         assert any(c["case_id"] == case_id for c in cases)
 
         # 3. Resolve quarantine case with CLEARED_BY_OVERRIDE
+        holds = next(c for c in cases if c["case_id"] == case_id)["holds"]
+        assert [(h["reason_code"], h["hold_class"]) for h in holds] == [
+            ("UNKNOWN_COMMERCIAL_LICENSE", "REVIEWABLE_QUARANTINE")
+        ]
         resolve_payload = {
             "resolution": "CLEARED_BY_OVERRIDE",
             "auditor_id": "auditor_bob",
             "notes": "Verified licensing manually with provider.",
+            "reviewer_role": "rights_reviewer",
+            "evidence": {
+                "provider_license_document_ref": "doc://provider/license/42",
+                "license_terms_version": "2026-09",
+                "commercial_use_confirmation_ref": "ticket://provider/7781",
+            },
         }
         res_post = qa_client.post(
             f"/qa/quarantine/{case_id}/resolve",

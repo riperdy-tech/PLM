@@ -10,14 +10,20 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
+from plm_platform.exceptions import DecisionCode, ExceptionCase, ExceptionQueue
 from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
 from ..domain.enums import ResolutionCode
-from ..domain.models import LegacyManifestError
+from ..domain.models import LegacyManifestError, QuarantineCase
 from ..gate.engine import run_candidate_evaluation
 from ..gate.persistence import persist_gate_result
-from ..gate.quarantine import OverrideNotPossibleError, resolve_quarantine
+from ..gate.quarantine import (
+    OverrideNotPossibleError,
+    OverrideRefusedError,
+    quarantine_holds,
+    resolve_quarantine,
+)
 from ..ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from ..storage.repositories import (
     get_candidate_evaluation,
@@ -28,6 +34,7 @@ from ..storage.repositories import (
 from .schemas import (
     EvaluationRequest,
     EvaluationResponse,
+    HoldResponse,
     QuarantineCaseResponse,
     QuarantineResolutionRequest,
     ReleaseManifestPayload,
@@ -35,6 +42,10 @@ from .schemas import (
 from .service_token import require_service_token
 
 __all__ = ["build_router", "get_clock"]
+
+_IDENTITY_REFUSALS = frozenset(
+    {DecisionCode.REVIEWER_ROLE_MISMATCH, DecisionCode.REVIEWER_NOT_AUTHORIZED}
+)
 
 
 def get_clock() -> Clock:
@@ -50,6 +61,22 @@ def build_router(
     """Build the authenticated router for the quality gate."""
     router = APIRouter(prefix="/qa", tags=["quality_gate"])
     auth_dep = require_service_token(settings.platform)
+    queue = ExceptionQueue(reviewers=settings.reviewers)
+
+    def _case_response(session: Session, c: QuarantineCase) -> QuarantineCaseResponse:
+        return QuarantineCaseResponse(
+            case_id=c.id,
+            candidate_id=c.candidate_id,
+            evaluation_id=c.evaluation_id,
+            reason_codes=c.reason_codes,
+            priority=c.priority,
+            status=c.status.value,
+            assigned_to=c.assigned_to,
+            resolved_at=c.resolved_at.isoformat() if c.resolved_at else None,
+            resolution=c.resolution.value if c.resolution else None,
+            resolution_notes=c.resolution_notes,
+            holds=[_hold_response(h) for h in quarantine_holds(session, queue, c.id)],
+        )
 
     def _require_session() -> Iterator[Session]:
         if session_factory is None:
@@ -193,22 +220,7 @@ def build_router(
     def list_quarantine_queue(
         session: Annotated[Session, Depends(_require_session)],
     ) -> list[QuarantineCaseResponse]:
-        cases = list_open_quarantine_cases(session)
-        return [
-            QuarantineCaseResponse(
-                case_id=c.id,
-                candidate_id=c.candidate_id,
-                evaluation_id=c.evaluation_id,
-                reason_codes=c.reason_codes,
-                priority=c.priority,
-                status=c.status.value,
-                assigned_to=c.assigned_to,
-                resolved_at=c.resolved_at.isoformat() if c.resolved_at else None,
-                resolution=c.resolution.value if c.resolution else None,
-                resolution_notes=c.resolution_notes,
-            )
-            for c in cases
-        ]
+        return [_case_response(session, c) for c in list_open_quarantine_cases(session)]
 
     @router.post(
         "/quarantine/{case_id}/resolve",
@@ -253,7 +265,25 @@ def build_router(
                 auditor_id=req.auditor_id,
                 notes=req.notes,
                 now=clock.now(),
+                queue=queue,
+                reviewer_role=req.reviewer_role,
+                evidence=req.evidence,
             )
+        except OverrideRefusedError as exc:
+            # Nothing in qa changed; keep the queue's record of the refused attempt.
+            session.commit()
+            refusal = exc.refusal
+            field_paths = [f"evidence.{item}" for item in exc.missing_evidence]
+            if refusal.code in _IDENTITY_REFUSALS:
+                field_paths = ["auditor_id", "reviewer_role", *field_paths]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code=refusal.code.value,
+                    field_paths=field_paths or ["case_id"],
+                    message=str(exc),
+                ).model_dump(),
+            ) from exc
         except OverrideNotPossibleError as exc:
             session.rollback()
             raise HTTPException(
@@ -264,17 +294,21 @@ def build_router(
             ) from exc
         session.commit()
 
-        return QuarantineCaseResponse(
-            case_id=case.id,
-            candidate_id=case.candidate_id,
-            evaluation_id=case.evaluation_id,
-            reason_codes=case.reason_codes,
-            priority=case.priority,
-            status=case.status.value,
-            assigned_to=case.assigned_to,
-            resolved_at=case.resolved_at.isoformat() if case.resolved_at else None,
-            resolution=case.resolution.value if case.resolution else None,
-            resolution_notes=case.resolution_notes,
-        )
+        return _case_response(session, case)
 
     return router
+
+
+def _hold_response(hold: ExceptionCase) -> HoldResponse:
+    return HoldResponse(
+        hold_id=hold.id,
+        reason_code=hold.reason_code,
+        hold_class=hold.hold_class.value,
+        severity=hold.severity.value,
+        override_permitted=hold.override_permitted,
+        required_evidence=list(hold.required_evidence),
+        reviewer_role=hold.reviewer_role,
+        policy_mapped=hold.policy_mapped,
+        status=hold.status.value,
+        resolution=hold.resolution.value if hold.resolution else None,
+    )
