@@ -387,3 +387,19 @@ def test_p8_takedown_needs_its_own_grant() -> None:
         with pytest.raises(ExternalWriteRefusedError):
             engine.request_takedown(session, submitted.release.release_id)
     assert client.writes == ["submit_release"]
+
+
+def test_p7_real_client_never_uploads_placeholder_bytes() -> None:
+    caps = ("youtube.upload", "youtube.thumbnail", "youtube.playlist")
+    guard = _guard(
+        {c: ExecutionPolicy.LIVE for c in caps}, grants=tuple(_grant(c) for c in caps), budget=AllowAll()
+    )
+    client = SpyRealYouTubeClient()
+    engine = YouTubePublishingEngine(client, chunk_size=512, write_guard=guard)
+    manifest = _sample_manifest()
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        result = engine.execute_publish(session, manifest, operating_mode=OperatingMode.AUTONOMOUS)
+    assert _yt_writes(client) == []
+    assert result.attempt.state is PublishState.FAILED_PERMANENT
+    assert result.error is not None and "no video bytes" in result.error
