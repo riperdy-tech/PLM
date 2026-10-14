@@ -13,6 +13,10 @@ dependencies = [
     "fastapi>=0.115",
     "httpx>=0.27",
     "minio>=7.2",
+    "numpy>=2.0",
+    "Pillow>=11.0",
+    "pyloudnorm>=0.1",
+    "soundfile>=0.12",
     "prometheus-client>=0.26",
     "psycopg[binary]>=3.2",
     "pydantic>=2.7",
@@ -70,4 +74,5 @@ testpaths = ["tests", "services"]
 timeout = 120
 markers = [
     "integration: needs docker compose services (postgres, minio); skips cleanly when unreachable",
+    "media: needs ffmpeg/ffprobe (the dev image pins FFmpeg 7); skipped on a host without them unless PLM_REQUIRE_MEDIA_TOOLS=1, which turns a missing tool into a failure",
 ]

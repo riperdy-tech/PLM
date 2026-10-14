@@ -85,6 +85,9 @@ def test_gate_commands_present_and_in_order(job: dict[str, Any]) -> None:
     assert joined.index("plm migrate") < joined.index("pytest -q -m integration"), (
         "the integration tier needs a migrated database"
     )
+    assert "PLM_REQUIRE_MEDIA_TOOLS=1" in joined and "pytest -q -m media" in joined, (
+        "media tests run in the dev image and may not skip"
+    )
     assert "pytest -q -m integration" in joined
     lint = _index_of(commands, "ruff check .")
     fast = _index_of(commands, 'pytest -q -m "not integration"')
