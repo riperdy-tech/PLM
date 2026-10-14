@@ -180,10 +180,10 @@ def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
     assert after > before
 
     # AC-09/AC-10: the API answers with ranked items and the frozen envelope
-    base = {"DATABASE_URL": "postgresql://plm:x@localhost:5432/plm", "POSTGRES_PASSWORD": "x",
-            "MINIO_ENDPOINT": "localhost:9000", "MINIO_ROOT_USER": "plm",
+    base = {"DATABASE_URL": "postgresql://plm:x@127.0.0.1:5432/plm", "POSTGRES_PASSWORD": "x",
+            "MINIO_ENDPOINT": "127.0.0.1:9000", "MINIO_ROOT_USER": "plm",
             "MINIO_ROOT_PASSWORD": "x", "MINIO_BUCKET": "plm-media",
-            "TEMPORAL_HOST": "localhost:7233", "PLM_SERVICE_TOKEN": ACCEPTANCE_TOKEN}
+            "TEMPORAL_HOST": "127.0.0.1:7233", "PLM_SERVICE_TOKEN": ACCEPTANCE_TOKEN}
     app = create_app(session_factory=factory,
                      settings=load_market_settings(platform=load_settings(env=base)))
     client = SyncASGIClient(app, base_url="http://testserver",
