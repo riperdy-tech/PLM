@@ -10,7 +10,8 @@ in `packages/`, one service package per phase (P1-P9) in `services/`.
 That starts postgres, minio, temporal, temporal-ui and the worker container.
 Other targets: `down`, `logs`, `test`, `lint`, `fmt`, `typecheck`, `doctor`,
 `migrate`. First time: `python -m venv .venv`, install with
-`.\.venv\Scripts\python.exe -m pip install -e ".[dev]"`, then copy
+`.\.venv\Scripts\python.exe -m pip install -c constraints.txt -e ".[dev]"`
+(the versions CI verifies), then copy
 `.env.example` to `.env`. POSIX hosts can run `make <target>` instead.
 
 ## Status
