@@ -27,6 +27,7 @@ from services.distribution.artists.manager import get_or_create_artist
 from services.distribution.client.mock import MockDistributorClient
 from services.distribution.compiler.release_compiler import compile_canonical_release_package
 from services.distribution.engine import DistributionEngine
+from services.distribution.identifiers.allocator import allocate_isrc
 
 # P5 & P6
 from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
@@ -42,7 +43,7 @@ from services.youtube_publishing.preflight.gates import (
     evaluate_gate_b_artifact,
     evaluate_gate_c_metadata,
 )
-from tests.support.seams import sample_lineage
+from tests.support.seams import media_package, release_manifest, sample_lineage
 
 
 def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
@@ -133,43 +134,35 @@ def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
 def test_p8_duplicate_submission_is_strictly_idempotent(distribution_db: Session) -> None:
     """Review Focus 2: Double submission to distributor is strictly idempotent."""
     artist = get_or_create_artist(distribution_db, "Neon Resident", "brand_neon")
-    p5_manifest = {"p5_manifest_id": "p5_idem_001", "disposition": "PASSED"}
-    p6_media = {
-        "media_package_id": "p6_idem_001",
-        "brand_id": "brand_neon",
-        "audio_master_uri": "media/audio/idem.wav",
-        "audio_checksum": "chk_audio_idem",
-        "thumbnails": [{"uri": "media/artwork/cover.jpg", "checksum": "chk_art_idem"}],
-        "tracklist": [
-            {
-                "title": "Idempotent Beat",
-                "duration_seconds": 180.0,
-                "audio_uri": "media/audio/idem.wav",
-                "audio_checksum": "chk_audio_idem",
-            }
-        ],
-    }
+    now = datetime(2026, 10, 1, tzinfo=UTC)
     pkg = compile_canonical_release_package(
-        p5_manifest=p5_manifest,
-        media_package=p6_media,
+        track_manifests=[release_manifest(candidate_id="cand_idem")],
+        media_package=media_package("cand_idem"),
         artist_id=artist.id,
         artist_name=artist.canonical_name,
-        brand_id="brand_neon",
         release_title="Idempotent Beat",
+        release_date="2026-10-01",
+        label_name="Neon Records",
+        copyright_line="2026 Neon Records",
+        publisher_line="2026 Neon Music Publishing",
+        territories="WORLDWIDE",
+        allocate_isrc=lambda key: allocate_isrc(distribution_db, key, now=now),
+        now=now,
     )
+    identity = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
 
     client = MockDistributorClient()
     engine = DistributionEngine(client)
 
     # First submission succeeds
-    sub1 = engine.submit_release(distribution_db, pkg, artist=artist)
+    sub1 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
     assert sub1.is_success
     assert not sub1.is_duplicate
     first_release_id = sub1.release.release_id
     assert len(client.submitted_packages) == 1
 
     # Second submission with exact same package / fingerprint
-    sub2 = engine.submit_release(distribution_db, pkg, artist=artist)
+    sub2 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
     assert sub2.is_success
     assert sub2.is_duplicate
     assert sub2.release.release_id == first_release_id

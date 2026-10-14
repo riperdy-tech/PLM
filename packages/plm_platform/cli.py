@@ -775,14 +775,18 @@ def youtube_smoke() -> None:
 
 @distribution_app.command(name="submit")
 def distribution_submit(
-    package_path: str = typer.Option(..., "--package", "-p", help="Path to release package JSON file"),
-    artist_name: str = typer.Option("Neon Artist", "--artist", "-a", help="Artist display name"),
-    brand_id: str = typer.Option("brand_neon", "--brand", "-b", help="Brand ID"),
+    package_path: str = typer.Option(
+        ...,
+        "--request",
+        "-r",
+        help="Path to a release request JSON: track_manifests (C5), media_package (C6), "
+        "optional publication, and the release metadata",
+    ),
 ) -> None:
-    """Submit a compiled release package to DSPs (P8)."""
+    """Submit a release to DSPs from seam payloads (P8)."""
     from distribution.cli import cli_submit
 
-    cli_submit(package_path=package_path, artist_name=artist_name, brand_id=brand_id)
+    cli_submit(package_path=package_path)
 
 
 @distribution_app.command(name="release")

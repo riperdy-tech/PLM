@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from plm_contracts import ExecutionPolicy
+from plm_contracts.seams import ExperimentLineage
 from plm_platform.execution import (
     ExternalWriteGuard,
     GuardDecision,
@@ -150,17 +151,22 @@ class YouTubePublishingEngine:
         if existing_rec:
             logger.info("Found existing publication record for package %s: video %s", manifest.media_package_id, existing_rec.youtube_video_id)
             # Emit Hop 2 event for the existing publication
-            event = YouTubeVideoPublishedEvent(
+            event = YouTubeVideoPublishedEvent.build(
+                event="youtube_video_published",
                 youtube_video_id=existing_rec.youtube_video_id,
                 publish_attempt_id=existing_rec.publish_attempt_id,
-                experiment_id=existing_rec.experiment_id,
-                content_arm_id=existing_rec.content_arm_id,
+                channel_id=existing_rec.channel_id,
+                media_package_id=existing_rec.media_package_id,
+                lineage=ExperimentLineage(
+                    experiment_id=existing_rec.experiment_id,
+                    experiment_family_id=existing_rec.experiment_family_id,
+                    content_arm_id=existing_rec.content_arm_id,
+                    content_genome_id=existing_rec.content_genome_id,
+                    production_directive_id=existing_rec.production_directive_id,
+                ),
                 published_at=existing_rec.published_at,
                 metadata_version=manifest.metadata_version,
-                experiment_family_id=existing_rec.experiment_family_id,
-                content_genome_id=existing_rec.content_genome_id,
-                production_directive_id=existing_rec.production_directive_id,
-                media_package_id=existing_rec.media_package_id,
+                contains_synthetic_media=existing_rec.contains_synthetic_media,
             )
             attempt = get_publish_attempt_by_idempotency_key(session, manifest.idempotency_key)
             if not attempt:
@@ -396,17 +402,16 @@ class YouTubePublishingEngine:
             session.commit()
 
             # Hop 2 Event carrying all R9 identity fields
-            event = YouTubeVideoPublishedEvent(
+            event = YouTubeVideoPublishedEvent.build(
+                event="youtube_video_published",
                 youtube_video_id=youtube_video_id,
                 publish_attempt_id=attempt.attempt_id,
-                experiment_id=manifest.experiment_id,
-                content_arm_id=manifest.content_arm_id,
+                channel_id=manifest.channel_id,
+                media_package_id=manifest.media_package_id,
+                lineage=manifest.lineage,
                 published_at=completed_time,
                 metadata_version=manifest.metadata_version,
-                experiment_family_id=manifest.experiment_family_id,
-                content_genome_id=manifest.content_genome_id,
-                production_directive_id=manifest.production_directive_id,
-                media_package_id=manifest.media_package_id,
+                contains_synthetic_media=manifest.contains_synthetic_media,
             )
 
             # Reload updated attempt

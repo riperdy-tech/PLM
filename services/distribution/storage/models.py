@@ -77,6 +77,21 @@ class TrackRow(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
 
+class IsrcAllocationRow(Base):
+    """One ISRC per recording, allocated once and never regenerated (ADR-0029)."""
+
+    __tablename__ = "isrc_allocations"
+    __table_args__ = {"schema": "distribution"}  # noqa: RUF012
+
+    recording_key: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    isrc: Mapped[str] = mapped_column(sa.String(32), nullable=False, unique=True)
+    country: Mapped[str] = mapped_column(sa.String(2), nullable=False)
+    registrant: Mapped[str] = mapped_column(sa.String(3), nullable=False)
+    year: Mapped[str] = mapped_column(sa.String(2), nullable=False)
+    sequence: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    allocated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
 class ProviderReportRow(Base):
     """Raw distributor report row (Ruling R10)."""
 

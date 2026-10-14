@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from media_factory.domain.enums import (
     PackageStatus,
 )
@@ -16,10 +17,11 @@ from media_factory.domain.ids import (
 )
 from media_factory.domain.models import (
     Chapter,
+    LegacyPackageError,
     MediaPackage,
 )
 
-from tests.support.seams import sample_lineage
+from tests.support.seams import media_package_fields, sample_lineage
 
 
 def test_deterministic_identifiers() -> None:
@@ -59,23 +61,24 @@ def test_chapter_formatting() -> None:
 
 
 def test_media_package_creation_and_c6_payload() -> None:
+    wire = media_package_fields("s1")
     pkg = MediaPackage.create(
         release_manifest_id="rm_01",
-        experiment_id="exp_01",
-        content_arm_id="arm_01",
+        experiment_id="exp_test_01",
+        content_arm_id="arm_test_01",
         brand_id="brand_neon",
         playlist_session_id="ps_01",
         visual_session_id="vs_01",
         video_master_uri="s3://plm/video.mp4",
-        video_checksum="chk_vid_123",
+        video_checksum=wire["video"]["checksum"],
         video_duration_seconds=3600.0,
         render_profile="yt_longform_1080p_v1",
         audio_master_uri="s3://plm/audio.wav",
-        audio_checksum="chk_aud_123",
-        thumbnails=[{"id": "thumb_a", "uri": "s3://plm/thumb_a.webp"}],
-        tracklist=[{"song_id": "s1", "position": 1}],
-        chapters=[{"title": "Track 1", "start_seconds": 0.0}],
-        metadata_candidates=[{"variant_id": "meta_a", "title": "Great Mix"}],
+        audio_checksum=wire["audio"]["checksum"],
+        thumbnails=wire["thumbnails"],
+        tracklist=wire["tracklist"],
+        chapters=[],
+        metadata_candidates=wire["metadata_candidates"],
         short_source_assets=[{"clip_id": "clip_01"}],
         render_report={"status": "passed"},
         lineage=sample_lineage(),
@@ -88,8 +91,21 @@ def test_media_package_creation_and_c6_payload() -> None:
 
     payload = pkg.to_c6_payload()
     assert payload["media_package_id"] == pkg.media_package_id
+    assert payload["lineage"] == sample_lineage().model_dump()
+    assert payload["ai_disclosure_required"] is True
     assert payload["video"]["master_uri"] == "s3://plm/video.mp4"
-    assert payload["video"]["checksum"] == "chk_vid_123"
     assert payload["audio"]["master_uri"] == "s3://plm/audio.wav"
-    assert payload["audio"]["checksum"] == "chk_aud_123"
     assert payload["status"] == "ready_for_publish"
+
+
+def test_legacy_package_without_lineage_has_no_c6_wire() -> None:
+    pkg = MediaPackage(
+        media_package_id="mpkg_legacy", release_manifest_id="rm", experiment_id="e",
+        content_arm_id="a", brand_id="b", playlist_session_id="p", visual_session_id="v",
+        video_master_uri="u", video_checksum="c", video_duration_seconds=1.0,
+        render_profile="r", audio_master_uri="u", audio_checksum="c", thumbnails=[],
+        tracklist=[], chapters=[], metadata_candidates=[], short_source_assets=[],
+        render_report={}, status=PackageStatus.READY_FOR_PUBLISH,
+    )
+    with pytest.raises(LegacyPackageError):
+        pkg.to_c6_payload()

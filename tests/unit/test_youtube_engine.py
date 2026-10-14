@@ -83,9 +83,9 @@ def test_engine_publishes_end_to_end_successfully() -> None:
         event = result.event
         assert event is not None
         assert event.event == "youtube_video_published"
-        assert event.experiment_family_id == "fam_synth_001"
-        assert event.content_genome_id == "gen_synth_001"
-        assert event.production_directive_id == "dir_synth_001"
+        assert event.lineage.experiment_family_id == "fam_synth_001"
+        assert event.lineage.content_genome_id == "gen_synth_001"
+        assert event.lineage.production_directive_id == "dir_synth_001"
         assert event.media_package_id == "pkg_synth_001"
 
 

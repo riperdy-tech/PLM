@@ -13,11 +13,15 @@ from typing import Any
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_contracts.seams.c6 import MediaPackagePayload
 
 __all__ = [
     "candidate_event",
     "candidate_event_fields",
     "lineage_fields",
+    "media_package",
+    "media_package_fields",
+    "publication_fields",
     "release_manifest",
     "release_manifest_fields",
     "rights_fields",
@@ -151,3 +155,63 @@ def release_manifest_fields(**overrides: Any) -> dict[str, Any]:
 
 def release_manifest(**overrides: Any) -> ReleaseManifestPayload:
     return ReleaseManifestPayload.build(**release_manifest_fields(**overrides))
+
+
+def media_package_fields(*candidates: str, **overrides: Any) -> dict[str, Any]:
+    """Keyword arguments for a complete C6 hop-1 package over the given recordings."""
+    songs = candidates or ("cand_test_01",)
+    digest = hashlib.sha256("|".join(songs).encode()).hexdigest()
+    fields: dict[str, Any] = {
+        "media_package_id": "mpkg_test_01",
+        "release_manifest_id": "plm_test_01",
+        "lineage": lineage_fields(),
+        "brand_id": "brand_neon",
+        "ai_disclosure_required": True,
+        "video": {
+            "master_uri": "media/test/video.mp4",
+            "checksum": digest,
+            "duration_seconds": 150.0 * len(songs),
+            "render_profile": "yt_longform_1080p_v1",
+        },
+        "audio": {"master_uri": "media/test/audio.wav", "checksum": digest},
+        "thumbnails": [
+            {"id": "thumb_a", "uri": "media/test/thumb_a.jpg", "checksum": digest,
+             "width": 1280, "height": 720},
+        ],
+        "tracklist": [
+            {"position": n, "song_id": song, "title": f"Track {n}", "duration_seconds": 150.0,
+             "source_artifact_id": f"art_{song}"}
+            for n, song in enumerate(songs, start=1)
+        ],
+        "chapters": [],
+        "metadata_candidates": [
+            {"variant_id": "meta_a", "title": "Test Mix", "description": "A test mix.",
+             "tags": ["test"], "category_id": "10", "contains_synthetic_media": True},
+        ],
+        "short_source_assets": [],
+        "render_report": {},
+        "status": "ready_for_publish",
+    }
+    fields.update(overrides)
+    return fields
+
+
+def media_package(*candidates: str, **overrides: Any) -> MediaPackagePayload:
+    return MediaPackagePayload.build(**media_package_fields(*candidates, **overrides))
+
+
+def publication_fields(**overrides: Any) -> dict[str, Any]:
+    """Keyword arguments for a complete C6 hop-2 ``youtube_video_published`` event."""
+    fields: dict[str, Any] = {
+        "event": "youtube_video_published",
+        "youtube_video_id": "yt_test_01",
+        "publish_attempt_id": "att_test_01",
+        "channel_id": "UC_test",
+        "media_package_id": "mpkg_test_01",
+        "lineage": lineage_fields(),
+        "published_at": "2026-09-25T12:00:00+00:00",
+        "metadata_version": "meta_a",
+        "contains_synthetic_media": True,
+    }
+    fields.update(overrides)
+    return fields

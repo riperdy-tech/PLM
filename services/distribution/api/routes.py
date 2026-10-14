@@ -9,14 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
 from plm_platform.execution import ExternalWriteGuard, ExternalWriteRefusedError
 
-from ..artists.manager import get_or_create_artist
 from ..client.mock import MockDistributorClient
-from ..compiler.release_compiler import ReleaseClearanceError, compile_canonical_release_package
 from ..domain.models import DistributionRelease
 from ..engine import DistributionEngine
 from ..preflight.validators import DistributionPreflightError
 from ..reports.ingest import get_report_reference, ingest_provider_report
 from ..storage.repositories import get_release_by_id
+from ..submission import ReleaseMetadata, SubmissionRefusedError, submit_release_from_seams
 from .schemas import (
     HealthResponse,
     ReleaseResponse,
@@ -88,59 +87,31 @@ def build_distribution_router(
     def submit_release(
         req: ReleaseSubmitRequest,
     ) -> ReleaseResponse:
-        brand_id = req.brand_id or "brand_neon"
-
         with session_factory() as session:
-            # 1. Resolve or create artist profile
-            artist = get_or_create_artist(session, req.artist_name, brand_id=brand_id)
-
-            # 2. Mock or construct p5 clearance and p6 media package
-            p5_manifest = {
-                "p5_manifest_id": req.p5_manifest_id,
-                "disposition": "PASSED",
-            }
-            media_package = {
-                "media_package_id": req.p6_media_package_id,
-                "brand_id": brand_id,
-                "tracklist": req.tracks or [],
-                "thumbnails": [{"uri": f"media/artwork/{req.p6_media_package_id}.jpg"}],
-                "audio_master_uri": f"media/audio/{req.p6_media_package_id}.wav",
-            }
-
             try:
-                package = compile_canonical_release_package(
-                    p5_manifest=p5_manifest,
-                    media_package=media_package,
-                    artist_id=artist.id,
-                    artist_name=artist.canonical_name,
-                    brand_id=brand_id,
-                    release_title=req.release_title,
-                    release_version=req.release_version,
-                    release_date=req.release_date,
-                    label_name=req.label_name,
-                    copyright_line=req.copyright_line,
-                    publisher_line=req.publisher_line,
-                    territories=req.territories,
-                )
-            except ReleaseClearanceError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except Exception as exc:
-                raise HTTPException(status_code=422, detail=f"Compilation error: {exc}") from exc
-
-            try:
-                result = dist_engine.submit_release(
+                result = submit_release_from_seams(
                     session,
-                    package,
-                    artist=artist,
-                    experiment_id=req.experiment_id,
-                    experiment_family_id=req.experiment_family_id,
-                    content_arm_id=req.content_arm_id,
-                    content_genome_id=req.content_genome_id,
-                    production_directive_id=req.production_directive_id,
-                    media_package_id=req.media_package_id,
+                    dist_engine,
+                    track_manifests=req.track_manifests,
+                    media_package=req.media_package,
+                    publication=req.publication,
+                    metadata=ReleaseMetadata(
+                        artist_name=req.artist_name,
+                        release_date=req.release_date,
+                        label_name=req.label_name,
+                        copyright_line=req.copyright_line,
+                        publisher_line=req.publisher_line,
+                        territories=req.territories,
+                        release_title=req.release_title,
+                        release_version=req.release_version,
+                    ),
+                    now=datetime.now(UTC),
                 )
                 session.commit()
                 return _to_release_response(result.release)
+            except SubmissionRefusedError as exc:
+                session.rollback()
+                raise HTTPException(status_code=422, detail=exc.error.model_dump()) from exc
             except DistributionPreflightError as exc:
                 raise HTTPException(status_code=422, detail=exc.errors) from exc
             except ExternalWriteRefusedError as exc:

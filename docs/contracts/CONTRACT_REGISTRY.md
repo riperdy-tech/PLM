@@ -536,7 +536,24 @@ producer sent the identity fields P9 §38 requires).
   P8's release provenance (P8 §39) references `p5_manifest_id` and
   `p6_manifest_id`; `source_manifest_ids` in P8 §11 is the compiled snapshot.
 
-**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **exists**.
+**Amended by ADR-0025 / ADR-0029 (shared models `plm_contracts.seams.c6`):**
+
+- Hop 1 `MediaPackagePayload` (schema 1.0) = the P6 §5 fields above plus
+  `schema_version`, `lineage` (ExperimentLineage), `ai_disclosure_required`; every
+  asset is typed with its SHA-256 checksum; `thumbnails`, `tracklist` and
+  `metadata_candidates` are non-empty.
+- Hop 2 `YouTubePublicationPayload` (schema 1.0): `schema_version`, `event`,
+  `youtube_video_id`, `publish_attempt_id`, `channel_id`, `media_package_id`,
+  `lineage` (replaces the five loose R9 identifiers), `published_at` (aware),
+  `metadata_version`, `contains_synthetic_media`.
+- P7 refuses unconfigured channels, unready packages and naive schedule times. P8
+  submits only from C5 manifests + the C6 package (+ optional, matching C6 event).
+  ISRCs are allocated once per recording from a persisted sequence.
+
+**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **exists**. It runs P6's
+real assembler into P7's real manifest builder and publishing engine, then the real
+hop-2 event into P8's real submission. It proves the lineage reaches P8's stored release
+and that both hops refuse missing, placeholder, naive-time and future payloads.
 
 ---
 

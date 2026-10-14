@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select, update
@@ -22,6 +22,10 @@ from .models import (
     PublishManifestRow,
 )
 
+
+def _utc(value: datetime) -> datetime:
+    """SQLite drops ``tzinfo`` on read-back; P7 stores aware-UTC instants only."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 def _to_channel_domain(row: ChannelProfileRow) -> ChannelProfile:
     return ChannelProfile(
@@ -300,7 +304,7 @@ def _to_record_domain(row: PublicationRecordRow) -> YouTubePublicationRecord:
         title=row.title,
         privacy_status=PrivacyStatus(row.privacy_status),
         contains_synthetic_media=row.contains_synthetic_media,
-        published_at=row.published_at,
+        published_at=_utc(row.published_at),
         video_url=row.video_url,
         thumbnail_url=row.thumbnail_url,
         playlist_id=row.playlist_id,

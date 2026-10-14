@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -84,13 +85,9 @@ def insert_release(
     session: Session,
     release: DistributionRelease,
     *,
-    source_manifest_ids: list[str] | None = None,
-    experiment_id: str = "exp_unknown",
-    experiment_family_id: str = "fam_unknown",
-    content_arm_id: str = "arm_unknown",
-    content_genome_id: str = "gen_unknown",
-    production_directive_id: str = "dir_unknown",
-    media_package_id: str = "pkg_unknown",
+    source_manifest_ids: list[str],
+    lineage: ExperimentLineage,
+    media_package_id: str,
 ) -> None:
     deliv_dicts = [
         {
@@ -113,12 +110,12 @@ def insert_release(
         provider_release_id=release.provider_release_id,
         submission_fingerprint=release.submission_fingerprint,
         deliveries=deliv_dicts,
-        source_manifest_ids=source_manifest_ids or [],
-        experiment_id=experiment_id,
-        experiment_family_id=experiment_family_id,
-        content_arm_id=content_arm_id,
-        content_genome_id=content_genome_id,
-        production_directive_id=production_directive_id,
+        source_manifest_ids=source_manifest_ids,
+        experiment_id=lineage.experiment_id,
+        experiment_family_id=lineage.experiment_family_id,
+        content_arm_id=lineage.content_arm_id,
+        content_genome_id=lineage.content_genome_id,
+        production_directive_id=lineage.production_directive_id,
         media_package_id=media_package_id,
         created_at=release.created_at,
         updated_at=release.updated_at,
@@ -163,6 +160,26 @@ def get_release_by_id(session: Session, release_id: str) -> DistributionRelease 
         select(ReleaseRow).where(ReleaseRow.release_id == release_id)
     ).scalar_one_or_none()
     return _to_release_domain(row) if row else None
+
+
+def get_release_identity(session: Session, release_id: str) -> tuple[ExperimentLineage, str]:
+    """The lineage and media package a release was submitted with (R9, ADR-0029).
+
+    Raises ``ValueError`` if the release is unknown or its stored identity is not a valid
+    lineage (for example a placeholder written before ADR-0029)."""
+    row = session.execute(
+        select(ReleaseRow).where(ReleaseRow.release_id == release_id)
+    ).scalar_one_or_none()
+    if row is None:
+        raise ValueError(f"Release not found: {release_id}")
+    lineage = ExperimentLineage(
+        experiment_id=row.experiment_id,
+        experiment_family_id=row.experiment_family_id,
+        content_arm_id=row.content_arm_id,
+        content_genome_id=row.content_genome_id,
+        production_directive_id=row.production_directive_id,
+    )
+    return lineage, row.media_package_id
 
 
 def get_release_by_fingerprint(session: Session, fingerprint: str) -> DistributionRelease | None:

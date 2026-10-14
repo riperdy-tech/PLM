@@ -14,6 +14,7 @@ from plm_contracts.seams.c5 import ReleaseManifestPayload
 from sqlalchemy.orm import Session
 
 from ..config import MediaFactorySettings
+from ..domain.models import LegacyPackageError
 from ..playlist.assembler import PlaylistAssemblyError
 from ..rendering.assembler import assemble_media_package
 from ..storage.repositories import (
@@ -222,7 +223,15 @@ def build_router(
                     message=f"media package {package_id} not found",
                 ).model_dump(),
             )
-        return pkg.to_c6_payload()
+        try:
+            return pkg.to_c6_payload()
+        except LegacyPackageError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="legacy_media_package", field_paths=["package_id"], message=str(exc)
+                ).model_dump(),
+            ) from exc
 
     @router.get(
         "/playlists/{playlist_id}",

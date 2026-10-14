@@ -36,7 +36,7 @@ from youtube_publishing.storage.repositories import insert_publish_manifest
 
 from tests.support.distribution_db import distribution_db_session
 from tests.support.youtube_db import youtube_db_session
-from tests.unit.test_distribution_engine import _create_sample_package
+from tests.unit.test_distribution_engine import IDENTITY, _create_sample_package
 from tests.unit.test_youtube_engine import _sample_manifest
 
 NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
@@ -356,7 +356,7 @@ def test_p8_real_client_under_dry_run_is_never_called_and_nothing_persists() -> 
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
         with pytest.raises(ExternalWriteRefusedError) as exc:
-            engine.submit_release(session, pkg, artist=artist)
+            engine.submit_release(session, pkg, artist=artist, **IDENTITY)
     assert exc.value.decision.decision is WriteDecision.RECORD_INTENT
     assert client.writes == []
 
@@ -368,7 +368,7 @@ def test_p8_live_without_authorization_is_refused() -> None:
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
         with pytest.raises(ExternalWriteRefusedError) as exc:
-            engine.submit_release(session, pkg, artist=artist)
+            engine.submit_release(session, pkg, artist=artist, **IDENTITY)
     assert exc.value.decision.reason == "no_authorization"
     assert client.writes == []
 
@@ -383,7 +383,7 @@ def test_p8_takedown_needs_its_own_grant() -> None:
     engine = DistributionEngine(client, write_guard=guard)
     with distribution_db_session() as session:
         pkg, artist = _create_sample_package(session)
-        submitted = engine.submit_release(session, pkg, artist=artist)
+        submitted = engine.submit_release(session, pkg, artist=artist, **IDENTITY)
         with pytest.raises(ExternalWriteRefusedError):
             engine.request_takedown(session, submitted.release.release_id)
     assert client.writes == ["submit_release"]

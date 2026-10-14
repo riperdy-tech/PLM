@@ -18,6 +18,7 @@ from distribution.engine import DistributionEngine
 from pydantic import BaseModel, ConfigDict
 
 from tests.support.contract import SeamRegistry, assert_seam_payload
+from tests.support.seams import sample_lineage
 
 REGISTRY_ENTRY = "C7 · PHASE-P8 → PHASE-P9 → PHASE-P2"
 
@@ -112,11 +113,11 @@ def test_producer_event_validates_against_consumer_schema(contract_registry: Sea
         release=release,
         isrcs=["USPLM2600001"],
         source_package_hash="fingerprint_abc_123",
-        experiment_id="exp_synth_01",
-        experiment_family_id="fam_synth_01",
-        content_arm_id="arm_synth_01",
-        content_genome_id="gen_synth_01",
-        production_directive_id="dir_synth_01",
+        lineage=sample_lineage(
+            experiment_id="exp_synth_01", experiment_family_id="fam_synth_01",
+            content_arm_id="arm_synth_01", content_genome_id="gen_synth_01",
+            production_directive_id="dir_synth_01",
+        ),
         media_package_id="pkg_synth_01",
     )
 
