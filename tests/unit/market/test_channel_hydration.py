@@ -39,6 +39,9 @@ from services.market_intelligence.domain.enums import ConnectorType, ProviderNam
 from services.market_intelligence.features.arm_features import compute_arm_features
 from services.market_intelligence.storage import repositories
 
+# Exercises code that loads platform settings; the values are set explicitly.
+pytestmark = pytest.mark.usefixtures("platform_env")
+
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"

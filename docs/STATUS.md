@@ -186,7 +186,7 @@ deferred and tracked here; they are not scheduled before the economics gate.
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1439 passed, 1 skipped, ~36 s. Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
+| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1441 passed, 1 skipped, ~36 s. Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
 | Integration, compose **down** | `pytest -m integration` | 3 passed, 27 skipped, ~2.5 min (collection and imports verified) |
 | Integration, compose **up** | `pytest -m integration` | Not run (no containers). The migrations `0016`–`0024` and the schema-matches-models tests have therefore **not** been exercised against Postgres. |
 | Lint | `ruff check .` | clean |
