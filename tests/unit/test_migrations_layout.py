@@ -69,6 +69,14 @@ class TestSingleChain:
         assert len(script.get_heads()) == 1, "the alembic chain must not fork"
         assert len(script.get_bases()) == 1, "the alembic chain must have one base"
 
+    def test_every_revision_id_fits_the_alembic_version_column(self) -> None:
+        """``alembic_version.version_num`` is ``varchar(32)`` on Postgres. SQLite does not
+        enforce the length, so an over-long id passes every unit test and then fails the
+        first real upgrade."""
+        script = ScriptDirectory.from_config(_config())
+        too_long = sorted(r.revision for r in script.walk_revisions() if len(r.revision) > 32)
+        assert not too_long, f"revision ids longer than 32 characters: {too_long}"
+
 
 class TestBaseline:
     def test_baseline_schema_list_matches_the_platform_module(self) -> None:
