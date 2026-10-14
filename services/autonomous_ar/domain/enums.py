@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from plm_contracts.seams.c7 import ObservationMaturity as _SharedObservationMaturity
+
 __all__ = [
     "AllocationCycleStatus", "ArmLifecycleStatus", "DirectiveStatus", "ObservationMaturity",
     "OverrideAction", "ReasonCode", "UpdateStatus",
@@ -44,12 +46,8 @@ class DirectiveStatus(StrEnum):
     FAILED = "failed"
 
 
-class ObservationMaturity(StrEnum):
-    """§18/§19: a 24h result is provisional, never final."""
-
-    PROVISIONAL = "provisional"
-    MATURE = "mature"
-    CLOSED = "closed"
+ObservationMaturity = _SharedObservationMaturity
+"""§18/§19 maturity; defined once in ``plm_contracts.seams.c7`` (C7 leg 2)."""
 
 
 class UpdateStatus(StrEnum):

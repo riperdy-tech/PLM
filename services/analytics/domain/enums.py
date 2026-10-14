@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from plm_contracts import ObservationWindow as SharedObservationWindow
+
 
 class MetricSource(str, Enum):
     """Source provider for metric observations."""
@@ -25,16 +27,9 @@ class MetricStatus(str, Enum):
     QUARANTINED = "quarantined"
 
 
-class ObservationWindow(str, Enum):
-    """Canonical observation time window (P9 §14, §15)."""
-
-    W_1H = "1h"
-    W_24H = "24h"
-    W_7D = "7d"
-    W_14D = "14d"
-    W_28D = "28d"
-    W_90D = "90d"
-    LIFETIME = "lifetime"
+ObservationWindow = SharedObservationWindow
+"""Observation windows; the shared vocabulary P2 parses (ADR-0030). P9's own
+``1h``/``14d`` windows were refused by P2 and are gone; ``72h`` is now available."""
 
 
 class RevenueStatus(str, Enum):

@@ -14,6 +14,7 @@ from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_contracts.seams.c7 import RAW_REWARD_METRICS
 
 __all__ = [
     "candidate_event",
@@ -27,6 +28,7 @@ __all__ = [
     "rights_fields",
     "sample_lineage",
     "track_spec_fields",
+    "unmeasured_raw_metrics",
 ]
 
 
@@ -215,3 +217,8 @@ def publication_fields(**overrides: Any) -> dict[str, Any]:
     }
     fields.update(overrides)
     return fields
+
+
+def unmeasured_raw_metrics() -> dict[str, float | None]:
+    """The C7 leg-2 raw-metric keys, none measured (``null``, never ``0``)."""
+    return dict.fromkeys(RAW_REWARD_METRICS)

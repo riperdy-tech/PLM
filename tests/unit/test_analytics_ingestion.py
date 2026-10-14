@@ -29,7 +29,7 @@ def test_youtube_metrics_ingestion() -> None:
             subscribers_gained=45,
             subscribers_lost=3,
             estimated_revenue_usd=82.40,
-            window=ObservationWindow.W_24H,
+            window=ObservationWindow.H24,
         )
 
         assert obs.video_id == "vid_yt_001"

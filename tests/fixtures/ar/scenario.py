@@ -42,6 +42,7 @@ from services.autonomous_ar.modeling.prior import cold_start_prior
 from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
 from services.autonomous_ar.modeling.update import apply_pending_updates
 from services.autonomous_ar.storage import repositories
+from tests.support.seams import unmeasured_raw_metrics
 
 __all__ = ["BRAND_ID", "NOW", "AcceptanceEnvironment", "build_acceptance_environment",
            "seed_environment"]
@@ -176,10 +177,10 @@ def _history_rows(
 def _payload(arm_id: str, maturity: ObservationMaturity, window: ObservationWindow,
              reward: float, *, now: datetime) -> dict[str, Any]:
     return {
-        "experiment_id": f"p215-history-{arm_id}-{window.value}",
+        "schema_version": "1.0", "experiment_id": f"p215-history-{arm_id}-{window.value}",
         "arm_id": arm_id, "content_id": f"p215-content-{arm_id}",
         "observation_window": window.value, "status": maturity.value,
-        "observed_at": (now - timedelta(days=3)).isoformat(), "raw_metrics": {},
+        "observed_at": (now - timedelta(days=3)).isoformat(), "raw_metrics": unmeasured_raw_metrics(),
         "normalized_reward": reward, "reward_version": "p9-reward-v1",
         "attribution_confidence": 0.9,
     }

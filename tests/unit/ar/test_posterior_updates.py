@@ -15,6 +15,7 @@ from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
 from services.autonomous_ar.modeling.update import apply_pending_updates
 from services.autonomous_ar.storage import repositories
 from tests.support.ar_db import ar_session, create_ar_engine
+from tests.support.seams import unmeasured_raw_metrics
 
 NOW = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
 SETTINGS = load_ar_settings()
@@ -40,9 +41,9 @@ def _seed_arm_and_posterior(session, *, mean: float = 0.5, variance: float = 0.0
 
 def _payload(*, reward: float = 0.9, observed_at: datetime = NOW,
              attribution: float = 0.99) -> dict[str, object]:
-    return {"experiment_id": "exp-1", "arm_id": "rnb-1", "content_id": "c-1",
+    return {"schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-1", "content_id": "c-1",
             "observation_window": "7d", "status": "mature",
-            "observed_at": observed_at.isoformat(), "raw_metrics": {},
+            "observed_at": observed_at.isoformat(), "raw_metrics": unmeasured_raw_metrics(),
             "normalized_reward": reward, "reward_version": "p9-reward-v1",
             "attribution_confidence": attribution}
 

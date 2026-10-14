@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from services.autonomous_ar.api.app import create_app
 from services.autonomous_ar.config import load_ar_settings
 from tests.support.ar_db import create_ar_engine
+from tests.support.seams import unmeasured_raw_metrics
 
 ENV_WITH_TOKEN = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm", "POSTGRES_PASSWORD": "x",
@@ -22,9 +23,9 @@ CYCLE_BODY = {
 }
 
 RESULT_BODY = {
-    "experiment_id": "exp-1", "arm_id": "rnb-0", "content_id": "c-1",
+    "schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-0", "content_id": "c-1",
     "observation_window": "7d", "status": "mature",
-    "observed_at": "2026-10-01T00:00:00+00:00", "raw_metrics": {},
+    "observed_at": "2026-10-01T00:00:00+00:00", "raw_metrics": unmeasured_raw_metrics(),
     "normalized_reward": 0.8, "reward_version": "p9-reward-v1",
     "attribution_confidence": 0.9,
 }

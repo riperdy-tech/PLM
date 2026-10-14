@@ -85,14 +85,14 @@ def test_producer_event_validates_against_consumer_schema(contract_registry: Sea
         content_arm_id="arm_synth_01",
         content_genome_id="gen_synth_01",
         unit_id="pkg_synth_01",
-        observation_window=ObservationWindow.W_7D,
+        observation_window=ObservationWindow.D7,
         primary_metric="net_contribution",
         primary_value=120.50,
         normalized_reward=0.85,
         reward_version="v1",
         attribution_confidence=0.98,
         maturity="mature",
-        quality_status="eligible",
+        quality_status=None,
         created_at=datetime.now(UTC),
     )
 

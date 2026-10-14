@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from plm_contracts import QualityStatus
+from plm_contracts.seams.c7 import ObservationMaturity, RewardResultPayload
 from pydantic import BaseModel, ConfigDict
 
 from .enums import (
@@ -47,8 +49,8 @@ class TrackMetricObservation(BaseModel):
 
     id: str
     isrc: str
-    track_id: str
-    release_id: str
+    track_id: str | None
+    release_id: str | None
     window: ObservationWindow
     date_str: str  # YYYY-MM-DD
     streams: int = 0
@@ -73,6 +75,9 @@ class RevenueStatement(BaseModel):
     file_hash: str
     source_reference: str
     received_at: datetime
+    unattributed_revenue_usd: float
+    """Revenue on rows with no ISRC: reported, but not attributable to a recording."""
+    unattributed_row_count: int
 
 
 class CostItem(BaseModel):
@@ -124,28 +129,16 @@ class ExperimentOutcomeRecord(BaseModel):
     primary_metric: str = "net_contribution"
     primary_value: float
     normalized_reward: float  # [0.0, 1.0]
-    reward_version: str = "v1"
-    attribution_confidence: float = 1.0
-    maturity: str = "MATURE"
-    quality_status: str = "ELIGIBLE"
+    reward_version: str
+    attribution_confidence: float
+    maturity: ObservationMaturity
+    quality_status: QualityStatus | None
+    """``None`` means P9 did not assess data quality for this outcome."""
     created_at: datetime
 
 
-class NormalizedRewardPayload(BaseModel):
-    """Seam C7 Leg 2 contract payload: P9 → P2 (POST /ar/results) (Ruling R11, P2 §72)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    experiment_id: str
-    arm_id: str
-    content_id: str
-    observation_window: str
-    status: str
-    observed_at: str  # ISO-8601 string
-    raw_metrics: dict[str, Any]
-    normalized_reward: float
-    reward_version: str
-    attribution_confidence: float
+NormalizedRewardPayload = RewardResultPayload
+"""Seam C7 leg 2 (R11, P2 §72): the shared ``plm_contracts.seams.c7`` model."""
 
 
 class P10FeatureView(BaseModel):

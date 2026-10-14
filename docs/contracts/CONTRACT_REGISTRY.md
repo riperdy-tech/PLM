@@ -626,7 +626,25 @@ ownership overlapped (P8 §51 vs P9 §53–§54).
   experiment-outcome record, not the reward post).
 - This is the loop-closing contract; tested end to end in Wave 6.
 
-**Seam test:** `tests/contract/test_c7_distribution_to_analytics.py` — **exists**.
+**Amended by ADR-0025 / ADR-0030 (shared models `plm_contracts.seams.c7`):**
+
+- Leg 1 `DistributionRecordPayload` (schema 1.0): the fields above, with `lineage`
+  (ExperimentLineage) replacing the five loose R9 identifiers, `isrcs[]` non-empty and
+  ISO 3901-valid. P9 consumes it (`analytics.ingestion.releases`) and links each
+  (release, ISRC) to the lineage. A statement row without an ISRC is counted as
+  unattributed revenue, never given an invented ISRC.
+- Leg 2 `RewardResultPayload` (schema 1.0): the P2 §72 fields plus `schema_version`.
+  `observation_window` ∈ `plm_contracts.ObservationWindow`; `status` ∈
+  `ObservationMaturity` (`provisional` / `mature` / `closed`); `raw_metrics` carries
+  exactly the five registry keys, `null` when unmeasured. `quality_status` resolves the
+  open item as optional `QualityStatus` (`null` = not assessed). `economic_terms` is
+  reserved per ADR-0023 #4.
+
+**Seam test:** `tests/contract/test_c7_distribution_to_analytics.py` — **exists**. It runs
+P8's real submission into P9's real link and statement ingestion, and P9's real reward
+producer into P2's real `store_result`. It proves attribution through the ISRC link,
+that unattributed revenue is counted but not invented, and that both legs refuse missing
+or old-vocabulary facts.
 
 ---
 

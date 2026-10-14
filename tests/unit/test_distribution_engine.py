@@ -60,8 +60,7 @@ def test_submit_release_success_and_c7_payload() -> None:
 
         # Check Seam C7 payload with R9 fields
         assert result.payload is not None
-        assert result.payload.experiment_id == IDENTITY["lineage"].experiment_id
-        assert result.payload.content_arm_id == IDENTITY["lineage"].content_arm_id
+        assert result.payload.lineage == IDENTITY["lineage"]
         assert result.payload.media_package_id == "mpkg_test_01"
 
 

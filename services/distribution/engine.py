@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
 from plm_platform.execution import (
@@ -291,28 +290,23 @@ class DistributionEngine:
         media_package_id: str,
     ) -> DistributionRecordPayload:
         """Construct the Seam C7 Leg 1 payload carrying all R9 identity fields (P8 §71, Ruling R9, R10)."""
-        deliveries_dict: list[dict[str, Any]] = [
-            {
-                "store": d.store.value,
-                "external_release_id": d.external_release_id,
-                "status": d.status.value,
-                "first_delivered_at": d.first_delivered_at.isoformat() if d.first_delivered_at else None,
-            }
-            for d in release.deliveries
-        ]
-        return DistributionRecordPayload(
+        return DistributionRecordPayload.build(
             release_id=release.release_id,
             artist_id=release.artist_id,
             release_version=release.release_version,
-            isrcs=isrcs,
+            isrcs=tuple(isrcs),
             provider=release.provider,
-            deliveries=deliveries_dict,
+            deliveries=tuple(
+                {
+                    "store": d.store.value,
+                    "external_release_id": d.external_release_id,
+                    "status": d.status.value,
+                    "first_delivered_at": d.first_delivered_at,
+                }
+                for d in release.deliveries
+            ),
             source_package_hash=source_package_hash,
             status=release.status.value,
-            experiment_id=lineage.experiment_id,
-            experiment_family_id=lineage.experiment_family_id,
-            content_arm_id=lineage.content_arm_id,
-            content_genome_id=lineage.content_genome_id,
-            production_directive_id=lineage.production_directive_id,
+            lineage=lineage,
             media_package_id=media_package_id,
         )

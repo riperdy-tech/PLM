@@ -16,15 +16,18 @@ from plm_contracts import AllocationType, GateDisposition
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
-from sqlalchemy.orm import Session
 
 # P9
+from plm_contracts.seams.c7 import ObservationMaturity
+from sqlalchemy.orm import Session
+
 from services.analytics.domain.enums import ObservationWindow, PaybackStatus
 from services.analytics.economics.calculator import compute_unit_economics
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
     generate_and_post_reward,
 )
+from services.analytics.ingestion.releases import ingest_distribution_record, lineage_for_isrc
 
 # P2
 from services.autonomous_ar.config import load_ar_settings
@@ -352,13 +355,19 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         )
     c7_dist_payload = submitted.payload
     assert c7_dist_payload is not None
-    assert c7_dist_payload.content_arm_id == directive.arm_id
-    assert c7_dist_payload.experiment_family_id == ready_event.lineage.experiment_family_id
+    assert c7_dist_payload.lineage.content_arm_id == directive.arm_id
+    assert c7_dist_payload.lineage == ready_event.lineage
 
     # =========================================================================
     # Step 9: P9 Analytics & Economics — Unit Economics & Reward Posting (R10, R11)
     # =========================================================================
+    # Leg 1: P9 links the released ISRCs to the lineage P8 recorded (ADR-0030).
+    ingest_distribution_record(analytics_db, c7_dist_payload.to_wire(), now=now)
+    linked = lineage_for_isrc(analytics_db, c7_dist_payload.isrcs[0])
+    assert linked is not None and linked[1] == ready_event.lineage
+
     # Ingest facts: YouTube revenue $60.00, DSP royalties $50.00, production cost $15.00
+    # (still literals: real ingestion of these facts is stage R6)
     gross_revenue = 110.0
     allocated_cost = 15.0
     net_contribution = gross_revenue - allocated_cost  # $95.00
@@ -378,16 +387,16 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # Evaluate outcome and post normalized reward (Ruling R11, Seam C7 Leg 2)
     outcome = evaluate_experiment_outcome(
         analytics_db,
-        experiment_id=experiment.experiment_id,
-        experiment_family_id=yt_event.lineage.experiment_family_id,
-        content_arm_id=directive.arm_id,
-        content_genome_id=yt_event.lineage.content_genome_id,
+        lineage=linked[1],
         unit_id=media_pkg.media_package_id,
         net_contribution_usd=net_contribution,
         views=28000,
         watch_time_minutes=1400.0,
-        window=ObservationWindow.W_7D,
+        window=ObservationWindow.D7,
+        maturity=ObservationMaturity.MATURE,
         attribution_confidence=1.0,
+        quality_status=None,
+        now=now,
     )
     assert outcome.normalized_reward > 0.70  # Strong positive performance
 
@@ -410,7 +419,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # Ingest observation into P2
     stored_result = store_result(
         ar_db,
-        reward_post.model_dump(),
+        reward_post.to_wire(),
         brand_id="brand_neon",
         now=now,
     )

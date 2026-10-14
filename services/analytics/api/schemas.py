@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from plm_contracts import ObservationWindow, QualityStatus
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c7 import ObservationMaturity
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -53,14 +56,23 @@ class CostIngestRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """Evaluate one outcome and build its C7 leg-2 reward (ADR-0030).
 
-    experiment_id: str
-    experiment_family_id: str
-    content_arm_id: str
-    content_genome_id: str
-    unit_id: str
+    Every measurement fact is explicit. An unmeasured raw metric is ``null``, never 0.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lineage: ExperimentLineage
+    unit_id: str = Field(min_length=1)
     net_contribution_usd: float
-    views: int = 0
-    watch_time_minutes: float = 0.0
-    window: str = "7d"
+    views: int | None
+    watch_time_minutes: float | None
+    average_percentage_viewed: float | None
+    subscribers_gained: int | None
+    estimated_revenue: float | None
+    window: ObservationWindow
+    maturity: ObservationMaturity
+    attribution_confidence: float = Field(ge=0.0, le=1.0)
+    quality_status: QualityStatus | None
+    observed_at: AwareDatetime

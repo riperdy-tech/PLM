@@ -29,7 +29,7 @@ def test_enums_values() -> None:
     assert MetricSource.YOUTUBE_ANALYTICS.value == "youtube_analytics"
     assert MetricSource.DISTRIBUTOR_STATEMENT.value == "distributor_statement"
     assert MetricStatus.VALID.value == "valid"
-    assert ObservationWindow.W_7D.value == "7d"
+    assert ObservationWindow.D7.value == "7d"
     assert RevenueStatus.REPORTED.value == "reported"
     assert PaybackStatus.REPAID.value == "repaid"
     assert DataFreshness.FRESH.value == "fresh"
@@ -61,7 +61,7 @@ def test_domain_models_creation() -> None:
         id="obs_01",
         video_id="vid_01",
         channel_id="chan_01",
-        window=ObservationWindow.W_24H,
+        window=ObservationWindow.H24,
         date_str="2026-09-26",
         views=1200,
         watch_time_minutes=45.2,
@@ -78,5 +78,7 @@ def test_domain_models_creation() -> None:
         file_hash="chk_123",
         source_reference="statement.csv",
         received_at=now,
+        unattributed_revenue_usd=0.0,
+        unattributed_row_count=0,
     )
     assert stmt.total_revenue_usd == 150.0

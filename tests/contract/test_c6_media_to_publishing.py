@@ -125,7 +125,7 @@ def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str
     assert lineage.model_dump() == hop1["lineage"]
     assert package_id == hop1["media_package_id"]
     assert result.payload is not None
-    assert result.payload.content_arm_id == hop1["lineage"]["content_arm_id"]
+    assert result.payload.lineage.content_arm_id == hop1["lineage"]["content_arm_id"]
 
 
 def test_p8_refuses_a_publication_from_another_package(
