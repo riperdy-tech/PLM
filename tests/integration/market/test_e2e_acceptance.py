@@ -190,7 +190,7 @@ def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
     client = SyncASGIClient(app, base_url="http://testserver",
                             headers={"X-PLM-Service-Token": ACCEPTANCE_TOKEN})
     body = client.get("/market/v1/opportunities").json()
-    assert set(body) == {"items", "next_cursor", "as_of", "score_version"}
+    assert set(body) == {"schema_version", "items", "next_cursor", "as_of", "score_version"}
     scores_seen = [item["market_opportunity_score"] for item in body["items"]]
     assert scores_seen and scores_seen == sorted(scores_seen, reverse=True)
 
