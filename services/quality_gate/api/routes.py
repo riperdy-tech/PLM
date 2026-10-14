@@ -14,8 +14,12 @@ from plm_platform.exceptions import DecisionCode, ExceptionCase, ExceptionQueue
 from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
+from ..detectors.config import load_detector_policy
+from ..detectors.suite import RightsDetectors
 from ..domain.enums import ResolutionCode
-from ..domain.models import LegacyManifestError, QuarantineCase
+from ..domain.ids import evaluation_id as derive_evaluation_id
+from ..domain.ids import quarantine_case_id
+from ..domain.models import CandidateEvaluation, LegacyManifestError, QuarantineCase
 from ..gate.engine import run_candidate_evaluation
 from ..gate.persistence import persist_gate_result
 from ..gate.quarantine import (
@@ -25,7 +29,19 @@ from ..gate.quarantine import (
     quarantine_holds,
     resolve_quarantine,
 )
+from ..ingestion.artifact_fetch import (
+    ARTIFACT_INTEGRITY_FAILED,
+    ARTIFACT_NOT_FOUND,
+    ARTIFACT_SHA256_MISMATCH,
+    ARTIFACT_STORE_NOT_CONFIGURED,
+    ARTIFACT_STORE_UNAVAILABLE,
+    ARTIFACT_URI_INVALID,
+    ArtifactFetcher,
+    ArtifactFetchRefused,
+    staged_audio,
+)
 from ..ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
+from ..storage.detector_catalog import SqlInternalCatalog, SqlLyricCorpus, SqlReferenceAudioSet
 from ..storage.repositories import (
     get_candidate_evaluation,
     get_quarantine_case,
@@ -48,6 +64,16 @@ _IDENTITY_REFUSALS = frozenset(
     {DecisionCode.REVIEWER_ROLE_MISMATCH, DecisionCode.REVIEWER_NOT_AUTHORIZED}
 )
 
+_FETCH_REFUSAL_STATUS = {
+    ARTIFACT_URI_INVALID: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ARTIFACT_SHA256_MISMATCH: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ARTIFACT_NOT_FOUND: status.HTTP_409_CONFLICT,
+    ARTIFACT_INTEGRITY_FAILED: status.HTTP_409_CONFLICT,
+    ARTIFACT_STORE_UNAVAILABLE: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ARTIFACT_STORE_NOT_CONFIGURED: status.HTTP_503_SERVICE_UNAVAILABLE,
+}
+"""HTTP status per artifact-read reason code (see :mod:`..ingestion.artifact_fetch`)."""
+
 
 def get_clock() -> Clock:
     """The wall clock for request handling; tests override this dependency."""
@@ -58,8 +84,13 @@ def build_router(
     *,
     session_factory: Callable[[], Session] | None,
     settings: QualityGateSettings,
+    artifact_fetcher: ArtifactFetcher | None = None,
 ) -> APIRouter:
-    """Build the authenticated router for the quality gate."""
+    """Build the authenticated router for the quality gate.
+
+    ``artifact_fetcher`` reads candidate audio by URI and checksum; ``None`` means no
+    store is configured and evaluations are refused with 503.
+    """
     router = APIRouter(prefix="/qa", tags=["quality_gate"])
     auth_dep = require_service_token(settings.platform)
     queue = ExceptionQueue(reviewers=settings.reviewers)
@@ -77,6 +108,29 @@ def build_router(
             resolution=c.resolution.value if c.resolution else None,
             resolution_notes=c.resolution_notes,
             holds=[_hold_response(h) for h in quarantine_holds(session, queue, c.id)],
+        )
+
+    def _stored_response(session: Session, ev: CandidateEvaluation) -> EvaluationResponse:
+        case = get_quarantine_case(session, quarantine_case_id(ev.candidate_id, ev.id))
+        manifest = get_release_manifest_by_candidate(session, ev.candidate_id)
+        return EvaluationResponse(
+            evaluation_id=ev.id,
+            candidate_id=ev.candidate_id,
+            status=ev.status.value,
+            disposition=ev.disposition.value if ev.disposition else None,
+            technical_status=ev.technical_status,
+            quality_status=ev.quality_status,
+            provenance_status=ev.provenance_status,
+            rights_status=ev.rights_status,
+            policy_status=ev.policy_status,
+            composite_quality_score=ev.composite_quality_score,
+            quarantine_case_id=case.id if case else None,
+            quarantine_reason_codes=list(case.reason_codes) if case else [],
+            release_manifest_id=(
+                manifest.p5_manifest_id
+                if manifest is not None and manifest.evaluation_id == ev.id
+                else None
+            ),
         )
 
     def _require_session() -> Iterator[Session]:
@@ -151,13 +205,64 @@ def build_router(
                     message=exc.error.message,
                 ).model_dump(),
             ) from exc
-        result = run_candidate_evaluation(
-            event=event,
-            audio_path=req.audio_path,
-            clock=clock,
-            evaluation_policy_version=req.evaluation_policy_version,
-            trigger=req.trigger,
+        # The evaluation id is deterministic per (candidate, policy, trigger): a retried
+        # request replays the stored evaluation instead of evaluating twice.
+        stored = get_candidate_evaluation(
+            session,
+            derive_evaluation_id(event.candidate_id, req.evaluation_policy_version, req.trigger),
         )
+        if stored is not None:
+            if stored.artifact_id != event.artifact_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=ErrorShape(
+                        code="evaluation_conflict",
+                        field_paths=["candidate_event.artifact_id"],
+                        message=(
+                            f"evaluation {stored.id} judged artifact {stored.artifact_id}, "
+                            f"not {event.artifact_id}"
+                        ),
+                    ).model_dump(),
+                )
+            return _stored_response(session, stored)
+        try:
+            if artifact_fetcher is None:
+                raise ArtifactFetchRefused(
+                    ARTIFACT_STORE_NOT_CONFIGURED,
+                    "no artifact store is configured for the quality gate",
+                )
+            audio = artifact_fetcher.fetch(event.artifact_uri, event.artifact_sha256)
+        except ArtifactFetchRefused as exc:
+            # Nothing was evaluated, so nothing is recorded: never a pass (R4).
+            raise HTTPException(
+                status_code=_FETCH_REFUSAL_STATUS.get(
+                    exc.error.code, status.HTTP_409_CONFLICT
+                ),
+                detail=ErrorShape(
+                    code=exc.error.code,
+                    field_paths=[f"candidate_event.{p}" for p in exc.error.field_paths],
+                    message=exc.error.message,
+                ).model_dump(),
+            ) from exc
+        with staged_audio(audio, event.artifact_sha256) as audio_path:
+            detector_policy = load_detector_policy()
+            result = run_candidate_evaluation(
+                event=event,
+                audio_path=audio_path,
+                clock=clock,
+                # The registered catalog, reference recordings and lyric corpus in the qa
+                # schema; an empty or unreachable source is UNKNOWN and quarantines.
+                detectors=RightsDetectors(
+                    internal_catalog=SqlInternalCatalog(session),
+                    reference_audio=SqlReferenceAudioSet(
+                        session, detector_policy.audio_fingerprint
+                    ),
+                    lyric_corpus=SqlLyricCorpus(session, detector_policy.lyric_similarity),
+                    policy=detector_policy,
+                ),
+                evaluation_policy_version=req.evaluation_policy_version,
+                trigger=req.trigger,
+            )
 
         # Persist aggregate to database
         persist_gate_result(session, result)
@@ -176,6 +281,9 @@ def build_router(
             policy_status=result.evaluation.policy_status,
             composite_quality_score=result.evaluation.composite_quality_score,
             quarantine_case_id=result.quarantine_case.id if result.quarantine_case else None,
+            quarantine_reason_codes=(
+                list(result.quarantine_case.reason_codes) if result.quarantine_case else []
+            ),
             release_manifest_id=result.release_manifest.p5_manifest_id if result.release_manifest else None,
         )
 
@@ -199,18 +307,7 @@ def build_router(
                     message=f"Evaluation {evaluation_id} not found.",
                 ).model_dump(),
             )
-        return EvaluationResponse(
-            evaluation_id=ev.id,
-            candidate_id=ev.candidate_id,
-            status=ev.status.value,
-            disposition=ev.disposition.value if ev.disposition else None,
-            technical_status=ev.technical_status,
-            quality_status=ev.quality_status,
-            provenance_status=ev.provenance_status,
-            rights_status=ev.rights_status,
-            policy_status=ev.policy_status,
-            composite_quality_score=ev.composite_quality_score,
-        )
+        return _stored_response(session, ev)
 
     @router.get(
         "/quarantine",

@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.api.app import create_app
+from services.music_factory.storage.artifacts import MinioArtifactStorage
+from tests.support.fake_minio import FakeMinio
 from tests.support.music_db import create_music_engine, music_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
@@ -61,7 +63,9 @@ def _make_client(*, with_token: bool = True) -> tuple[TestClient, str]:
     def session_factory():
         return music_session(engine)
 
-    app = create_app(session_factory=session_factory, settings=settings)
+    # The production MinIO store over an in-process stand-in for the MinIO client (R4).
+    storage = MinioArtifactStorage(platform, client=FakeMinio())  # type: ignore[arg-type]
+    app = create_app(session_factory=session_factory, settings=settings, storage=storage)
     client = TestClient(app)
     return client, "music-seam-token"
 
@@ -143,7 +147,17 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     export_data = res_export.json()
     assert export_data["candidate"]["status"] == "exported_to_p5"
     assert export_data["event"]["event_type"] == "music_candidate_ready_for_p5"
-    assert export_data["event"]["schema_version"] == "2.0"  # ADR-0032
+    assert export_data["event"]["schema_version"] == "3.0"  # ADR-0035
     assert export_data["event"]["lineage"]["content_arm_id"] == "arm_01"  # not a placeholder
     # The mock honours the requested duration (ADR-0032); it no longer clamps to 30 s.
     assert export_data["event"]["measured_audio"]["duration_seconds"] == 90.0
+    # R4: the artifact is named by its opaque plm:// URI, whose key ends in the sha256.
+    event = export_data["event"]
+    assert event["artifact_uri"].startswith("plm://plm-media/music/")
+    assert event["artifact_uri"].endswith("/" + event["artifact_sha256"])
+
+    # Re-export is idempotent: the same event, rebuilt from the same stored facts.
+    again = client.post(f"/music/candidates/{candidate_id}/export-to-p5", headers=headers)
+    assert again.status_code == 200
+    assert again.json()["event"] == event
+    assert again.json()["candidate"]["status"] == "exported_to_p5"

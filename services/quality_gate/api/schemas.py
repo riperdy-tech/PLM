@@ -21,12 +21,16 @@ __all__ = [
 
 
 class EvaluationRequest(BaseModel):
-    """Evaluate one candidate: its Seam C4 event plus where P5 can read the audio."""
+    """Evaluate one candidate from its Seam C4 event alone (R4).
+
+    P5 reads the audio from the artifact store by the event's ``artifact_uri`` and
+    verifies it against ``artifact_sha256``. A caller cannot name a file: any extra
+    field, ``audio_path`` included, is refused with 422.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     candidate_event: dict[str, Any]
-    audio_path: str
     evaluation_policy_version: str = "p5-v1"
     trigger: str = "candidate_ready"
 
@@ -45,6 +49,8 @@ class EvaluationResponse(BaseModel):
     policy_status: str
     composite_quality_score: float | None = None
     quarantine_case_id: str | None = None
+    quarantine_reason_codes: list[str] = Field(default_factory=list)
+    """The quarantine case's reason codes; empty when there is no case."""
     release_manifest_id: str | None = None
 
 

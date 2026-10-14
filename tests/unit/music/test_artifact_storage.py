@@ -34,7 +34,8 @@ def test_artifact_storage_and_creation() -> None:
         name="master.wav",
         data=wav_bytes,
     )
-    assert uri == "s3://plm-artifacts/music/cand_123/master.wav"
+    # Test-only store: content-addressed like MinIO, under a scheme no consumer accepts.
+    assert uri == f"memory://music/cand_123/master.wav/{measured.sha256}"
     assert storage.get_artifact(uri) == wav_bytes
 
     artifact = create_audio_artifact(

@@ -18,6 +18,7 @@ from .generation.planner import plan_generation
 from .ingestion.p3_adapter import adapt_track_spec
 from .providers.adapters import get_provider_adapter
 from .providers.registry import list_providers
+from .storage.artifacts import ArtifactStorageUnavailable, MinioArtifactStorage
 
 music_cli = typer.Typer(help="Music generation factory CLI commands")
 
@@ -58,11 +59,14 @@ def cli_generate(
 
     typer.echo(f"Created Generation Plan: {plan.plan_id} ({len(variants)} variants)")
 
+    # Audio goes to the MinIO artifact store from the platform settings (R4); there is no
+    # in-memory fallback, and an unreachable store fails the command without committing.
+    storage = MinioArtifactStorage(load_settings())
     factory = platform_session_factory()
     session = factory()
 
     adapter = get_provider_adapter(provider)
-    engine = GenerationEngine(clock=clock, default_provider_id=provider)
+    engine = GenerationEngine(clock=clock, storage=storage, default_provider_id=provider)
 
     try:
         result = engine.execute_plan(
@@ -73,6 +77,11 @@ def cli_generate(
             provider_adapter=adapter,
         )
         session.commit()
+    except ArtifactStorageUnavailable as exc:
+        session.rollback()
+        typer.echo(f"Error: artifact_store_unavailable: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    else:
         typer.echo(f"Generation Status: {result.status.value}")
         typer.echo(f"Generated {len(result.candidates)} candidates:")
         for cand in result.candidates:
