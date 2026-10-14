@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ArmStateOut", "CycleCreateRequest", "CycleSummaryOut", "DecisionOut", "ResultAccepted",
-    "UpdateSummaryOut",
+    "ResultLookupOut", "UpdateSummaryOut",
 ]
 
 
@@ -111,6 +111,22 @@ class ArmStateOut(_Frozen):
 class ResultAccepted(_Frozen):
     observation_id: str
     experiment_result_id: str
+    stored: bool
+
+
+class ResultLookupOut(_Frozen):
+    """Whether one fact (experiment, content, window, maturity) is stored.
+
+    The reconciliation read for a producer whose delivery timed out: ``stored`` is a
+    definite yes or no. ``observation_id`` is the deterministic id the fact is (or would
+    be) stored under.
+    """
+
+    experiment_id: str
+    content_id: str
+    observation_window: str
+    status: str
+    observation_id: str
     stored: bool
 
 

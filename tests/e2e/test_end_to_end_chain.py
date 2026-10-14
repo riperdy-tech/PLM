@@ -27,7 +27,7 @@ from services.analytics.domain.enums import PaybackStatus
 from services.analytics.economics.calculator import compute_unit_economics
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
-    generate_and_post_reward,
+    record_and_enqueue_reward,
 )
 from services.analytics.ingestion.releases import ingest_distribution_record, lineage_for_isrc
 
@@ -404,7 +404,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     )
     assert outcome.normalized_reward > 0.70  # Strong positive performance
 
-    reward_post = generate_and_post_reward(
+    reward_post = record_and_enqueue_reward(
         analytics_db,
         outcome,
         views=28000,
@@ -412,7 +412,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         average_percentage_viewed=72.0,
         subscribers_gained=45,
         estimated_revenue=gross_revenue,
-        now=now,
+        now=now, enqueued_at=now,
     )
     assert reward_post.arm_id == "arm_synth_lofi_01"
     assert reward_post.normalized_reward == outcome.normalized_reward

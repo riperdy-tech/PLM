@@ -25,7 +25,7 @@ from ..domain.enums import (
     ObservationWindow,
     RevenueStatus,
 )
-from ..domain.ids import build_fx_rate_id
+from ..domain.ids import build_fx_rate_id, build_reward_id
 from ..domain.models import (
     CostItem,
     ExperimentOutcomeRecord,
@@ -365,7 +365,8 @@ def get_experiment_outcomes(session: Session, experiment_id: str) -> list[Experi
 
 def insert_posted_reward(session: Session, payload: NormalizedRewardPayload) -> None:
     row = RewardPostedRow(
-        id=f"rwd_{payload.experiment_id}_{payload.arm_id}_{payload.observation_window}",
+        id=build_reward_id(payload.experiment_id, payload.content_id,
+                           payload.observation_window.value, payload.status.value),
         experiment_id=payload.experiment_id,
         arm_id=payload.arm_id,
         content_id=payload.content_id,

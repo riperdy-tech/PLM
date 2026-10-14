@@ -18,7 +18,7 @@ from sqlalchemy import text
 
 from ..domain.enums import CostCategory, ObservationWindow
 from ..economics.ledger import entity_economics
-from ..evaluation.feedback import evaluate_experiment_outcome, generate_and_post_reward
+from ..evaluation.feedback import evaluate_experiment_outcome, record_and_enqueue_reward
 from ..ingestion.cost import ingest_cost_entry
 from ..ingestion.distributor import ingest_distributor_statement
 from ..ingestion.youtube import ingest_youtube_metrics
@@ -128,7 +128,7 @@ def run_smoke_test() -> str | None:
                 quality_status=None,
                 observed_at=now,
             )
-            reward_payload = generate_and_post_reward(
+            reward_payload = record_and_enqueue_reward(
                 session,
                 outcome,
                 views=15000,
@@ -137,6 +137,7 @@ def run_smoke_test() -> str | None:
                 subscribers_gained=None,
                 estimated_revenue=obs_yt.estimated_revenue,
                 now=now,
+                enqueued_at=now,
             )
             if reward_payload.normalized_reward <= 0.0 or reward_payload.normalized_reward > 1.0:
                 return f"Invalid normalized reward range: {reward_payload.normalized_reward}"

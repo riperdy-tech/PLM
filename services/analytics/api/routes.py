@@ -9,12 +9,13 @@ from plm_contracts import ErrorShape
 from plm_contracts.measurement import MeasurementKindError
 from plm_contracts.money import CurrencyMismatchError, FxRateMissingError, Money
 from plm_platform.clock import Clock
+from plm_platform.outbox import OutboxConflictError
 
 from ..config import AnalyticsSettings
 from ..domain.enums import ObservationWindow
 from ..domain.models import NormalizedRewardPayload, P10FeatureView
 from ..economics.ledger import entity_economics
-from ..evaluation.feedback import evaluate_experiment_outcome, generate_and_post_reward
+from ..evaluation.feedback import evaluate_experiment_outcome, record_and_enqueue_reward
 from ..ingestion.cost import ingest_cost_entry
 from ..ingestion.distributor import StatementRejected, ingest_distributor_statement
 from ..ingestion.youtube import ingest_youtube_metrics
@@ -269,16 +270,22 @@ def build_analytics_router(
             except CurrencyMismatchError as exc:
                 session.rollback()
                 _refuse(409, "currency_mismatch", str(exc))
-            payload = generate_and_post_reward(
-                session,
-                outcome,
-                views=req.views,
-                watch_time_minutes=req.watch_time_minutes,
-                average_percentage_viewed=req.average_percentage_viewed,
-                subscribers_gained=req.subscribers_gained,
-                estimated_revenue=estimated,
-                now=req.observed_at,
-            )
+            try:
+                # Recorded and queued in this transaction; the dispatcher delivers it.
+                payload = record_and_enqueue_reward(
+                    session,
+                    outcome,
+                    views=req.views,
+                    watch_time_minutes=req.watch_time_minutes,
+                    average_percentage_viewed=req.average_percentage_viewed,
+                    subscribers_gained=req.subscribers_gained,
+                    estimated_revenue=estimated,
+                    now=req.observed_at,
+                    enqueued_at=clock.now(),
+                )
+            except OutboxConflictError as exc:
+                session.rollback()
+                _refuse(409, "reward_fact_conflict", str(exc))
             session.commit()
             return payload
 
