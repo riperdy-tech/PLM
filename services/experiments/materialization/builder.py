@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import (
+    BoundedPreferences,
+    HardConstraints,
+    ProviderPolicy,
+)
+
 from ..domain.enums import PackageStatus, TrackRole
 from ..domain.fingerprint import compute_package_hash
-from ..domain.genome import BpmRange, ContentGenome
+from ..domain.genome import BpmRange, ContentGenome, DurationRange
 from ..domain.package import (
     ContentPackage,
     PlaylistSpec,
@@ -24,6 +32,26 @@ if TYPE_CHECKING:
 
 class BudgetEnvelopeExceededError(Exception):
     """Raised when a package's budget allocation is invalid or exceeds ceilings."""
+
+
+def derived_bpm(bpm: BpmRange) -> int:
+    """R5 rule: the genome's target BPM, else the rounded midpoint of its range."""
+    if bpm.target_bpm is not None:
+        return bpm.target_bpm
+    return round((bpm.min_bpm + bpm.max_bpm) / 2)
+
+
+def derived_duration_seconds(duration: DurationRange) -> int:
+    """R5 rule: the genome's target duration, else the rounded midpoint of its range."""
+    if duration.target_seconds is not None:
+        return duration.target_seconds
+    return round((duration.min_seconds + duration.max_seconds) / 2)
+
+
+def content_genome_id(genome: ContentGenome) -> str:
+    """Identity of the effective genome a package was built from (content-addressed)."""
+    digest = hashlib.sha256(genome.model_dump_json().encode("utf-8")).hexdigest()
+    return f"gen_{digest[:16]}"
 
 
 def _apply_genome_delta(base: ContentGenome, delta: dict[str, Any]) -> ContentGenome:
@@ -67,6 +95,13 @@ def materialize_package(
     thb_id = spec_id("thb", pkg_id)
     ttl_id = spec_id("ttl", pkg_id)
 
+    lineage = ExperimentLineage(
+        experiment_id=experiment.experiment_id,
+        experiment_family_id=experiment.experiment_family_id,
+        content_arm_id=experiment.content_arm_id,
+        content_genome_id=content_genome_id(effective_genome),
+        production_directive_id=experiment.production_directive_id,
+    )
     track_budget = round(budget_envelope / track_count, 2)
     track_specs: list[TrackSpec] = []
     track_spec_ids: list[str] = []
@@ -76,17 +111,17 @@ def materialize_package(
         track_spec_ids.append(trk_id)
         role = TrackRole.FOCUS if i == 0 else TrackRole.SECONDARY
 
-        hard_constraints = {
-            "genre": effective_genome.genre,
-            "language": effective_genome.language,
-            "vocal_mode": effective_genome.vocal_mode.value,
-        }
-        bounded_preferences = {
-            "bpm": effective_genome.bpm.target_bpm or 80,
-            "key_profile": effective_genome.key_profile or "C_minor",
-            "mood": list(effective_genome.mood),
-            "use_case": list(effective_genome.use_case),
-        }
+        hard_constraints = HardConstraints(
+            genre=effective_genome.genre,
+            language=effective_genome.language,
+            vocal_mode=effective_genome.vocal_mode.value,
+        )
+        bounded_preferences = BoundedPreferences(
+            bpm=derived_bpm(effective_genome.bpm),
+            key_profile=effective_genome.key_profile,
+            mood=tuple(effective_genome.mood),
+            use_case=tuple(effective_genome.use_case),
+        )
         creative_latitude = {
             "energy": effective_genome.energy.value,
             "visual_motion": effective_genome.visual_motion_profile,
@@ -103,18 +138,17 @@ def materialize_package(
             "instrumentation_profile": list(effective_genome.instrumentation_profile),
             "hook_profile": effective_genome.hook_profile,
         }
-        provider_policy = {
-            "allowed_providers": ["elevenlabs", "suno", "stable_audio"],
-        }
+        provider_policy = ProviderPolicy(
+            allowed_providers=("elevenlabs", "suno", "stable_audio"),
+        )
 
-        duration = effective_genome.track_duration.target_seconds or 180
+        duration = derived_duration_seconds(effective_genome.track_duration)
 
         track_specs.append(
             TrackSpec(
                 track_spec_id=trk_id,
                 playlist_spec_id=ply_id,
-                experiment_id=experiment.experiment_id,
-                content_arm_id=experiment.content_arm_id,
+                lineage=lineage,
                 brand_profile_id=f"{brand_id}_profile",
                 hard_constraints=hard_constraints,
                 bounded_preferences=bounded_preferences,

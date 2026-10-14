@@ -128,7 +128,7 @@ def test_producer_payload_validates_against_the_consumer_schema(c1_api_client) -
     response = c1_api_client.get("/market/v1/opportunities", params={"limit": 1})
     assert response.status_code == 200, response.text
     body = response.json()
-    assert set(body) == {"items", "next_cursor", "as_of", "score_version"}
+    assert set(body) == {"schema_version", "items", "next_cursor", "as_of", "score_version"}
     payload = json.loads(json.dumps(body["items"][0]))
     assert_seam_payload(
         payload, ConsumerSchema, seam=REGISTRY_ENTRY, producer="GET /market/v1/opportunities"

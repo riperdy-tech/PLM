@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
+from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
 
-from ..artists.manager import get_or_create_artist
 from ..client.mock import MockDistributorClient
-from ..compiler.release_compiler import compile_canonical_release_package
 from ..engine import DistributionEngine
 from ..reports.ingest import ingest_provider_report
+from ..submission import ReleaseMetadata, submit_release_from_seams
 
 __all__ = ["run_smoke_test"]
 
@@ -39,62 +43,100 @@ def run_smoke_test() -> str | None:
     try:
         factory = session_factory(engine)
         with factory() as session:
-            # 1. Create or resolve artist
-            artist = get_or_create_artist(
-                session,
-                name=f"Smoke Artist {ts}",
-                brand_id="brand_neon",
-            )
-
-            # 2. Compile release package
-            p5_manifest = {
-                "p5_manifest_id": f"p5_smoke_{ts}",
-                "disposition": "PASSED",
-            }
-            media_package = {
-                "media_package_id": f"p6_smoke_{ts}",
-                "brand_id": "brand_neon",
-                "audio_master_uri": f"media/audio/smoke_{ts}.wav",
-                "audio_checksum": f"chk_audio_{ts}",
-                "thumbnails": [
-                    {
-                        "uri": f"media/artwork/smoke_{ts}.jpg",
-                        "checksum": f"chk_art_{ts}",
-                    }
-                ],
-                "tracklist": [
-                    {
-                        "title": f"Smoke Track {ts}",
-                        "duration_seconds": 180.0,
-                        "audio_uri": f"media/audio/smoke_{ts}.wav",
-                        "audio_checksum": f"chk_audio_{ts}",
-                    }
-                ],
-            }
-
-            package = compile_canonical_release_package(
-                p5_manifest=p5_manifest,
-                media_package=media_package,
-                artist_id=artist.id,
-                artist_name=artist.canonical_name,
-                brand_id="brand_neon",
-                release_title=f"Smoke Release {ts}",
-            )
-
-            # 3. Submit release via DistributionEngine
-            dist_client = MockDistributorClient()
-            dist_engine = DistributionEngine(dist_client)
-
-            result = dist_engine.submit_release(
-                session,
-                package,
-                artist=artist,
+            # 1-3. Compile and submit from complete seam payloads
+            lineage = ExperimentLineage(
                 experiment_id=f"exp_smoke_{ts}",
                 experiment_family_id=f"fam_smoke_{ts}",
                 content_arm_id=f"arm_smoke_{ts}",
                 content_genome_id=f"gen_smoke_{ts}",
                 production_directive_id=f"dir_smoke_{ts}",
-                media_package_id=f"p6_smoke_{ts}",
+            )
+            digest = hashlib.sha256(f"smoke_{ts}".encode()).hexdigest()
+            candidate = f"cand_smoke_{ts}"
+            manifest = ReleaseManifestPayload.build(
+                p5_manifest_id=f"rel_man_smoke_{ts}",
+                release_manifest_version="1.0",
+                candidate_id=candidate,
+                canonical_artifact_id=f"art_smoke_{ts}",
+                artifact_uri=f"music/smoke/{candidate}.wav",
+                artifact_sha256=digest,
+                measured_duration_seconds=180.0,
+                track_spec_id=f"trk_smoke_{ts}",
+                lineage=lineage,
+                disposition=GateDisposition.PASSED,
+                override=None,
+                technical_status="PASSED",
+                commercial_use_status=CommercialUseEligibility.ELIGIBLE,
+                provenance_status=ProvenanceStatus.COMPLETE,
+                ai_disclosure_required=True,
+                rights_risk="LOW",
+                policy_status="COMPLIANT",
+                evaluation_id=f"eval_smoke_{ts}",
+                evaluation_policy_version="p5-v1",
+                warning_codes=(),
+                evidence_bundle_id=f"evi_smoke_{ts}",
+            )
+            package = MediaPackagePayload.build(
+                media_package_id=f"mpkg_smoke_{ts}",
+                release_manifest_id=f"plm_smoke_{ts}",
+                lineage=lineage,
+                brand_id="brand_neon",
+                ai_disclosure_required=True,
+                video={
+                    "master_uri": f"media/smoke/{ts}.mp4",
+                    "checksum": digest,
+                    "duration_seconds": 180.0,
+                    "render_profile": "yt_longform_1080p_v1",
+                },
+                audio={"master_uri": f"media/smoke/{ts}.wav", "checksum": digest},
+                thumbnails=[
+                    {
+                        "id": "thumb_a",
+                        "uri": f"media/smoke/{ts}.jpg",
+                        "checksum": digest,
+                        "width": 1280,
+                        "height": 720,
+                    }
+                ],
+                tracklist=[
+                    {
+                        "position": 1,
+                        "song_id": candidate,
+                        "title": f"Smoke Track {ts}",
+                        "duration_seconds": 180.0,
+                        "source_artifact_id": f"art_smoke_{ts}",
+                    }
+                ],
+                chapters=[],
+                metadata_candidates=[
+                    {
+                        "variant_id": "meta_a",
+                        "title": f"Smoke Release {ts}",
+                        "description": "Distribution smoke test.",
+                        "tags": ["smoke"],
+                        "category_id": "10",
+                        "contains_synthetic_media": True,
+                    }
+                ],
+                short_source_assets=[],
+                render_report={},
+                status="ready_for_publish",
+            )
+            result = submit_release_from_seams(
+                session,
+                DistributionEngine(MockDistributorClient()),
+                track_manifests=[manifest.to_wire()],
+                media_package=package.to_wire(),
+                publication=None,
+                metadata=ReleaseMetadata(
+                    artist_name=f"Smoke Artist {ts}",
+                    release_date=now.strftime("%Y-%m-%d"),
+                    label_name="PLM Smoke Label",
+                    copyright_line="2026 PLM Smoke Label",
+                    publisher_line="2026 PLM Smoke Publishing",
+                    territories="WORLDWIDE",
+                ),
+                now=now,
             )
 
             if not result.is_success:

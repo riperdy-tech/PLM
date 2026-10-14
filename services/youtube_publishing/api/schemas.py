@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class PublishRequest(BaseModel):
@@ -14,9 +14,12 @@ class PublishRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     media_package: dict[str, Any]
-    channel_id: str = "UC_neon_records"
+    """The Seam C6 hop-1 payload, parsed with the shared model (ADR-0029)."""
+    channel_id: str = Field(min_length=1)
+    """A channel profile configured by an operator (P0 §10); never auto-created."""
     operating_mode: str = "dry_run"
-    publish_at: datetime | None = None
+    publish_at: AwareDatetime | None = None
+    """Must carry a timezone; a naive time is ambiguous and is refused (422)."""
 
 
 class PublishResponse(BaseModel):
@@ -30,6 +33,8 @@ class PublishResponse(BaseModel):
     youtube_video_id: str | None = None
     video_url: str | None = None
     error: str | None = None
+    publication_event: dict[str, Any] | None = None
+    """The C6 hop-2 ``youtube_video_published`` wire once published (ADR-0029)."""
 
 
 class AttemptStatusResponse(BaseModel):

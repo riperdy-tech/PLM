@@ -25,6 +25,8 @@ from distribution.domain.models import (
 )
 from pydantic import ValidationError
 
+from tests.support.seams import lineage_fields
+
 
 def test_enums_values() -> None:
     assert ReleaseType.SINGLE.value == "single"
@@ -92,24 +94,22 @@ def test_distribution_record_payload_strictness() -> None:
         "deliveries": [],
         "source_package_hash": "hash_123",
         "status": "delivered",
-        "experiment_id": "exp_1",
-        "experiment_family_id": "fam_1",
-        "content_arm_id": "arm_1",
-        "content_genome_id": "gen_1",
-        "production_directive_id": "dir_1",
+        "lineage": lineage_fields(experiment_id="exp_1"),
         "media_package_id": "pkg_1",
     }
-    payload = DistributionRecordPayload(**valid_data)
-    assert payload.experiment_id == "exp_1"
+    payload = DistributionRecordPayload.build(**valid_data)
+    assert payload.lineage.experiment_id == "exp_1"
+    valid_data = payload.to_wire()
 
     # Missing R9 field raises ValidationError
     invalid_data = dict(valid_data)
-    del invalid_data["experiment_family_id"]
+    invalid_data["lineage"] = {k: v for k, v in valid_data["lineage"].items()
+                               if k != "experiment_family_id"}
     with pytest.raises(ValidationError):
-        DistributionRecordPayload(**invalid_data)
+        DistributionRecordPayload.model_validate(invalid_data)
 
     # Extra field raises ValidationError due to extra="forbid"
     extra_data = dict(valid_data)
     extra_data["unknown_extra_field"] = "bad"
     with pytest.raises(ValidationError):
-        DistributionRecordPayload(**extra_data)
+        DistributionRecordPayload.model_validate(extra_data)

@@ -95,6 +95,13 @@ freshness buckets from `as_of`; `freshness_seconds` is P2-internal (P2 §46).
   *state* (P2 §45), posteriors (P2 §47) and exposure (P2 §54) (R15).
 - Base path `/market/v1`; auth via service token from `plm_platform` (R15).
 
+**Amended by ADR-0025:** the envelope is the shared versioned model
+`plm_contracts.seams.c1.OpportunityPagePayload` (`schema_version` "1.0" + the flat
+`items`, `next_cursor`, `as_of`, `score_version`), used by P1 to serve and P2 to parse.
+`top_observation_ids` is required (no default), and P1 no longer serves `0` for
+missing evidence counts. P2 refuses a page with a missing fact or a future major as
+`MarketUnavailable`, never as an empty market.
+
 **Seam test:** `tests/contract/test_c1_market_to_ar.py` — **exists** (P1.10; the
 producer's real payload is validated against the consumer schema, and the
 no-`freshness` / aware-`as_of` halves of this entry are asserted).
@@ -112,9 +119,11 @@ expected by P3).
 **Endpoint / event:** the directive handoff; queued directives are served by
 `GET /ar/directives` (P2 §71).
 
-**Producer fields (frozen names, P2 §32, as amended by R4):**
+**Producer fields (frozen names, P2 §32, as amended by R4; `schema_version` added by
+ADR-0025):**
 
 ```text
+schema_version      "<major>.<minor>"; P3 accepts the current and previous major
 directive_id
 decision_id
 arm_id
@@ -198,13 +207,11 @@ change is a registry amendment first, then both sides in one change (R2).
    confidence; under-covered arms are returned flagged, never silently mixed into
    the ranking. The human partner holds override at all times (P2 §107).
 
-**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **exists** (P2's producer half,
-shipped by task P2.1A: it asserts the serialised directive payload against the registry's frozen
-names above, so a rename fails loudly and names the field that moved). P3's consumer half — its
-adapter ingesting P2's real payload, including the `allocation_type` → `exploration_level` enum
-map and the `quantity` → `requested_experiment_count` rename — lands with task P3.4 and extends
-this same file. Until then the enforcement is producer-side only, which the test's own docstring
-states so it is never mistaken for the whole seam.
+**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **exists**. Since
+ADR-0025 both sides use the shared model `plm_contracts.seams.c2.ProductionDirectivePayload`;
+the test runs P2's real allocation cycle, feeds the wire to P3's real `adapt_directive`,
+checks every field arrives without invention, and checks that removing any field, adding
+an unknown one, a future major version or an invalid value is refused with a reason code.
 
 ---
 
@@ -219,13 +226,16 @@ interface P4), §58 (`track_specs`).
 **Endpoint / event:** `GET /content-packages/{package_id}` (P3 §45); the
 `music_specs[]` array of the content package (P3 §44).
 
-**Frozen field list (the union, canonical names = P4 §7; P3 emits every key — R5):**
+**Frozen field list (the union, canonical names = P4 §7; P3 emits every key — R5;
+amended by ADR-0025 and ADR-0026):**
 
 ```text
+schema_version      "<major>.<minor>" (ADR-0025)
 track_spec_id
 playlist_spec_id
-experiment_id
-content_arm_id
+lineage             {experiment_id, experiment_family_id, content_arm_id,
+                     content_genome_id, production_directive_id}  (ADR-0026;
+                     replaces the loose experiment_id / content_arm_id)
 brand_profile_id
 hard_constraints
 bounded_preferences
@@ -266,9 +276,20 @@ not emit.
 - P3 derives (documented rules): `candidate_target`, `priority`, `budget_limit`
   from the budget envelope (P3 §34/§44); `requested_duration` from
   `duration_range`; `provider_policy` from the experiment's provider constraints.
-- P4 must reject only what P4 §7 says it rejects — no extra strictness.
+- ~~P4 must reject only what P4 §7 says it rejects — no extra strictness.~~
+  Superseded by ADR-0026: P4 refuses any spec missing a required fact, because the
+  only alternative is substituting a value.
+- Typed sub-objects (shared model `plm_contracts.seams.c3.TrackSpecPayload`):
+  `hard_constraints {genre, language, vocal_mode}`, `bounded_preferences {bpm,
+  key_profile (null = open), mood[], use_case[]}`, `provider_policy
+  {allowed_providers[] (non-empty)}`; `track_role` is one of P3 §20's roles.
+- P3's derivation rules (R5, ADR-0026): `requested_duration` and `bpm` are the genome
+  target or the rounded midpoint of its range.
 
-**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists** (producer half shipped by P3.7).
+**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists**. It runs
+P3's real `materialize_package` into P4's real `adapt_track_spec` and planner, asserts
+the lineage reaches the plan intact, and asserts refusal for every missing required
+fact, placeholder identity, unknown field and future major.
 
 ---
 
@@ -280,25 +301,40 @@ not emit.
 §7 (P4 input contract), §33 (provider license snapshot), §117 (unknown
 commercial rights — the scenario that quarantines when the snapshot is thin).
 
-**Endpoint / event:** event `music_candidate_ready_for_p5`, `event_version` `"1"`
-(P4 §68).
+**Endpoint / event:** event `music_candidate_ready_for_p5` (P4 §68), schema
+`1.0` (ADR-0025, ADR-0027). Shared model:
+`plm_contracts.seams.c4.CandidateReadyPayload`.
 
-**Producer fields (frozen names, P4 §68):**
+**Producer fields (amended by ADR-0027; `event_version`, `rights_status` and
+`provenance_complete` are replaced):**
 
 ```text
+schema_version              "<major>.<minor>"
 event_type                  = "music_candidate_ready_for_p5"
-event_version               = "1"
 candidate_id
 artifact_id
+artifact_uri                where the artifact is stored (C9)
+artifact_sha256             hex SHA-256 of the artifact bytes
 track_spec_id
-experiment_id
-content_arm_id
+lineage                     ExperimentLineage (ADR-0026)
 provider_id
 model_id
 measured_audio              {duration_seconds, sample_rate, channels}
-rights_status
-provenance_complete
+requested_duration_seconds  from the C3 spec
+vocal_mode                  from the C3 spec
+genre_tags[]                genre + moods from the C3 spec (non-empty)
+prompt_text                 the prompt that produced the attempt
+lyrics_text                 null = the provider returned no lyrics
+rights                      the declared R6 snapshot of the producing attempt
+                            {commercial_use_status, basis, license_reference,
+                             plan_or_tier, account_identity_ref, terms_version,
+                             attempt_id, provider_id, policy_version, checked_at,
+                             downloaded_at}; null = no terms declared (unknown)
 ```
+
+`commercial_use_status` uses the shared P5 §34 vocabulary
+(`plm_contracts.CommercialUseEligibility`): `eligible`, `ineligible`, `unknown`,
+`conditional`, `expired_or_unverified`.
 
 **Consumer requirement beyond the event (P5 §7):** P5 must be able to retrieve,
 through internal APIs: the full candidate record, artifact manifest, provenance
@@ -326,7 +362,15 @@ reconstructing generation history from raw provider logs.
 - Must land before P5.3 starts; without these, P5 §117 defaults every candidate
   to quarantine.
 
-**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**.
+- ADR-0027: P4 builds the event only from stored facts and refuses an export with
+  any fact missing. P5 parses only through the shared model. A null `rights` is
+  quarantined and never cleared. A plan-tier label can only downgrade eligibility.
+
+**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**. It runs P4's real
+generation engine and event builder into P5's real consumer and gate engine. It
+asserts that lineage and declared rights arrive intact and are read as eligible, that
+undeclared rights are quarantined, and that every missing, placeholder, old-vocabulary,
+unknown or future field is refused.
 
 ---
 
@@ -342,9 +386,17 @@ manifest** rather than receiving one.
 **Endpoint / event:** per-track `GET /qa/release-manifests/{candidate_id}` (P5
 §94) — P6 calls it for each track of the playlist it assembles.
 
-**Producer fields (frozen names, P5 §77; `p5_manifest_id` added by R7):**
+**Producer fields (frozen names, P5 §77; `p5_manifest_id` added by R7; amended by
+ADR-0025/ADR-0028 — shared model `plm_contracts.seams.c5.ReleaseManifestPayload`):**
 
 ```text
+schema_version              "<major>.<minor>"
+artifact_uri                from the C4 event (ADR-0028)
+artifact_sha256             from the C4 event (ADR-0028)
+measured_duration_seconds   from the C4 event (ADR-0028)
+lineage                     ExperimentLineage (ADR-0026)
+override                    null, or {status: CLEARED_BY_OVERRIDE, quarantine_case_id,
+                             auditor_id, resolved_at, reason_codes} (ADR-0028)
 p5_manifest_id
 release_manifest_version
 candidate_id
@@ -398,7 +450,17 @@ assembling the playlist-level manifest; vocabulary drifted (`cleared` vs `PASSED
   means "`PASSED`, or `PASSED_WITH_WARNINGS` where that phase's own policy
   permits warnings".
 
-**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **exists**.
+- ADR-0028: `disposition` is always the automated decision (four values). An
+  override is the separate `override` record and is valid only with `QUARANTINED` or
+  `REJECTED`. P6 assembles only from C5 manifests and refuses any that are uncleared,
+  incomplete, or mixed-lineage. `experiment_id` / `content_arm_id` travel inside
+  `lineage`.
+
+**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **exists**. It runs P5's real gate
+engine and real override path into P6's real assembler. It proves lineage and artifact
+facts arrive unchanged and that an override is admitted only through its record. It
+also proves refusal for missing facts, a fifth disposition, old vocabulary, placeholder
+ids, an override on a passing manifest, and tracks from two arms.
 
 ---
 
@@ -481,7 +543,24 @@ producer sent the identity fields P9 §38 requires).
   P8's release provenance (P8 §39) references `p5_manifest_id` and
   `p6_manifest_id`; `source_manifest_ids` in P8 §11 is the compiled snapshot.
 
-**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **exists**.
+**Amended by ADR-0025 / ADR-0029 (shared models `plm_contracts.seams.c6`):**
+
+- Hop 1 `MediaPackagePayload` (schema 1.0) = the P6 §5 fields above plus
+  `schema_version`, `lineage` (ExperimentLineage), `ai_disclosure_required`; every
+  asset is typed with its SHA-256 checksum; `thumbnails`, `tracklist` and
+  `metadata_candidates` are non-empty.
+- Hop 2 `YouTubePublicationPayload` (schema 1.0): `schema_version`, `event`,
+  `youtube_video_id`, `publish_attempt_id`, `channel_id`, `media_package_id`,
+  `lineage` (replaces the five loose R9 identifiers), `published_at` (aware),
+  `metadata_version`, `contains_synthetic_media`.
+- P7 refuses unconfigured channels, unready packages and naive schedule times. P8
+  submits only from C5 manifests + the C6 package (+ optional, matching C6 event).
+  ISRCs are allocated once per recording from a persisted sequence.
+
+**Seam test:** `tests/contract/test_c6_media_to_publishing.py` — **exists**. It runs P6's
+real assembler into P7's real manifest builder and publishing engine, then the real
+hop-2 event into P8's real submission. It proves the lineage reaches P8's stored release
+and that both hops refuse missing, placeholder, naive-time and future payloads.
 
 ---
 
@@ -554,7 +633,25 @@ ownership overlapped (P8 §51 vs P9 §53–§54).
   experiment-outcome record, not the reward post).
 - This is the loop-closing contract; tested end to end in Wave 6.
 
-**Seam test:** `tests/contract/test_c7_distribution_to_analytics.py` — **exists**.
+**Amended by ADR-0025 / ADR-0030 (shared models `plm_contracts.seams.c7`):**
+
+- Leg 1 `DistributionRecordPayload` (schema 1.0): the fields above, with `lineage`
+  (ExperimentLineage) replacing the five loose R9 identifiers, `isrcs[]` non-empty and
+  ISO 3901-valid. P9 consumes it (`analytics.ingestion.releases`) and links each
+  (release, ISRC) to the lineage. A statement row without an ISRC is counted as
+  unattributed revenue, never given an invented ISRC.
+- Leg 2 `RewardResultPayload` (schema 1.0): the P2 §72 fields plus `schema_version`.
+  `observation_window` ∈ `plm_contracts.ObservationWindow`; `status` ∈
+  `ObservationMaturity` (`provisional` / `mature` / `closed`); `raw_metrics` carries
+  exactly the five registry keys, `null` when unmeasured. `quality_status` resolves the
+  open item as optional `QualityStatus` (`null` = not assessed). `economic_terms` is
+  reserved per ADR-0023 #4.
+
+**Seam test:** `tests/contract/test_c7_distribution_to_analytics.py` — **exists**. It runs
+P8's real submission into P9's real link and statement ingestion, and P9's real reward
+producer into P2's real `store_result`. It proves attribution through the ISRC link,
+that unattributed revenue is counted but not invented, and that both legs refuse missing
+or old-vocabulary facts.
 
 ---
 
@@ -596,6 +693,13 @@ consumer.
 
 **Required amendments:** none for this build. P9 §86/§88 must still exist as
 frozen surfaces; P10 consumes them when it is scheduled.
+
+**Amended by ADR-0025:** the view is the shared model
+`plm_contracts.seams.c8.P10FeatureViewPayload` (schema 1.0). `maturity` and
+`primary_outcome.status` use `ObservationMaturity`, and `observation_window` uses the
+shared windows. Every `secondary_outcomes` value and `quality.data_completeness` /
+`fidelity` / `contamination` is `null` when not measured or not assessed. The producer
+used to serve `0`, `1.0`, `false` and a hardcoded `REPORTED` instead.
 
 **Seam test:** `tests/contract/test_c8_analytics_to_p10.py` — **exists**.
 

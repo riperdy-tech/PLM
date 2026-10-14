@@ -11,6 +11,8 @@ from pathlib import Path
 from quality_gate.domain.enums import GateDisposition, QuarantineStatus
 from quality_gate.gate.engine import run_candidate_evaluation
 
+from tests.support.seams import candidate_event, lineage_fields, rights_fields
+
 
 def _make_wav(duration: float = 1.0, amplitude: int = 15000) -> Path:
     temp_dir = tempfile.gettempdir()
@@ -33,24 +35,19 @@ def _make_wav(duration: float = 1.0, amplitude: int = 15000) -> Path:
 def test_scenario_1_clean_candidate_passes() -> None:
     wav_path = _make_wav(duration=1.0)
     try:
-        rights_snap = {
-            "plan_or_tier": "pro",
-            "account_identity_ref": "acc_001",
-            "terms_version": "v1.0",
-            "downloaded_at": "2026-09-25T12:00:00Z",
-            "commercial_use_status": "ELIGIBLE",
-        }
+        rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
-            candidate_id="cand_clean_01",
-            artifact_id="art_01",
+            event=candidate_event(
+                candidate_id="cand_clean_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                vocal_mode="instrumental",
+                prompt_text="ambient synth pad electronic chill",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=rights_snap,
+            ),
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
-            track_spec_id="spec_01",
-            experiment_id="exp_01",
-            content_arm_id="arm_01",
-            vocal_mode="instrumental",
-            prompt_text="ambient synth pad electronic chill",
-            rights_snapshot=rights_snap,
         )
         assert res.disposition == GateDisposition.PASSED
         assert res.quarantine_case is None
@@ -67,24 +64,19 @@ def test_scenario_2_soft_warning_passes_with_warnings() -> None:
     # Use quiet amplitude to induce a loudness deviation warning
     wav_path = _make_wav(duration=1.0, amplitude=200)
     try:
-        rights_snap = {
-            "plan_or_tier": "pro",
-            "account_identity_ref": "acc_001",
-            "terms_version": "v1.0",
-            "downloaded_at": "2026-09-25T12:00:00Z",
-            "commercial_use_status": "ELIGIBLE",
-        }
+        rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
-            candidate_id="cand_warn_01",
-            artifact_id="art_01",
+            event=candidate_event(
+                candidate_id="cand_warn_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                vocal_mode="instrumental",
+                prompt_text="ambient electronic",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=rights_snap,
+            ),
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
-            track_spec_id="spec_01",
-            experiment_id="exp_01",
-            content_arm_id="arm_01",
-            vocal_mode="instrumental",
-            prompt_text="ambient electronic",
-            rights_snapshot=rights_snap,
         )
         assert res.disposition == GateDisposition.PASSED_WITH_WARNINGS
         assert res.quarantine_case is None
@@ -100,20 +92,17 @@ def test_scenario_3_unknown_license_routes_to_quarantine() -> None:
     wav_path = _make_wav(duration=1.0)
     try:
         # Incomplete R6 provenance fields
-        rights_snap = {
-            "plan_or_tier": "pro",
-            # missing account_identity_ref, terms_version, downloaded_at
-            "commercial_use_status": "UNKNOWN",
-        }
+        rights_snap = rights_fields(plan_or_tier='pro', commercial_use_status='unknown')
         res = run_candidate_evaluation(
-            candidate_id="cand_quar_01",
-            artifact_id="art_01",
+            event=candidate_event(
+                candidate_id="cand_quar_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=rights_snap,
+            ),
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
-            track_spec_id="spec_01",
-            experiment_id="exp_01",
-            content_arm_id="arm_01",
-            rights_snapshot=rights_snap,
         )
         assert res.disposition == GateDisposition.QUARANTINED
         assert res.quarantine_case is not None
@@ -127,21 +116,17 @@ def test_scenario_3_unknown_license_routes_to_quarantine() -> None:
 def test_scenario_4_free_tier_hard_reject() -> None:
     wav_path = _make_wav(duration=1.0)
     try:
-        rights_snap = {
-            "plan_or_tier": "free",
-            "account_identity_ref": "acc_001",
-            "terms_version": "v1.0",
-            "downloaded_at": "2026-09-25T12:00:00Z",
-        }
+        rights_snap = rights_fields(plan_or_tier='free', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
-            candidate_id="cand_free_01",
-            artifact_id="art_01",
+            event=candidate_event(
+                candidate_id="cand_free_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=rights_snap,
+            ),
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
-            track_spec_id="spec_01",
-            experiment_id="exp_01",
-            content_arm_id="arm_01",
-            rights_snapshot=rights_snap,
         )
         assert res.disposition == GateDisposition.REJECTED
         assert res.release_manifest is None
@@ -153,14 +138,16 @@ def test_scenario_4_free_tier_hard_reject() -> None:
 
 def test_scenario_5_corrupt_or_missing_audio_hard_reject() -> None:
     res = run_candidate_evaluation(
-        candidate_id="cand_missing_01",
-        artifact_id="art_01",
-        audio_path="missing_file.wav",
-        expected_duration_seconds=1.0,
-        track_spec_id="spec_01",
-        experiment_id="exp_01",
-        content_arm_id="arm_01",
-    )
+            event=candidate_event(
+                candidate_id="cand_missing_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=None,
+            ),
+            audio_path="missing_file.wav",
+        )
     assert res.disposition == GateDisposition.REJECTED
     assert res.evaluation.technical_status == "FAILED"
     assert res.release_manifest is None
@@ -169,23 +156,18 @@ def test_scenario_5_corrupt_or_missing_audio_hard_reject() -> None:
 def test_scenario_6_protected_artist_likeness_hard_reject() -> None:
     wav_path = _make_wav(duration=1.0)
     try:
-        rights_snap = {
-            "plan_or_tier": "pro",
-            "account_identity_ref": "acc_001",
-            "terms_version": "v1.0",
-            "downloaded_at": "2026-09-25T12:00:00Z",
-            "commercial_use_status": "ELIGIBLE",
-        }
+        rights_snap = rights_fields(plan_or_tier='pro', account_identity_ref='acc_001', terms_version='v1.0', commercial_use_status='eligible')
         res = run_candidate_evaluation(
-            candidate_id="cand_likeness_01",
-            artifact_id="art_01",
+            event=candidate_event(
+                candidate_id="cand_likeness_01",
+                artifact_id="art_01",
+                track_spec_id="spec_01",
+                prompt_text="synth pop song sounding exactly like Drake",
+                requested_duration_seconds=int(1.0),
+                lineage=lineage_fields(experiment_id="exp_01", content_arm_id="arm_01"),
+                rights=rights_snap,
+            ),
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
-            track_spec_id="spec_01",
-            experiment_id="exp_01",
-            content_arm_id="arm_01",
-            prompt_text="synth pop song sounding exactly like Drake",
-            rights_snapshot=rights_snap,
         )
         assert res.disposition == GateDisposition.REJECTED
         assert res.evaluation.policy_status == "NON_COMPLIANT"

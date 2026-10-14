@@ -4,8 +4,8 @@
 commit messages and the dashboard record intent or progress; this file records verified
 capability. Update it in the same change that alters a capability.
 
-- Last verified: 2026-10-13, branch `review/r0-truth-baseline` (R0 of the remediation
-  plan).
+- Last verified: 2026-10-14, branch `review/r1-fail-closed-seams` (R1 of the remediation
+  plan; R0 on `review/r0-truth-baseline`).
 - Evidence: the review in
   [`reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md),
   which has file:line references for every finding.
@@ -20,8 +20,9 @@ domain logic, persistence and unit tests, but the phases do not yet run together
 - P3 has no transport.
 - P9 computes a reward but never delivers it to P2.
 - The P4, P7 and P8 providers exist only as mocks, and P6 renders nothing.
-- The W6 end-to-end test runs the phases in process on SQLite, and builds most hand-offs
-  inside the test.
+- The W6 end-to-end test runs the phases in process on SQLite. Since R1 it uses the
+  real P2 → P8 producers and consumers, but the P5 manifest and the P9 revenue figures
+  are still built inside the test.
 - The dashboard serves demo data.
 
 Closing these gaps is stages R1–R6 of the remediation plan. Each stage is approved
@@ -54,6 +55,9 @@ separately against its own evidence gate.
 | Outbox / cross-service delivery | absent | R3 |
 | Exception queue with hold classes (PART XVIII) | absent | R3 |
 | Decision log (PART XXI) | absent | R3 |
+| Seam payloads C1–C8 | real | One shared, versioned model per seam in `plm_contracts/seams/` (ADR-0025). Producers serialise and consumers parse with it; missing, unknown, placeholder and future-major payloads are refused with a reason code. |
+| Experiment lineage | real | `ExperimentLineage` (ADR-0026) travels from P3 through C3–C7 to P9's ISRC links and P2's reward. Placeholder ids are refused. |
+| Fail-open regression guard | real | `tests/contract/test_no_fail_open_defaults.py`, a narrow static scan that supplements the behavioural seam tests |
 | Dashboard | demo | `plm_platform/dashboard/`: literal data and a scripted playback, labelled `data_source: "demo"` with a page banner. The six PART XVII views are absent (R5). |
 
 ## Phases (`services/`)
@@ -78,8 +82,8 @@ separately against its own evidence gate.
 |---|---|---|
 | Normal–Normal posterior, Thompson sampling | real | `modeling/reward_model.py` |
 | Prior from P1 score/confidence/staleness | real | `modeling/prior.py` |
-| P1 intake over HTTP | real | `ingestion/p1_adapter.py` |
-| `POST /ar/results` storage, idempotent | real | Only stores; posteriors change on `POST /ar/update` |
+| P1 intake over HTTP | real | `ingestion/p1_adapter.py`; parses the shared C1 page, and a malformed page is `MarketUnavailable` |
+| `POST /ar/results` storage, idempotent | real | Parses the shared C7 leg-2 model. Only stores; posteriors change on `POST /ar/update` |
 | Posterior update | partial | Every observation window of one content is a full-weight update, so it is counted several times (R2) |
 | Exploration split 70/20/10 | partial | Configurable, but fractions may sum below 1 and under-fill slots (R2) |
 | Budget allocation (PART XI) | stub | Equal split per slot (later stage) |
@@ -91,8 +95,11 @@ separately against its own evidence gate.
 | Content genome (21 dimensions) | partial | Defaults fill unknowns. Only an rnb template exists; other genres reuse lofi (R2). |
 | Treatment generation | stub | Variables other than bpm/visual_world get literal `variant_{idx}`; no variable isolation; seed ignored (R2) |
 | Validation | partial | Status is set to `VALIDATED` before validation runs (R2) |
-| Directive intake from P2 | absent | No HTTP client; `GET /ar/directives` is never consumed (R3) |
-| `budget_limit` from P2 | stub | Ignored; defaults to 100.0 (R2) |
+| Directive parsing (C2) | real | `ingestion/p2_adapter.py` parses the shared model with no defaults (R1) |
+| Directive transport from P2 | absent | No HTTP client; `GET /ar/directives` is never consumed (R3) |
+| `budget_limit` from P2 | stub | Parsed, but materialization still uses a request `budget_envelope` that defaults to 100.0 (R2) |
+| Lineage origination | real | `experiment_family_id` (P3 §12) and `content_genome_id` are minted and carried on every track spec (ADR-0026) |
+| Track spec derivation | real | BPM and duration are the genome target or range midpoint (R5 rule), not invented defaults. The provider allow-list is still a fixed list (R2). |
 
 ### P4 Music factory
 | Capability | Status | Where / gap |
@@ -102,7 +109,9 @@ separately against its own evidence gate.
 | Suno / ElevenLabs adapters | stub | Always return FAILED (R6) |
 | Seed determinism | stub | `abs(hash(...))` varies per process (R2) |
 | Artifact storage via API | stub | In-memory; stored URIs point at nothing (R4) |
-| Rights snapshot | stub | Hardcoded PERMITTED / `pro_tier` (R1) |
+| Rights snapshot | real | Records the terms the provider adapter declares (`license_terms()`, ADR-0027). The mock declares PLM-owned synthesis; Suno and ElevenLabs declare nothing, which means unknown. |
+| C4 event | real | Built only from stored facts (plan spec, the candidate's own attempt, its single full-mix artifact); refused with 409 when a fact is missing |
+| Provider selection | partial | The engine ignores the spec's `allowed_providers` and uses its default (mock). That is the intended mock-mode behaviour, but it is implicit; real provider selection is R6. |
 | Cost tracking / budget enforcement | stub | `credits*0.05` is invented; `budget_limit` is not enforced |
 | Protected-artist prompt blocking | absent | Exists only in P5 (R4) |
 
@@ -112,13 +121,14 @@ separately against its own evidence gate.
 | WAV integrity, sample rate, channels, duration, all-zero silence, clipping | partial | `evaluators/technical.py`. WAV only; clipping never blocks; no edge-silence check |
 | Loudness (LUFS), true peak | stub | RMS−3 dB approximation; no true peak (R4) |
 | Audio / lyric similarity, voice cloning | absent | `similarity_score` is never computed (R4) |
-| Rights / provenance (P28) | partial | 4 of 12 fields checked; missing fields don't block; P4 vocabulary mismatch quarantines everything (R1, R4) |
-| Hard-stop vs reviewable hold | absent | Overrides have no authorization check (R3) |
+| Rights / provenance (P28) | partial | Judges the declared C4 snapshot (R6 fields) in the shared vocabulary. No snapshot means quarantine; a tier label can no longer upgrade unknown to eligible (R1). The other P28 fields (generator, model version, human contribution, …) are R4. |
+| Intake | real | `POST /qa/evaluations` takes the C4 event; no defaulted vocal mode or rights (R1). The audio is read from a caller-given path; fetching it by URI and checksum is R4. |
+| Override | partial | Recorded separately from the automated disposition (ADR-0028). Who may override, and hard-stop classes, are R3. |
 
 ### P6 Media factory
 | Capability | Status | Where / gap |
 |---|---|---|
-| Playlist manifest assembly with clearance check | partial | `playlist/assembler.py`. `rendering/assembler.py` defaults a missing disposition to `PASSED`, which bypasses the gate (R1) |
+| Playlist manifest assembly with clearance check | real | Assembles only from C5 manifests. It refuses an uncleared track, mixed lineage, an empty playlist or a missing fact (ADR-0028). Manifests are passed by the caller, not fetched from P5 (R3). |
 | Sequencing (BPM/key/energy) | stub | Input order, labelled "optimal_energy_flow" (R4) |
 | Video render, thumbnails | stub | URIs and checksums are hashes of seed strings; FFmpeg is never called (R4) |
 | Metadata, chapters, tags | partial | Tags hardcoded; chapter rules not validated |
@@ -130,9 +140,10 @@ separately against its own evidence gate.
 | Publish state machine, idempotency | real | `engine.py` |
 | YouTube client | mock | `client/mock.py` only (R6) |
 | External-write guard, dry-run enforcement | real | A real client under dry_run/shadow ends `INTENT_RECORDED`; live writes need an authorization |
-| Synthetic-media disclosure field | real | Sent in `status.containsSyntheticMedia`, so far only to the mock |
-| Media bytes | stub | Falls back to `MOCK_*_BINARY` bytes (R1) |
-| Channel profile / OAuth | stub | The route invents a profile, so Gate A always passes (R1) |
+| Synthetic-media disclosure field | real | Comes from P5's finding carried on C6 (no hardcoded `True`); so far sent only to the mock |
+| Publish manifest | real | Derived only from the C6 package and the configured channel (ADR-0029); the hop-2 event carries the lineage and is returned |
+| Media bytes | partial | Placeholder bytes exist only on the mock client; a real client with no bytes fails before sending. Fetching real media is R4. |
+| Channel profile / OAuth | partial | Must be configured by an operator (409 otherwise). Real OAuth is R6. |
 
 ### P8 Distribution
 | Capability | Status | Where / gap |
@@ -140,7 +151,9 @@ separately against its own evidence gate.
 | Release state machine, fingerprint idempotency | real | `engine.py` |
 | Distributor client | mock | `client/mock.py` only (R6) |
 | External-write guard | real | Submit/takedown are refused before anything persists (HTTP 409) |
-| ISRC allocation | stub | Built from the track index, so a second release violates the unique constraint; `identifiers/isrc.py` is unused (R1) |
+| ISRC allocation | real | Once per recording from a persisted sequence (`identifiers/allocator.py`, ADR-0029); the registrant code is development configuration (P0 §10) |
+| Release compilation | real | Only from C5 manifests + the C6 package (+ a matching C6 event); release metadata comes from the caller; lineage is stored and read back |
+| One recording on several releases | absent | `tracks.isrc` is unique, so a recording cannot yet appear on two releases (R6) |
 | UPC, cross-platform catalog (P20) | absent | R6 |
 | Raw report references (R10) | real | `reports/ingest.py` |
 
@@ -150,7 +163,10 @@ separately against its own evidence gate.
 | Unit economics calculator | real | `economics/calculator.py` |
 | Economics endpoint aggregation | stub | Sums overlapping window snapshots (R2) |
 | YouTube Analytics ingestion | stub | Stores caller-supplied numbers; no API client (R6) |
-| Distributor statement ingestion | partial | Invents an ISRC when it is missing (R1) |
+| Distributor statement ingestion | real | No invented ids. Rows without an ISRC are counted as unattributed revenue; an ISRC's release comes from its C7 link (ADR-0030). |
+| C7 leg-1 release links | real | `ingestion/releases.py` links each (release, ISRC) to its lineage, idempotently |
+| Outcome measurement inputs | partial | Window, maturity, attribution and quality are explicit inputs with the shared vocabulary; deriving maturity from publish time is R2 |
+| C8 feature view | real | Unmeasured values served as null (no zeros, `1.0`, `false` or hardcoded `REPORTED`) |
 | Currency, decimal money | absent | All `*_usd` floats (R2) |
 | Reward computation | partial | A bounded engagement/contribution proxy, not economic value (R2, economics gate) |
 | Reward delivery to P2 | absent | The route never sends it; a failed POST is still recorded as posted (R3) |
@@ -160,15 +176,15 @@ PART X (weekly multi-agent review / LLM router), XII (Shorts engine), XIII (comm
 XXIII (multi-brand beyond a `brand_id` column), and P10 recursive allocation. These are
 deferred and tracked here; they are not scheduled before the economics gate.
 
-## Test baseline (2026-10-13)
+## Test baseline (2026-10-14, after R1)
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 948 passed, 1 skipped, ~40 s |
-| Integration, compose **down** | `pytest -m integration` | 3 passed, 27 skipped, ~2.5 min |
-| Integration, compose **up** | `pytest -m integration` | Not run in this session (no containers running) |
+| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1216 passed, 1 skipped, ~35 s |
+| Integration, compose **down** | `pytest -m integration` | 3 passed, 27 skipped, ~2.5 min (collection and imports verified) |
+| Integration, compose **up** | `pytest -m integration` | Not run (no containers). The migrations `0016`–`0020` and the schema-matches-models tests have therefore **not** been exercised against Postgres. |
 | Lint | `ruff check .` | clean |
-| Types | `mypy packages services` | clean (349 files) |
+| Types | `mypy packages services` | clean (365 files) |
 
 Before R0:
 
@@ -182,11 +198,20 @@ Before R0:
 - **The known skip** is `tests/unit/test_cli.py:57`. Its parameter list `STUB_CASES` is
   empty because no stub CLI commands remain, so the test has nothing to check.
 
-**What the green suite does not prove.** The e2e test calls phase functions in process on
-SQLite and builds the P1 opportunity, P2 directive, C4 event, P5 manifest, P7 event and
-P8 release by hand. It never runs a second allocation cycle. The contract tests validate
-schemas copied into the test files rather than the real consumer models. R1 and R5
-replace both.
+**What the green suite does and does not prove (after R1).** Every seam contract test
+now runs the real producer into the real consumer, and refuses every missing,
+placeholder, unknown-field and future-major payload. That proves the hand-offs, not
+the pipeline.
+
+The e2e test still has these gaps:
+- It runs in process on SQLite, with no HTTP, Temporal or Postgres.
+- Its P1 opportunity and P2 directive are hand-built.
+- Its P5 manifest is hand-built from the real C4 event's facts. A real P5 run rejects
+  the mock's 30 s audio against the 150 s spec until R2 resolves the duration seam.
+- Its P9 revenue figures are literals.
+- It never runs a second allocation cycle.
+
+R5 replaces it.
 
 ## Detector limitations (for when R4 lands)
 

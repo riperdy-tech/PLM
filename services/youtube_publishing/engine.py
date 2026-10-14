@@ -6,7 +6,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from plm_contracts import ExecutionPolicy
+from plm_contracts import ExecutionPolicy, ProviderMode
+from plm_contracts.seams import ExperimentLineage
 from plm_platform.execution import (
     ExternalWriteGuard,
     GuardDecision,
@@ -105,6 +106,34 @@ class YouTubePublishingEngine:
             policy_ceiling=ceiling,
         )
 
+    def _media_bytes(self, supplied: bytes | None, placeholder_attr: str) -> bytes | None:
+        """The bytes to upload: the supplied media, or a mock client's own placeholder.
+
+        A real client never gets placeholder bytes; missing media there is a refusal.
+        """
+        if supplied:
+            return supplied
+        if self.provider_mode is ProviderMode.MOCK:
+            placeholder = getattr(self.client, placeholder_attr, None)
+            return placeholder if isinstance(placeholder, bytes) else None
+        return None
+
+    def _missing_media(
+        self, session: Session, attempt: PublishAttempt, what: str
+    ) -> PublishingEngineResult:
+        message = f"no {what} bytes supplied for a real upload; nothing was sent"
+        update_publish_attempt(
+            session,
+            attempt.attempt_id,
+            state=PublishState.FAILED_PERMANENT,
+            error_code=FailureReasonCode.PREFLIGHT_ARTIFACT_MISSING.value,
+            error_message=message,
+            updated_at=datetime.now(UTC),
+        )
+        session.commit()
+        updated = get_publish_attempt_by_id(session, attempt.attempt_id)
+        return PublishingEngineResult(attempt=updated or attempt, error=message)
+
     def _halt_for(
         self, session: Session, attempt: PublishAttempt, decision: GuardDecision
     ) -> PublishingEngineResult:
@@ -150,17 +179,22 @@ class YouTubePublishingEngine:
         if existing_rec:
             logger.info("Found existing publication record for package %s: video %s", manifest.media_package_id, existing_rec.youtube_video_id)
             # Emit Hop 2 event for the existing publication
-            event = YouTubeVideoPublishedEvent(
+            event = YouTubeVideoPublishedEvent.build(
+                event="youtube_video_published",
                 youtube_video_id=existing_rec.youtube_video_id,
                 publish_attempt_id=existing_rec.publish_attempt_id,
-                experiment_id=existing_rec.experiment_id,
-                content_arm_id=existing_rec.content_arm_id,
+                channel_id=existing_rec.channel_id,
+                media_package_id=existing_rec.media_package_id,
+                lineage=ExperimentLineage(
+                    experiment_id=existing_rec.experiment_id,
+                    experiment_family_id=existing_rec.experiment_family_id,
+                    content_arm_id=existing_rec.content_arm_id,
+                    content_genome_id=existing_rec.content_genome_id,
+                    production_directive_id=existing_rec.production_directive_id,
+                ),
                 published_at=existing_rec.published_at,
                 metadata_version=manifest.metadata_version,
-                experiment_family_id=existing_rec.experiment_family_id,
-                content_genome_id=existing_rec.content_genome_id,
-                production_directive_id=existing_rec.production_directive_id,
-                media_package_id=existing_rec.media_package_id,
+                contains_synthetic_media=existing_rec.contains_synthetic_media,
             )
             attempt = get_publish_attempt_by_idempotency_key(session, manifest.idempotency_key)
             if not attempt:
@@ -195,7 +229,9 @@ class YouTubePublishingEngine:
             insert_publish_attempt(session, attempt)
             session.commit()
 
-        video_bytes = video_data or b"MOCK_VIDEO_BINARY_STREAM"
+        video_bytes = self._media_bytes(video_data, "placeholder_video_bytes")
+        if video_bytes is None:
+            return self._missing_media(session, attempt, "video")
         total_bytes = len(video_bytes)
 
         try:
@@ -309,7 +345,9 @@ class YouTubePublishingEngine:
             decision = self._authorize(CAPABILITY_THUMBNAIL, manifest, operating_mode)
             if not decision.decision.may_call_provider:
                 return self._halt_for(session, attempt, decision)
-            thumb_bytes = thumbnail_data or b"MOCK_THUMBNAIL_BINARY_IMAGE"
+            thumb_bytes = self._media_bytes(thumbnail_data, "placeholder_thumbnail_bytes")
+            if thumb_bytes is None:
+                return self._missing_media(session, attempt, "thumbnail")
             update_publish_attempt(
                 session,
                 attempt.attempt_id,
@@ -396,17 +434,16 @@ class YouTubePublishingEngine:
             session.commit()
 
             # Hop 2 Event carrying all R9 identity fields
-            event = YouTubeVideoPublishedEvent(
+            event = YouTubeVideoPublishedEvent.build(
+                event="youtube_video_published",
                 youtube_video_id=youtube_video_id,
                 publish_attempt_id=attempt.attempt_id,
-                experiment_id=manifest.experiment_id,
-                content_arm_id=manifest.content_arm_id,
+                channel_id=manifest.channel_id,
+                media_package_id=manifest.media_package_id,
+                lineage=manifest.lineage,
                 published_at=completed_time,
                 metadata_version=manifest.metadata_version,
-                experiment_family_id=manifest.experiment_family_id,
-                content_genome_id=manifest.content_genome_id,
-                production_directive_id=manifest.production_directive_id,
-                media_package_id=manifest.media_package_id,
+                contains_synthetic_media=manifest.contains_synthetic_media,
             )
 
             # Reload updated attempt

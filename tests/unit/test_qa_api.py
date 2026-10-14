@@ -15,6 +15,7 @@ from quality_gate.api.app import create_app
 from quality_gate.config import load_quality_gate_settings
 
 from tests.support.qa_db import create_qa_engine, qa_session
+from tests.support.seams import candidate_event, lineage_fields, rights_fields
 
 _TEST_TOKEN = "test-qa-secret-token"
 ENV_WITH_TOKEN = {
@@ -85,22 +86,14 @@ def test_evaluate_and_get_manifest_flow(qa_client, qa_engine) -> None:
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
         eval_payload = {
-            "candidate_id": "cand_api_01",
-            "artifact_id": "art_api_01",
+            "candidate_event": candidate_event(
+                candidate_id="cand_api_01",
+                artifact_id="art_api_01",
+                track_spec_id="spec_api_01",
+                lineage=lineage_fields(experiment_id="exp_api_01", content_arm_id="arm_api_01"),
+                prompt_text="relaxing lo-fi chill beat",
+            ).to_wire(),
             "audio_path": str(wav_path),
-            "expected_duration_seconds": 1.0,
-            "track_spec_id": "spec_api_01",
-            "experiment_id": "exp_api_01",
-            "content_arm_id": "arm_api_01",
-            "vocal_mode": "instrumental",
-            "prompt_text": "relaxing lo-fi chill beat",
-            "rights_snapshot": {
-                "plan_or_tier": "pro",
-                "account_identity_ref": "acc_001",
-                "terms_version": "v1.0",
-                "downloaded_at": "2026-09-25T12:00:00Z",
-                "commercial_use_status": "ELIGIBLE",
-            },
         }
 
         # 1. Post evaluation
@@ -135,19 +128,16 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
     wav_path = _make_temp_wav(duration=1.0)
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
-        # Incomplete R6 fields -> triggers quarantine
+        # Declared commercial use unknown -> triggers quarantine
         eval_payload = {
-            "candidate_id": "cand_quar_api_01",
-            "artifact_id": "art_api_02",
+            "candidate_event": candidate_event(
+                candidate_id="cand_quar_api_01",
+                artifact_id="art_api_02",
+                track_spec_id="spec_api_02",
+                lineage=lineage_fields(experiment_id="exp_api_02", content_arm_id="arm_api_02"),
+                rights=rights_fields(commercial_use_status="unknown"),
+            ).to_wire(),
             "audio_path": str(wav_path),
-            "expected_duration_seconds": 1.0,
-            "track_spec_id": "spec_api_02",
-            "experiment_id": "exp_api_02",
-            "content_arm_id": "arm_api_02",
-            "rights_snapshot": {
-                "plan_or_tier": "pro",
-                "commercial_use_status": "UNKNOWN",
-            },
         }
 
         # 1. Post evaluation -> Quarantined
@@ -179,11 +169,28 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
         assert res_post.json()["status"] == "RESOLVED"
         assert res_post.json()["resolution"] == "CLEARED_BY_OVERRIDE"
 
-        # 4. Manifest is now available with CLEARED_BY_OVERRIDE
+        # 4. Manifest is available: automated disposition kept, override recorded (R8)
         man_res = qa_client.get("/qa/release-manifests/cand_quar_api_01", headers=headers)
         assert man_res.status_code == 200
-        assert man_res.json()["disposition"] == "CLEARED_BY_OVERRIDE"
+        assert man_res.json()["disposition"] == "QUARANTINED"
+        assert man_res.json()["override"]["status"] == "CLEARED_BY_OVERRIDE"
+        assert man_res.json()["override"]["quarantine_case_id"] == case_id
+        assert man_res.json()["lineage"]["content_arm_id"] == "arm_api_02"
 
     finally:
         if wav_path.is_file():
             wav_path.unlink()
+
+
+def test_evaluation_refuses_an_incomplete_candidate_event(qa_client, qa_engine) -> None:
+    headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
+    event = candidate_event().to_wire()
+    del event["lineage"]
+    res = qa_client.post(
+        "/qa/evaluations",
+        json={"candidate_event": event, "audio_path": "unused.wav"},
+        headers=headers,
+    )
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "missing_required_field"
+    assert "candidate_event.lineage" in res.json()["detail"]["field_paths"]

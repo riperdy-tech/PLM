@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -10,63 +11,55 @@ import uvicorn
 from plm_platform.db import build_engine, session_factory
 
 from .api.app import create_app
-from .artists.manager import get_or_create_artist
+from .api.schemas import ReleaseSubmitRequest
 from .client.mock import MockDistributorClient
-from .compiler.release_compiler import compile_canonical_release_package
 from .engine import DistributionEngine
 from .reports.ingest import get_report_reference
 from .storage.repositories import get_release_by_id
+from .submission import ReleaseMetadata, SubmissionRefusedError, submit_release_from_seams
 
 
-def cli_submit(
-    package_path: str,
-    artist_name: str = "Neon Artist",
-    brand_id: str = "brand_neon",
-) -> None:
-    """Submit a release package JSON file for distribution."""
+def cli_submit(package_path: str) -> None:
+    """Submit a release from a JSON file holding the ReleaseSubmitRequest fields."""
     path = Path(package_path)
     if not path.is_file():
         typer.echo(f"Error: package file {package_path} not found", err=True)
         raise typer.Exit(code=1)
-
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        typer.echo(f"Error reading package JSON: {exc}", err=True)
-        raise typer.Exit(code=1)
+        req = ReleaseSubmitRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except ValueError as exc:
+        typer.echo(f"Error: request refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     engine = build_engine()
     factory = session_factory(engine)
-
     with factory() as session:
-        artist = get_or_create_artist(session, artist_name, brand_id=brand_id)
-
-        p5_manifest = {
-            "p5_manifest_id": data.get("p5_manifest_id", "p5_cli_def"),
-            "disposition": "PASSED",
-        }
-        media_package = {
-            "media_package_id": data.get("media_package_id", "p6_cli_def"),
-            "brand_id": brand_id,
-            "tracklist": data.get("tracklist", []),
-            "thumbnails": data.get("thumbnails", [{"uri": "media/artwork/cli.jpg"}]),
-            "audio_master_uri": data.get("audio_master_uri", "media/audio/cli.wav"),
-        }
-
-        package = compile_canonical_release_package(
-            p5_manifest=p5_manifest,
-            media_package=media_package,
-            artist_id=artist.id,
-            artist_name=artist.canonical_name,
-            brand_id=brand_id,
-            release_title=data.get("title", "CLI Release"),
-        )
-
-        dist_engine = DistributionEngine(MockDistributorClient())
-        result = dist_engine.submit_release(session, package, artist=artist)
+        try:
+            result = submit_release_from_seams(
+                session,
+                DistributionEngine(MockDistributorClient()),
+                track_manifests=req.track_manifests,
+                media_package=req.media_package,
+                publication=req.publication,
+                metadata=ReleaseMetadata(
+                    artist_name=req.artist_name,
+                    release_date=req.release_date,
+                    label_name=req.label_name,
+                    copyright_line=req.copyright_line,
+                    publisher_line=req.publisher_line,
+                    territories=req.territories,
+                    release_title=req.release_title,
+                    release_version=req.release_version,
+                ),
+                now=datetime.now(UTC),
+            )
+        except SubmissionRefusedError as exc:
+            typer.echo(f"Error: release refused: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
         session.commit()
-
-        typer.echo(f"Submitted release: {result.release.release_id} (status={result.release.status.value})")
+        typer.echo(
+            f"Submitted release: {result.release.release_id} (status={result.release.status.value})"
+        )
 
 
 def cli_release(release_id: str) -> None:

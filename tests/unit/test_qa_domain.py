@@ -19,6 +19,8 @@ from quality_gate.domain.models import (
     ReleaseManifest,
 )
 
+from tests.support.seams import sample_lineage
+
 
 def test_id_determinism_and_collision_resistance() -> None:
     id1 = evaluation_id("cand_100", "p5-v1", "candidate_ready")
@@ -75,10 +77,13 @@ def test_gate_decision_and_manifest_hashes() -> None:
     man = ReleaseManifest.create(
         candidate_id="cand_01",
         canonical_artifact_id="art_01",
-        experiment_id="exp_01",
+        artifact_uri="music/test/art_01.wav",
+        artifact_sha256="0" * 64,
+        measured_duration_seconds=180.0,
         track_spec_id="spec_01",
-        content_arm_id="arm_01",
+        lineage=sample_lineage(experiment_id="exp_01", content_arm_id="arm_01"),
         disposition=GateDisposition.PASSED,
+        override=None,
         technical_status="PASSED",
         commercial_use_status="ELIGIBLE",
         provenance_status="COMPLETE",

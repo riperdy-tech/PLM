@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
+import pytest
 from youtube_publishing.domain.enums import (
     PublishState,
 )
@@ -16,6 +15,8 @@ from youtube_publishing.domain.ids import (
 from youtube_publishing.domain.models import (
     YouTubeVideoPublishedEvent,
 )
+
+from tests.support.seams import lineage_fields, publication_fields
 
 
 def test_publish_state_includes_processing_timeout_mandated_by_r9() -> None:
@@ -56,22 +57,15 @@ def test_manifest_and_attempt_ids() -> None:
 
 
 def test_hop2_event_contains_all_r9_identity_fields() -> None:
-    now = datetime.now(UTC)
-    event = YouTubeVideoPublishedEvent(
-        youtube_video_id="dQw4w9WgXcQ",
-        publish_attempt_id="att_001_01",
-        experiment_id="exp_01",
-        content_arm_id="arm_01",
-        published_at=now,
-        metadata_version="v1",
-        experiment_family_id="fam_01",
-        content_genome_id="gen_01",
-        production_directive_id="dir_01",
-        media_package_id="pkg_01",
-    )
-    dumped = event.model_dump()
+    event = YouTubeVideoPublishedEvent.build(**publication_fields(media_package_id="pkg_01"))
+    dumped = event.to_wire()
     assert dumped["event"] == "youtube_video_published"
-    assert dumped["experiment_family_id"] == "fam_01"
-    assert dumped["content_genome_id"] == "gen_01"
-    assert dumped["production_directive_id"] == "dir_01"
+    assert dumped["lineage"] == lineage_fields()
     assert dumped["media_package_id"] == "pkg_01"
+
+
+def test_hop2_event_refuses_placeholder_identity() -> None:
+    with pytest.raises(ValueError):
+        YouTubeVideoPublishedEvent.build(
+            **publication_fields(lineage=lineage_fields(experiment_family_id="fam_unknown"))
+        )

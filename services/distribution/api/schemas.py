@@ -8,30 +8,26 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReleaseSubmitRequest(BaseModel):
-    """Payload to compile and submit a release for distribution."""
+    """Compile and submit a release from seam payloads (P8 §11, §71, ADR-0029).
 
-    model_config = ConfigDict(extra="ignore")
+    ``track_manifests`` are C5 payloads, ``media_package`` is the C6 hop-1 payload and
+    ``publication`` the optional C6 hop-2 event. The release-level facts are decisions
+    the caller makes; none is defaulted. Identity comes from the package's lineage.
+    """
 
-    p5_manifest_id: str
-    p6_media_package_id: str
-    artist_name: str
-    artist_id: str | None = None
-    brand_id: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    track_manifests: list[dict[str, Any]] = Field(min_length=1)
+    media_package: dict[str, Any]
+    publication: dict[str, Any] | None = None
+    artist_name: str = Field(min_length=1)
+    release_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    label_name: str = Field(min_length=1)
+    copyright_line: str = Field(min_length=1)
+    publisher_line: str = Field(min_length=1)
+    territories: str = Field(min_length=1)
     release_title: str | None = None
-    release_version: int = 1
-    release_date: str | None = None
-    label_name: str = "Neon Records"
-    copyright_line: str = "2026 Neon Records"
-    publisher_line: str = "2026 Neon Music Publishing"
-    territories: str = "WORLDWIDE"
-    tracks: list[dict[str, Any]] | None = None
-    # R9 identity fields:
-    experiment_id: str = "exp_unknown"
-    experiment_family_id: str = "fam_unknown"
-    content_arm_id: str = "arm_unknown"
-    content_genome_id: str = "gen_unknown"
-    production_directive_id: str = "dir_unknown"
-    media_package_id: str = "pkg_unknown"
+    release_version: int = Field(default=1, ge=1)
 
 
 class ReleaseResponse(BaseModel):

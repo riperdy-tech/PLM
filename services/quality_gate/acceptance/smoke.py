@@ -8,6 +8,7 @@ C4 candidate ready event → technical audio validation → musical analysis
 
 from __future__ import annotations
 
+import hashlib
 import math
 import struct
 import tempfile
@@ -15,6 +16,9 @@ import wave
 from datetime import UTC, datetime
 from pathlib import Path
 
+from plm_contracts import CommercialUseEligibility
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c4 import CandidateReadyPayload, MeasuredAudio, RightsSnapshotPayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -75,28 +79,43 @@ def run_smoke_test() -> str | None:
             candidate_id = f"cand_smoke_{int(now.timestamp())}"
             artifact_id = f"art_smoke_{int(now.timestamp())}"
 
-            rights_snapshot = {
-                "plan_or_tier": "pro",
-                "account_identity_ref": "acc_smoke_123",
-                "terms_version": "terms-2026-v1",
-                "downloaded_at": now.isoformat(),
-                "commercial_use_status": "ELIGIBLE",
-                "provider_id": "mock",
-            }
-
-            result = run_candidate_evaluation(
+            event = CandidateReadyPayload.build(
+                event_type="music_candidate_ready_for_p5",
                 candidate_id=candidate_id,
                 artifact_id=artifact_id,
-                audio_path=wav_path,
-                expected_duration_seconds=2.0,
+                artifact_uri=str(wav_path),
+                artifact_sha256=hashlib.sha256(wav_path.read_bytes()).hexdigest(),
                 track_spec_id="spec_smoke_01",
-                experiment_id="exp_smoke_01",
-                content_arm_id="arm_smoke_01",
+                lineage=ExperimentLineage(
+                    experiment_id="exp_smoke_01",
+                    experiment_family_id="fam_smoke_01",
+                    content_arm_id="arm_smoke_01",
+                    content_genome_id="gen_smoke_01",
+                    production_directive_id="dir_smoke_01",
+                ),
+                provider_id="mock",
+                model_id="mock-v1",
+                measured_audio=MeasuredAudio(duration_seconds=2.0, sample_rate=44100, channels=2),
+                requested_duration_seconds=2,
                 vocal_mode="instrumental",
+                genre_tags=("ambient",),
                 prompt_text="ambient electronic relaxing beat",
-                rights_snapshot=rights_snapshot,
-                provenance_metadata={"provider_id": "mock", "model_id": "mock-v1"},
+                lyrics_text=None,
+                rights=RightsSnapshotPayload(
+                    commercial_use_status=CommercialUseEligibility.ELIGIBLE,
+                    basis="plm_internal_synthesis",
+                    license_reference="plm-mock-provider",
+                    plan_or_tier="internal",
+                    account_identity_ref="plm-mock",
+                    terms_version="mock-v1",
+                    attempt_id="att_smoke_01",
+                    provider_id="mock",
+                    policy_version="p4-v1",
+                    checked_at=now,
+                    downloaded_at=now,
+                ),
             )
+            result = run_candidate_evaluation(event=event, audio_path=wav_path)
 
             if result.disposition not in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS):
                 return f"smoke test evaluation failed with disposition: {result.disposition}"

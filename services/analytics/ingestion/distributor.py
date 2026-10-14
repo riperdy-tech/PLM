@@ -18,6 +18,7 @@ from ..storage.repositories import (
     insert_revenue_statement,
     insert_track_metric,
 )
+from .releases import lineage_for_isrc
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +59,28 @@ def ingest_distributor_statement(
 
     total_revenue = 0.0
     total_streams = 0
+    unattributed_revenue = 0.0
+    unattributed_rows = 0
     track_observations: list[TrackMetricObservation] = []
 
-    for idx, r in enumerate(parsed_rows, start=1):
-        isrc = r.get("isrc") or f"USPLM26{idx:05d}"
-        track_id = r.get("track_id") or f"trk_{isrc}"
-        release_id = r.get("release_id") or f"rel_{provider}_{period}"
-        streams = int(r.get("streams", 0))
-        revenue = float(r.get("revenue_usd", r.get("revenue", 0.0)))
-
+    for r in parsed_rows:
+        streams = int(r.get("streams") or 0)
+        revenue = float(r.get("revenue_usd", r.get("revenue")) or 0.0)
         total_streams += streams
         total_revenue += revenue
 
-        obs_id = build_observation_id(track_id, "streams", ObservationWindow.LIFETIME.value, period)
+        isrc = (r.get("isrc") or "").strip().upper()
+        if not isrc:
+            # No recording named: the revenue is real but cannot be attributed (ADR-0030).
+            unattributed_revenue += revenue
+            unattributed_rows += 1
+            continue
+
+        link = lineage_for_isrc(session, isrc)
+        release_id = r.get("release_id") or (link[0] if link else None)
+        track_id = r.get("track_id") or None
+
+        obs_id = build_observation_id(isrc, "streams", ObservationWindow.LIFETIME.value, period)
         obs = TrackMetricObservation(
             id=obs_id,
             isrc=isrc,
@@ -99,6 +109,8 @@ def ingest_distributor_statement(
         file_hash=file_hash,
         source_reference=source_reference,
         received_at=now,
+        unattributed_revenue_usd=round(unattributed_revenue, 4),
+        unattributed_row_count=unattributed_rows,
     )
     insert_revenue_statement(session, statement)
 

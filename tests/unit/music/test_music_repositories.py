@@ -24,6 +24,7 @@ from services.music_factory.domain.models import (
 )
 from services.music_factory.storage import repositories
 from tests.support.music_db import create_music_engine, music_session
+from tests.support.seams import sample_lineage
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -35,6 +36,8 @@ def test_generation_plan_and_variant_crud() -> None:
             plan_id="plan_001",
             track_spec_id="trk_001",
             experiment_id="exp_001",
+            lineage=sample_lineage(experiment_id="exp_001"),
+            track_spec_wire=None,
             candidate_target=2,
             max_attempts=4,
             budget_limit=40.0,
@@ -100,6 +103,7 @@ def test_attempt_and_candidate_and_artifact_crud() -> None:
 
         # 2. Candidate
         cand = GeneratedCandidate(
+            source_attempt_id=None,
             candidate_id="cand_001",
             track_spec_id="trk_001",
             experiment_id="exp_001",
@@ -133,7 +137,7 @@ def test_attempt_and_candidate_and_artifact_crud() -> None:
             snapshot_id="rgt_001",
             attempt_id="att_001",
             provider_id="mock",
-            commercial_use_status=CommercialUseStatus.PERMITTED,
+            commercial_use_status=CommercialUseStatus.ELIGIBLE,
             basis="enterprise_license",
             license_reference="lic_ref_123",
             policy_version="p4-lic-v1",

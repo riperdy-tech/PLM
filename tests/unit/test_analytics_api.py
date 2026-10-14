@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.analytics_db import create_analytics_engine
+from tests.support.seams import lineage_fields
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",
@@ -86,20 +87,29 @@ def test_analytics_api_lifecycle_roundtrip(client: TestClient) -> None:
 
     # 4. Post feedback
     fb_payload = {
-        "experiment_id": "exp_api_01",
-        "experiment_family_id": "fam_api_01",
-        "content_arm_id": "arm_api_01",
-        "content_genome_id": "gen_api_01",
+        "lineage": lineage_fields(
+            experiment_id="exp_api_01", experiment_family_id="fam_api_01",
+            content_arm_id="arm_api_01", content_genome_id="gen_api_01",
+        ),
         "unit_id": "vid_api_01",
         "net_contribution_usd": 25.0,
         "views": 10000,
         "watch_time_minutes": 320.0,
+        "average_percentage_viewed": None,
+        "subscribers_gained": None,
+        "estimated_revenue": 30.0,
         "window": "7d",
+        "maturity": "mature",
+        "attribution_confidence": 1.0,
+        "quality_status": None,
+        "observed_at": "2026-10-01T12:00:00+00:00",
     }
     res_fb = client.post("/analytics/evaluation/feedback", json=fb_payload, headers=headers)
     assert res_fb.status_code == 200, res_fb.text
     fb_data = res_fb.json()
     assert fb_data["experiment_id"] == "exp_api_01"
+    assert fb_data["schema_version"] == "1.0"
+    assert fb_data["raw_metrics"]["subscriber_gain"] is None  # unmeasured stays null
     assert fb_data["normalized_reward"] > 0.0
 
     # 5. Get P10 features

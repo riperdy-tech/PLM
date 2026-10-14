@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+
+from plm_contracts.seams.c4 import CandidateReadyPayload
 
 from ..domain.enums import (
     CheckSeverity,
@@ -56,23 +57,29 @@ class GateEngineResult:
 
 def run_candidate_evaluation(
     *,
-    candidate_id: str,
-    artifact_id: str,
+    event: CandidateReadyPayload,
     audio_path: str | Path,
-    expected_duration_seconds: float,
-    track_spec_id: str,
-    experiment_id: str,
-    content_arm_id: str,
-    vocal_mode: str = "instrumental",
-    lyrics_text: str | None = None,
-    prompt_text: str | None = None,
-    genre_tags: list[str] | None = None,
-    rights_snapshot: dict[str, Any] | None = None,
-    provenance_metadata: dict[str, Any] | None = None,
     evaluation_policy_version: str = "p5-v1",
     trigger: str = "candidate_ready",
 ) -> GateEngineResult:
-    """Execute full evaluation pipeline against a candidate."""
+    """Evaluate one candidate described by its Seam C4 event (ADR-0027).
+
+    Every candidate fact comes from the event: lineage, expected duration, vocal mode,
+    genre tags, prompt, lyrics and the declared rights. ``evaluation_policy_version`` and
+    ``trigger`` are P5's own settings. ``audio_path`` is where P5 can read the artifact;
+    fetching it from storage by URI and checksum is stage R4.
+    """
+    candidate_id = event.candidate_id
+    artifact_id = event.artifact_id
+    track_spec_id = event.track_spec_id
+    experiment_id = event.lineage.experiment_id
+    content_arm_id = event.lineage.content_arm_id
+    expected_duration_seconds = float(event.requested_duration_seconds)
+    vocal_mode = event.vocal_mode
+    lyrics_text = event.lyrics_text
+    prompt_text = event.prompt_text
+    genre_tags = list(event.genre_tags)
+
     # 1. Initialize Aggregate Root
     evaluation = CandidateEvaluation.create(
         candidate_id=candidate_id,
@@ -81,25 +88,29 @@ def run_candidate_evaluation(
         trigger=trigger,
     )
 
-    # 2. Immutable Fact Snapshot
+    # 2. Immutable Fact Snapshot: the C4 event as received, lineage included.
     snapshot = EvaluationSnapshot.create(
         evaluation_id_str=evaluation.id,
         candidate_id=candidate_id,
         artifact_id=artifact_id,
         candidate_snapshot={
             "track_spec_id": track_spec_id,
+            "lineage": event.lineage.model_dump(mode="json"),
             "experiment_id": experiment_id,
             "content_arm_id": content_arm_id,
             "vocal_mode": vocal_mode,
             "prompt_text": prompt_text,
-            "genre_tags": genre_tags or [],
+            "genre_tags": genre_tags,
         },
         artifact_snapshot={
             "audio_path": str(audio_path),
+            "artifact_uri": event.artifact_uri,
+            "artifact_sha256": event.artifact_sha256,
             "expected_duration_seconds": expected_duration_seconds,
+            "measured_audio": event.measured_audio.model_dump(mode="json"),
         },
-        provider_snapshot=provenance_metadata or {},
-        license_snapshot=rights_snapshot or {},
+        provider_snapshot={"provider_id": event.provider_id, "model_id": event.model_id},
+        license_snapshot=event.rights.model_dump(mode="json") if event.rights else {},
         p3_snapshot_ref=track_spec_id,
         p4_snapshot_ref=candidate_id,
         policy_snapshot_ref=evaluation_policy_version,
@@ -136,8 +147,7 @@ def run_candidate_evaluation(
 
     rights_res = validate_provenance_and_rights(
         evaluation_id=evaluation.id,
-        rights_snapshot=rights_snapshot,
-        provenance_metadata=provenance_metadata,
+        rights=event.rights,
     )
     evaluation.rights_checks.extend(rights_res.rights_checks)
     evaluation.provenance_checks.extend(rights_res.provenance_checks)
@@ -160,8 +170,8 @@ def run_candidate_evaluation(
     )
     evaluation.technical_status = "FAILED" if has_blocking_tech else "PASSED"
     evaluation.quality_status = "PASSED" if (musical_res.composite_score >= 0.5) else "MARGINAL"
-    evaluation.provenance_status = rights_res.provenance_status
-    evaluation.rights_status = rights_res.commercial_use_status
+    evaluation.provenance_status = rights_res.provenance_status.value
+    evaluation.rights_status = rights_res.commercial_use_status.value
     evaluation.policy_status = policy_res.policy_status
 
     # 5. Deterministic Gate Decision logic (P5 §45-§51)
@@ -221,14 +231,18 @@ def run_candidate_evaluation(
 
     # 6. Release Manifest Generation (Only if passed or passed with warnings)
     if disposition in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS):
-        primary_evidence_id = evaluation.evidence_items[0].id if evaluation.evidence_items else "no_evidence"
+        # The rights evaluator always records the declaration (or its absence).
+        primary_evidence_id = evaluation.evidence_items[0].id
         release_manifest = build_release_manifest(
             candidate_id=candidate_id,
             canonical_artifact_id=artifact_id,
-            experiment_id=experiment_id,
+            artifact_uri=event.artifact_uri,
+            artifact_sha256=event.artifact_sha256,
+            measured_duration_seconds=event.measured_audio.duration_seconds,
             track_spec_id=track_spec_id,
-            content_arm_id=content_arm_id,
+            lineage=event.lineage,
             disposition=disposition,
+            override=None,
             technical_status=evaluation.technical_status,
             commercial_use_status=evaluation.rights_status,
             provenance_status=evaluation.provenance_status,

@@ -7,9 +7,12 @@ from pathlib import Path
 
 import typer
 import uvicorn
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 
+from .api.schemas import AssemblePackageRequest
 from .config import load_media_factory_settings
 from .rendering.assembler import assemble_media_package
 from .storage.repositories import (
@@ -29,39 +32,34 @@ media_cli = typer.Typer(help="Media factory CLI commands")
 
 @media_cli.command(name="assemble")
 def cli_assemble(
-    manifest_path: str = typer.Option(
-        ..., "--manifest", "-m", help="Path to P5 release manifest JSON file"
+    request_path: str = typer.Option(
+        ...,
+        "--request",
+        "-r",
+        help="Path to an assembly request JSON: track_manifests (C5), brand_id, brand_name, "
+        "required_duration_seconds, visual_profile, playlist_concept",
     ),
-    brand_id: str = typer.Option("brand_neon", "--brand-id", help="Brand ID"),
-    brand_name: str = typer.Option("Neon Records", "--brand-name", help="Brand display name"),
-    render_profile: str = typer.Option(
-        "yt_longform_1080p_v1", "--render-profile", help="Render profile"
-    ),
-    duration_seconds: float = typer.Option(
-        3600.0, "--duration", "-d", help="Required playlist duration in seconds"
-    ),
-    version: str = typer.Option("v1", "--version", help="Package sequence version"),
 ) -> None:
-    """Assemble and render a media package from a release manifest file."""
-    path = Path(manifest_path)
+    """Assemble and render a media package from P5 track manifests (ADR-0028)."""
+    path = Path(request_path)
     if not path.is_file():
-        typer.echo(f"Error: manifest file {manifest_path} does not exist.", err=True)
+        typer.echo(f"Error: request file {request_path} does not exist.", err=True)
         raise typer.Exit(code=1)
-
     try:
-        manifest_data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        typer.echo(f"Error parsing manifest JSON: {exc}", err=True)
-        raise typer.Exit(code=1)
-
-    brand = BrandProfile(brand_id=brand_id, brand_name=brand_name)
-    result = assemble_media_package(
-        release_manifest=manifest_data,
-        brand_profile=brand,
-        render_profile=render_profile,
-        required_duration_seconds=duration_seconds,
-        sequence_version=version,
-    )
+        req = AssemblePackageRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        manifests = [parse_seam(ReleaseManifestPayload, m) for m in req.track_manifests]
+        result = assemble_media_package(
+            track_manifests=manifests,
+            brand_profile=BrandProfile(brand_id=req.brand_id, brand_name=req.brand_name),
+            required_duration_seconds=req.required_duration_seconds,
+            visual_profile=req.visual_profile,
+            playlist_concept=req.playlist_concept,
+            render_profile=req.render_profile,
+            sequence_version=req.sequence_version,
+        )
+    except (ValueError, SeamRejection) as exc:
+        typer.echo(f"Error: assembly refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     pkg = result.media_package
     typer.echo(f"Media Package ID:    {pkg.media_package_id}")

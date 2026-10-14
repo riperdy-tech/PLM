@@ -13,15 +13,21 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from plm_contracts import AllocationType, GateDisposition
-from sqlalchemy.orm import Session
+from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_contracts.seams.c6 import MediaPackagePayload
 
 # P9
+from plm_contracts.seams.c7 import ObservationMaturity
+from sqlalchemy.orm import Session
+
 from services.analytics.domain.enums import ObservationWindow, PaybackStatus
 from services.analytics.economics.calculator import compute_unit_economics
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
     generate_and_post_reward,
 )
+from services.analytics.ingestion.releases import ingest_distribution_record, lineage_for_isrc
 
 # P2
 from services.autonomous_ar.config import load_ar_settings
@@ -46,16 +52,11 @@ from services.autonomous_ar.ingestion.result_adapter import store_result
 from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
 from services.autonomous_ar.modeling.update import apply_pending_updates
 from services.autonomous_ar.storage import repositories
+from services.distribution.client.mock import MockDistributorClient
 
 # P8
-from services.distribution.domain.enums import (
-    DeliveryStatus,
-    ReleaseStatus,
-    ReleaseType,
-    StorePlatform,
-)
-from services.distribution.domain.models import DeliveryTarget, DistributionRelease
 from services.distribution.engine import DistributionEngine
+from services.distribution.submission import ReleaseMetadata, submit_release_from_seams
 
 # P3
 from services.experiments.domain.experiment import Experiment, Hypothesis, Treatment
@@ -66,16 +67,26 @@ from services.experiments.materialization.builder import materialize_package
 # P6
 from services.media_factory.rendering.assembler import assemble_media_package
 from services.media_factory.visuals.planner import BrandProfile
+from services.music_factory.api.events import build_candidate_ready_event
 
 # P4
-from services.music_factory.api.events import build_candidate_ready_event
+from services.music_factory.generation.engine import GenerationEngine
+from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 
 # P5
 from services.quality_gate.gate.manifest import build_release_manifest
+from services.youtube_publishing.client.mock import MockYouTubeClient
+from services.youtube_publishing.domain.enums import OperatingMode
 
 # P7
-from services.youtube_publishing.domain.models import YouTubeVideoPublishedEvent
+from services.youtube_publishing.domain.models import ChannelProfile
+from services.youtube_publishing.engine import YouTubePublishingEngine
+from services.youtube_publishing.manifests import build_publish_manifest
+from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.distribution_db import distribution_db_session
+from tests.support.music_db import music_db_session
+from tests.support.youtube_db import youtube_db_session
 
 
 def test_autonomous_music_engine_end_to_end_loop_closure(
@@ -239,39 +250,40 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 4: P4 Music Factory — Audio Generation & Candidate Ready (Seam C4)
     # =========================================================================
-    adapted_spec = adapt_track_spec(track_spec.model_dump(mode="json"))
+    adapted_spec = adapt_track_spec(track_spec.to_wire())
     assert adapted_spec.genre == "lofi"
 
-    candidate_id = "cand_lofi_001"
-    artifact_id = "art_lofi_001"
-    ready_event = build_candidate_ready_event(
-        candidate_id=candidate_id,
-        artifact_id=artifact_id,
-        track_spec_id=track_spec.track_spec_id,
-        experiment_id=experiment.experiment_id,
-        content_arm_id=directive.arm_id,
-        provider_id="mock_music_provider",
-        model_id="music-v1",
-        duration_seconds=150.0,
-        sample_rate=44100,
-        channels=2,
-        rights_status="permitted",
-        provenance_complete=True,
-    )
+    # Real P4 path: plan, generate with the mock provider, then build the C4 event
+    # from the stored facts (ADR-0027) instead of hand-writing it.
+    plan, variants = plan_generation(adapted_spec)
+    with music_db_session() as music_db:
+        gen = GenerationEngine().execute_plan(
+            music_db, plan=plan, variants=variants, spec=adapted_spec
+        )
+        ready_event = build_candidate_ready_event(music_db, gen.candidates[0].candidate_id)
     assert ready_event.event_type == "music_candidate_ready_for_p5"
+    assert ready_event.lineage.content_arm_id == directive.arm_id
+    candidate_id = ready_event.candidate_id
+    artifact_id = ready_event.artifact_id
 
     # =========================================================================
     # Step 5: P5 Quality & Release Gate — Verdict & Release Clearance (Seam C5)
     # =========================================================================
+    # Still hand-built (STATUS.md): a real P5 run would reject the mock's 30 s audio
+    # against the 150 s spec until R2 resolves the duration seam. Every fact below is
+    # taken from the real C4 event, including its lineage.
     manifest = build_release_manifest(
         candidate_id=candidate_id,
         canonical_artifact_id=artifact_id,
-        experiment_id=experiment.experiment_id,
-        track_spec_id=track_spec.track_spec_id,
-        content_arm_id=directive.arm_id,
+        artifact_uri=ready_event.artifact_uri,
+        artifact_sha256=ready_event.artifact_sha256,
+        measured_duration_seconds=ready_event.measured_audio.duration_seconds,
+        track_spec_id=ready_event.track_spec_id,
+        lineage=ready_event.lineage,
         disposition=GateDisposition.PASSED,
+        override=None,
         technical_status="PASSED",
-        commercial_use_status="ELIGIBLE",
+        commercial_use_status="eligible",
         provenance_status="COMPLETE",
         ai_disclosure_required=True,
         rights_risk="LOW",
@@ -287,30 +299,15 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 6: P6 Media Factory — Playlist Video & Packaging (Seam C6 Hop 1)
     # =========================================================================
-    playlist_manifest_input = {
-        "release_manifest_id": manifest.p5_manifest_id,
-        "experiment_id": experiment.experiment_id,
-        "content_arm_id": directive.arm_id,
-        "brand_id": "brand_neon",
-        "tracks": [
-            {
-                "song_id": candidate_id,
-                "title": "Rainy Window Coffee",
-                "duration_seconds": 150.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "music/neon/lofi_001.wav/abc123hash",
-                "audio_checksum": "chk_lofi_audio_001",
-            }
-        ],
-        "playlist_intent": "Lofi Study Session",
-        "policy_flags": {"ai_disclosure_required": True},
-    }
+    track_manifest = parse_seam(ReleaseManifestPayload, manifest.to_wire())
     brand_profile = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats")
     assembled = assemble_media_package(
-        release_manifest=playlist_manifest_input,
+        track_manifests=[track_manifest],
         brand_profile=brand_profile,
+        required_duration_seconds=track_manifest.measured_duration_seconds,
+        visual_profile="brand_neon_rain_v1",
+        playlist_concept="Lofi Study Session",
         render_profile="yt_longform_1080p_v1",
-        required_duration_seconds=150.0,
     )
     media_pkg = assembled.media_package
     c6_hop1 = media_pkg.to_c6_payload()
@@ -320,73 +317,57 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 7: P7 YouTube Publishing — Preflight & Publication Event (Seam C6 Hop 2, R9)
     # =========================================================================
-    yt_event = YouTubeVideoPublishedEvent(
-        event="youtube_video_published",
-        youtube_video_id="yt_vid_lofi_888",
-        publish_attempt_id="att_yt_001",
-        experiment_id=experiment.experiment_id,
-        content_arm_id=directive.arm_id,
-        published_at=now,
-        metadata_version="v1",
-        # All 6 R9 lineage fields:
-        experiment_family_id="fam_lofi_01",
-        content_genome_id="gen_lofi_01",
-        production_directive_id=directive.directive_id,
-        media_package_id=media_pkg.media_package_id,
+    channel = ChannelProfile(
+        id="prof_UC_e2e", channel_id="UC_e2e", channel_name="E2E Channel",
+        brand_id="brand_neon", oauth_credential_ref="sec_oauth_e2e",
+        created_at=now, updated_at=now,
     )
-    assert yt_event.youtube_video_id == "yt_vid_lofi_888"
+    package_wire = parse_seam(MediaPackagePayload, c6_hop1)
+    publish_manifest = build_publish_manifest(package_wire, channel, publish_at=None, now=now)
+    with youtube_db_session() as yt_db:
+        insert_publish_manifest(yt_db, publish_manifest)
+        yt_db.commit()
+        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512).execute_publish(
+            yt_db, publish_manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
+            operating_mode=OperatingMode.DRY_RUN,
+        )
+    yt_event = published.event
+    assert yt_event is not None, published.error
     assert yt_event.media_package_id == media_pkg.media_package_id
+    assert yt_event.lineage == ready_event.lineage  # P3's lineage, carried to P7
 
     # =========================================================================
     # Step 8: P8 DSP Distribution — Release Compilation & DSP Delivery (Seam C7 Leg 1, R9)
     # =========================================================================
-    deliveries = [
-        DeliveryTarget(
-            store=StorePlatform.SPOTIFY,
-            external_release_id="sp_rel_123",
-            status=DeliveryStatus.DELIVERED,
-            first_delivered_at=now,
-        ),
-        DeliveryTarget(
-            store=StorePlatform.APPLE_MUSIC,
-            external_release_id="am_rel_123",
-            status=DeliveryStatus.DELIVERED,
-            first_delivered_at=now,
-        ),
-    ]
-    distribution_release = DistributionRelease(
-        id="dist_rel_lofi_001",
-        release_id="rel_lofi_rain",
-        artist_id="art_neon_seoul",
-        release_type=ReleaseType.SINGLE,
-        release_title="Rainy Window Coffee",
-        release_version=1,
-        status=ReleaseStatus.DELIVERED,
-        provider="mock_distributor",
-        provider_release_id="prov_lofi_001",
-        submission_fingerprint="fp_lofi_rain_001",
-        deliveries=deliveries,
-        created_at=now,
-        updated_at=now,
-    )
-    c7_dist_payload = DistributionEngine.build_c7_payload(
-        release=distribution_release,
-        isrcs=["USPLM2600001"],
-        source_package_hash="fp_lofi_rain_001",
-        experiment_id=experiment.experiment_id,
-        experiment_family_id=yt_event.experiment_family_id,
-        content_arm_id=directive.arm_id,
-        content_genome_id=yt_event.content_genome_id,
-        production_directive_id=directive.directive_id,
-        media_package_id=media_pkg.media_package_id,
-    )
-    assert c7_dist_payload.status == "delivered"
-    assert c7_dist_payload.isrcs == ["USPLM2600001"]
+    with distribution_db_session() as dist_db:
+        submitted = submit_release_from_seams(
+            dist_db,
+            DistributionEngine(MockDistributorClient()),
+            track_manifests=[track_manifest.to_wire()],
+            media_package=c6_hop1,
+            publication=yt_event.to_wire(),
+            metadata=ReleaseMetadata(
+                artist_name="Neon Seoul", release_date="2026-10-13", label_name="Neon Records",
+                copyright_line="2026 Neon Records", publisher_line="2026 Neon Music Publishing",
+                territories="WORLDWIDE",
+            ),
+            now=now,
+        )
+    c7_dist_payload = submitted.payload
+    assert c7_dist_payload is not None
+    assert c7_dist_payload.lineage.content_arm_id == directive.arm_id
+    assert c7_dist_payload.lineage == ready_event.lineage
 
     # =========================================================================
     # Step 9: P9 Analytics & Economics — Unit Economics & Reward Posting (R10, R11)
     # =========================================================================
+    # Leg 1: P9 links the released ISRCs to the lineage P8 recorded (ADR-0030).
+    ingest_distribution_record(analytics_db, c7_dist_payload.to_wire(), now=now)
+    linked = lineage_for_isrc(analytics_db, c7_dist_payload.isrcs[0])
+    assert linked is not None and linked[1] == ready_event.lineage
+
     # Ingest facts: YouTube revenue $60.00, DSP royalties $50.00, production cost $15.00
+    # (still literals: real ingestion of these facts is stage R6)
     gross_revenue = 110.0
     allocated_cost = 15.0
     net_contribution = gross_revenue - allocated_cost  # $95.00
@@ -406,16 +387,16 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # Evaluate outcome and post normalized reward (Ruling R11, Seam C7 Leg 2)
     outcome = evaluate_experiment_outcome(
         analytics_db,
-        experiment_id=experiment.experiment_id,
-        experiment_family_id=yt_event.experiment_family_id,
-        content_arm_id=directive.arm_id,
-        content_genome_id=yt_event.content_genome_id,
+        lineage=linked[1],
         unit_id=media_pkg.media_package_id,
         net_contribution_usd=net_contribution,
         views=28000,
         watch_time_minutes=1400.0,
-        window=ObservationWindow.W_7D,
+        window=ObservationWindow.D7,
+        maturity=ObservationMaturity.MATURE,
         attribution_confidence=1.0,
+        quality_status=None,
+        now=now,
     )
     assert outcome.normalized_reward > 0.70  # Strong positive performance
 
@@ -438,7 +419,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # Ingest observation into P2
     stored_result = store_result(
         ar_db,
-        reward_post.model_dump(),
+        reward_post.to_wire(),
         brand_id="brand_neon",
         now=now,
     )

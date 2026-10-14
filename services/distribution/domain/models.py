@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
+from plm_contracts.seams.c7 import DistributionRecordPayload as SharedDistributionRecordPayload
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import ArtistType, DeliveryStatus, ISRCSource, ReleaseStatus, ReleaseType, StorePlatform
@@ -122,26 +122,5 @@ class DistributionReportReference(BaseModel):
     report_type: str = "streaming_statement"
 
 
-class DistributionRecordPayload(BaseModel):
-    """Seam C7 Hop 1 contract payload: P8 → P9 stable distribution record (P8 §71, Ruling R9, R10).
-
-    Carries all R9 identity fields to close the experiment feedback loop at P9.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    release_id: str
-    artist_id: str
-    release_version: int
-    isrcs: list[str]
-    provider: str
-    deliveries: list[dict[str, Any]]
-    source_package_hash: str
-    status: str
-    # R9 identity fields:
-    experiment_id: str
-    experiment_family_id: str
-    content_arm_id: str
-    content_genome_id: str
-    production_directive_id: str
-    media_package_id: str
+DistributionRecordPayload = SharedDistributionRecordPayload
+"""Seam C7 leg 1 (P8 §71, R9, R10): the shared ``plm_contracts.seams.c7`` model."""

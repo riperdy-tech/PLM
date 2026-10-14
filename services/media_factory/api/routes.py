@@ -9,9 +9,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from sqlalchemy.orm import Session
 
 from ..config import MediaFactorySettings
+from ..domain.models import LegacyPackageError
+from ..playlist.assembler import PlaylistAssemblyError
 from ..rendering.assembler import assemble_media_package
 from ..storage.repositories import (
     get_media_package_by_id,
@@ -87,23 +91,34 @@ def build_router(
             brand_name=payload.brand_name,
         )
 
+        manifests: list[ReleaseManifestPayload] = []
+        for idx, raw in enumerate(payload.track_manifests):
+            try:
+                manifests.append(parse_seam(ReleaseManifestPayload, raw))
+            except SeamRejection as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=ErrorShape(
+                        code=exc.error.code,
+                        field_paths=[f"track_manifests[{idx}].{p}" for p in exc.field_paths],
+                        message=exc.error.message,
+                    ).model_dump(),
+                ) from exc
         try:
             result = assemble_media_package(
-                release_manifest=payload.release_manifest,
+                track_manifests=manifests,
                 brand_profile=brand,
-                render_profile=payload.render_profile,
                 required_duration_seconds=payload.required_duration_seconds,
+                visual_profile=payload.visual_profile,
+                playlist_concept=payload.playlist_concept,
+                render_profile=payload.render_profile,
                 sequence_version=payload.sequence_version,
             )
-        except ValueError as exc:
+        except PlaylistAssemblyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=ErrorShape(
-                    code="assembly_validation_failed",
-                    field_paths=["release_manifest"],
-                    message=str(exc),
-                ).model_dump(),
-            )
+                detail=exc.error.model_dump(),
+            ) from exc
 
         # Persist session, tracks, visual session, assets, thumbnails, render job, and package
         insert_playlist_session(session, result.playlist_session)
@@ -208,7 +223,15 @@ def build_router(
                     message=f"media package {package_id} not found",
                 ).model_dump(),
             )
-        return pkg.to_c6_payload()
+        try:
+            return pkg.to_c6_payload()
+        except LegacyPackageError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="legacy_media_package", field_paths=["package_id"], message=str(exc)
+                ).model_dump(),
+            ) from exc
 
     @router.get(
         "/playlists/{playlist_id}",

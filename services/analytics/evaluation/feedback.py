@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
+from plm_contracts import QualityStatus
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c7 import ObservationMaturity
 from sqlalchemy.orm import Session
 
 from ..domain.enums import ObservationWindow
@@ -52,40 +55,45 @@ def compute_normalized_reward(
     return max(0.0, min(1.0, round(reward, 4)))
 
 
+REWARD_VERSION = "engagement-contribution-proxy-v1"
+"""The version of :func:`compute_normalized_reward`. It is a bounded proxy of net
+contribution and engagement, not expected economic value (economics gate)."""
+
+
 def evaluate_experiment_outcome(
     session: Session,
     *,
-    experiment_id: str,
-    experiment_family_id: str,
-    content_arm_id: str,
-    content_genome_id: str,
+    lineage: ExperimentLineage,
     unit_id: str,
     net_contribution_usd: float,
-    views: int = 0,
-    watch_time_minutes: float = 0.0,
-    window: ObservationWindow = ObservationWindow.W_7D,
-    reward_version: str = "v1",
-    attribution_confidence: float = 1.0,
-    maturity: str = "mature",
-    quality_status: str = "eligible",
+    views: int,
+    watch_time_minutes: float,
+    window: ObservationWindow,
+    maturity: ObservationMaturity,
+    attribution_confidence: float,
+    quality_status: QualityStatus | None,
+    now: datetime,
 ) -> ExperimentOutcomeRecord:
-    """Evaluate experiment performance and record outcome."""
-    now = datetime.now(UTC)
+    """Evaluate one outcome and record it (ADR-0030).
+
+    Every measurement fact is the caller's: window, maturity, attribution confidence and
+    quality are never defaulted. Deriving maturity from publish time is stage R2.
+    """
     norm_reward = compute_normalized_reward(net_contribution_usd, views, watch_time_minutes)
 
-    outc_id = build_outcome_id(experiment_id, content_arm_id, window.value)
+    outc_id = build_outcome_id(lineage.experiment_id, lineage.content_arm_id, window.value)
     outc = ExperimentOutcomeRecord(
         id=outc_id,
-        experiment_id=experiment_id,
-        experiment_family_id=experiment_family_id,
-        content_arm_id=content_arm_id,
-        content_genome_id=content_genome_id,
+        experiment_id=lineage.experiment_id,
+        experiment_family_id=lineage.experiment_family_id,
+        content_arm_id=lineage.content_arm_id,
+        content_genome_id=lineage.content_genome_id,
         unit_id=unit_id,
         observation_window=window,
         primary_metric="net_contribution",
         primary_value=round(net_contribution_usd, 4),
         normalized_reward=norm_reward,
-        reward_version=reward_version,
+        reward_version=REWARD_VERSION,
         attribution_confidence=round(attribution_confidence, 4),
         maturity=maturity,
         quality_status=quality_status,
@@ -100,49 +108,46 @@ def generate_and_post_reward(
     session: Session,
     outcome: ExperimentOutcomeRecord,
     *,
-    views: int = 0,
-    watch_time_minutes: float = 0.0,
-    average_percentage_viewed: float = 0.0,
-    subscribers_gained: int = 0,
-    estimated_revenue: float = 0.0,
+    views: float | None,
+    watch_time_minutes: float | None,
+    average_percentage_viewed: float | None,
+    subscribers_gained: float | None,
+    estimated_revenue: float | None,
+    now: datetime,
     http_client: Any = None,
     ar_results_url: str | None = None,
-    now: datetime | None = None,
 ) -> NormalizedRewardPayload:
-    """Construct Seam C7 Leg 2 payload and post to P2 (Ruling R11).
+    """Build the Seam C7 leg-2 payload through the shared model (R11, ADR-0030).
 
-    ``now`` stamps ``observed_at``. Pass it explicitly: P2 only ingests observations
-    at or before its own cycle clock, so a wall-clock stamp makes a replay drop the
-    reward. The wall-clock fallback remains for existing callers until R2 injects a
-    clock everywhere.
+    A metric that was not measured is passed as ``None`` and travels as ``null``; it is
+    never sent as ``0``. ``now`` stamps ``observed_at``: P2 only ingests observations at
+    or before its own cycle clock, so the stamp must come from the caller's clock.
+    Delivery to P2 is not guaranteed here; the transactional outbox is stage R3.
     """
-    now = now or datetime.now(UTC)
-
-    raw_metrics: dict[str, Any] = {
-        "views": float(views),
-        "watch_time_minutes": float(watch_time_minutes),
-        "average_percentage_viewed": float(average_percentage_viewed),
-        "subscriber_gain": float(subscribers_gained),
-        "estimated_revenue": float(estimated_revenue),
-    }
-
-    payload = NormalizedRewardPayload(
+    payload = NormalizedRewardPayload.build(
         experiment_id=outcome.experiment_id,
         arm_id=outcome.content_arm_id,
         content_id=outcome.unit_id,
-        observation_window=outcome.observation_window.value,
+        observation_window=outcome.observation_window,
         status=outcome.maturity,
-        observed_at=now.isoformat(),
-        raw_metrics=raw_metrics,
+        observed_at=now,
+        raw_metrics={
+            "views": views,
+            "watch_time_minutes": watch_time_minutes,
+            "average_percentage_viewed": average_percentage_viewed,
+            "subscriber_gain": subscribers_gained,
+            "estimated_revenue": estimated_revenue,
+        },
         normalized_reward=outcome.normalized_reward,
         reward_version=outcome.reward_version,
         attribution_confidence=outcome.attribution_confidence,
+        quality_status=outcome.quality_status,
     )
 
     # Optional HTTP dispatch to P2 if client provided
     if http_client is not None and ar_results_url:
         try:
-            http_client.post(ar_results_url, json=payload.model_dump())
+            http_client.post(ar_results_url, json=payload.to_wire())
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to post reward to P2: %s", exc)
 

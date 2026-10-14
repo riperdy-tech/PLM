@@ -1,108 +1,86 @@
 # tests/contract/test_c8_analytics_to_p10.py
-"""Seam C8 — PHASE-P9 → PHASE-P10 (deferred feature seam). FROZEN by Ruling R12.
+"""Seam C8 — PHASE-P9 → PHASE-P10 (feature view). R12 (P10 deferred), ADR-0025.
 
-Producer: P9's `P10FeatureView` via `build_p10_feature_view()` / `GET /analytics/p10/features`.
-Consumer: PHASE-P10 (deferred per Ruling R12, preserved so interface does not rot).
+Producer: P9's real ``build_p10_feature_view`` and ``GET /analytics/p10/features``.
+Consumer: P10 is deferred, so the consumer is the shared
+``plm_contracts.seams.c8.P10FeatureViewPayload`` a future P10 will parse with. The test
+proves the producer emits that wire, serves unmeasured values as ``null`` rather than
+zeros, and that the model refuses incomplete or future views.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
-from analytics.domain.enums import ObservationWindow
-from analytics.domain.models import ExperimentOutcomeRecord
-from analytics.projection import build_p10_feature_view
-from pydantic import BaseModel, ConfigDict
+import pytest
+from plm_contracts import ObservationWindow
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c7 import ObservationMaturity
+from plm_contracts.seams.c8 import P10FeatureViewPayload
 
-from tests.support.contract import SeamRegistry, assert_seam_payload
+from services.analytics.evaluation.feedback import evaluate_experiment_outcome
+from services.analytics.projection.p10_features import build_p10_feature_view
+from tests.support.analytics_db import analytics_db_session
+from tests.support.contract import SeamRegistry, assert_refused, with_value, without
+from tests.support.seams import sample_lineage
 
 REGISTRY_ENTRY = "C8 · PHASE-P9 → PHASE-P10"
-
-REGISTRY_FIELDS: tuple[str, ...] = (
-    "unit_id",
-    "experiment_id",
-    "arm_id",
-    "content_genome_id",
-    "observation_window",
-    "maturity",
-    "primary_outcome",
-    "secondary_outcomes",
-    "quality",
-)
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+UNMEASURED: dict[str, Any] = {
+    "views": None, "watch_time_hours": None, "subscribers_gained": None,
+    "spotify_streams": None, "data_completeness": None, "fidelity": None,
+    "contamination": None,
+}
 
 
-class PrimaryOutcome(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    metric: str
-    value: float
-    status: str
+@pytest.fixture(scope="module")
+def view() -> dict[str, Any]:
+    with analytics_db_session() as session:
+        outcome = evaluate_experiment_outcome(
+            session, lineage=sample_lineage(), unit_id="pkg_c8_01",
+            net_contribution_usd=120.5, views=9000, watch_time_minutes=600.0,
+            window=ObservationWindow.D7, maturity=ObservationMaturity.MATURE,
+            attribution_confidence=0.98, quality_status=None, now=NOW,
+        )
+    return json.loads(json.dumps(build_p10_feature_view(outcome, **UNMEASURED).to_wire()))
 
 
-class SecondaryOutcomes(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    views: int
-    watch_time_hours: float
-    subscribers_gained: int
-    spotify_streams: int
-
-
-class QualityMetrics(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    data_completeness: float
-    fidelity: float
-    contamination: float
-    attribution_confidence: float
-
-
-class ConsumerP10Schema(BaseModel):
-    """P10's expected feature view schema for C8, fields copied from registry entry C8."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    unit_id: str
-    experiment_id: str
-    arm_id: str
-    content_genome_id: str
-    observation_window: str
-    maturity: str
-    primary_outcome: dict[str, Any]
-    secondary_outcomes: dict[str, Any]
-    quality: dict[str, Any]
-
-
-def test_declared_fields_match_registry() -> None:
-    assert set(ConsumerP10Schema.model_fields) == set(REGISTRY_FIELDS)
-
-
-def test_producer_event_validates_against_consumer_schema(contract_registry: SeamRegistry) -> None:
+def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
     contract_registry.require_entry(REGISTRY_ENTRY)
 
-    outcome = ExperimentOutcomeRecord(
-        id="outc_exp_synth_01_arm_synth_01_7d",
-        experiment_id="exp_synth_01",
-        experiment_family_id="fam_synth_01",
-        content_arm_id="arm_synth_01",
-        content_genome_id="gen_synth_01",
-        unit_id="pkg_synth_01",
-        observation_window=ObservationWindow.W_7D,
-        primary_metric="net_contribution",
-        primary_value=120.50,
-        normalized_reward=0.85,
-        reward_version="v1",
-        attribution_confidence=0.98,
-        maturity="mature",
-        quality_status="eligible",
-        created_at=datetime.now(UTC),
-    )
 
-    feature_view = build_p10_feature_view(outcome)
-    payload = feature_view.model_dump()
+def test_producer_emits_the_shared_wire_with_nulls_for_unmeasured(view: dict[str, Any]) -> None:
+    assert tuple(view) == tuple(P10FeatureViewPayload.model_fields)
+    assert view["arm_id"] == sample_lineage().content_arm_id
+    assert view["primary_outcome"] == {
+        "metric": "net_contribution", "value": 120.5, "status": "mature"
+    }
+    assert set(view["secondary_outcomes"].values()) == {None}
+    assert view["quality"]["contamination"] is None
+    assert view["quality"]["attribution_confidence"] == 0.98
 
-    # Assert payload satisfies consumer schema
-    assert_seam_payload(payload, ConsumerP10Schema, seam="C8")
-    assert payload["unit_id"] == "pkg_synth_01"
-    assert payload["experiment_id"] == "exp_synth_01"
-    assert payload["arm_id"] == "arm_synth_01"
-    assert payload["primary_outcome"]["metric"] == "net_contribution"
-    assert payload["quality"]["attribution_confidence"] == 0.98
+
+@pytest.mark.parametrize(
+    "field",
+    [*P10FeatureViewPayload.model_fields, "secondary_outcomes.views", "quality.fidelity"],
+)
+def test_consumer_model_refuses_a_missing_fact(view: dict[str, Any], field: str) -> None:
+    def parse(p: dict[str, Any]) -> object:
+        return parse_seam(P10FeatureViewPayload, p)
+
+    assert_refused(parse, without(view, field), SeamRejection, because=field)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("maturity", "MATURE"), ("observation_window", "14d"), ("schema_version", "2.0")],
+)
+def test_consumer_model_refuses_old_vocabulary_or_future_views(
+    view: dict[str, Any], field: str, value: Any
+) -> None:
+    def parse(p: dict[str, Any]) -> object:
+        return parse_seam(P10FeatureViewPayload, p)
+
+    assert_refused(parse, with_value(view, field, value), SeamRejection, because=field)

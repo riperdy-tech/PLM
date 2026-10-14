@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c7 import ObservationMaturity
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -88,21 +90,32 @@ def run_smoke_test() -> str | None:
             # 5. Evaluate outcome and post feedback reward
             outcome = evaluate_experiment_outcome(
                 session,
-                experiment_id=exp_id,
-                experiment_family_id=f"fam_{ts}",
-                content_arm_id=arm_id,
-                content_genome_id=f"gen_{ts}",
+                lineage=ExperimentLineage(
+                    experiment_id=exp_id,
+                    experiment_family_id=f"fam_{ts}",
+                    content_arm_id=arm_id,
+                    content_genome_id=f"gen_{ts}",
+                    production_directive_id=f"dir_{ts}",
+                ),
                 unit_id=video_id,
                 net_contribution_usd=econ.net_contribution_usd,
                 views=obs_yt.views,
                 watch_time_minutes=obs_yt.watch_time_minutes,
-                window=ObservationWindow.W_7D,
+                window=ObservationWindow.D7,
+                maturity=ObservationMaturity.MATURE,
+                attribution_confidence=1.0,
+                quality_status=None,
+                now=now,
             )
             reward_payload = generate_and_post_reward(
                 session,
                 outcome,
                 views=obs_yt.views,
                 watch_time_minutes=obs_yt.watch_time_minutes,
+                average_percentage_viewed=None,
+                subscribers_gained=None,
+                estimated_revenue=obs_yt.estimated_revenue_usd,
+                now=now,
             )
             if reward_payload.normalized_reward <= 0.0 or reward_payload.normalized_reward > 1.0:
                 return f"Invalid normalized reward range: {reward_payload.normalized_reward}"

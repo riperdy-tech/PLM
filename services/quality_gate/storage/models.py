@@ -222,5 +222,11 @@ release_manifests_table = sa.Table(
     sa.Column("warning_codes_json", sa.Text, nullable=False),
     sa.Column("evidence_bundle_id", sa.String(64), nullable=False),
     sa.Column("manifest_hash", sa.String(64), nullable=False),
+    # ADR-0028; NULL only on manifests stored before it (never served on C5).
+    sa.Column("lineage_json", sa.JSON, nullable=True),
+    sa.Column("artifact_uri", sa.String(512), nullable=True),
+    sa.Column("artifact_sha256", sa.String(64), nullable=True),
+    sa.Column("measured_duration_seconds", sa.Float, nullable=True),
+    sa.Column("override_json", sa.JSON, nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )

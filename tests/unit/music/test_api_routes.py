@@ -3,30 +3,35 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.api.app import create_app
 from tests.support.music_db import create_music_engine, music_session
+from tests.support.seams import lineage_fields, track_spec_fields
 
-SAMPLE_C3_SPEC = {
-    "track_spec_id": "trk_api_01",
-    "playlist_spec_id": "ply_01",
-    "experiment_id": "exp_api_01",
-    "content_arm_id": "arm_01",
-    "brand_profile_id": "neon_seoul",
-    "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-    "bounded_preferences": {"bpm": 80, "mood": ["melancholic"], "use_case": ["late_night_drive"]},
-    "creative_latitude": {},
-    "lyric_spec": {},
-    "vocal_spec": {"vocal_mode": "vocal"},
-    "instrumentation_spec": {},
-    "production_style": "lofi_contemporary",
-    "track_role": "standout_single",
-    "requested_duration": 90,
-    "candidate_target": 1,
-    "priority": 1,
-    "budget_limit": 50.0,
-    "provider_policy": {},
-}
+SAMPLE_C3_SPEC = TrackSpecPayload.build(
+    **track_spec_fields(
+        track_spec_id='trk_api_01',
+        playlist_spec_id='ply_01',
+        brand_profile_id='neon_seoul',
+        hard_constraints={'genre': 'rnb', 'language': 'english', 'vocal_mode': 'vocal'},
+        creative_latitude={},
+        lyric_spec={},
+        vocal_spec={'vocal_mode': 'vocal'},
+        instrumentation_spec={},
+        production_style='lofi_contemporary',
+        requested_duration=90,
+        candidate_target=1,
+        priority=1,
+        budget_limit=50.0,
+        lineage=lineage_fields(experiment_id='exp_api_01', content_arm_id='arm_01'),
+        bounded_preferences={'bpm': 80,
+         'key_profile': None,
+         'mood': ['melancholic'],
+         'use_case': ['late_night_drive']},
+        provider_policy={'allowed_providers': ['mock']},
+    )
+).to_wire()
 
 
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
@@ -115,10 +120,10 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     res_lic = client.get(f"/music/candidates/{candidate_id}/license", headers=headers)
     assert res_lic.status_code == 200
     lic_data = res_lic.json()
-    assert lic_data["commercial_use_status"] == "permitted"
-    assert lic_data["plan_or_tier"] == "pro_tier"
-    assert lic_data["account_identity_ref"] == "plm-service-account"
-    assert lic_data["terms_version"] == "2026-v1"
+    assert lic_data["commercial_use_status"] == "eligible"
+    assert lic_data["plan_or_tier"] == "internal"  # declared by the mock provider (ADR-0027)
+    assert lic_data["account_identity_ref"] == "plm-mock"
+    assert lic_data["terms_version"] == "mock-v1"
 
     # GET /music/candidates/{id}/artifacts
     res_art = client.get(f"/music/candidates/{candidate_id}/artifacts", headers=headers)
@@ -138,5 +143,6 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     export_data = res_export.json()
     assert export_data["candidate"]["status"] == "exported_to_p5"
     assert export_data["event"]["event_type"] == "music_candidate_ready_for_p5"
-    assert export_data["event"]["event_version"] == "1"
+    assert export_data["event"]["schema_version"] == "1.0"
+    assert export_data["event"]["lineage"]["content_arm_id"] == "arm_01"  # not a placeholder
     assert export_data["event"]["measured_audio"]["duration_seconds"] > 0

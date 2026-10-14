@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.api.events import build_candidate_ready_event
 from services.music_factory.candidates.bank import (
@@ -23,31 +24,31 @@ from services.music_factory.providers.registry import select_provider_and_model
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage, probe_audio_bytes
 from services.music_factory.storage.repositories import get_rights_snapshot_for_attempt
 from tests.support.music_db import music_db_session
+from tests.support.seams import lineage_fields, track_spec_fields
 
-SAMPLE_C3_SPEC = {
-    "track_spec_id": "trk_ac_01",
-    "playlist_spec_id": "ply_ac_01",
-    "experiment_id": "exp_ac_01",
-    "content_arm_id": "arm_ac_01",
-    "brand_profile_id": "neon_seoul",
-    "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-    "bounded_preferences": {
-        "bpm": 82,
-        "mood": ["melancholic", "intimate"],
-        "use_case": ["late_night_drive"],
-    },
-    "creative_latitude": {},
-    "lyric_spec": {},
-    "vocal_spec": {"vocal_mode": "vocal"},
-    "instrumentation_spec": {},
-    "production_style": "lofi_contemporary",
-    "track_role": "standout_single",
-    "requested_duration": 180,
-    "candidate_target": 2,
-    "priority": 1,
-    "budget_limit": 60.0,
-    "provider_policy": {},
-}
+SAMPLE_C3_SPEC = TrackSpecPayload.build(
+    **track_spec_fields(
+        track_spec_id='trk_ac_01',
+        playlist_spec_id='ply_ac_01',
+        brand_profile_id='neon_seoul',
+        hard_constraints={'genre': 'rnb', 'language': 'english', 'vocal_mode': 'vocal'},
+        creative_latitude={},
+        lyric_spec={},
+        vocal_spec={'vocal_mode': 'vocal'},
+        instrumentation_spec={},
+        production_style='lofi_contemporary',
+        requested_duration=180,
+        candidate_target=2,
+        priority=1,
+        budget_limit=60.0,
+        lineage=lineage_fields(experiment_id='exp_ac_01', content_arm_id='arm_ac_01'),
+        bounded_preferences={'bpm': 82,
+         'key_profile': None,
+         'mood': ['melancholic', 'intimate'],
+         'use_case': ['late_night_drive']},
+        provider_policy={'allowed_providers': ['mock']},
+    )
+).to_wire()
 
 
 # AC-01: Ingest valid C3 TrackSpec
@@ -173,10 +174,10 @@ def test_ac08_ruling_r6_rights_snapshot() -> None:
         attempt_id = result.attempts[0].attempt_id
         rgt = get_rights_snapshot_for_attempt(session, attempt_id)
         assert rgt is not None
-        assert rgt.commercial_use_status == CommercialUseStatus.PERMITTED
-        assert rgt.plan_or_tier == "pro_tier"
-        assert rgt.account_identity_ref == "plm-service-account"
-        assert rgt.terms_version == "2026-v1"
+        assert rgt.commercial_use_status == CommercialUseStatus.ELIGIBLE
+        assert rgt.plan_or_tier == "internal"  # declared by the mock provider (ADR-0027)
+        assert rgt.account_identity_ref == "plm-mock"
+        assert rgt.terms_version == "mock-v1"
         assert rgt.downloaded_at is not None
 
 
@@ -199,25 +200,21 @@ def test_ac09_candidate_bank_lifecycle() -> None:
         assert c_exp.status == CandidateStatus.EXPORTED_TO_P5
 
 
-# AC-10: Seam C4 event generation and validation
+# AC-10: Seam C4 event generation from stored facts (ADR-0027)
 def test_ac10_seam_c4_event_generation() -> None:
-    event = build_candidate_ready_event(
-        candidate_id="cand_ac_01",
-        artifact_id="art_ac_01",
-        track_spec_id="trk_ac_01",
-        experiment_id="exp_ac_01",
-        content_arm_id="arm_ac_01",
-        provider_id="mock",
-        model_id="mock-v1",
-        duration_seconds=180.0,
-        sample_rate=44100,
-        channels=2,
-        rights_status="permitted",
-        provenance_complete=True,
-    )
-    dumped = event.model_dump(mode="json")
-    assert dumped["event_type"] == "music_candidate_ready_for_p5"
-    assert dumped["event_version"] == "1"
-    assert dumped["measured_audio"]["duration_seconds"] == 180.0
-    assert dumped["rights_status"] == "permitted"
-    assert dumped["provenance_complete"] is True
+    adapted = adapt_track_spec(SAMPLE_C3_SPEC)
+    plan, variants = plan_generation(adapted)
+    engine = GenerationEngine()
+    with music_db_session() as session:
+        result = engine.execute_plan(session, plan=plan, variants=variants, spec=adapted)
+        cand = result.candidates[0]
+
+        event = build_candidate_ready_event(session, cand.candidate_id)
+
+    wire = event.to_wire()
+    assert wire["event_type"] == "music_candidate_ready_for_p5"
+    assert wire["schema_version"] == "1.0"
+    assert wire["lineage"] == SAMPLE_C3_SPEC["lineage"]
+    assert wire["requested_duration_seconds"] == SAMPLE_C3_SPEC["requested_duration"]
+    assert wire["rights"]["commercial_use_status"] == "eligible"
+    assert wire["rights"]["attempt_id"] == cand.source_attempt_id

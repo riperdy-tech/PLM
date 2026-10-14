@@ -40,6 +40,8 @@ def _sample_directive() -> AdaptedDirective:
         },
         required_constraints={"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
         recommended_attributes={"mood": ["melancholic", "dreamy"]},
+        market_context={"brand_id": "neon_seoul"},
+        selection_reason=["test"],
         expected_value=0.8,
         uncertainty=0.1,
         value_model="p2-proxy-v1",

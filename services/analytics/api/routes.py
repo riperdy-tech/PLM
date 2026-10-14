@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from plm_contracts import ErrorShape
 
 from ..domain.enums import CostCategory, ObservationWindow
 from ..domain.models import NormalizedRewardPayload, P10FeatureView
@@ -168,23 +169,37 @@ def build_analytics_router(
     )
     def post_feedback(req: FeedbackRequest) -> NormalizedRewardPayload:
         with session_factory() as session:
+            if req.views is None or req.watch_time_minutes is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=ErrorShape(
+                        code="missing_required_field",
+                        field_paths=["views", "watch_time_minutes"],
+                        message="the reward proxy needs measured views and watch time",
+                    ).model_dump(),
+                )
             outcome = evaluate_experiment_outcome(
                 session,
-                experiment_id=req.experiment_id,
-                experiment_family_id=req.experiment_family_id,
-                content_arm_id=req.content_arm_id,
-                content_genome_id=req.content_genome_id,
+                lineage=req.lineage,
                 unit_id=req.unit_id,
                 net_contribution_usd=req.net_contribution_usd,
                 views=req.views,
                 watch_time_minutes=req.watch_time_minutes,
-                window=ObservationWindow(req.window),
+                window=req.window,
+                maturity=req.maturity,
+                attribution_confidence=req.attribution_confidence,
+                quality_status=req.quality_status,
+                now=req.observed_at,
             )
             payload = generate_and_post_reward(
                 session,
                 outcome,
                 views=req.views,
                 watch_time_minutes=req.watch_time_minutes,
+                average_percentage_viewed=req.average_percentage_viewed,
+                subscribers_gained=req.subscribers_gained,
+                estimated_revenue=req.estimated_revenue,
+                now=req.observed_at,
             )
             session.commit()
             return payload
@@ -199,7 +214,13 @@ def build_analytics_router(
             outcomes = get_experiment_outcomes(session, experiment_id)
             views: list[P10FeatureView] = []
             for outc in outcomes:
-                view = build_p10_feature_view(outc)
+                # P9 does not yet store secondary metrics or quality per outcome; they are
+                # served as null (not measured), never as zeros (ADR-0025).
+                view = build_p10_feature_view(
+                    outc, views=None, watch_time_hours=None, subscribers_gained=None,
+                    spotify_streams=None, data_completeness=None, fidelity=None,
+                    contamination=None,
+                )
                 views.append(view)
             return views
 

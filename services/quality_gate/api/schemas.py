@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from plm_contracts.seams.c5 import ReleaseManifestPayload
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "EvaluationRequest",
@@ -18,46 +19,13 @@ __all__ = [
 ]
 
 
-class ReleaseManifestPayload(BaseModel):
-    """Frozen Seam C5 release manifest payload (P5 §77, Ruling R7, R8)."""
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    p5_manifest_id: str
-    release_manifest_version: str
-    candidate_id: str
-    canonical_artifact_id: str
-    experiment_id: str
-    track_spec_id: str
-    disposition: str
-    technical_status: str
-    commercial_use_status: str
-    provenance_status: str
-    ai_disclosure_required: bool
-    rights_risk: str
-    policy_status: str
-    evaluation_id: str
-    evaluation_policy_version: str
-    warning_codes: list[str] = Field(default_factory=list)
-    evidence_bundle_id: str
-
-
 class EvaluationRequest(BaseModel):
-    """Request to initiate candidate evaluation."""
+    """Evaluate one candidate: its Seam C4 event plus where P5 can read the audio."""
 
-    candidate_id: str
-    artifact_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_event: dict[str, Any]
     audio_path: str
-    expected_duration_seconds: float
-    track_spec_id: str
-    experiment_id: str
-    content_arm_id: str
-    vocal_mode: str = "instrumental"
-    lyrics_text: str | None = None
-    prompt_text: str | None = None
-    genre_tags: list[str] = Field(default_factory=list)
-    rights_snapshot: dict[str, Any] = Field(default_factory=dict)
-    provenance_metadata: dict[str, Any] = Field(default_factory=dict)
     evaluation_policy_version: str = "p5-v1"
     trigger: str = "candidate_ready"
 

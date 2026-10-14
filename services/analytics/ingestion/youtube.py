@@ -25,7 +25,7 @@ def ingest_youtube_metrics(
     subscribers_gained: int = 0,
     subscribers_lost: int = 0,
     estimated_revenue_usd: float = 0.0,
-    window: ObservationWindow = ObservationWindow.W_24H,
+    window: ObservationWindow = ObservationWindow.H24,
     source: MetricSource = MetricSource.YOUTUBE_ANALYTICS,
     status: MetricStatus = MetricStatus.VALID,
     observed_at: datetime | None = None,

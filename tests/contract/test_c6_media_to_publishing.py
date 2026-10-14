@@ -1,208 +1,207 @@
 # tests/contract/test_c6_media_to_publishing.py
-"""Seam C6 — PHASE-P6 → PHASE-P7 → PHASE-P8 (publish/distribution identity). FROZEN by Ruling R9.
+"""Seam C6 — PHASE-P6 → PHASE-P7 → PHASE-P8. FROZEN by R9, ADR-0025, ADR-0029.
 
-Producer: P6's `MediaPackage` via `to_c6_payload()`.
-Consumer: P7's expected publish package schema (P7 §9, Ruling R9).
+Hop 1: P6's real ``assemble_media_package`` → ``MediaPackage.to_c6_payload()`` → P7's real
+publish-manifest builder and publishing engine (mock YouTube client).
+Hop 2: P7's real ``youtube_video_published`` event → P8's real release submission.
+All three services read ``plm_contracts.seams.c6``.
+
+What this proves: the lineage P6 received from P5 reaches P7's event and P8's stored
+release unchanged; P7 takes title, assets, checksums and the disclosure flag from the
+package rather than defaults; P8 refuses a publication event that belongs to another
+package; every consumer refuses incomplete, placeholder or future payloads.
 """
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from typing import Any
 
-from media_factory.rendering.assembler import assemble_media_package
-from media_factory.visuals.planner import BrandProfile
-from pydantic import BaseModel, ConfigDict
+import pytest
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
 
-from tests.support.contract import SeamRegistry, assert_seam_payload
+from services.distribution.client.mock import MockDistributorClient
+from services.distribution.engine import DistributionEngine
+from services.distribution.storage.repositories import get_release_identity
+from services.distribution.submission import (
+    ReleaseMetadata,
+    SubmissionRefusedError,
+    submit_release_from_seams,
+)
+from services.media_factory.rendering.assembler import assemble_media_package
+from services.media_factory.visuals.planner import BrandProfile
+from services.youtube_publishing.client.mock import MockYouTubeClient
+from services.youtube_publishing.domain.enums import OperatingMode
+from services.youtube_publishing.domain.models import ChannelProfile
+from services.youtube_publishing.engine import YouTubePublishingEngine
+from services.youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
+from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.contract import SeamRegistry, assert_refused, with_value, without
+from tests.support.distribution_db import distribution_db_session
+from tests.support.seams import lineage_fields, release_manifest
+from tests.support.youtube_db import youtube_db_session
 
 REGISTRY_ENTRY = "C6 · PHASE-P6 → PHASE-P7 → PHASE-P8"
-
-REGISTRY_FIELDS: tuple[str, ...] = (
-    "media_package_id",
-    "release_manifest_id",
-    "experiment_id",
-    "brand_id",
-    "video",
-    "audio",
-    "thumbnails",
-    "tracklist",
-    "chapters",
-    "metadata_candidates",
-    "short_source_assets",
-    "render_report",
-    "status",
+NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+SONGS = ("song_01", "song_02")
+MANIFESTS = [release_manifest(candidate_id=s, measured_duration_seconds=180.0) for s in SONGS]
+CHANNEL = ChannelProfile(
+    id="prof_UC_contract", channel_id="UC_contract", channel_name="Contract Channel",
+    brand_id="brand_neon", oauth_credential_ref="sec_oauth_contract",
+    created_at=NOW, updated_at=NOW,
+)
+METADATA = ReleaseMetadata(
+    artist_name="Contract Artist", release_date="2026-10-01", label_name="Neon Records",
+    copyright_line="2026 Neon Records", publisher_line="2026 Neon Music Publishing",
+    territories="WORLDWIDE",
 )
 
 
-class VideoPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    master_uri: str
-    checksum: str
-    duration_seconds: float
-    render_profile: str
+@pytest.fixture(scope="module")
+def hop1() -> dict[str, Any]:
+    result = assemble_media_package(
+        track_manifests=MANIFESTS,
+        brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
+        required_duration_seconds=360.0,
+        visual_profile="brand_neon_rain_v1",
+        playlist_concept="Late Night Synthwave",
+    )
+    return json.loads(json.dumps(result.media_package.to_c6_payload()))
 
 
-class AudioPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    master_uri: str
-    checksum: str
+@pytest.fixture(scope="module")
+def hop2(hop1: dict[str, Any]) -> dict[str, Any]:
+    pkg = parse_seam(MediaPackagePayload, hop1)
+    manifest = build_publish_manifest(pkg, CHANNEL, publish_at=None, now=NOW)
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        session.commit()
+        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512).execute_publish(
+            session, manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
+            operating_mode=OperatingMode.DRY_RUN,
+        )
+    assert result.event is not None, result.error
+    return json.loads(json.dumps(result.event.to_wire()))
 
 
-class ThumbnailItem(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    id: str
-    uri: str
-
-
-class ConsumerMediaPackageSchema(BaseModel):
-    """P7's expected media package schema for Hop 1, fields copied from registry entry C6."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    media_package_id: str
-    release_manifest_id: str
-    experiment_id: str
-    brand_id: str
-    video: VideoPayload
-    audio: AudioPayload
-    thumbnails: list[ThumbnailItem]
-    tracklist: list[dict[str, Any]]
-    chapters: list[dict[str, Any]]
-    metadata_candidates: list[dict[str, Any]]
-    short_source_assets: list[dict[str, Any]]
-    render_report: dict[str, Any]
-    status: str
-
-
-def test_declared_fields_match_registry() -> None:
-    assert set(ConsumerMediaPackageSchema.model_fields) == set(REGISTRY_FIELDS)
-
-
-def test_producer_event_validates_against_consumer_schema(contract_registry: SeamRegistry) -> None:
+def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
     contract_registry.require_entry(REGISTRY_ENTRY)
 
-    # 1. Assemble media package via P6 pipeline
-    manifest = {
-        "release_manifest_id": "rm_test_001",
-        "experiment_id": "exp_synth_01",
-        "content_arm_id": "arm_synth_01",
-        "brand_id": "brand_neon",
-        "tracks": [
-            {
-                "song_id": "song_01",
-                "title": "Midnight Drive",
-                "duration_seconds": 180.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "media/audio/song_01.wav",
-                "audio_checksum": "chk_01",
-            },
-            {
-                "song_id": "song_02",
-                "title": "City Lights",
-                "duration_seconds": 210.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "media/audio/song_02.wav",
-                "audio_checksum": "chk_02",
-            },
-        ],
-        "playlist_intent": "Late Night Synthwave",
-        "policy_flags": {"ai_disclosure_required": True},
-    }
 
-    brand = BrandProfile(
-        brand_id="brand_neon",
-        brand_name="Neon Dreams",
-    )
-
-    assembly_result = assemble_media_package(
-        release_manifest=manifest,
-        brand_profile=brand,
-        render_profile="yt_longform_1080p_v1",
-        required_duration_seconds=390.0,
-    )
-
-    pkg = assembly_result.media_package
-    payload = pkg.to_c6_payload()
-
-    # 2. Assert against consumer schema and verify C6 seam
-    validated = assert_seam_payload(
-        payload,
-        ConsumerMediaPackageSchema,
-        seam="C6 (Hop 1: P6 → P7)",
-        producer="media_factory.rendering.assembler.assemble_media_package",
-        consumer="ConsumerMediaPackageSchema (P7 §9)",
-    )
-
-    assert isinstance(validated, ConsumerMediaPackageSchema)
-    assert validated.media_package_id == pkg.media_package_id
-    assert validated.release_manifest_id == "rm_test_001"
-    assert validated.experiment_id == "exp_synth_01"
-    assert validated.brand_id == "brand_neon"
-    assert validated.video.master_uri.endswith(".mp4")
-    assert validated.video.render_profile == "yt_longform_1080p_v1"
-    assert validated.audio.master_uri.endswith(".wav")
-    assert len(validated.thumbnails) >= 1
-    assert len(validated.chapters) == 2
-    assert validated.chapters[0]["start_seconds"] == 0.0  # YouTube 00:00 requirement
-    assert validated.status == "ready_for_publish"
+def test_hop1_producer_emits_exactly_the_shared_wire(hop1: dict[str, Any]) -> None:
+    assert tuple(hop1) == tuple(MediaPackagePayload.model_fields)
+    assert hop1["lineage"] == lineage_fields()
+    assert [t["song_id"] for t in hop1["tracklist"]] == list(SONGS)
 
 
-REGISTRY_HOP2_FIELDS: tuple[str, ...] = (
-    "event",
-    "youtube_video_id",
-    "publish_attempt_id",
-    "experiment_id",
-    "content_arm_id",
-    "published_at",
-    "metadata_version",
-    "experiment_family_id",
-    "content_genome_id",
-    "production_directive_id",
-    "media_package_id",
-)
+def test_hop1_p7_takes_every_fact_from_the_package(hop1: dict[str, Any]) -> None:
+    pkg = parse_seam(MediaPackagePayload, hop1)
+    manifest = build_publish_manifest(pkg, CHANNEL, publish_at=None, now=NOW)
+    assert manifest.lineage.model_dump() == hop1["lineage"]
+    assert manifest.title == hop1["metadata_candidates"][0]["title"]
+    assert manifest.video_checksum == hop1["video"]["checksum"]
+    assert manifest.thumbnail_checksum == hop1["thumbnails"][0]["checksum"]
+    assert manifest.contains_synthetic_media is hop1["ai_disclosure_required"]
+    assert manifest.playlist_id is None  # no invented playlist
 
 
-def test_hop2_declared_fields_match_registry() -> None:
-    from youtube_publishing.domain.models import YouTubeVideoPublishedEvent
+def test_hop2_event_carries_the_lineage(hop1: dict[str, Any], hop2: dict[str, Any]) -> None:
+    assert tuple(hop2) == tuple(YouTubePublicationPayload.model_fields)
+    assert hop2["lineage"] == hop1["lineage"]
+    assert hop2["media_package_id"] == hop1["media_package_id"]
+    assert hop2["contains_synthetic_media"] is hop1["ai_disclosure_required"]
 
-    assert set(YouTubeVideoPublishedEvent.model_fields) == set(REGISTRY_HOP2_FIELDS)
+
+def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str, Any]) -> None:
+    with distribution_db_session() as session:
+        result = submit_release_from_seams(
+            session, DistributionEngine(MockDistributorClient()),
+            track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            publication=hop2, metadata=METADATA, now=NOW,
+        )
+        lineage, package_id = get_release_identity(session, result.release.release_id)
+    assert lineage.model_dump() == hop1["lineage"]
+    assert package_id == hop1["media_package_id"]
+    assert result.payload is not None
+    assert result.payload.lineage.content_arm_id == hop1["lineage"]["content_arm_id"]
 
 
-def test_hop2_producer_event_validates_against_consumer_schema(
-    contract_registry: SeamRegistry,
+def test_p8_refuses_a_publication_from_another_package(
+    hop1: dict[str, Any], hop2: dict[str, Any]
 ) -> None:
-    from datetime import UTC, datetime
+    with distribution_db_session() as session, pytest.raises(SubmissionRefusedError) as exc:
+        submit_release_from_seams(
+            session, DistributionEngine(MockDistributorClient()),
+            track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            publication=with_value(hop2, "media_package_id", "mpkg_other"),
+            metadata=METADATA, now=NOW,
+        )
+    assert exc.value.error.code == "publication_mismatch"
 
-    from youtube_publishing.domain.models import YouTubeVideoPublishedEvent
 
-    contract_registry.require_entry(REGISTRY_ENTRY)
+def test_p7_refuses_a_package_that_is_not_ready(hop1: dict[str, Any]) -> None:
+    pkg = parse_seam(MediaPackagePayload, with_value(hop1, "status", "failed"))
+    with pytest.raises(PackageNotReadyError):
+        build_publish_manifest(pkg, CHANNEL, publish_at=None, now=NOW)
 
-    now = datetime.now(UTC)
-    event = YouTubeVideoPublishedEvent(
-        event="youtube_video_published",
-        youtube_video_id="dQw4w9WgXcQ",
-        publish_attempt_id="att_001_01",
-        experiment_id="exp_synth_01",
-        content_arm_id="arm_synth_01",
-        published_at=now,
-        metadata_version="v1",
-        experiment_family_id="fam_synth_01",
-        content_genome_id="gen_synth_01",
-        production_directive_id="dir_synth_01",
-        media_package_id="pkg_test_001",
-    )
 
-    validated = assert_seam_payload(
-        event.model_dump(),
-        YouTubeVideoPublishedEvent,
-        seam="C6 (Hop 2: P7 → P8/P9)",
-        producer="youtube_publishing.engine.YouTubePublishingEngine",
-        consumer="P8/P9 distribution & analytics consumer",
-    )
-    assert isinstance(validated, YouTubeVideoPublishedEvent)
-    assert validated.youtube_video_id == "dQw4w9WgXcQ"
-    assert validated.experiment_family_id == "fam_synth_01"
-    assert validated.content_genome_id == "gen_synth_01"
-    assert validated.production_directive_id == "dir_synth_01"
-    assert validated.media_package_id == "pkg_test_001"
+def _parse_hop1(payload: dict[str, Any]) -> object:
+    return parse_seam(MediaPackagePayload, payload)
 
+
+def _parse_hop2(payload: dict[str, Any]) -> object:
+    return parse_seam(YouTubePublicationPayload, payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [*MediaPackagePayload.model_fields, "lineage.experiment_family_id", "video.checksum"],
+)
+def test_hop1_consumers_refuse_a_missing_fact(hop1: dict[str, Any], field: str) -> None:
+    exc = assert_refused(_parse_hop1, without(hop1, field), SeamRejection, because=field)
+    assert isinstance(exc, SeamRejection)
+    assert exc.error.code == "missing_required_field"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [*YouTubePublicationPayload.model_fields, "lineage.content_genome_id"],
+)
+def test_hop2_consumers_refuse_a_missing_fact(hop2: dict[str, Any], field: str) -> None:
+    exc = assert_refused(_parse_hop2, without(hop2, field), SeamRejection, because=field)
+    assert isinstance(exc, SeamRejection)
+    assert exc.error.code == "missing_required_field"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("lineage.content_arm_id", "arm_unknown"),
+        ("video.checksum", "chk_video_default"),
+        ("thumbnails", []),
+        ("metadata_candidates", []),
+        ("schema_version", "2.0"),
+        ("surprise", 1),
+    ],
+)
+def test_hop1_consumers_refuse_invalid_values(
+    hop1: dict[str, Any], field: str, value: Any
+) -> None:
+    assert_refused(_parse_hop1, with_value(hop1, field, value), SeamRejection, because=field)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("lineage.experiment_id", "exp_unknown"),
+        ("published_at", "2026-10-01T12:00:00"),  # naive time
+        ("event", "video_uploaded"),
+        ("schema_version", "2.0"),
+    ],
+)
+def test_hop2_consumers_refuse_invalid_values(
+    hop2: dict[str, Any], field: str, value: Any
+) -> None:
+    assert_refused(_parse_hop2, with_value(hop2, field, value), SeamRejection, because=field)

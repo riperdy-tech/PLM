@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c6 import YouTubePublicationPayload
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import OperatingMode, PrivacyStatus, PublishState
@@ -77,6 +79,17 @@ class PublishManifest(BaseModel):
     metadata_version: str = "v1"
     created_at: datetime
 
+    @property
+    def lineage(self) -> ExperimentLineage:
+        """The manifest's identity fields as one validated lineage (refuses placeholders)."""
+        return ExperimentLineage(
+            experiment_id=self.experiment_id,
+            experiment_family_id=self.experiment_family_id,
+            content_arm_id=self.content_arm_id,
+            content_genome_id=self.content_genome_id,
+            production_directive_id=self.production_directive_id,
+        )
+
 
 class PublishAttempt(BaseModel):
     """A durable execution attempt of a publish manifest (P7 §12)."""
@@ -131,22 +144,5 @@ class YouTubePublicationRecord(BaseModel):
     updated_at: datetime
 
 
-class YouTubeVideoPublishedEvent(BaseModel):
-    """Hop 2 event emitted upon successful publication (P7 §65, Ruling R9).
-
-    Must carry all R9 identity fields to close the learning loop at P9.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    event: str = "youtube_video_published"
-    youtube_video_id: str
-    publish_attempt_id: str
-    experiment_id: str
-    content_arm_id: str
-    published_at: datetime
-    metadata_version: str
-    experiment_family_id: str  # R9
-    content_genome_id: str  # R9
-    production_directive_id: str  # R9
-    media_package_id: str  # R9
+YouTubeVideoPublishedEvent = YouTubePublicationPayload
+"""Hop 2 event (P7 §65, R9): the shared ``plm_contracts.seams.c6`` model (ADR-0029)."""

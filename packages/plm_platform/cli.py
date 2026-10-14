@@ -611,36 +611,15 @@ def qa_review() -> None:
 
 @qa_app.command(name="evaluate")
 def qa_evaluate(
-    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID"),
-    artifact_id: str = typer.Option(..., "--artifact-id", "-a", help="Artifact ID"),
+    event_path: str = typer.Option(
+        ..., "--event", "-e", help="Path to a Seam C4 candidate-ready event (JSON)"
+    ),
     audio_path: str = typer.Option(..., "--audio", "-f", help="Path to WAV audio file"),
-    expected_duration: float = typer.Option(
-        ..., "--duration", "-d", help="Expected duration in seconds"
-    ),
-    track_spec_id: str = typer.Option("spec_default", "--track-spec-id", help="Track spec ID"),
-    experiment_id: str = typer.Option("exp_default", "--experiment-id", help="Experiment ID"),
-    content_arm_id: str = typer.Option("arm_default", "--arm-id", help="Content arm ID"),
-    plan_tier: str = typer.Option("pro", "--tier", help="Provider license tier (pro, free, etc.)"),
-    account_ref: str = typer.Option(
-        "acc_internal", "--account-ref", help="Account identity reference"
-    ),
-    terms_version: str = typer.Option("v1.0", "--terms", help="Terms of service version"),
 ) -> None:
-    """Evaluate a candidate against quality, rights, and release gates."""
+    """Evaluate a candidate, described by its C4 event, against the release gates."""
     from quality_gate.cli import cli_evaluate
 
-    cli_evaluate(
-        candidate_id=candidate_id,
-        artifact_id=artifact_id,
-        audio_path=audio_path,
-        expected_duration=expected_duration,
-        track_spec_id=track_spec_id,
-        experiment_id=experiment_id,
-        content_arm_id=content_arm_id,
-        plan_tier=plan_tier,
-        account_ref=account_ref,
-        terms_version=terms_version,
-    )
+    cli_evaluate(event_path=event_path, audio_path=audio_path)
 
 
 @qa_app.command(name="manifest")
@@ -698,30 +677,18 @@ def qa_smoke() -> None:
 
 @media_app.command(name="assemble")
 def media_assemble(
-    manifest_path: str = typer.Option(
-        ..., "--manifest", "-m", help="Path to P5 release manifest JSON file"
+    request_path: str = typer.Option(
+        ...,
+        "--request",
+        "-r",
+        help="Path to an assembly request JSON (track_manifests, brand, duration, visual "
+        "profile, playlist concept)",
     ),
-    brand_id: str = typer.Option("brand_neon", "--brand-id", help="Brand ID"),
-    brand_name: str = typer.Option("Neon Records", "--brand-name", help="Brand display name"),
-    render_profile: str = typer.Option(
-        "yt_longform_1080p_v1", "--render-profile", help="Render profile"
-    ),
-    duration_seconds: float = typer.Option(
-        3600.0, "--duration", "-d", help="Required playlist duration in seconds"
-    ),
-    version: str = typer.Option("v1", "--version", help="Package sequence version"),
 ) -> None:
-    """Assemble and render a media package from a release manifest file."""
+    """Assemble and render a media package from P5 track manifests."""
     from media_factory.cli import cli_assemble
 
-    cli_assemble(
-        manifest_path=manifest_path,
-        brand_id=brand_id,
-        brand_name=brand_name,
-        render_profile=render_profile,
-        duration_seconds=duration_seconds,
-        version=version,
-    )
+    cli_assemble(request_path=request_path)
 
 
 @media_app.command(name="package")
@@ -808,14 +775,18 @@ def youtube_smoke() -> None:
 
 @distribution_app.command(name="submit")
 def distribution_submit(
-    package_path: str = typer.Option(..., "--package", "-p", help="Path to release package JSON file"),
-    artist_name: str = typer.Option("Neon Artist", "--artist", "-a", help="Artist display name"),
-    brand_id: str = typer.Option("brand_neon", "--brand", "-b", help="Brand ID"),
+    package_path: str = typer.Option(
+        ...,
+        "--request",
+        "-r",
+        help="Path to a release request JSON: track_manifests (C5), media_package (C6), "
+        "optional publication, and the release metadata",
+    ),
 ) -> None:
-    """Submit a compiled release package to DSPs (P8)."""
+    """Submit a release to DSPs from seam payloads (P8)."""
     from distribution.cli import cli_submit
 
-    cli_submit(package_path=package_path, artist_name=artist_name, brand_id=brand_id)
+    cli_submit(package_path=package_path)
 
 
 @distribution_app.command(name="release")

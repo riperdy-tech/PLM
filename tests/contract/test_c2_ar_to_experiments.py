@@ -1,14 +1,11 @@
 # tests/contract/test_c2_ar_to_experiments.py
-"""Seam C2 — PHASE-P2 → PHASE-P3 (production directive). FROZEN by ADR-0023 (R4).
+"""Seam C2 — PHASE-P2 → PHASE-P3 (production directive). FROZEN by ADR-0023 (R4), ADR-0025.
 
-Producer: P2's `ProductionDirective.to_wire()` — the real serialiser, not a stub.
-Consumer schema: the registry's frozen producer field list (the wire P3's adapter reads).
-
-Scope note (stated so it is never mistaken for the whole seam): this is P2's producer
-half. P3's consumer half — its adapter, the `exploration_level ← allocation_type` map and
-the `requested_experiment_count ← quantity` rename against P3's code — lands in P3.4,
-after which `tests/contract/test_c2_ar_to_experiments.py` gains those cases in the same
-file. A wire change is a registry amendment first (R2), then both sides in one change.
+Producer: P2's real allocation cycle, serialised by ``ProductionDirective.to_wire()``.
+Consumer: P3's real ``adapt_directive``. Both read the shared
+``plm_contracts.seams.c2.ProductionDirectivePayload``; this file proves the real producer's
+output is accepted, mapped without invention, and that the consumer refuses every
+incomplete, unknown-field or future-version payload.
 """
 
 from __future__ import annotations
@@ -17,14 +14,13 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from plm_contracts import AllocationType, to_exploration_level
-from pydantic import BaseModel, ConfigDict
+import pytest
+from plm_contracts import AllocationType
+from plm_contracts.seams.c2 import C2_WIRE_FIELDS
 
-from services.autonomous_ar.domain.directive import (
-    DIRECTIVE_WIRE_FIELDS,
-    ProductionDirective,
-)
-from tests.support.contract import SeamRegistry, assert_seam_payload
+from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS, ProductionDirective
+from services.experiments.ingestion.p2_adapter import DirectiveValidationError, adapt_directive
+from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 
 REGISTRY_ENTRY = "C2 · PHASE-P2 → PHASE-P3"
 
@@ -47,51 +43,6 @@ REGISTRY_FIELDS: tuple[str, ...] = (
     "exploration_fraction",
     "value_model",
 )
-REGISTRY_BRIEF_FIELDS: tuple[str, ...] = (
-    "genre",
-    "mood",
-    "use_case",
-    "language",
-    "vocal_mode",
-    "duration_bucket",
-    "visual_world",
-)
-
-
-class BriefSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    genre: str | None = None
-    mood: list[str] = []
-    use_case: list[str] = []
-    language: str | None = None
-    vocal_mode: str | None = None
-    duration_bucket: str | None = None
-    visual_world: str | None = None
-
-
-class ConsumerSchema(BaseModel):
-    """P3's expected wire schema, field names copied from the registry entry."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    directive_id: str
-    decision_id: str
-    arm_id: str
-    allocation_type: str
-    priority: int
-    quantity: int
-    brief: BriefSchema
-    expected_value: float
-    uncertainty: float
-    budget_limit: float
-    market_context: dict[str, Any]
-    selection_reason: list[str]
-    directive_version: str
-    policy_version: str
-    expires_at: datetime
-    exploration_fraction: float
-    value_model: str
 
 
 def producer_directive() -> ProductionDirective:
@@ -156,81 +107,84 @@ def producer_directive() -> ProductionDirective:
     return result.directives[0]
 
 
-def test_declared_fields_match_the_registry_field_list() -> None:
-    assert DIRECTIVE_WIRE_FIELDS == REGISTRY_FIELDS
-    assert set(ConsumerSchema.model_fields) == set(DIRECTIVE_WIRE_FIELDS)
-    assert set(BriefSchema.model_fields) == set(REGISTRY_BRIEF_FIELDS)
-
-
-def test_producer_payload_validates_against_the_consumer_schema() -> None:
-    payload = json.loads(json.dumps(producer_directive().to_wire()))
-    assert_seam_payload(
-        payload,
-        ConsumerSchema,
-        seam=REGISTRY_ENTRY,
-        producer="ProductionDirective.to_wire",
-        consumer="P3 adapter schema (registry C2)",
-    )
-
-
-def test_frozen_vocabulary_and_rename_direction() -> None:
-    # ADR-0023 #2: the three discrete levels are the contract; the map is the identity.
-    assert to_exploration_level(AllocationType.EXPLOIT) == "exploit"
-    assert to_exploration_level(AllocationType.ADJACENT_EXPLORE) == "adjacent_explore"
-    assert to_exploration_level(AllocationType.RADICAL_EXPLORE) == "radical_explore"
-    # P3's internal names are the consumer's, never the producer's (R4): if either rename
-    # ever appears on P2's wire, the seam has been broken from the wrong side.
-    for consumer_only in (
-        "requested_experiment_count",
-        "exploration_level",
-        "production_deadline",
-        "required_constraints",
-    ):
-        assert consumer_only not in DIRECTIVE_WIRE_FIELDS
+def _wire() -> dict[str, Any]:
+    return json.loads(json.dumps(producer_directive().to_wire()))
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
-    assert contract_registry.exists, "the registry was frozen 2026-09-20; it cannot be missing"
     contract_registry.require_entry(REGISTRY_ENTRY)
 
 
-def test_p3_adapter_ingests_real_p2_producer_payload() -> None:
-    from services.experiments.ingestion.p2_adapter import adapt_directive
+def test_wire_is_schema_version_plus_the_registry_fields() -> None:
+    assert C2_WIRE_FIELDS == DIRECTIVE_WIRE_FIELDS == ("schema_version", *REGISTRY_FIELDS)
+    assert tuple(_wire()) == C2_WIRE_FIELDS
 
-    wire = producer_directive().to_wire()
+
+def test_real_producer_payload_is_adapted_without_invention() -> None:
+    directive = producer_directive()
+    wire = _wire()
     adapted = adapt_directive(wire)
 
-    assert adapted.directive_id == wire["directive_id"]
-    assert adapted.decision_id == wire["decision_id"]
-    assert adapted.arm_id == wire["arm_id"]
-    assert adapted.requested_experiment_count == wire["quantity"]
-    assert adapted.exploration_level == wire["allocation_type"]
-    assert adapted.production_deadline == datetime.fromisoformat(wire["expires_at"])
-    assert adapted.budget_limit == wire["budget_limit"]
-    assert adapted.required_constraints["genre"] == wire["brief"]["genre"]
+    assert adapted.directive_id == directive.directive_id
+    assert adapted.decision_id == directive.decision_id
+    assert adapted.arm_id == directive.arm_id
+    assert adapted.exploration_level is AllocationType(directive.allocation_type)
+    assert adapted.requested_experiment_count == directive.quantity
+    assert adapted.production_deadline == directive.expires_at
+    assert adapted.priority == directive.priority
+    assert adapted.budget_limit == directive.budget_limit
+    # The fields P3 used to default must arrive with the producer's own values.
+    assert adapted.expected_value == directive.expected_value
+    assert adapted.uncertainty == directive.uncertainty
+    assert adapted.value_model == directive.value_model
+    assert adapted.directive_version == directive.directive_version
+    assert adapted.policy_version == directive.policy_version
+    assert adapted.market_context == dict(directive.market_context)
+    assert adapted.selection_reason == list(directive.selection_reason)
 
 
-def test_p3_adapter_rejects_missing_identity_or_invalid_budget() -> None:
-    import pytest
+@pytest.mark.parametrize("field", C2_WIRE_FIELDS)
+def test_consumer_refuses_a_payload_missing_any_field(field: str) -> None:
+    exc = assert_refused(
+        adapt_directive, without(_wire(), field), DirectiveValidationError,
+        because=f"{field} missing",
+    )
+    assert isinstance(exc, DirectiveValidationError)
+    assert exc.error.code == "missing_required_field"
+    assert field in exc.error.field_paths
 
-    from services.experiments.ingestion.p2_adapter import (
-        DirectiveValidationError,
-        adapt_directive,
+
+def test_consumer_refuses_an_unknown_field() -> None:
+    exc = assert_refused(
+        adapt_directive, with_value(_wire(), "surprise", 1), DirectiveValidationError,
+        because="unknown field",
+    )
+    assert isinstance(exc, DirectiveValidationError)
+    assert exc.error.code == "unknown_field"
+
+
+def test_consumer_refuses_a_future_major_version() -> None:
+    exc = assert_refused(
+        adapt_directive, with_value(_wire(), "schema_version", "2.0"), DirectiveValidationError,
+        because="future major",
+    )
+    assert isinstance(exc, DirectiveValidationError)
+    assert exc.error.code == "unsupported_schema_version"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("allocation_type", "yolo"),
+        ("budget_limit", -1.0),
+        ("quantity", 0),
+        ("arm_id", ""),
+        ("expires_at", "2026-11-01T00:00:00"),  # naive timestamp: ambiguous deadline
+    ],
+)
+def test_consumer_refuses_invalid_values(field: str, value: Any) -> None:
+    assert_refused(
+        adapt_directive, with_value(_wire(), field, value), DirectiveValidationError,
+        because=f"{field}={value!r}",
     )
 
-    wire = producer_directive().to_wire()
-
-    bad_id = dict(wire)
-    bad_id["arm_id"] = ""
-    with pytest.raises(DirectiveValidationError, match="arm_id"):
-        adapt_directive(bad_id)
-
-    bad_budget = dict(wire)
-    bad_budget["budget_limit"] = -5.0
-    with pytest.raises(DirectiveValidationError, match="budget_limit"):
-        adapt_directive(bad_budget)
-
-    bad_alloc = dict(wire)
-    bad_alloc["allocation_type"] = "unknown_type"
-    with pytest.raises(DirectiveValidationError, match="allocation_type"):
-        adapt_directive(bad_alloc)

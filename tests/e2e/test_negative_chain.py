@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 
 import pytest
 from plm_contracts import GateDisposition
+from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from sqlalchemy.orm import Session
 
 # P9
@@ -25,9 +27,10 @@ from services.distribution.artists.manager import get_or_create_artist
 from services.distribution.client.mock import MockDistributorClient
 from services.distribution.compiler.release_compiler import compile_canonical_release_package
 from services.distribution.engine import DistributionEngine
+from services.distribution.identifiers.allocator import allocate_isrc
 
 # P5 & P6
-from services.media_factory.playlist.assembler import assemble_playlist
+from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from services.media_factory.rendering.assembler import assemble_media_package
 from services.media_factory.visuals.planner import BrandProfile
 from services.quality_gate.gate.manifest import build_release_manifest
@@ -40,6 +43,7 @@ from services.youtube_publishing.preflight.gates import (
     evaluate_gate_b_artifact,
     evaluate_gate_c_metadata,
 )
+from tests.support.seams import media_package, release_manifest, sample_lineage
 
 
 def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
@@ -48,13 +52,16 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
     rejected_manifest = build_release_manifest(
         candidate_id="cand_rejected_001",
         canonical_artifact_id="art_defect_001",
-        experiment_id="exp_fail_001",
+        artifact_uri="music/test/art_defect_001.wav",
+        artifact_sha256="0" * 64,
+        measured_duration_seconds=120.0,
         track_spec_id="trk_spec_001",
-        content_arm_id="arm_fail_001",
+        lineage=sample_lineage(experiment_id="exp_fail_001", content_arm_id="arm_fail_001"),
         disposition=GateDisposition.REJECTED,
-        technical_status="FAIL",
-        commercial_use_status="INELIGIBLE",
-        provenance_status="FAILED",
+        override=None,
+        technical_status="FAILED",
+        commercial_use_status="ineligible",
+        provenance_status="COMPLETE",
         ai_disclosure_required=True,
         rights_risk="HIGH",
         policy_status="VIOLATION",
@@ -64,51 +71,20 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
         evidence_bundle_id="evi_fail_001",
     )
     assert rejected_manifest.disposition == GateDisposition.REJECTED
+    track = parse_seam(ReleaseManifestPayload, rejected_manifest.to_wire())
 
     # 2. P6 playlist assembly hard-blocks the unapproved candidate (Rulings R7, R8)
-    with pytest.raises(ValueError, match="not cleared"):
-        assemble_playlist(
-            release_manifest_id=rejected_manifest.p5_manifest_id,
-            experiment_id=rejected_manifest.experiment_id,
-            content_arm_id=rejected_manifest.content_arm_id,
-            brand_id="brand_neon",
-            candidate_manifests=[
-                {
-                    "candidate_id": rejected_manifest.candidate_id,
-                    "disposition": rejected_manifest.disposition.value,
-                    "canonical_artifact_id": rejected_manifest.canonical_artifact_id,
-                }
-            ],
-            track_details=[
-                {
-                    "candidate_id": rejected_manifest.candidate_id,
-                    "title": "Rejected Track",
-                    "duration_seconds": 120.0,
-                }
-            ],
-            required_duration_seconds=120.0,
-        )
+    with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
+        assemble_playlist(manifests=[track], brand_id="brand_neon", required_duration_seconds=120.0)
 
-    # 3. P6 top-level media package assembler also refuses to assemble unapproved candidate
-    with pytest.raises(ValueError, match="not cleared"):
+    # 3. P6 top-level media package assembler also refuses it
+    with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
         assemble_media_package(
-            release_manifest={
-                "release_manifest_id": rejected_manifest.p5_manifest_id,
-                "experiment_id": rejected_manifest.experiment_id,
-                "content_arm_id": rejected_manifest.content_arm_id,
-                "brand_id": "brand_neon",
-                "tracks": [
-                    {
-                        "song_id": rejected_manifest.candidate_id,
-                        "title": "Rejected Track",
-                        "duration_seconds": 120.0,
-                        "provenance_status": "REJECTED",
-                    }
-                ],
-            },
+            track_manifests=[track],
             brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
-            render_profile="yt_longform_1080p_v1",
             required_duration_seconds=120.0,
+            visual_profile="brand_neon_rain_v1",
+            playlist_concept="Never Published",
         )
 
 
@@ -158,43 +134,35 @@ def test_p7_preflight_failure_blocks_youtube_publishing() -> None:
 def test_p8_duplicate_submission_is_strictly_idempotent(distribution_db: Session) -> None:
     """Review Focus 2: Double submission to distributor is strictly idempotent."""
     artist = get_or_create_artist(distribution_db, "Neon Resident", "brand_neon")
-    p5_manifest = {"p5_manifest_id": "p5_idem_001", "disposition": "PASSED"}
-    p6_media = {
-        "media_package_id": "p6_idem_001",
-        "brand_id": "brand_neon",
-        "audio_master_uri": "media/audio/idem.wav",
-        "audio_checksum": "chk_audio_idem",
-        "thumbnails": [{"uri": "media/artwork/cover.jpg", "checksum": "chk_art_idem"}],
-        "tracklist": [
-            {
-                "title": "Idempotent Beat",
-                "duration_seconds": 180.0,
-                "audio_uri": "media/audio/idem.wav",
-                "audio_checksum": "chk_audio_idem",
-            }
-        ],
-    }
+    now = datetime(2026, 10, 1, tzinfo=UTC)
     pkg = compile_canonical_release_package(
-        p5_manifest=p5_manifest,
-        media_package=p6_media,
+        track_manifests=[release_manifest(candidate_id="cand_idem")],
+        media_package=media_package("cand_idem"),
         artist_id=artist.id,
         artist_name=artist.canonical_name,
-        brand_id="brand_neon",
         release_title="Idempotent Beat",
+        release_date="2026-10-01",
+        label_name="Neon Records",
+        copyright_line="2026 Neon Records",
+        publisher_line="2026 Neon Music Publishing",
+        territories="WORLDWIDE",
+        allocate_isrc=lambda key: allocate_isrc(distribution_db, key, now=now),
+        now=now,
     )
+    identity = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
 
     client = MockDistributorClient()
     engine = DistributionEngine(client)
 
     # First submission succeeds
-    sub1 = engine.submit_release(distribution_db, pkg, artist=artist)
+    sub1 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
     assert sub1.is_success
     assert not sub1.is_duplicate
     first_release_id = sub1.release.release_id
     assert len(client.submitted_packages) == 1
 
     # Second submission with exact same package / fingerprint
-    sub2 = engine.submit_release(distribution_db, pkg, artist=artist)
+    sub2 = engine.submit_release(distribution_db, pkg, artist=artist, **identity)
     assert sub2.is_success
     assert sub2.is_duplicate
     assert sub2.release.release_id == first_release_id

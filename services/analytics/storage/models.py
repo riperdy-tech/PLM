@@ -44,8 +44,10 @@ class TrackMetricRow(Base):
 
     id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
     isrc: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
-    track_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
-    release_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    # NULL = the statement row named no track/release and the ISRC is not linked
+    # to a release (ADR-0030); never an invented id.
+    track_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    release_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
     window: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
     date_str: Mapped[str] = mapped_column(sa.String(10), nullable=False, index=True)
     streams: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
@@ -71,6 +73,11 @@ class RevenueStatementRow(Base):
     file_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
     source_reference: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     received_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    # Rows with no ISRC cannot be attributed to a recording (ADR-0030).
+    unattributed_revenue_usd: Mapped[float] = mapped_column(
+        sa.Float, nullable=False, default=0.0
+    )
+    unattributed_row_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
 
 
 class CostItemRow(Base):
@@ -103,8 +110,9 @@ class ExperimentOutcomeRow(Base):
     normalized_reward: Mapped[float] = mapped_column(sa.Float, nullable=False)
     reward_version: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="v1")
     attribution_confidence: Mapped[float] = mapped_column(sa.Float, nullable=False, default=1.0)
-    maturity: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="MATURE")
-    quality_status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="ELIGIBLE")
+    maturity: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    # NULL = quality not assessed (ADR-0030); no defaulted 'ELIGIBLE'.
+    quality_status: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
 
@@ -125,3 +133,16 @@ class RewardPostedRow(Base):
     attribution_confidence: Mapped[float] = mapped_column(sa.Float, nullable=False)
     raw_metrics: Mapped[Any] = mapped_column(sa.JSON, nullable=False)
     posted_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
+class ReleaseLinkRow(Base):
+    """One released recording and the lineage it was released under (C7 leg 1, ADR-0030)."""
+
+    __tablename__ = "release_links"
+    __table_args__ = {"schema": "analytics"}  # noqa: RUF012
+
+    release_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    isrc: Mapped[str] = mapped_column(sa.String(32), primary_key=True, index=True)
+    media_package_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    lineage_json: Mapped[Any] = mapped_column(sa.JSON, nullable=False)
+    linked_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)

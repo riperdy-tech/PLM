@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.distribution_db import create_distribution_engine
+from tests.support.seams import media_package, release_manifest
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",
@@ -55,25 +56,16 @@ def test_submit_rejects_unauthenticated(client: TestClient) -> None:
 def test_release_submission_and_lifecycle_roundtrip(client: TestClient) -> None:
     headers = {SERVICE_TOKEN_HEADER: "test-dist-token"}
     payload = {
-        "p5_manifest_id": "p5_api_001",
-        "p6_media_package_id": "p6_api_001",
+        "track_manifests": [release_manifest(candidate_id="cand_city").to_wire()],
+        "media_package": media_package("cand_city").to_wire(),
+        "publication": None,
         "artist_name": "API Neon Artist",
-        "brand_id": "brand_neon",
         "release_title": "City Skylines",
-        "tracks": [
-            {
-                "title": "City Skylines",
-                "duration_seconds": 180.0,
-                "audio_uri": "media/audio/city.wav",
-                "audio_checksum": "chk_audio_city",
-            }
-        ],
-        "experiment_id": "exp_api_01",
-        "experiment_family_id": "fam_api_01",
-        "content_arm_id": "arm_api_01",
-        "content_genome_id": "gen_api_01",
-        "production_directive_id": "dir_api_01",
-        "media_package_id": "p6_api_001",
+        "release_date": "2026-10-01",
+        "label_name": "Neon Records",
+        "copyright_line": "2026 Neon Records",
+        "publisher_line": "2026 Neon Music Publishing",
+        "territories": "WORLDWIDE",
     }
 
     # 1. Submit release
@@ -119,3 +111,22 @@ def test_reports_api_roundtrip(client: TestClient) -> None:
     res_get = client.get(f"/distribution/reports/{rep_id}", headers=headers)
     assert res_get.status_code == 200
     assert res_get.json()["report_id"] == rep_id
+
+
+def test_release_submission_refuses_an_uncleared_track(client) -> None:
+    headers = {SERVICE_TOKEN_HEADER: "test-dist-token"}
+    payload = {
+        "track_manifests": [
+            release_manifest(candidate_id="cand_q", disposition="QUARANTINED").to_wire()
+        ],
+        "media_package": media_package("cand_q").to_wire(),
+        "artist_name": "API Neon Artist",
+        "release_date": "2026-10-01",
+        "label_name": "Neon Records",
+        "copyright_line": "2026 Neon Records",
+        "publisher_line": "2026 Neon Music Publishing",
+        "territories": "WORLDWIDE",
+    }
+    res = client.post("/distribution/releases", json=payload, headers=headers)
+    assert res.status_code == 422
+    assert res.json()["detail"]["code"] == "track_not_cleared"

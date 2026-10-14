@@ -36,6 +36,8 @@ def _sample_directive(exploration_level: str = "exploit") -> AdaptedDirective:
         },
         required_constraints={"genre": "rnb", "language": "english"},
         recommended_attributes={"mood": ["melancholic", "dreamy"]},
+        market_context={"brand_id": "neon_seoul"},
+        selection_reason=["test"],
         expected_value=0.85,
         uncertainty=0.15,
         value_model="p2-proxy-v1",

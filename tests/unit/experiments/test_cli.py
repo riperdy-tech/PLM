@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.cli import app
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
@@ -34,14 +35,8 @@ from tests.support.experiments_db import create_experiments_engine
 
 runner = CliRunner()
 
-SAMPLE_DIRECTIVE = {
-    "directive_id": "dir_cli_sample_01",
-    "decision_id": "dec_cli_01",
-    "arm_id": "rnb_late_night_drive_english_vocal_45_75m",
-    "allocation_type": "exploit",
-    "priority": 1,
-    "quantity": 1,
-    "brief": {
+SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
+    directive_id="dir_cli_sample_01", decision_id="dec_cli_01", arm_id="rnb_late_night_drive_english_vocal_45_75m", allocation_type="exploit", priority=1, quantity=1, brief={
         "genre": "rnb",
         "mood": ["melancholic", "intimate"],
         "use_case": ["late_night_drive"],
@@ -49,18 +44,8 @@ SAMPLE_DIRECTIVE = {
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    },
-    "expected_value": 85.0,
-    "uncertainty": 0.15,
-    "budget_limit": 100.0,
-    "market_context": {"brand_id": "neon_seoul"},
-    "selection_reason": ["high_demand"],
-    "directive_version": "p2-dir-v1",
-    "policy_version": "p2-v1",
-    "expires_at": "2026-10-01T00:00:00Z",
-    "exploration_fraction": 0.2,
-    "value_model": "early-stage-proxy-v1",
-}
+    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1"
+).to_wire()
 
 
 def _setup_seeded_db() -> tuple[sessionmaker, str, str]:

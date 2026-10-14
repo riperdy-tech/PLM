@@ -8,6 +8,7 @@ from media_factory.config import MediaFactorySettings
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.media_db import create_media_engine, media_session
+from tests.support.seams import release_manifest
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",
@@ -75,36 +76,16 @@ def test_media_api_assemble_and_query_package() -> None:
     headers = {SERVICE_TOKEN_HEADER: token}
 
     assemble_payload = {
-        "release_manifest": {
-            "release_manifest_id": "rm_api_01",
-            "experiment_id": "exp_api_01",
-            "content_arm_id": "arm_api_01",
-            "brand_id": "brand_neon",
-            "tracks": [
-                {
-                    "song_id": "song_api_01",
-                    "title": "First Light",
-                    "duration_seconds": 120.0,
-                    "provenance_status": "PASSED",
-                    "audio_uri": "media/audio/song1.wav",
-                    "audio_checksum": "chk1",
-                },
-                {
-                    "song_id": "song_api_02",
-                    "title": "Neon Horizons",
-                    "duration_seconds": 150.0,
-                    "provenance_status": "PASSED",
-                    "audio_uri": "media/audio/song2.wav",
-                    "audio_checksum": "chk2",
-                },
-            ],
-            "playlist_intent": "Deep Focus",
-            "policy_flags": {"ai_disclosure_required": True},
-        },
+        "track_manifests": [
+            release_manifest(candidate_id="song_api_01", measured_duration_seconds=120.0).to_wire(),
+            release_manifest(candidate_id="song_api_02", measured_duration_seconds=150.0).to_wire(),
+        ],
         "brand_id": "brand_neon",
         "brand_name": "Neon Records",
-        "render_profile": "yt_longform_1080p_v1",
         "required_duration_seconds": 270.0,
+        "visual_profile": "brand_neon_rain_v1",
+        "playlist_concept": "Deep Focus",
+        "render_profile": "yt_longform_1080p_v1",
     }
 
     # 1. Assemble package
@@ -137,3 +118,29 @@ def test_media_api_assemble_and_query_package() -> None:
     assert resp_pl.status_code == 200
     assert resp_pl.json()["id"] == pl_id
     assert len(resp_pl.json()["tracks"]) == 2
+
+
+def test_media_api_refuses_an_incomplete_track_manifest() -> None:
+    token = "test-token"
+    platform = load_settings(env={**MINIMAL_ENV, "PLM_SERVICE_TOKEN": token})
+    app = create_app(
+        session_factory=lambda: media_session(create_media_engine(static_pool=True)),
+        settings=MediaFactorySettings(platform=platform),
+    )
+    manifest = release_manifest().to_wire()
+    del manifest["disposition"]
+    resp = TestClient(app).post(
+        "/media/packages/assemble",
+        json={
+            "track_manifests": [manifest],
+            "brand_id": "brand_neon",
+            "brand_name": "Neon Records",
+            "required_duration_seconds": 150.0,
+            "visual_profile": "brand_neon_rain_v1",
+            "playlist_concept": "Deep Focus",
+        },
+        headers={SERVICE_TOKEN_HEADER: token},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "missing_required_field"
+    assert "track_manifests[0].disposition" in resp.json()["detail"]["field_paths"]

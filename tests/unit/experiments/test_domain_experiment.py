@@ -11,7 +11,6 @@ from services.experiments.domain.enums import (
     ExperimentStatus,
     ExperimentType,
     PackageStatus,
-    TrackRole,
     VariableClass,
     VocalGender,
     VocalMode,
@@ -36,6 +35,7 @@ from services.experiments.domain.package import (
     TrackSpec,
     VisualSpec,
 )
+from tests.support.seams import lineage_fields, track_spec_fields
 
 
 def _sample_genome() -> ContentGenome:
@@ -140,24 +140,7 @@ def test_experiment_fingerprint_computation() -> None:
 def test_package_hash_and_model() -> None:
     now = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
     track = TrackSpec(
-        track_spec_id="trk_01",
-        playlist_spec_id="ply_01",
-        experiment_id="exp_01",
-        content_arm_id="arm_rnb_01",
-        brand_profile_id="brand_lofi",
-        hard_constraints={"genre": "rnb"},
-        bounded_preferences={"bpm": 75},
-        creative_latitude={"variations": 3},
-        lyric_spec={"theme": "night driving"},
-        vocal_spec={"gender": "female"},
-        instrumentation_spec={"lead": "rhodes"},
-        production_style="warm_analog",
-        track_role=TrackRole.FOCUS,
-        requested_duration=190,
-        candidate_target=3,
-        priority=1,
-        budget_limit=250.0,
-        provider_policy={"preferred_provider": "elevenlabs"},
+        **track_spec_fields(lineage=lineage_fields(experiment_id="exp_01"))
     )
     ply = PlaylistSpec(
         playlist_spec_id="ply_01",

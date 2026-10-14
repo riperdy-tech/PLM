@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -44,30 +46,37 @@ def run_smoke_test() -> str | None:
     factory = session_factory(engine)
     with factory() as session:
         now = datetime.now(UTC)
-        wire_spec = {
-            "track_spec_id": f"trk_smoke_{int(now.timestamp())}",
-            "playlist_spec_id": f"ply_smoke_{int(now.timestamp())}",
-            "experiment_id": f"exp_smoke_{int(now.timestamp())}",
-            "content_arm_id": "arm_smoke_01",
-            "brand_profile_id": "neon_seoul",
-            "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-            "bounded_preferences": {
+        stamp = int(now.timestamp())
+        wire_spec = TrackSpecPayload.build(
+            track_spec_id=f"trk_smoke_{stamp}",
+            playlist_spec_id=f"ply_smoke_{stamp}",
+            lineage=ExperimentLineage(
+                experiment_id=f"exp_smoke_{stamp}",
+                experiment_family_id="fam_smoke_01",
+                content_arm_id="arm_smoke_01",
+                content_genome_id="gen_smoke_01",
+                production_directive_id=f"dir_smoke_{stamp}",
+            ),
+            brand_profile_id="neon_seoul_profile",
+            hard_constraints={"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
+            bounded_preferences={
                 "bpm": 80,
+                "key_profile": None,
                 "mood": ["melancholic"],
                 "use_case": ["late_night_drive"],
             },
-            "creative_latitude": {},
-            "lyric_spec": {},
-            "vocal_spec": {"vocal_mode": "vocal"},
-            "instrumentation_spec": {},
-            "production_style": "lofi_contemporary",
-            "track_role": "standout_single",
-            "requested_duration": 60,
-            "candidate_target": 1,
-            "priority": 1,
-            "budget_limit": 50.0,
-            "provider_policy": {},
-        }
+            creative_latitude={},
+            lyric_spec={},
+            vocal_spec={"vocal_mode": "vocal"},
+            instrumentation_spec={},
+            production_style="lofi_contemporary",
+            track_role="focus",
+            requested_duration=60,
+            candidate_target=1,
+            priority=1,
+            budget_limit=50.0,
+            provider_policy={"allowed_providers": ["mock"]},
+        ).to_wire()
 
         # 1. Adapt P3 spec
         spec = adapt_track_spec(wire_spec)
@@ -100,28 +109,14 @@ def run_smoke_test() -> str | None:
         if detail.rights_snapshot is None:
             return "failed: candidate missing Ruling R6 rights snapshot"
 
-        if detail.rights_snapshot.commercial_use_status != CommercialUseStatus.PERMITTED:
+        if detail.rights_snapshot.commercial_use_status != CommercialUseStatus.ELIGIBLE:
             return "failed: candidate rights not permitted for commercial use"
 
-        # 5. Export to P5 and emit Seam C4 event
+        # 5. Build the Seam C4 event from stored facts, then mark the export
+        event = build_candidate_ready_event(session, candidate.candidate_id)
         exported = mark_candidate_exported_to_p5(session, candidate.candidate_id)
         if exported.status != CandidateStatus.EXPORTED_TO_P5:
             return "failed: candidate could not be transitioned to EXPORTED_TO_P5"
-
-        event = build_candidate_ready_event(
-            candidate_id=candidate.candidate_id,
-            artifact_id=detail.artifacts[0].artifact_id,
-            track_spec_id=spec.track_spec_id,
-            experiment_id=spec.experiment_id,
-            content_arm_id=spec.content_arm_id,
-            provider_id="mock",
-            model_id="mock-v1",
-            duration_seconds=detail.artifacts[0].duration_seconds,
-            sample_rate=detail.artifacts[0].sample_rate,
-            channels=detail.artifacts[0].channels,
-            rights_status=detail.rights_snapshot.commercial_use_status.value,
-            provenance_complete=True,
-        )
         assert event.event_type == "music_candidate_ready_for_p5"
 
         session.commit()

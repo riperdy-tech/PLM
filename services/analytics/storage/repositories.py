@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
+from plm_contracts import QualityStatus
+from plm_contracts.seams.c7 import ObservationMaturity
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -134,6 +134,8 @@ def insert_revenue_statement(session: Session, stmt: RevenueStatement) -> None:
         file_hash=stmt.file_hash,
         source_reference=stmt.source_reference,
         received_at=stmt.received_at,
+        unattributed_revenue_usd=stmt.unattributed_revenue_usd,
+        unattributed_row_count=stmt.unattributed_row_count,
     )
     session.merge(row)
 
@@ -153,6 +155,8 @@ def get_revenue_statement_by_hash(session: Session, file_hash: str) -> RevenueSt
         file_hash=row.file_hash,
         source_reference=row.source_reference,
         received_at=row.received_at,
+        unattributed_revenue_usd=row.unattributed_revenue_usd,
+        unattributed_row_count=row.unattributed_row_count,
     )
 
 
@@ -203,8 +207,8 @@ def insert_experiment_outcome(session: Session, outc: ExperimentOutcomeRecord) -
         normalized_reward=outc.normalized_reward,
         reward_version=outc.reward_version,
         attribution_confidence=outc.attribution_confidence,
-        maturity=outc.maturity,
-        quality_status=outc.quality_status,
+        maturity=outc.maturity.value,
+        quality_status=outc.quality_status.value if outc.quality_status else None,
         created_at=outc.created_at,
     )
     session.merge(row)
@@ -228,8 +232,8 @@ def get_experiment_outcomes(session: Session, experiment_id: str) -> list[Experi
             normalized_reward=r.normalized_reward,
             reward_version=r.reward_version,
             attribution_confidence=r.attribution_confidence,
-            maturity=r.maturity,
-            quality_status=r.quality_status,
+            maturity=ObservationMaturity(r.maturity),
+            quality_status=QualityStatus(r.quality_status) if r.quality_status else None,
             created_at=r.created_at,
         )
         for r in rows
@@ -248,6 +252,6 @@ def insert_posted_reward(session: Session, payload: NormalizedRewardPayload) -> 
         reward_version=payload.reward_version,
         attribution_confidence=payload.attribution_confidence,
         raw_metrics=payload.raw_metrics,
-        posted_at=datetime.fromisoformat(payload.observed_at),
+        posted_at=payload.observed_at,
     )
     session.merge(row)

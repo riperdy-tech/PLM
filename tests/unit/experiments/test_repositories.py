@@ -40,6 +40,7 @@ from services.experiments.domain.package import (
 )
 from services.experiments.storage import repositories
 from tests.support.experiments_db import create_experiments_engine, experiments_session
+from tests.support.seams import lineage_fields, track_spec_fields
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -158,23 +159,7 @@ def test_content_package_persistence_and_retrieval() -> None:
         repositories.insert_experiment(session, exp)
 
         track = TrackSpec(
-            track_spec_id="trk_01",
-            playlist_spec_id="ply_01",
-            experiment_id="exp_test_02",
-            content_arm_id="arm_01",
-            brand_profile_id="brand_lofi",
-            hard_constraints={"genre": "rnb"},
-            bounded_preferences={},
-            creative_latitude={},
-            lyric_spec={},
-            vocal_spec={},
-            instrumentation_spec={},
-            production_style="clean_modern",
-            track_role=TrackRole.FOCUS,
-            requested_duration=180,
-            candidate_target=2,
-            priority=1,
-            budget_limit=150.0,
+            **track_spec_fields(lineage=lineage_fields(experiment_id="exp_test_02"))
         )
         ply = PlaylistSpec(
             playlist_spec_id="ply_01",

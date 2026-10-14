@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c6 import MediaPackagePayload
+
 from .enums import (
     PackageStatus,
     PlaylistStatus,
@@ -118,7 +121,7 @@ class PlaylistSession:
         requested_duration_seconds: float,
         sequence_version: str = "v1",
     ) -> PlaylistSession:
-        sid = playlist_session_id(experiment_id, brand_id, sequence_version)
+        sid = playlist_session_id(release_manifest_id, brand_id, sequence_version)
         return cls(
             id=sid,
             release_manifest_id=release_manifest_id,
@@ -340,6 +343,10 @@ class RenderJob:
         )
 
 
+class LegacyPackageError(ValueError):
+    """A media package stored before ADR-0028 lacks facts the C6 wire requires."""
+
+
 @dataclass
 class MediaPackage:
     """Downstream contract for P7 and P8 (Seam C6, P6 §5, Ruling R9)."""
@@ -364,6 +371,8 @@ class MediaPackage:
     short_source_assets: list[dict[str, Any]]
     render_report: dict[str, Any]
     status: PackageStatus
+    lineage: ExperimentLineage | None = None
+    """The tracks' common lineage (ADR-0028); ``None`` only on legacy rows."""
     package_version: str = "v1"
     manifest_uri: str = ""
     manifest_hash: str = ""
@@ -391,16 +400,18 @@ class MediaPackage:
         metadata_candidates: list[dict[str, Any]],
         short_source_assets: list[dict[str, Any]],
         render_report: dict[str, Any],
+        lineage: ExperimentLineage,
         package_version: str = "v1",
         status: PackageStatus = PackageStatus.READY_FOR_PUBLISH,
     ) -> MediaPackage:
-        mpid = media_package_id(experiment_id, brand_id, package_version)
+        mpid = media_package_id(release_manifest_id, brand_id, package_version)
         content = json.dumps(
             {
                 "media_package_id": mpid,
                 "release_manifest_id": release_manifest_id,
                 "experiment_id": experiment_id,
                 "content_arm_id": content_arm_id,
+                "lineage": lineage.model_dump(mode="json"),
                 "brand_id": brand_id,
                 "video_checksum": video_checksum,
                 "audio_checksum": audio_checksum,
@@ -431,32 +442,45 @@ class MediaPackage:
             short_source_assets=short_source_assets,
             render_report=render_report,
             status=status,
+            lineage=lineage,
             package_version=package_version,
             manifest_hash=m_hash,
         )
 
     def to_c6_payload(self) -> dict[str, Any]:
-        """Convert to the frozen Seam C6 Hop 1 producer shape (P6 §5)."""
-        return {
-            "media_package_id": self.media_package_id,
-            "release_manifest_id": self.release_manifest_id,
-            "experiment_id": self.experiment_id,
-            "brand_id": self.brand_id,
-            "video": {
+        """The Seam C6 hop-1 wire, through the shared model (P6 §5, R9, ADR-0029).
+
+        ``ai_disclosure_required`` is the disclosure the metadata was compiled with, which
+        is P5's finding for the tracks. A package stored before lineage existed has no
+        complete wire and is refused.
+        """
+        if self.lineage is None:
+            raise LegacyPackageError(
+                f"media package {self.media_package_id!r} predates ADR-0028 and has no lineage"
+            )
+        disclosure = {bool(c["contains_synthetic_media"]) for c in self.metadata_candidates}
+        if len(disclosure) != 1:
+            raise LegacyPackageError(
+                f"media package {self.media_package_id!r} has inconsistent disclosure flags"
+            )
+        return MediaPackagePayload.build(
+            media_package_id=self.media_package_id,
+            release_manifest_id=self.release_manifest_id,
+            lineage=self.lineage,
+            brand_id=self.brand_id,
+            ai_disclosure_required=disclosure.pop(),
+            video={
                 "master_uri": self.video_master_uri,
                 "checksum": self.video_checksum,
                 "duration_seconds": self.video_duration_seconds,
                 "render_profile": self.render_profile,
             },
-            "audio": {
-                "master_uri": self.audio_master_uri,
-                "checksum": self.audio_checksum,
-            },
-            "thumbnails": self.thumbnails,
-            "tracklist": self.tracklist,
-            "chapters": self.chapters,
-            "metadata_candidates": self.metadata_candidates,
-            "short_source_assets": self.short_source_assets,
-            "render_report": self.render_report,
-            "status": self.status.value,
-        }
+            audio={"master_uri": self.audio_master_uri, "checksum": self.audio_checksum},
+            thumbnails=self.thumbnails,
+            tracklist=self.tracklist,
+            chapters=self.chapters,
+            metadata_candidates=self.metadata_candidates,
+            short_source_assets=self.short_source_assets,
+            render_report=self.render_report,
+            status=self.status.value,
+        ).to_wire()

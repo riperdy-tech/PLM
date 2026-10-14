@@ -23,6 +23,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from plm_contracts import ChannelActivationState, ErrorShape
+from plm_contracts.seams.c2 import ProductionDirectivePayload
 from sqlalchemy.orm import Session
 
 from ..config import ARSettings
@@ -105,14 +106,15 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
             raise _not_found("cycle", cycle_id)
         return [_decision(row) for row in repositories.load_decisions(session, cycle_id)]
 
-    @router.get("/ar/directives", response_model=list[ProductionDirective])
+    @router.get("/ar/directives", response_model=list[ProductionDirectivePayload])
     def list_directives(_: Annotated[None, Depends(auth)],
                         session: Annotated[Session, Depends(dependency)],
-                        brand_id: str = Query(min_length=1)) -> list[ProductionDirective]:
+                        brand_id: str = Query(min_length=1)) -> list[dict[str, Any]]:
+        """Queued directives as the versioned C2 wire (ADR-0025)."""
         rows = repositories.list_queued_directives(
             session, brand_id=brand_id, activation_states=_ACTIONABLE_ACTIVATION_STATES
         )
-        return [_directive(row) for row in rows]
+        return [_directive(row).to_wire() for row in rows]
 
     @router.get("/ar/arms/{arm_id}/state", response_model=ArmStateOut)
     def get_arm_state(arm_id: str, _: Annotated[None, Depends(auth)],

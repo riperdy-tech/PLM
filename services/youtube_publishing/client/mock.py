@@ -18,6 +18,9 @@ class MockYouTubeClient:
     """In-memory deterministic mock of YouTube Data API v3."""
 
     provider_mode = ProviderMode.MOCK
+    placeholder_video_bytes = b"MOCK_VIDEO_BINARY_STREAM"
+    """Stand-in media for mock runs only; the engine never uses it with a real client."""
+    placeholder_thumbnail_bytes = b"MOCK_THUMBNAIL_BINARY_IMAGE"
 
     def __init__(
         self,

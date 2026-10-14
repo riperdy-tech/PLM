@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
 from plm_platform.execution import (
     ExternalWriteGuard,
     ExternalWriteRefusedError,
@@ -35,6 +35,7 @@ from .preflight.validators import (
 from .storage.repositories import (
     get_release_by_fingerprint,
     get_release_by_id,
+    get_release_identity,
     get_tracks_by_release_id,
     insert_release,
     insert_track,
@@ -111,12 +112,8 @@ class DistributionEngine:
         package: CanonicalReleasePackage,
         *,
         artist: ArtistProfile | None = None,
-        experiment_id: str = "exp_unknown",
-        experiment_family_id: str = "fam_unknown",
-        content_arm_id: str = "arm_unknown",
-        content_genome_id: str = "gen_unknown",
-        production_directive_id: str = "dir_unknown",
-        media_package_id: str = "pkg_unknown",
+        lineage: ExperimentLineage,
+        media_package_id: str,
     ) -> DistributionEngineResult:
         """Submit a canonical release package to the distributor.
 
@@ -130,16 +127,15 @@ class DistributionEngine:
         if existing:
             logger.info("Found existing distribution release for fingerprint %s", package.submission_fingerprint)
             existing_tracks = get_tracks_by_release_id(session, existing.release_id)
+            stored_lineage, stored_package_id = get_release_identity(
+                session, existing.release_id
+            )
             c7_payload = self.build_c7_payload(
                 release=existing,
                 isrcs=[t.isrc for t in existing_tracks],
                 source_package_hash=package.submission_fingerprint,
-                experiment_id=experiment_id,
-                experiment_family_id=experiment_family_id,
-                content_arm_id=content_arm_id,
-                content_genome_id=content_genome_id,
-                production_directive_id=production_directive_id,
-                media_package_id=media_package_id,
+                lineage=stored_lineage,
+                media_package_id=stored_package_id,
             )
             return DistributionEngineResult(release=existing, payload=c7_payload, is_duplicate=True)
 
@@ -198,11 +194,7 @@ class DistributionEngine:
             session,
             release,
             source_manifest_ids=package.source_manifest_ids,
-            experiment_id=experiment_id,
-            experiment_family_id=experiment_family_id,
-            content_arm_id=content_arm_id,
-            content_genome_id=content_genome_id,
-            production_directive_id=production_directive_id,
+            lineage=lineage,
             media_package_id=media_package_id,
         )
 
@@ -210,11 +202,7 @@ class DistributionEngine:
             release=release,
             isrcs=[t.isrc for t in package.tracks],
             source_package_hash=package.submission_fingerprint,
-            experiment_id=experiment_id,
-            experiment_family_id=experiment_family_id,
-            content_arm_id=content_arm_id,
-            content_genome_id=content_genome_id,
-            production_directive_id=production_directive_id,
+            lineage=lineage,
             media_package_id=media_package_id,
         )
 
@@ -224,13 +212,6 @@ class DistributionEngine:
         self,
         session: Session,
         release_id: str,
-        *,
-        experiment_id: str = "exp_unknown",
-        experiment_family_id: str = "fam_unknown",
-        content_arm_id: str = "arm_unknown",
-        content_genome_id: str = "gen_unknown",
-        production_directive_id: str = "dir_unknown",
-        media_package_id: str = "pkg_unknown",
     ) -> DistributionEngineResult:
         """Query remote distributor status and reconcile local delivery states."""
         now = datetime.now(UTC)
@@ -256,16 +237,13 @@ class DistributionEngine:
             raise RuntimeError("Failed to retrieve updated release")
 
         tracks = get_tracks_by_release_id(session, release_id)
+        stored_lineage, stored_package_id = get_release_identity(session, release_id)
         c7_payload = self.build_c7_payload(
             release=updated_release,
             isrcs=[t.isrc for t in tracks],
             source_package_hash=updated_release.submission_fingerprint,
-            experiment_id=experiment_id,
-            experiment_family_id=experiment_family_id,
-            content_arm_id=content_arm_id,
-            content_genome_id=content_genome_id,
-            production_directive_id=production_directive_id,
-            media_package_id=media_package_id,
+            lineage=stored_lineage,
+            media_package_id=stored_package_id,
         )
 
         return DistributionEngineResult(release=updated_release, payload=c7_payload, is_duplicate=False)
@@ -308,36 +286,27 @@ class DistributionEngine:
         isrcs: list[str],
         source_package_hash: str,
         *,
-        experiment_id: str,
-        experiment_family_id: str,
-        content_arm_id: str,
-        content_genome_id: str,
-        production_directive_id: str,
+        lineage: ExperimentLineage,
         media_package_id: str,
     ) -> DistributionRecordPayload:
         """Construct the Seam C7 Leg 1 payload carrying all R9 identity fields (P8 §71, Ruling R9, R10)."""
-        deliveries_dict: list[dict[str, Any]] = [
-            {
-                "store": d.store.value,
-                "external_release_id": d.external_release_id,
-                "status": d.status.value,
-                "first_delivered_at": d.first_delivered_at.isoformat() if d.first_delivered_at else None,
-            }
-            for d in release.deliveries
-        ]
-        return DistributionRecordPayload(
+        return DistributionRecordPayload.build(
             release_id=release.release_id,
             artist_id=release.artist_id,
             release_version=release.release_version,
-            isrcs=isrcs,
+            isrcs=tuple(isrcs),
             provider=release.provider,
-            deliveries=deliveries_dict,
+            deliveries=tuple(
+                {
+                    "store": d.store.value,
+                    "external_release_id": d.external_release_id,
+                    "status": d.status.value,
+                    "first_delivered_at": d.first_delivered_at,
+                }
+                for d in release.deliveries
+            ),
             source_package_hash=source_package_hash,
             status=release.status.value,
-            experiment_id=experiment_id,
-            experiment_family_id=experiment_family_id,
-            content_arm_id=content_arm_id,
-            content_genome_id=content_genome_id,
-            production_directive_id=production_directive_id,
+            lineage=lineage,
             media_package_id=media_package_id,
         )

@@ -34,6 +34,7 @@ from tests.fixtures.ar.scenario import (
     build_acceptance_environment,
     seed_environment,
 )
+from tests.support.seams import unmeasured_raw_metrics
 
 pytestmark = pytest.mark.integration
 
@@ -89,10 +90,10 @@ def test_snapshot_cycle_rewards_update_second_cycle_changes(engine: sa.Engine) -
         freshly_stored = 0
         for offset, arm_id in enumerate(rewarded):
             stored = store_result(session, {
-                "experiment_id": f"p215-cycle-{offset}", "arm_id": arm_id,
+                "schema_version": "1.0", "experiment_id": f"p215-cycle-{offset}", "arm_id": arm_id,
                 "content_id": f"p215-content-{arm_id}", "observation_window": "7d",
                 "status": "mature",
-                "observed_at": (NOW + timedelta(days=7)).isoformat(), "raw_metrics": {},
+                "observed_at": (NOW + timedelta(days=7)).isoformat(), "raw_metrics": unmeasured_raw_metrics(),
                 "normalized_reward": 0.85, "reward_version": "p9-reward-v1",
                 "attribution_confidence": 0.99,
             }, brand_id=BRAND_ID, now=NOW + timedelta(days=7))

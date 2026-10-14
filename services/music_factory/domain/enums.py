@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from plm_contracts import CommercialUseEligibility
+
 
 class ProviderStatus(StrEnum):
     """Status of an AI music generation provider."""
@@ -70,13 +72,11 @@ class ArtifactType(StrEnum):
     PREVIEW = "preview"
 
 
-class CommercialUseStatus(StrEnum):
-    """Commercial rights status for generation output (§65, R6)."""
+CommercialUseStatus = CommercialUseEligibility
+"""Commercial-use eligibility of generated output; the shared P5 §34 vocabulary (ADR-0027).
 
-    PERMITTED = "permitted"
-    RESTRICTED = "restricted"
-    PROHIBITED = "prohibited"
-    UNKNOWN = "unknown"
+P4 used its own permitted/restricted/prohibited tokens, which P5 never matched, so every
+real candidate was classed unknown. Migration 0017 maps stored values."""
 
 
 class CostType(StrEnum):

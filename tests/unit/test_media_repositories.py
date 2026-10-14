@@ -32,6 +32,7 @@ from media_factory.storage.repositories import (
 )
 
 from tests.support.media_db import media_db_session
+from tests.support.seams import sample_lineage
 
 
 def test_playlist_session_and_tracks_repository() -> None:
@@ -94,6 +95,7 @@ def test_media_package_and_render_job_repository() -> None:
             metadata_candidates=[{"variant_id": "m1"}],
             short_source_assets=[],
             render_report={"status": "passed"},
+            lineage=sample_lineage(),
             status=PackageStatus.READY_FOR_PUBLISH,
         )
         insert_media_package(session, pkg)

@@ -19,7 +19,7 @@ NOW = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
 
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
-        "experiment_id": "exp-1", "arm_id": "rnb-1", "content_id": "content-1",
+        "schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-1", "content_id": "content-1",
         "observation_window": "7d", "status": "mature", "observed_at": NOW.isoformat(),
         "raw_metrics": {"views": 42000.0, "watch_time_minutes": 185000.0,
                         "average_percentage_viewed": 41.2, "subscriber_gain": 613.0,

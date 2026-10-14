@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import (
@@ -119,6 +120,11 @@ class GenerationPlan(BaseModel):
     plan_id: str
     track_spec_id: str
     experiment_id: str
+    lineage: ExperimentLineage | None
+    """From the C3 spec. ``None`` only for plans stored before lineage existed (ADR-0026);
+    such plans cannot export candidates to P5."""
+    track_spec_wire: dict[str, Any] | None
+    """The C3 spec the plan was made from (ADR-0027); ``None`` only for legacy plans."""
     candidate_target: int = Field(default=2, ge=1)
     max_attempts: int = Field(default=5, ge=1)
     budget_limit: float = Field(default=50.0, ge=0.0)
@@ -171,6 +177,9 @@ class GeneratedCandidate(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     parent_candidate_id: str | None = None
+    source_attempt_id: str | None
+    """The attempt that produced this candidate; ``None`` only for rows stored before
+    ADR-0027. Its rights snapshot is the one exported to P5."""
 
 
 class AudioArtifact(BaseModel):
@@ -194,24 +203,27 @@ class AudioArtifact(BaseModel):
 
 
 class RightsSnapshot(BaseModel):
-    """Commercial rights and license snapshot (§65, R6)."""
+    """The license terms a provider adapter declared for one attempt (§65, R6, ADR-0027).
+
+    No field has a default: a snapshot records what the provider declared, never what
+    P4 assumed. An attempt whose provider declares no terms gets no snapshot at all.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     snapshot_id: str
     attempt_id: str
     provider_id: str
-    commercial_use_status: CommercialUseStatus = CommercialUseStatus.PERMITTED
-    basis: str = "paid_commercial_tier"
+    commercial_use_status: CommercialUseStatus
+    basis: str
     license_reference: str
-    policy_version: str = "p4-lic-v1"
-    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    # Fields required by Ruling R6:
-    plan_or_tier: str = "enterprise_commercial"
-    account_identity_ref: str = "acct_plm_prod"
-    terms_version: str = "terms_2026_01"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    downloaded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    policy_version: str
+    checked_at: datetime
+    plan_or_tier: str
+    account_identity_ref: str
+    terms_version: str
+    created_at: datetime
+    downloaded_at: datetime
 
 
 class CostRecord(BaseModel):

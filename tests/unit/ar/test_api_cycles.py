@@ -7,8 +7,10 @@ seventeen frozen C2 fields — no more, no less.
 """
 
 from fastapi.testclient import TestClient
+from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c2 import ProductionDirectivePayload
 
-from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS, ProductionDirective
+from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS
 
 BRIEF_WIRE_FIELDS = ("genre", "mood", "use_case", "language", "vocal_mode",
                      "duration_bucket", "visual_world")
@@ -50,8 +52,8 @@ def test_a_served_directive_is_exactly_the_seventeen_frozen_c2_fields(client: Te
     for item in served:
         assert tuple(item) == DIRECTIVE_WIRE_FIELDS, "C2 fields, in registry order, no extras"
         assert tuple(item["brief"]) == BRIEF_WIRE_FIELDS
-        # the payload round-trips through the producer's own serialiser unchanged
-        assert ProductionDirective.model_validate(item).to_wire() == item
+        # the payload parses with the shared seam model and round-trips unchanged
+        assert parse_seam(ProductionDirectivePayload, item).to_wire() == item
     # another brand's surface stays empty — the brand_id coordinate is load-bearing
     assert client.get("/ar/directives", params={"brand_id": "somewhere_else"}).json() == []
 

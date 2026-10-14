@@ -9,38 +9,37 @@ from typing import Any
 
 import typer
 import uvicorn
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.db import build_engine, session_factory
 
 from .client.mock import MockYouTubeClient
-from .domain.enums import OperatingMode, PrivacyStatus
-from .domain.ids import build_idempotency_key, build_manifest_id
-from .domain.models import ChannelProfile, PublishManifest
+from .domain.enums import OperatingMode
 from .engine import YouTubePublishingEngine
+from .manifests import PackageNotReadyError, build_publish_manifest, preflight_metadata
 from .preflight.gates import evaluate_preflight_all
 from .storage.repositories import (
     get_channel_profile_by_channel_id,
     get_publish_attempt_by_id,
-    insert_channel_profile,
     insert_publish_manifest,
 )
 
 
 def cli_publish(
     package_path: str,
-    channel_id: str = "UC_neon_records",
+    channel_id: str,
     mode: str = "dry_run",
 ) -> None:
-    """Publish a media package JSON file to YouTube."""
+    """Publish a Seam C6 hop-1 media package JSON file to a configured channel."""
     path = Path(package_path)
     if not path.is_file():
         typer.echo(f"Error: package file {package_path} not found", err=True)
         raise typer.Exit(code=1)
-
     try:
-        pkg = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        typer.echo(f"Error reading package JSON: {exc}", err=True)
-        raise typer.Exit(code=1)
+        pkg = parse_seam(MediaPackagePayload, json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, SeamRejection) as exc:
+        typer.echo(f"Error: media package refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     now = datetime.now(UTC)
     engine = build_engine()
@@ -49,70 +48,25 @@ def cli_publish(
     with factory() as session:
         profile = get_channel_profile_by_channel_id(session, channel_id)
         if not profile:
-            profile = ChannelProfile(
-                id=f"prof_{channel_id}",
-                channel_id=channel_id,
-                channel_name="Neon Records Channel",
-                brand_id=pkg.get("brand_id", "brand_neon"),
-                oauth_credential_ref="sec_oauth_neon",
-                default_privacy_mode=PrivacyStatus.PRIVATE,
-                operating_mode=OperatingMode(mode),
-                created_at=now,
-                updated_at=now,
+            typer.echo(
+                f"Error: no channel profile for {channel_id!r}; an operator must configure it",
+                err=True,
             )
-            insert_channel_profile(session, profile)
-            session.commit()
-
-        metadata_cands = pkg.get("metadata_candidates", [{}])
-        meta = metadata_cands[0] if metadata_cands else {}
-        title = meta.get("title", f"Release {pkg.get('media_package_id')}")
-        description = meta.get("description", "Synthetic music release.")
-        tags = meta.get("tags", ["music", "synth"])
+            raise typer.Exit(code=1)
+        try:
+            manifest = build_publish_manifest(pkg, profile, publish_at=None, now=now)
+        except PackageNotReadyError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
 
         passed, results, reason = evaluate_preflight_all(
-            profile,
-            pkg,
-            {"title": title, "description": description, "tags": tags, "category_id": "10"},
+            profile, pkg.to_wire(), preflight_metadata(pkg)
         )
         if not passed:
             diags = [d for r in results for d in r.diagnostics]
             typer.echo(f"Preflight check failed ({reason}): {'; '.join(diags)}", err=True)
             raise typer.Exit(code=1)
 
-        video_info = pkg.get("video", {})
-        video_chk = video_info.get("checksum", "chk_def")
-        media_pkg_id = pkg.get("media_package_id", "pkg_default")
-        manifest_id = build_manifest_id(channel_id, media_pkg_id, video_chk)
-        idem_key = build_idempotency_key(channel_id, media_pkg_id, video_chk)
-
-        manifest = PublishManifest(
-            manifest_id=manifest_id,
-            channel_id=channel_id,
-            media_package_id=media_pkg_id,
-            release_manifest_id=pkg.get("release_manifest_id", "rm_default"),
-            experiment_id=pkg.get("experiment_id", "exp_default"),
-            experiment_family_id=pkg.get("experiment_family_id", "fam_default"),
-            content_arm_id=pkg.get("content_arm_id", "arm_default"),
-            content_genome_id=pkg.get("content_genome_id", "gen_default"),
-            production_directive_id=pkg.get("production_directive_id", "dir_default"),
-            brand_id=pkg.get("brand_id", "brand_neon"),
-            idempotency_key=idem_key,
-            video_master_uri=video_info.get("master_uri", "media/video/default.mp4"),
-            video_checksum=video_chk,
-            video_duration_seconds=float(video_info.get("duration_seconds", 300.0)),
-            thumbnail_uri=pkg.get("thumbnails", [{}])[0].get("uri", "media/thumb/default.jpg"),
-            thumbnail_checksum=pkg.get("thumbnails", [{}])[0].get("id", "chk_thumb"),
-            title=title,
-            description=description,
-            tags=tags,
-            category_id="10",
-            privacy_status=PrivacyStatus.PRIVATE,
-            contains_synthetic_media=True,
-            made_for_kids=False,
-            playlist_id="PL_neon_official",
-            metadata_version="v1",
-            created_at=now,
-        )
         insert_publish_manifest(session, manifest)
         session.commit()
 

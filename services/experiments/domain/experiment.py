@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Any
 
@@ -61,3 +62,16 @@ class Experiment(BaseModel):
     experiment_version: str = "p3-exp-v1"
     created_at: datetime
     immutable_after_start: bool = True
+
+    @property
+    def experiment_family_id(self) -> str:
+        """P3 §12 ``experiment_family``: experiments on one arm that vary the same variables.
+
+        Deterministic from (arm, experiment type, sorted varied-variable names), so
+        replications and follow-ups of the same question share a family (ADR-0026).
+        """
+        varied = ",".join(sorted(v.name for v in self.variables))
+        digest = hashlib.sha256(
+            f"{self.content_arm_id}|{self.experiment_type.value}|{varied}".encode()
+        ).hexdigest()
+        return f"fam_{digest[:16]}"

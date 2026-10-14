@@ -13,16 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from plm_contracts import ObservationWindow, QualityStatus
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c7 import RewardResultPayload
 from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationError,
     field_validator,
 )
 
-from ..domain.enums import ObservationMaturity
 from ..domain.reward import RESERVED_VALUE_TERMS, RewardObservation, tri_from_optional
 from ..storage import repositories
 
@@ -38,23 +34,8 @@ class ResultValidationError(ValueError):
         self.field_paths = field_paths
 
 
-class ResultPayload(BaseModel):
-    """The §72 wire object, plus the C7-freeze-resolving optional `quality_status`."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    experiment_id: str = Field(min_length=1)
-    arm_id: str = Field(min_length=1)
-    content_id: str = Field(min_length=1)
-    observation_window: ObservationWindow
-    status: ObservationMaturity
-    observed_at: datetime
-    raw_metrics: dict[str, float | None]
-    normalized_reward: float = Field(ge=0.0, le=1.0)
-    reward_version: str = Field(min_length=1)
-    attribution_confidence: float = Field(ge=0.0, le=1.0)
-    quality_status: QualityStatus | None = None
-    economic_terms: dict[str, float | None] | None = None
+class ResultPayload(RewardResultPayload):
+    """The C7 leg-2 wire (shared model, ADR-0030) plus P2's reserved-term check."""
 
     @field_validator("economic_terms")
     @classmethod
@@ -71,13 +52,6 @@ class ResultPayload(BaseModel):
                 )
         return value
 
-    @field_validator("observed_at")
-    @classmethod
-    def _observed_at_is_timezone_aware(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            raise ValueError("observed_at must be timezone-aware")
-        return value
-
 
 @dataclass(frozen=True, slots=True)
 class StoredResult:
@@ -89,11 +63,11 @@ class StoredResult:
 def parse_result_payload(payload: dict[str, Any]) -> RewardObservation:
     """§72 payload → domain object, with `field_paths` on every refusal."""
     try:
-        parsed = ResultPayload.model_validate(payload)
-    except ValidationError as exc:
-        paths = tuple(".".join(str(part) for part in error["loc"]) for error in exc.errors())
+        parsed = parse_seam(ResultPayload, payload)
+    except SeamRejection as exc:
         raise ResultValidationError(
-            f"result payload failed validation: {paths}", field_paths=paths
+            f"result payload failed validation ({exc.error.code}): {exc.field_paths}",
+            field_paths=tuple(exc.field_paths),
         ) from exc
     return RewardObservation(
         experiment_id=parsed.experiment_id, arm_id=parsed.arm_id, content_id=parsed.content_id,
