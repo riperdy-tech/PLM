@@ -35,11 +35,11 @@ def test_the_opportunity_payload_carries_exactly_the_frozen_c1_field_names() -> 
 
 
 def test_the_list_envelope_is_the_registry_shape_not_a_page() -> None:
-    response = OpportunityListResponse(items=[], next_cursor=None,
-                                      as_of=datetime(2026, 9, 20, tzinfo=UTC),
-                                      score_version="p1-v1")
+    response = OpportunityListResponse.build(items=[], next_cursor=None,
+                                            as_of=datetime(2026, 9, 20, tzinfo=UTC),
+                                            score_version="p1-v1")
     dumped = json.loads(response.model_dump_json())
-    assert set(dumped) == {"items", "next_cursor", "as_of", "score_version"}
+    assert set(dumped) == {"schema_version", "items", "next_cursor", "as_of", "score_version"}
     assert "freshness" not in dumped
 
 

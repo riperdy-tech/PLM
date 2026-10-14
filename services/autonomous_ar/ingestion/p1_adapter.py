@@ -11,8 +11,16 @@ from __future__ import annotations
 from datetime import datetime
 
 import httpx
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c1 import (
+    ComponentsPayload,
+    EvidencePayload,
+    OpportunityPagePayload,
+    OpportunityPayload,
+    TaxonomyPayload,
+)
 from plm_platform.config import SERVICE_TOKEN_HEADER
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from ..domain.arm import ArmDimensions, ContentArm
 
@@ -25,7 +33,7 @@ __all__ = [
 MARKET_OPPORTUNITIES_PATH = "/market/v1/opportunities"
 """The frozen C1 endpoint (registry C1; base path fixed by R15)."""
 
-_ENVELOPE_KEYS = frozenset({"items", "next_cursor", "as_of", "score_version"})
+_ENVELOPE_KEYS = frozenset(OpportunityPagePayload.model_fields)
 
 
 class MarketUnavailable(RuntimeError):
@@ -40,53 +48,8 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class TaxonomyPayload(_Frozen):
-    genre: str | None = None
-    subgenre: str | None = None
-    mood: list[str] = Field(default_factory=list)
-    use_case: list[str] = Field(default_factory=list)
-    language: str | None = None
-    vocal_mode: str | None = None
-    duration_bucket: str | None = None
-    visual_world: str | None = None
-    title_archetype: str | None = None
-
-
-class ComponentsPayload(_Frozen):
-    demand: float | None
-    growth: float | None
-    competitor_velocity: float | None
-    competition: float | None
-    audience_quality: float | None
-    cross_platform: float | None
-    production_fit: float | None
-
-
-class EvidencePayload(_Frozen):
-    observation_count: int = Field(ge=0)
-    source_count: int = Field(ge=0)
-    top_observation_ids: list[str] = Field(default_factory=list)
-
-
-class OpportunityPayload(_Frozen):
-    """P2's transcription of the frozen C1 object; the consumer seam test pins it
-    against the registry field list (`tests/contract/test_c1_market_to_ar_consumer.py`)."""
-
-    arm_id: str = Field(min_length=1)
-    market_opportunity_score: float = Field(ge=0.0, le=100.0)
-    confidence: float = Field(ge=0.0, le=1.0)
-    as_of: datetime
-    taxonomy: TaxonomyPayload
-    components: ComponentsPayload
-    evidence: EvidencePayload
-    score_version: str = Field(min_length=1)
-
-
-class OpportunityPage(_Frozen):
-    items: tuple[OpportunityPayload, ...]
-    next_cursor: str | None
-    as_of: datetime
-    score_version: str
+OpportunityPage = OpportunityPagePayload
+"""The versioned C1 envelope; defined once in ``plm_contracts.seams.c1`` (ADR-0025)."""
 
 
 class P1Client:
@@ -126,7 +89,12 @@ class P1Client:
                 "C1 envelope drifted: expected "
                 f"{sorted(_ENVELOPE_KEYS)}, got {sorted(body)} (ADR-0022: the flat object)"
             )
-        return OpportunityPage.model_validate(body)
+        try:
+            return parse_seam(OpportunityPagePayload, body)
+        except SeamRejection as exc:
+            raise MarketUnavailable(
+                f"C1 page refused ({exc.error.code}): {exc.field_paths}"
+            ) from exc
 
 
 def adapt_opportunity(payload: OpportunityPayload, *, now: datetime) -> ContentArm:

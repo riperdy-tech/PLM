@@ -95,6 +95,13 @@ freshness buckets from `as_of`; `freshness_seconds` is P2-internal (P2 §46).
   *state* (P2 §45), posteriors (P2 §47) and exposure (P2 §54) (R15).
 - Base path `/market/v1`; auth via service token from `plm_platform` (R15).
 
+**Amended by ADR-0025:** the envelope is the shared versioned model
+`plm_contracts.seams.c1.OpportunityPagePayload` (`schema_version` "1.0" + the flat
+`items`, `next_cursor`, `as_of`, `score_version`), used by P1 to serve and P2 to parse.
+`top_observation_ids` is required (no default), and P1 no longer serves `0` for
+missing evidence counts. P2 refuses a page with a missing fact or a future major as
+`MarketUnavailable`, never as an empty market.
+
 **Seam test:** `tests/contract/test_c1_market_to_ar.py` — **exists** (P1.10; the
 producer's real payload is validated against the consumer schema, and the
 no-`freshness` / aware-`as_of` halves of this entry are asserted).

@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import json
 
+import httpx
+import pytest
+
 from services.autonomous_ar.ingestion.p1_adapter import (
     EvidencePayload,
+    MarketUnavailable,
     OpportunityPayload,
     P1Client,
     TaxonomyPayload,
@@ -71,7 +75,7 @@ def test_consumer_schema_matches_the_registry_field_lists() -> None:
 def test_real_producer_payload_validates_against_the_consumer_schema() -> None:
     with open_c1_client() as api:
         body = api.get("/market/v1/opportunities", params={"limit": 1}).json()
-        assert set(body) == {"items", "next_cursor", "as_of", "score_version"}, (
+        assert set(body) == {"schema_version", "items", "next_cursor", "as_of", "score_version"}, (
             "ADR-0022: the wire is the registry's flat envelope, never Page/Envelope"
         )
         payload = json.loads(json.dumps(body["items"][0]))
@@ -99,3 +103,38 @@ def test_adapter_consumes_only_frozen_fields() -> None:
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
     assert contract_registry.exists, "the registry was frozen 2026-09-20; it cannot be missing"
     contract_registry.require_entry(REGISTRY_ENTRY)
+
+
+def _client_for(body: dict[str, object]) -> P1Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    return P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
+                    transport=httpx.MockTransport(handler))
+
+
+def _real_page() -> dict[str, object]:
+    with open_c1_client() as api:
+        page: dict[str, object] = api.get("/market/v1/opportunities", params={"limit": 1}).json()
+    return page
+
+
+@pytest.mark.parametrize(
+    "field", ["schema_version", "items.0.evidence", "items.0.components.demand", "items.0.as_of"]
+)
+def test_p2_refuses_a_page_missing_a_fact(field: str) -> None:
+    page = json.loads(json.dumps(_real_page()))
+    parent: object = page
+    *parents, leaf = field.split(".")
+    for part in parents:
+        parent = parent[int(part)] if isinstance(parent, list) else parent[part]  # type: ignore[index]
+    del parent[leaf]  # type: ignore[union-attr, arg-type]
+    with pytest.raises(MarketUnavailable):
+        _client_for(page).fetch_opportunities(limit=1)
+
+
+def test_p2_refuses_a_future_major_page() -> None:
+    page = _real_page()
+    page["schema_version"] = "2.0"
+    with pytest.raises(MarketUnavailable, match="unsupported_schema_version"):
+        _client_for(page).fetch_opportunities(limit=1)

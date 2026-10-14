@@ -91,7 +91,7 @@ def build_router(*, session_factory: SessionFactory | None,
             last = items[-1]
             next_cursor = encode_cursor(float(last["market_opportunity_score"]), last["arm_id"])
         as_of = max((_instant(item["as_of"]) for item in items), default=now)
-        return OpportunityListResponse(
+        return OpportunityListResponse.build(
             items=[_opportunity(row) for row in items], next_cursor=next_cursor, as_of=as_of,
             score_version=settings.score_version,
         )
@@ -108,8 +108,8 @@ def build_router(*, session_factory: SessionFactory | None,
             component_scores=_components(row["components_json"]),
             confidence=float(row["confidence"]),
             evidence_summary=_evidence(row["evidence_json"]),
-            observation_counts=int(row["evidence_json"].get("observation_count", 0)),
-            source_counts=int(row["evidence_json"].get("source_count", 0)),
+            observation_counts=int(row["evidence_json"]["observation_count"]),
+            source_counts=int(row["evidence_json"]["source_count"]),
             last_updated=_instant(row["computed_at"]),
         )
 
@@ -213,10 +213,12 @@ def _evidence(stored: Mapping[str, Any]) -> EvidenceOut:
     (`basis_weight`) besides the three registry fields; `EvidenceOut` forbids extras,
     so the wire takes exactly its own keys and nothing else (registry C1).
     """
+    # P1 writes all three keys with every score; a missing one is a storage defect to
+    # surface, not a zero to serve (ADR-0025).
     return EvidenceOut(
-        observation_count=int(stored.get("observation_count", 0)),
-        source_count=int(stored.get("source_count", 0)),
-        top_observation_ids=list(stored.get("top_observation_ids", [])),
+        observation_count=int(stored["observation_count"]),
+        source_count=int(stored["source_count"]),
+        top_observation_ids=list(stored["top_observation_ids"]),
     )
 
 

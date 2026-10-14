@@ -13,6 +13,13 @@ import json
 from datetime import datetime
 from typing import Annotated, Any
 
+from plm_contracts.seams.c1 import (
+    ComponentsPayload,
+    EvidencePayload,
+    OpportunityPagePayload,
+    OpportunityPayload,
+    TaxonomyPayload,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
@@ -26,60 +33,13 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class TaxonomyOut(_Frozen):
-    """§20's taxonomy object, exactly the nine keys the registry freezes."""
-
-    genre: str | None = None
-    subgenre: str | None = None
-    mood: list[str] = Field(default_factory=list)
-    use_case: list[str] = Field(default_factory=list)
-    language: str | None = None
-    vocal_mode: str | None = None
-    duration_bucket: str | None = None
-    visual_world: str | None = None
-    title_archetype: str | None = None
-
-
-class ComponentsOut(_Frozen):
-    """§20's seven component names; an unobserved component is `null`, not a zero.
-
-    §17.3/§3.6: a component the evidence does not support is unknown, and the wire
-    says so rather than fabricating a 0.0 (which would read as "measured, terrible").
-    """
-
-    demand: float | None
-    growth: float | None
-    competitor_velocity: float | None
-    competition: float | None
-    audience_quality: float | None
-    cross_platform: float | None
-    production_fit: float | None
-
-
-class EvidenceOut(_Frozen):
-    observation_count: Annotated[int, Field(ge=0)]
-    source_count: Annotated[int, Field(ge=0)]
-    top_observation_ids: list[str] = Field(default_factory=list)
-
-
-class OpportunityOut(_Frozen):
-    """§20/registry C1. `freshness` is deliberately absent — P2 derives it from `as_of`."""
-
-    arm_id: str = Field(min_length=1)
-    market_opportunity_score: Annotated[float, Field(ge=0.0, le=100.0)]
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)]
-    as_of: datetime
-    taxonomy: TaxonomyOut
-    components: ComponentsOut
-    evidence: EvidenceOut
-    score_version: str = Field(min_length=1)
-
-
-class OpportunityListResponse(_Frozen):
-    items: list[OpportunityOut]
-    next_cursor: str | None
-    as_of: datetime
-    score_version: str
+TaxonomyOut = TaxonomyPayload
+ComponentsOut = ComponentsPayload
+EvidenceOut = EvidencePayload
+OpportunityOut = OpportunityPayload
+"""Registry C1 item; defined once in ``plm_contracts.seams.c1`` (ADR-0025)."""
+OpportunityListResponse = OpportunityPagePayload
+"""The versioned C1 envelope served by ``GET /market/v1/opportunities``."""
 
 
 class ArmOut(_Frozen):
