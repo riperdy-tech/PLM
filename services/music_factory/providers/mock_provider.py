@@ -8,6 +8,9 @@ import struct
 import wave
 from typing import Any
 
+from plm_contracts import CommercialUseEligibility
+from plm_contracts.seams.c4 import ProviderLicenseTerms
+
 from ..domain.enums import AttemptStatus
 from ..domain.models import GenerationRequest, GenerationResponse
 
@@ -57,6 +60,17 @@ class MockMusicProvider:
     def __init__(self, *, provider_id: str = "mock", model_id: str = "mock-v1") -> None:
         self.provider_id = provider_id
         self.model_id = model_id
+
+    def license_terms(self) -> ProviderLicenseTerms:
+        """Mock output is synthesized in-process by PLM itself; PLM owns it outright."""
+        return ProviderLicenseTerms(
+            commercial_use_status=CommercialUseEligibility.ELIGIBLE,
+            basis="plm_internal_synthesis",
+            license_reference="plm-mock-provider",
+            plan_or_tier="internal",
+            account_identity_ref="plm-mock",
+            terms_version="mock-v1",
+        )
 
     def generate(self, request: GenerationRequest) -> GenerationResponse:
         """Execute a generation request deterministically."""

@@ -61,7 +61,7 @@ def test_candidate_bank_transitions_and_queries() -> None:
         assert detail.candidate.candidate_id == cand_id
         assert len(detail.artifacts) >= 1
         assert detail.rights_snapshot is not None
-        assert detail.rights_snapshot.commercial_use_status.value == "permitted"
+        assert detail.rights_snapshot.commercial_use_status.value == "eligible"
 
         # 2. List queries
         by_exp = list_candidates_by_experiment(session, "exp_bank_01")

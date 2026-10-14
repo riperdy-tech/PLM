@@ -120,10 +120,10 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     res_lic = client.get(f"/music/candidates/{candidate_id}/license", headers=headers)
     assert res_lic.status_code == 200
     lic_data = res_lic.json()
-    assert lic_data["commercial_use_status"] == "permitted"
-    assert lic_data["plan_or_tier"] == "pro_tier"
-    assert lic_data["account_identity_ref"] == "plm-service-account"
-    assert lic_data["terms_version"] == "2026-v1"
+    assert lic_data["commercial_use_status"] == "eligible"
+    assert lic_data["plan_or_tier"] == "internal"  # declared by the mock provider (ADR-0027)
+    assert lic_data["account_identity_ref"] == "plm-mock"
+    assert lic_data["terms_version"] == "mock-v1"
 
     # GET /music/candidates/{id}/artifacts
     res_art = client.get(f"/music/candidates/{candidate_id}/artifacts", headers=headers)
@@ -143,5 +143,6 @@ def test_plan_and_execution_lifecycle_and_r6_endpoints() -> None:
     export_data = res_export.json()
     assert export_data["candidate"]["status"] == "exported_to_p5"
     assert export_data["event"]["event_type"] == "music_candidate_ready_for_p5"
-    assert export_data["event"]["event_version"] == "1"
+    assert export_data["event"]["schema_version"] == "1.0"
+    assert export_data["event"]["lineage"]["content_arm_id"] == "arm_01"  # not a placeholder
     assert export_data["event"]["measured_audio"]["duration_seconds"] > 0

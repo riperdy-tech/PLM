@@ -294,25 +294,39 @@ fact, placeholder identity, unknown field and future major.
 §7 (P4 input contract), §33 (provider license snapshot), §117 (unknown
 commercial rights — the scenario that quarantines when the snapshot is thin).
 
-**Endpoint / event:** event `music_candidate_ready_for_p5`, `event_version` `"1"`
-(P4 §68).
+**Endpoint / event:** event `music_candidate_ready_for_p5` (P4 §68), schema
+`1.0` (ADR-0025, ADR-0027). Shared model:
+`plm_contracts.seams.c4.CandidateReadyPayload`.
 
-**Producer fields (frozen names, P4 §68):**
+**Producer fields (amended by ADR-0027; `event_version`, `rights_status` and
+`provenance_complete` are replaced):**
 
 ```text
+schema_version              "<major>.<minor>"
 event_type                  = "music_candidate_ready_for_p5"
-event_version               = "1"
 candidate_id
 artifact_id
+artifact_sha256             hex SHA-256 of the artifact bytes
 track_spec_id
-experiment_id
-content_arm_id
+lineage                     ExperimentLineage (ADR-0026)
 provider_id
 model_id
 measured_audio              {duration_seconds, sample_rate, channels}
-rights_status
-provenance_complete
+requested_duration_seconds  from the C3 spec
+vocal_mode                  from the C3 spec
+genre_tags[]                genre + moods from the C3 spec (non-empty)
+prompt_text                 the prompt that produced the attempt
+lyrics_text                 null = the provider returned no lyrics
+rights                      the declared R6 snapshot of the producing attempt
+                            {commercial_use_status, basis, license_reference,
+                             plan_or_tier, account_identity_ref, terms_version,
+                             attempt_id, provider_id, policy_version, checked_at,
+                             downloaded_at}; null = no terms declared (unknown)
 ```
+
+`commercial_use_status` uses the shared P5 §34 vocabulary
+(`plm_contracts.CommercialUseEligibility`): `eligible`, `ineligible`, `unknown`,
+`conditional`, `expired_or_unverified`.
 
 **Consumer requirement beyond the event (P5 §7):** P5 must be able to retrieve,
 through internal APIs: the full candidate record, artifact manifest, provenance
@@ -340,7 +354,15 @@ reconstructing generation history from raw provider logs.
 - Must land before P5.3 starts; without these, P5 §117 defaults every candidate
   to quarantine.
 
-**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**.
+- ADR-0027: P4 builds the event only from stored facts and refuses an export with
+  any fact missing. P5 parses only through the shared model. A null `rights` is
+  quarantined and never cleared. A plan-tier label can only downgrade eligibility.
+
+**Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**. It runs P4's real
+generation engine and event builder into P5's real consumer and gate engine. It
+asserts that lineage and declared rights arrive intact and are read as eligible, that
+undeclared rights are quarantined, and that every missing, placeholder, old-vocabulary,
+unknown or future field is refused.
 
 ---
 

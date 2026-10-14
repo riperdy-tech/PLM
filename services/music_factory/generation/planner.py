@@ -31,6 +31,7 @@ def plan_generation(
         track_spec_id=track_spec.track_spec_id,
         experiment_id=track_spec.experiment_id,
         lineage=track_spec.lineage,
+        track_spec_wire=track_spec.raw_spec,
         candidate_target=candidate_target,
         max_attempts=max_attempts,
         budget_limit=track_spec.budget_limit,

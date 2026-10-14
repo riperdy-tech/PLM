@@ -67,17 +67,23 @@ def get_candidate_detail(session: Session, candidate_id: str) -> FullCandidateDe
 
     artifacts = list_artifacts_for_candidate(session, candidate_id)
 
-    # In our model, candidate was produced by an attempt. Attempt id can be derived from candidate
-    # or candidate_id convention: cand_{plan_id}_{attempt_id}_{idx}
+    # The candidate records the attempt that produced it (ADR-0027); its rights
+    # snapshot is that attempt's, never the plan's first attempt's.
     attempt: GenerationAttempt | None = None
     rights: RightsSnapshot | None = None
 
     from ..storage.repositories import list_generation_attempts
 
-    attempts = list_generation_attempts(session, cand.generation_plan_id)
-    if attempts:
-        attempt = attempts[0]
-        rights = get_rights_snapshot_for_attempt(session, attempt.attempt_id)
+    if cand.source_attempt_id is not None:
+        attempt = next(
+            (
+                a
+                for a in list_generation_attempts(session, cand.generation_plan_id)
+                if a.attempt_id == cand.source_attempt_id
+            ),
+            None,
+        )
+        rights = get_rights_snapshot_for_attempt(session, cand.source_attempt_id)
 
     return FullCandidateDetail(
         candidate=cand,
@@ -165,6 +171,7 @@ def list_candidates_by_experiment(
             experiment_id=r["experiment_id"],
             generation_plan_id=r["generation_plan_id"],
             parent_candidate_id=r["parent_candidate_id"],
+            source_attempt_id=r["source_attempt_id"],
             status=CandidateStatus(r["status"]),
             provider_id=r["provider_id"],
             model_id=r["model_id"],

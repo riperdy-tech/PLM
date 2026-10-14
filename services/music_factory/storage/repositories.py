@@ -59,6 +59,11 @@ __all__ = [
 ]
 
 
+def _utc(value: datetime) -> datetime:
+    """SQLite drops ``tzinfo`` on read-back; P4 stores aware-UTC instants only."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 def insert_generation_plan(session: Session, plan: GenerationPlan) -> None:
     session.execute(
         sa.insert(generation_plans_table).values(
@@ -66,6 +71,7 @@ def insert_generation_plan(session: Session, plan: GenerationPlan) -> None:
             track_spec_id=plan.track_spec_id,
             experiment_id=plan.experiment_id,
             lineage_json=plan.lineage.model_dump(mode="json") if plan.lineage else None,
+            track_spec_json=plan.track_spec_wire,
             candidate_target=plan.candidate_target,
             max_attempts=plan.max_attempts,
             budget_limit=plan.budget_limit,
@@ -98,13 +104,14 @@ def get_generation_plan(session: Session, plan_id: str) -> GenerationPlan | None
             if row["lineage_json"] is not None
             else None
         ),
+        track_spec_wire=row["track_spec_json"],
         candidate_target=row["candidate_target"],
         max_attempts=row["max_attempts"],
         budget_limit=row["budget_limit"],
         credit_limit=row["credit_limit"],
         policy_version=row["policy_version"],
         status=PlanStatus(row["status"]),
-        created_at=row["created_at"],
+        created_at=_utc(row["created_at"]),
         started_at=row["started_at"],
         finished_at=row["finished_at"],
     )
@@ -272,6 +279,7 @@ def insert_candidate(session: Session, candidate: GeneratedCandidate) -> None:
             experiment_id=candidate.experiment_id,
             generation_plan_id=candidate.generation_plan_id,
             parent_candidate_id=candidate.parent_candidate_id,
+            source_attempt_id=candidate.source_attempt_id,
             status=candidate.status.value,
             provider_id=candidate.provider_id,
             model_id=candidate.model_id,
@@ -299,10 +307,11 @@ def get_candidate(session: Session, candidate_id: str) -> GeneratedCandidate | N
         experiment_id=row["experiment_id"],
         generation_plan_id=row["generation_plan_id"],
         parent_candidate_id=row["parent_candidate_id"],
+        source_attempt_id=row["source_attempt_id"],
         status=CandidateStatus(row["status"]),
         provider_id=row["provider_id"],
         model_id=row["model_id"],
-        created_at=row["created_at"],
+        created_at=_utc(row["created_at"]),
         updated_at=row["updated_at"],
     )
 
@@ -324,6 +333,7 @@ def list_candidates_by_track(session: Session, track_spec_id: str) -> list[Gener
             experiment_id=r["experiment_id"],
             generation_plan_id=r["generation_plan_id"],
             parent_candidate_id=r["parent_candidate_id"],
+            source_attempt_id=r["source_attempt_id"],
             status=CandidateStatus(r["status"]),
             provider_id=r["provider_id"],
             model_id=r["model_id"],
@@ -460,12 +470,12 @@ def get_rights_snapshot_for_attempt(session: Session, attempt_id: str) -> Rights
         basis=row["basis"],
         license_reference=row["license_reference"],
         policy_version=row["policy_version"],
-        checked_at=row["checked_at"],
+        checked_at=_utc(row["checked_at"]),
         plan_or_tier=row["plan_or_tier"],
         account_identity_ref=row["account_identity_ref"],
         terms_version=row["terms_version"],
-        created_at=row["created_at"],
-        downloaded_at=row["downloaded_at"],
+        created_at=_utc(row["created_at"]),
+        downloaded_at=_utc(row["downloaded_at"]),
     )
 
 

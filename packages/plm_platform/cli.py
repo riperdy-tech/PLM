@@ -611,36 +611,15 @@ def qa_review() -> None:
 
 @qa_app.command(name="evaluate")
 def qa_evaluate(
-    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID"),
-    artifact_id: str = typer.Option(..., "--artifact-id", "-a", help="Artifact ID"),
+    event_path: str = typer.Option(
+        ..., "--event", "-e", help="Path to a Seam C4 candidate-ready event (JSON)"
+    ),
     audio_path: str = typer.Option(..., "--audio", "-f", help="Path to WAV audio file"),
-    expected_duration: float = typer.Option(
-        ..., "--duration", "-d", help="Expected duration in seconds"
-    ),
-    track_spec_id: str = typer.Option("spec_default", "--track-spec-id", help="Track spec ID"),
-    experiment_id: str = typer.Option("exp_default", "--experiment-id", help="Experiment ID"),
-    content_arm_id: str = typer.Option("arm_default", "--arm-id", help="Content arm ID"),
-    plan_tier: str = typer.Option("pro", "--tier", help="Provider license tier (pro, free, etc.)"),
-    account_ref: str = typer.Option(
-        "acc_internal", "--account-ref", help="Account identity reference"
-    ),
-    terms_version: str = typer.Option("v1.0", "--terms", help="Terms of service version"),
 ) -> None:
-    """Evaluate a candidate against quality, rights, and release gates."""
+    """Evaluate a candidate, described by its C4 event, against the release gates."""
     from quality_gate.cli import cli_evaluate
 
-    cli_evaluate(
-        candidate_id=candidate_id,
-        artifact_id=artifact_id,
-        audio_path=audio_path,
-        expected_duration=expected_duration,
-        track_spec_id=track_spec_id,
-        experiment_id=experiment_id,
-        content_arm_id=content_arm_id,
-        plan_tier=plan_tier,
-        account_ref=account_ref,
-        terms_version=terms_version,
-    )
+    cli_evaluate(event_path=event_path, audio_path=audio_path)
 
 
 @qa_app.command(name="manifest")

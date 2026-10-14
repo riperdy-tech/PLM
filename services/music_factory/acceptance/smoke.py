@@ -109,28 +109,14 @@ def run_smoke_test() -> str | None:
         if detail.rights_snapshot is None:
             return "failed: candidate missing Ruling R6 rights snapshot"
 
-        if detail.rights_snapshot.commercial_use_status != CommercialUseStatus.PERMITTED:
+        if detail.rights_snapshot.commercial_use_status != CommercialUseStatus.ELIGIBLE:
             return "failed: candidate rights not permitted for commercial use"
 
-        # 5. Export to P5 and emit Seam C4 event
+        # 5. Build the Seam C4 event from stored facts, then mark the export
+        event = build_candidate_ready_event(session, candidate.candidate_id)
         exported = mark_candidate_exported_to_p5(session, candidate.candidate_id)
         if exported.status != CandidateStatus.EXPORTED_TO_P5:
             return "failed: candidate could not be transitioned to EXPORTED_TO_P5"
-
-        event = build_candidate_ready_event(
-            candidate_id=candidate.candidate_id,
-            artifact_id=detail.artifacts[0].artifact_id,
-            track_spec_id=spec.track_spec_id,
-            experiment_id=spec.experiment_id,
-            content_arm_id=spec.content_arm_id,
-            provider_id="mock",
-            model_id="mock-v1",
-            duration_seconds=detail.artifacts[0].duration_seconds,
-            sample_rate=detail.artifacts[0].sample_rate,
-            channels=detail.artifacts[0].channels,
-            rights_status=detail.rights_snapshot.commercial_use_status.value,
-            provenance_complete=True,
-        )
         assert event.event_type == "music_candidate_ready_for_p5"
 
         session.commit()

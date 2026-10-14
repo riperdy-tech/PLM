@@ -49,6 +49,7 @@ def test_generation_plan_and_attempt_lifecycle() -> None:
         track_spec_id="trk_01",
         experiment_id="exp_01",
         lineage=sample_lineage(experiment_id="exp_01"),
+        track_spec_wire=None,
         candidate_target=3,
         budget_limit=60.0,
         status=PlanStatus.PLANNED,
@@ -81,6 +82,7 @@ def test_candidate_and_audio_artifact() -> None:
     assert cid.startswith("cand_")
 
     cand = GeneratedCandidate(
+        source_attempt_id=None,
         candidate_id=cid,
         track_spec_id="trk_01",
         experiment_id="exp_01",
@@ -120,17 +122,18 @@ def test_rights_snapshot_r6_compliance() -> None:
         snapshot_id=snap_id,
         attempt_id="att_01",
         provider_id="mock",
-        commercial_use_status=CommercialUseStatus.PERMITTED,
+        commercial_use_status=CommercialUseStatus.ELIGIBLE,
         basis="paid_commercial_tier",
         license_reference="lic_ref_01",
         policy_version="p4-lic-v1",
         plan_or_tier="enterprise_commercial",
         account_identity_ref="acct_plm_prod",
         terms_version="terms_2026_01",
+        checked_at=NOW,
         created_at=NOW,
         downloaded_at=NOW,
     )
-    assert snapshot.commercial_use_status == CommercialUseStatus.PERMITTED
+    assert snapshot.commercial_use_status == CommercialUseStatus.ELIGIBLE
     assert snapshot.plan_or_tier == "enterprise_commercial"
     assert snapshot.terms_version == "terms_2026_01"
 

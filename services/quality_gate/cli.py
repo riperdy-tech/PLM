@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
@@ -13,6 +14,7 @@ from .config import load_quality_gate_settings
 from .domain.enums import ResolutionCode
 from .gate.engine import run_candidate_evaluation
 from .gate.quarantine import resolve_quarantine
+from .ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from .storage.repositories import (
     get_release_manifest_by_candidate,
     insert_candidate_evaluation,
@@ -36,41 +38,27 @@ qa_cli = typer.Typer(help="Quality gate CLI commands")
 
 @qa_cli.command(name="evaluate")
 def cli_evaluate(
-    candidate_id: str = typer.Option(..., "--candidate-id", "-c", help="Candidate ID"),
-    artifact_id: str = typer.Option(..., "--artifact-id", "-a", help="Artifact ID"),
+    event_path: str = typer.Option(
+        ..., "--event", "-e", help="Path to a Seam C4 candidate-ready event (JSON)"
+    ),
     audio_path: str = typer.Option(..., "--audio", "-f", help="Path to WAV audio file"),
-    expected_duration: float = typer.Option(..., "--duration", "-d", help="Expected duration in seconds"),
-    track_spec_id: str = typer.Option("spec_default", "--track-spec-id", help="Track spec ID"),
-    experiment_id: str = typer.Option("exp_default", "--experiment-id", help="Experiment ID"),
-    content_arm_id: str = typer.Option("arm_default", "--arm-id", help="Content arm ID"),
-    plan_tier: str = typer.Option("pro", "--tier", help="Provider license tier (pro, free, etc.)"),
-    account_ref: str = typer.Option("acc_internal", "--account-ref", help="Account identity reference"),
-    terms_version: str = typer.Option("v1.0", "--terms", help="Terms of service version"),
 ) -> None:
-    """Evaluate a candidate against quality, rights, and release gates."""
+    """Evaluate a candidate, described by its C4 event, against the release gates.
+
+    Every candidate fact (lineage, expected duration, declared rights) comes from the
+    event; nothing is defaulted on the command line (ADR-0027).
+    """
     path = Path(audio_path)
     if not path.is_file():
         typer.echo(f"Error: audio file {audio_path} does not exist.", err=True)
         raise typer.Exit(code=1)
+    try:
+        event = consume_c4_event(json.loads(Path(event_path).read_text(encoding="utf-8")))
+    except CandidateEventRejected as exc:
+        typer.echo(f"Error: C4 event refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
-    rights_snapshot = {
-        "plan_or_tier": plan_tier,
-        "account_identity_ref": account_ref,
-        "terms_version": terms_version,
-        "downloaded_at": "2026-09-25T12:00:00Z",
-        "commercial_use_status": "ELIGIBLE" if plan_tier.lower() in ("pro", "premier", "standard") else "INELIGIBLE",
-    }
-
-    result = run_candidate_evaluation(
-        candidate_id=candidate_id,
-        artifact_id=artifact_id,
-        audio_path=path,
-        expected_duration_seconds=expected_duration,
-        track_spec_id=track_spec_id,
-        experiment_id=experiment_id,
-        content_arm_id=content_arm_id,
-        rights_snapshot=rights_snapshot,
-    )
+    result = run_candidate_evaluation(event=event, audio_path=path)
 
     typer.echo(f"Evaluation ID: {result.evaluation.id}")
     typer.echo(f"Disposition:   {result.decision.disposition.value}")

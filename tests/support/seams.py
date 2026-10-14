@@ -10,8 +10,16 @@ from __future__ import annotations
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c4 import CandidateReadyPayload
 
-__all__ = ["lineage_fields", "sample_lineage", "track_spec_fields"]
+__all__ = [
+    "candidate_event",
+    "candidate_event_fields",
+    "lineage_fields",
+    "rights_fields",
+    "sample_lineage",
+    "track_spec_fields",
+]
 
 
 def lineage_fields(**overrides: str) -> dict[str, str]:
@@ -58,3 +66,49 @@ def track_spec_fields(**overrides: Any) -> dict[str, Any]:
     }
     fields.update(overrides)
     return fields
+
+
+def rights_fields(**overrides: Any) -> dict[str, Any]:
+    """A complete declared rights snapshot (C4 ``rights``)."""
+    fields: dict[str, Any] = {
+        "commercial_use_status": "eligible",
+        "basis": "commercial_subscription",
+        "license_reference": "lic_test_01",
+        "plan_or_tier": "pro",
+        "account_identity_ref": "acct_test_01",
+        "terms_version": "terms_2026_01",
+        "attempt_id": "att_test_01",
+        "provider_id": "mock",
+        "policy_version": "p4-v1",
+        "checked_at": "2026-09-25T12:00:00+00:00",
+        "downloaded_at": "2026-09-25T12:00:00+00:00",
+    }
+    fields.update(overrides)
+    return fields
+
+
+def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
+    """Keyword arguments for a complete C4 event (no ``schema_version``)."""
+    fields: dict[str, Any] = {
+        "event_type": "music_candidate_ready_for_p5",
+        "candidate_id": "cand_test_01",
+        "artifact_id": "art_test_01",
+        "artifact_sha256": "0" * 64,
+        "track_spec_id": "trk_test_01",
+        "lineage": lineage_fields(),
+        "provider_id": "mock",
+        "model_id": "mock-v1",
+        "measured_audio": {"duration_seconds": 1.0, "sample_rate": 44100, "channels": 2},
+        "requested_duration_seconds": 1,
+        "vocal_mode": "instrumental",
+        "genre_tags": ["ambient"],
+        "prompt_text": "ambient synth pad electronic chill",
+        "lyrics_text": None,
+        "rights": rights_fields(),
+    }
+    fields.update(overrides)
+    return fields
+
+
+def candidate_event(**overrides: Any) -> CandidateReadyPayload:
+    return CandidateReadyPayload.build(**candidate_event_fields(**overrides))

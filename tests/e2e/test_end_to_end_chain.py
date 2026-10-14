@@ -66,9 +66,11 @@ from services.experiments.materialization.builder import materialize_package
 # P6
 from services.media_factory.rendering.assembler import assemble_media_package
 from services.media_factory.visuals.planner import BrandProfile
+from services.music_factory.api.events import build_candidate_ready_event
 
 # P4
-from services.music_factory.api.events import build_candidate_ready_event
+from services.music_factory.generation.engine import GenerationEngine
+from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 
 # P5
@@ -76,6 +78,7 @@ from services.quality_gate.gate.manifest import build_release_manifest
 
 # P7
 from services.youtube_publishing.domain.models import YouTubeVideoPublishedEvent
+from tests.support.music_db import music_db_session
 
 
 def test_autonomous_music_engine_end_to_end_loop_closure(
@@ -239,26 +242,21 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 4: P4 Music Factory — Audio Generation & Candidate Ready (Seam C4)
     # =========================================================================
-    adapted_spec = adapt_track_spec(track_spec.model_dump(mode="json"))
+    adapted_spec = adapt_track_spec(track_spec.to_wire())
     assert adapted_spec.genre == "lofi"
 
-    candidate_id = "cand_lofi_001"
-    artifact_id = "art_lofi_001"
-    ready_event = build_candidate_ready_event(
-        candidate_id=candidate_id,
-        artifact_id=artifact_id,
-        track_spec_id=track_spec.track_spec_id,
-        experiment_id=experiment.experiment_id,
-        content_arm_id=directive.arm_id,
-        provider_id="mock_music_provider",
-        model_id="music-v1",
-        duration_seconds=150.0,
-        sample_rate=44100,
-        channels=2,
-        rights_status="permitted",
-        provenance_complete=True,
-    )
+    # Real P4 path: plan, generate with the mock provider, then build the C4 event
+    # from the stored facts (ADR-0027) instead of hand-writing it.
+    plan, variants = plan_generation(adapted_spec)
+    with music_db_session() as music_db:
+        gen = GenerationEngine().execute_plan(
+            music_db, plan=plan, variants=variants, spec=adapted_spec
+        )
+        ready_event = build_candidate_ready_event(music_db, gen.candidates[0].candidate_id)
     assert ready_event.event_type == "music_candidate_ready_for_p5"
+    assert ready_event.lineage.content_arm_id == directive.arm_id
+    candidate_id = ready_event.candidate_id
+    artifact_id = ready_event.artifact_id
 
     # =========================================================================
     # Step 5: P5 Quality & Release Gate — Verdict & Release Clearance (Seam C5)

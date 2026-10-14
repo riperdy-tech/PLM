@@ -43,21 +43,12 @@ class ReleaseManifestPayload(BaseModel):
 
 
 class EvaluationRequest(BaseModel):
-    """Request to initiate candidate evaluation."""
+    """Evaluate one candidate: its Seam C4 event plus where P5 can read the audio."""
 
-    candidate_id: str
-    artifact_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_event: dict[str, Any]
     audio_path: str
-    expected_duration_seconds: float
-    track_spec_id: str
-    experiment_id: str
-    content_arm_id: str
-    vocal_mode: str = "instrumental"
-    lyrics_text: str | None = None
-    prompt_text: str | None = None
-    genre_tags: list[str] = Field(default_factory=list)
-    rights_snapshot: dict[str, Any] = Field(default_factory=dict)
-    provenance_metadata: dict[str, Any] = Field(default_factory=dict)
     evaluation_policy_version: str = "p5-v1"
     trigger: str = "candidate_ready"
 

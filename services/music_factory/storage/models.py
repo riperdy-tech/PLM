@@ -41,6 +41,8 @@ generation_plans_table = sa.Table(
     sa.Column("experiment_id", sa.String(64), nullable=False, index=True),
     # ExperimentLineage as JSON; NULL only for plans stored before ADR-0026.
     sa.Column("lineage_json", sa.JSON, nullable=True),
+    # The C3 wire the plan was made from; NULL only before ADR-0027.
+    sa.Column("track_spec_json", sa.JSON, nullable=True),
     sa.Column("candidate_target", sa.Integer, nullable=False),
     sa.Column("max_attempts", sa.Integer, nullable=False),
     sa.Column("budget_limit", sa.Float, nullable=False),
@@ -97,6 +99,8 @@ generated_candidates_table = sa.Table(
     sa.Column("experiment_id", sa.String(64), nullable=False, index=True),
     sa.Column("generation_plan_id", sa.String(64), nullable=False, index=True),
     sa.Column("parent_candidate_id", sa.String(64), nullable=True),
+    # Producing attempt; NULL only for candidates stored before ADR-0027.
+    sa.Column("source_attempt_id", sa.String(64), nullable=True),
     sa.Column("status", sa.String(32), nullable=False, index=True),
     sa.Column("provider_id", sa.String(64), nullable=False),
     sa.Column("model_id", sa.String(64), nullable=False),

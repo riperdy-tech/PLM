@@ -91,10 +91,10 @@ def test_generation_engine_successful_execution() -> None:
         # Verify Ruling R6 Rights Snapshot invariants
         rgt = get_rights_snapshot_for_attempt(session, attempts[0].attempt_id)
         assert rgt is not None
-        assert rgt.commercial_use_status == CommercialUseStatus.PERMITTED
-        assert rgt.plan_or_tier == "pro_tier"
-        assert rgt.account_identity_ref == "plm-service-account"
-        assert rgt.terms_version == "2026-v1"
+        assert rgt.commercial_use_status == CommercialUseStatus.ELIGIBLE
+        assert rgt.plan_or_tier == "internal"  # declared by the mock provider (ADR-0027)
+        assert rgt.account_identity_ref == "plm-mock"
+        assert rgt.terms_version == "mock-v1"
         assert rgt.downloaded_at is not None
 
 

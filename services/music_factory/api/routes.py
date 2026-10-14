@@ -32,7 +32,7 @@ from ..storage.repositories import (
     list_creative_variants,
     list_generation_attempts,
 )
-from .events import build_candidate_ready_event
+from .events import CandidateExportError, build_candidate_ready_event
 from .service_token import require_service_token
 
 __all__ = ["build_router"]
@@ -316,51 +316,27 @@ def build_router(
         candidate_id: str,
         session: Annotated[Session, Depends(_require_session)],
     ) -> dict[str, Any]:
-        """Export candidate to P5 QA gate, emitting frozen Seam C4 event."""
+        """Export a candidate to the P5 gate as a Seam C4 event (ADR-0027).
+
+        The event is built from stored facts first; a candidate with any missing fact is
+        refused with 409 and is not marked exported.
+        """
+        try:
+            event = build_candidate_ready_event(session, candidate_id)
+        except CandidateExportError as exc:
+            session.rollback()
+            code = (
+                status.HTTP_404_NOT_FOUND
+                if exc.error.code == "candidate_not_found"
+                else status.HTTP_409_CONFLICT
+            )
+            raise HTTPException(status_code=code, detail=exc.error.model_dump()) from exc
         try:
             cand = mark_candidate_exported_to_p5(session, candidate_id)
-            artifacts = list_artifacts_for_candidate(session, candidate_id)
-            if not artifacts:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Candidate has no audio artifacts to export",
-                )
-            art = artifacts[0]
-
-            attempts = list_generation_attempts(session, cand.generation_plan_id)
-            snapshot = (
-                get_rights_snapshot_for_attempt(session, attempts[0].attempt_id)
-                if attempts
-                else None
-            )
-            rights_status = snapshot.commercial_use_status.value if snapshot else "unknown"
-
-            # Build Seam C4 event
-            event = build_candidate_ready_event(
-                candidate_id=cand.candidate_id,
-                artifact_id=art.artifact_id,
-                track_spec_id=cand.track_spec_id,
-                experiment_id=cand.experiment_id,
-                content_arm_id="arm_placeholder",  # will be hydrated from spec or attempt
-                provider_id=cand.provider_id,
-                model_id=cand.model_id,
-                duration_seconds=art.duration_seconds,
-                sample_rate=art.sample_rate,
-                channels=art.channels,
-                rights_status=rights_status,
-                provenance_complete=True,
-            )
-
-            session.commit()
-            return {
-                "candidate": cand.model_dump(mode="json"),
-                "event": event.model_dump(mode="json"),
-            }
-        except CandidateNotFoundError as exc:
-            session.rollback()
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except InvalidCandidateTransitionError as exc:
             session.rollback()
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        session.commit()
+        return {"candidate": cand.model_dump(mode="json"), "event": event.to_wire()}
 
     return router

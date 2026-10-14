@@ -14,7 +14,6 @@ from ..domain.enums import (
     AttemptStatus,
     AttemptType,
     CandidateStatus,
-    CommercialUseStatus,
     CostType,
     PlanStatus,
 )
@@ -207,6 +206,7 @@ class GenerationEngine:
                         model_id=adapter.model_id,
                         created_at=datetime.now(UTC),
                         updated_at=datetime.now(UTC),
+                        source_attempt_id=completed_attempt.attempt_id,
                     )
                     insert_candidate(session, cand)
                     candidates.append(cand)
@@ -228,26 +228,29 @@ class GenerationEngine:
                     insert_audio_artifact(session, art)
                     artifacts.append(art)
 
-                    # Ruling R6 Rights Snapshot
-                    rgt = RightsSnapshot(
-                        snapshot_id=rights_snapshot_id(
-                            completed_attempt.attempt_id, adapter.provider_id
-                        ),
-                        attempt_id=completed_attempt.attempt_id,
-                        provider_id=adapter.provider_id,
-                        commercial_use_status=CommercialUseStatus.PERMITTED,
-                        basis="commercial_pro_subscription",
-                        license_reference="LICENSE-PLM-COMMERCIAL-2026",
-                        policy_version=plan.policy_version,
-                        checked_at=datetime.now(UTC),
-                        plan_or_tier="pro_tier",
-                        account_identity_ref="plm-service-account",
-                        terms_version="2026-v1",
-                        created_at=datetime.now(UTC),
-                        downloaded_at=datetime.now(UTC),
-                    )
-                    insert_rights_snapshot(session, rgt)
-                    rights_snapshots.append(rgt)
+                    # Ruling R6 rights snapshot: what the provider declared, or nothing.
+                    terms = adapter.license_terms()
+                    if terms is not None:
+                        recorded_at = datetime.now(UTC)
+                        rgt = RightsSnapshot(
+                            snapshot_id=rights_snapshot_id(
+                                completed_attempt.attempt_id, adapter.provider_id
+                            ),
+                            attempt_id=completed_attempt.attempt_id,
+                            provider_id=adapter.provider_id,
+                            commercial_use_status=terms.commercial_use_status,
+                            basis=terms.basis,
+                            license_reference=terms.license_reference,
+                            policy_version=plan.policy_version,
+                            checked_at=recorded_at,
+                            plan_or_tier=terms.plan_or_tier,
+                            account_identity_ref=terms.account_identity_ref,
+                            terms_version=terms.terms_version,
+                            created_at=recorded_at,
+                            downloaded_at=recorded_at,
+                        )
+                        insert_rights_snapshot(session, rgt)
+                        rights_snapshots.append(rgt)
 
                     # Cost tracking
                     cost = CostRecord(

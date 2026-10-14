@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from plm_contracts.seams.c4 import ProviderLicenseTerms
+
 from ..domain.enums import AttemptStatus
 from ..domain.models import GenerationRequest, GenerationResponse
 from .mock_provider import MockMusicProvider
@@ -50,6 +52,10 @@ class SunoAdapter:
     def check_health(self) -> bool:
         """Health check returns True if api_key is configured or endpoint reachable."""
         return bool(self._api_key)
+
+    def license_terms(self) -> ProviderLicenseTerms | None:
+        """No contract terms are on file for this provider yet (P0 §10): unknown."""
+        return None
 
     def get_quota_status(self) -> dict[str, Any]:
         return {
@@ -100,6 +106,10 @@ class ElevenLabsAdapter:
 
     def check_health(self) -> bool:
         return bool(self._api_key)
+
+    def license_terms(self) -> ProviderLicenseTerms | None:
+        """No contract terms are on file for this provider yet (P0 §10): unknown."""
+        return None
 
     def get_quota_status(self) -> dict[str, Any]:
         return {

@@ -8,11 +8,15 @@ import tempfile
 import wave
 from pathlib import Path
 
+from plm_contracts import CommercialUseEligibility, ProvenanceStatus
+from plm_contracts.seams.c4 import RightsSnapshotPayload
 from quality_gate.evaluators.lyrics import evaluate_lyrics
 from quality_gate.evaluators.musical import evaluate_musical_qualities
 from quality_gate.evaluators.policy import screen_policy_and_risk
 from quality_gate.evaluators.rights import validate_provenance_and_rights
 from quality_gate.evaluators.technical import validate_technical_audio
+
+from tests.support.seams import rights_fields
 
 
 def _make_test_wav(
@@ -128,41 +132,46 @@ def test_lyric_evaluator() -> None:
     assert any(f.finding_code == "PROHIBITED_CONTENT_IN_LYRICS" for f in res_tox.findings)
 
 
-def test_rights_and_provenance_evaluator() -> None:
-    # 1. Clean R6 compliant pro tier
-    valid_snap = {
-        "plan_or_tier": "pro",
-        "account_identity_ref": "acc_001",
-        "terms_version": "terms_2026",
-        "downloaded_at": "2026-09-25T10:00:00Z",
-        "commercial_use_status": "ELIGIBLE",
-    }
-    res_clean = validate_provenance_and_rights("eval_test", valid_snap)
-    assert res_clean.is_cleared
-    assert res_clean.commercial_use_status == "ELIGIBLE"
-    assert res_clean.provenance_status == "COMPLETE"
+def _rights(**overrides: object) -> RightsSnapshotPayload:
+    return RightsSnapshotPayload.model_validate(rights_fields(**overrides))
 
-    # 2. Free tier (ineligible for commercial use)
-    free_snap = {
-        "plan_or_tier": "free",
-        "account_identity_ref": "acc_001",
-        "terms_version": "terms_2026",
-        "downloaded_at": "2026-09-25T10:00:00Z",
-    }
-    res_free = validate_provenance_and_rights("eval_test", free_snap)
-    assert not res_free.is_cleared
-    assert res_free.commercial_use_status == "INELIGIBLE"
-    assert any(f.finding_code == "COMMERCIAL_USE_INELIGIBLE_TIER" for f in res_free.findings)
 
-    # 3. Missing R6 fields -> quarantine
-    missing_r6 = {
-        "plan_or_tier": "pro",
-        "terms_version": "terms_2026",
-    }
-    res_miss = validate_provenance_and_rights("eval_test", missing_r6)
-    assert not res_miss.is_cleared
-    assert res_miss.provenance_status == "INCOMPLETE"
-    assert res_miss.requires_quarantine
+def test_rights_declared_eligible_is_cleared() -> None:
+    res = validate_provenance_and_rights("eval_test", _rights())
+    assert res.is_cleared
+    assert res.commercial_use_status is CommercialUseEligibility.ELIGIBLE
+    assert res.provenance_status is ProvenanceStatus.COMPLETE
+
+
+def test_rights_free_tier_is_ineligible_even_if_declared_eligible() -> None:
+    res = validate_provenance_and_rights("eval_test", _rights(plan_or_tier="free"))
+    assert not res.is_cleared
+    assert res.commercial_use_status is CommercialUseEligibility.INELIGIBLE
+    assert any(f.finding_code == "COMMERCIAL_USE_INELIGIBLE_TIER" and f.blocking for f in res.findings)
+
+
+def test_rights_absent_snapshot_is_missing_and_unknown() -> None:
+    res = validate_provenance_and_rights("eval_test", None)
+    assert not res.is_cleared
+    assert res.provenance_status is ProvenanceStatus.MISSING
+    assert res.commercial_use_status is CommercialUseEligibility.UNKNOWN
+    assert res.requires_quarantine
+
+
+def test_rights_tier_label_never_upgrades_an_undeclared_status() -> None:
+    # Before ADR-0027 a "pro" tier label turned unknown into ELIGIBLE.
+    for status in ("unknown", "conditional", "expired_or_unverified"):
+        res = validate_provenance_and_rights(
+            "eval_test", _rights(plan_or_tier="pro", commercial_use_status=status)
+        )
+        assert res.commercial_use_status.value == status
+        assert not res.is_cleared
+        assert res.requires_quarantine
+
+
+def test_rights_declared_ineligible_blocks() -> None:
+    res = validate_provenance_and_rights("eval_test", _rights(commercial_use_status="ineligible"))
+    assert any(f.finding_code == "COMMERCIAL_USE_DECLARED_INELIGIBLE" and f.blocking for f in res.findings)
 
 
 def test_policy_screener() -> None:

@@ -15,6 +15,7 @@ from ..config import QualityGateSettings
 from ..domain.enums import ResolutionCode
 from ..gate.engine import run_candidate_evaluation
 from ..gate.quarantine import resolve_quarantine
+from ..ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from ..storage.repositories import (
     get_candidate_evaluation,
     get_quarantine_case,
@@ -122,20 +123,20 @@ def build_router(
         req: EvaluationRequest,
         session: Annotated[Session, Depends(_require_session)],
     ) -> EvaluationResponse:
+        try:
+            event = consume_c4_event(req.candidate_event)
+        except CandidateEventRejected as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ErrorShape(
+                    code=exc.error.code,
+                    field_paths=[f"candidate_event.{p}" for p in exc.error.field_paths],
+                    message=exc.error.message,
+                ).model_dump(),
+            ) from exc
         result = run_candidate_evaluation(
-            candidate_id=req.candidate_id,
-            artifact_id=req.artifact_id,
+            event=event,
             audio_path=req.audio_path,
-            expected_duration_seconds=req.expected_duration_seconds,
-            track_spec_id=req.track_spec_id,
-            experiment_id=req.experiment_id,
-            content_arm_id=req.content_arm_id,
-            vocal_mode=req.vocal_mode,
-            lyrics_text=req.lyrics_text,
-            prompt_text=req.prompt_text,
-            genre_tags=req.genre_tags,
-            rights_snapshot=req.rights_snapshot,
-            provenance_metadata=req.provenance_metadata,
             evaluation_policy_version=req.evaluation_policy_version,
             trigger=req.trigger,
         )
