@@ -187,8 +187,7 @@ deferred and tracked here; they are not scheduled before the economics gate.
 | Tier | Command | Result |
 |---|---|---|
 | Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1441 passed, 1 skipped, ~36 s. Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
-| Integration, compose **down** | `pytest -m integration` | 3 passed, 27 skipped, ~2.5 min (collection and imports verified) |
-| Integration, compose **up** | `pytest -m integration` | Not run (no containers). The migrations `0016`–`0024` and the schema-matches-models tests have therefore **not** been exercised against Postgres. |
+| Integration, compose up (CI) | `plm migrate` then `pytest -m integration` | Green in CI on 2026-10-14 for R0, R1 and R2: migrations `0001`–`0024` upgrade, downgrade and re-upgrade on Postgres 16, and the schema matches the models. MinIO is Chainguard's build pinned by digest. Not run locally (no Docker on the dev machine). |
 | Lint | `ruff check .` | clean |
 | Types | `mypy packages services` | clean (374 files) |
 | Cross-process determinism | `tests/unit/test_cross_process_determinism.py` | P2 draws, P3 design/package, P4 plan/seeds/ids/artifact digests identical under two `PYTHONHASHSEED` values |
