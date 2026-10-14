@@ -1,7 +1,7 @@
 """analytics schema: C7 release links; unknown stays unknown
 
 Revision ID: 0020_analytics_c7_links
-Revises: 0019_distribution_isrc_allocations
+Revises: 0019_distribution_isrc
 Create Date: 2026-10-14
 
 ADR-0030:
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0020_analytics_c7_links"
-down_revision = "0019_distribution_isrc_allocations"
+down_revision = "0019_distribution_isrc"
 branch_labels = None
 depends_on = None
 

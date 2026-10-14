@@ -1,6 +1,6 @@
 """distribution schema: persisted per-recording ISRC allocation
 
-Revision ID: 0019_distribution_isrc_allocations
+Revision ID: 0019_distribution_isrc
 Revises: 0018_c5_manifest_facts
 Create Date: 2026-10-14
 
@@ -13,7 +13,7 @@ track got the same code and the second release failed on the tracks' unique ISRC
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_distribution_isrc_allocations"
+revision = "0019_distribution_isrc"
 down_revision = "0018_c5_manifest_facts"
 branch_labels = None
 depends_on = None
