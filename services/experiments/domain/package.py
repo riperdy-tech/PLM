@@ -5,34 +5,20 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from plm_contracts.seams.c3 import TrackSpecPayload
 from pydantic import BaseModel, ConfigDict, Field
 
-from .enums import PackageStatus, TrackRole
+from .enums import PackageStatus
 
 
-class TrackSpec(BaseModel):
-    """The canonical track-level specification for P4 (frozen C3 wire format, Ruling R5)."""
+class TrackSpec(TrackSpecPayload):
+    """P3's track spec: exactly the frozen C3 wire (``plm_contracts.seams.c3``).
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    The producer stamps its own schema version; consumers parse with
+    :class:`TrackSpecPayload`, which has no default for it.
+    """
 
-    track_spec_id: str
-    playlist_spec_id: str
-    experiment_id: str
-    content_arm_id: str
-    brand_profile_id: str
-    hard_constraints: dict[str, Any]
-    bounded_preferences: dict[str, Any]
-    creative_latitude: dict[str, Any]
-    lyric_spec: dict[str, Any]
-    vocal_spec: dict[str, Any]
-    instrumentation_spec: dict[str, Any]
-    production_style: str
-    track_role: TrackRole
-    requested_duration: int = Field(ge=1)  # in seconds
-    candidate_target: int = Field(ge=1)
-    priority: int = Field(ge=1)
-    budget_limit: float = Field(ge=0.0)
-    provider_policy: dict[str, Any] = Field(default_factory=dict)
+    schema_version: str = TrackSpecPayload.SCHEMA_VERSION
 
 
 class PlaylistSpec(BaseModel):

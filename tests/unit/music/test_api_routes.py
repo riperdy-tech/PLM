@@ -3,30 +3,35 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.api.app import create_app
 from tests.support.music_db import create_music_engine, music_session
+from tests.support.seams import lineage_fields, track_spec_fields
 
-SAMPLE_C3_SPEC = {
-    "track_spec_id": "trk_api_01",
-    "playlist_spec_id": "ply_01",
-    "experiment_id": "exp_api_01",
-    "content_arm_id": "arm_01",
-    "brand_profile_id": "neon_seoul",
-    "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-    "bounded_preferences": {"bpm": 80, "mood": ["melancholic"], "use_case": ["late_night_drive"]},
-    "creative_latitude": {},
-    "lyric_spec": {},
-    "vocal_spec": {"vocal_mode": "vocal"},
-    "instrumentation_spec": {},
-    "production_style": "lofi_contemporary",
-    "track_role": "standout_single",
-    "requested_duration": 90,
-    "candidate_target": 1,
-    "priority": 1,
-    "budget_limit": 50.0,
-    "provider_policy": {},
-}
+SAMPLE_C3_SPEC = TrackSpecPayload.build(
+    **track_spec_fields(
+        track_spec_id='trk_api_01',
+        playlist_spec_id='ply_01',
+        brand_profile_id='neon_seoul',
+        hard_constraints={'genre': 'rnb', 'language': 'english', 'vocal_mode': 'vocal'},
+        creative_latitude={},
+        lyric_spec={},
+        vocal_spec={'vocal_mode': 'vocal'},
+        instrumentation_spec={},
+        production_style='lofi_contemporary',
+        requested_duration=90,
+        candidate_target=1,
+        priority=1,
+        budget_limit=50.0,
+        lineage=lineage_fields(experiment_id='exp_api_01', content_arm_id='arm_01'),
+        bounded_preferences={'bpm': 80,
+         'key_profile': None,
+         'mood': ['melancholic'],
+         'use_case': ['late_night_drive']},
+        provider_policy={'allowed_providers': ['mock']},
+    )
+).to_wire()
 
 
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings

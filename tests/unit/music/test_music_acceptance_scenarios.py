@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from plm_contracts.seams.c3 import TrackSpecPayload
 
 from services.music_factory.api.events import build_candidate_ready_event
 from services.music_factory.candidates.bank import (
@@ -23,31 +24,31 @@ from services.music_factory.providers.registry import select_provider_and_model
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage, probe_audio_bytes
 from services.music_factory.storage.repositories import get_rights_snapshot_for_attempt
 from tests.support.music_db import music_db_session
+from tests.support.seams import lineage_fields, track_spec_fields
 
-SAMPLE_C3_SPEC = {
-    "track_spec_id": "trk_ac_01",
-    "playlist_spec_id": "ply_ac_01",
-    "experiment_id": "exp_ac_01",
-    "content_arm_id": "arm_ac_01",
-    "brand_profile_id": "neon_seoul",
-    "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-    "bounded_preferences": {
-        "bpm": 82,
-        "mood": ["melancholic", "intimate"],
-        "use_case": ["late_night_drive"],
-    },
-    "creative_latitude": {},
-    "lyric_spec": {},
-    "vocal_spec": {"vocal_mode": "vocal"},
-    "instrumentation_spec": {},
-    "production_style": "lofi_contemporary",
-    "track_role": "standout_single",
-    "requested_duration": 180,
-    "candidate_target": 2,
-    "priority": 1,
-    "budget_limit": 60.0,
-    "provider_policy": {},
-}
+SAMPLE_C3_SPEC = TrackSpecPayload.build(
+    **track_spec_fields(
+        track_spec_id='trk_ac_01',
+        playlist_spec_id='ply_ac_01',
+        brand_profile_id='neon_seoul',
+        hard_constraints={'genre': 'rnb', 'language': 'english', 'vocal_mode': 'vocal'},
+        creative_latitude={},
+        lyric_spec={},
+        vocal_spec={'vocal_mode': 'vocal'},
+        instrumentation_spec={},
+        production_style='lofi_contemporary',
+        requested_duration=180,
+        candidate_target=2,
+        priority=1,
+        budget_limit=60.0,
+        lineage=lineage_fields(experiment_id='exp_ac_01', content_arm_id='arm_ac_01'),
+        bounded_preferences={'bpm': 82,
+         'key_profile': None,
+         'mood': ['melancholic', 'intimate'],
+         'use_case': ['late_night_drive']},
+        provider_policy={'allowed_providers': ['mock']},
+    )
+).to_wire()
 
 
 # AC-01: Ingest valid C3 TrackSpec

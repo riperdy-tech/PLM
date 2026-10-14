@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..ingestion.p3_adapter import AdaptedTrackSpec
 
 __all__ = ["CompiledPrompt", "build_generation_prompt", "compute_prompt_hash"]
 
@@ -36,31 +39,20 @@ def compute_prompt_hash(
 
 
 def build_generation_prompt(
-    track_spec: Any,
+    track_spec: AdaptedTrackSpec,
     *,
     variant_delta: dict[str, Any] | None = None,
 ) -> CompiledPrompt:
-    """Build a deterministic generation prompt from an adapted or raw TrackSpec."""
+    """Build a deterministic generation prompt from an adapted C3 track spec."""
     delta = variant_delta or {}
 
-    # 1. Extract core attributes
-    if hasattr(track_spec, "genre"):
-        genre = track_spec.genre
-        bpm = track_spec.bpm
-        moods = list(track_spec.moods)
-        use_cases = list(track_spec.use_cases)
-        vocal_mode = track_spec.vocal_mode
-        language = track_spec.language
-    else:
-        hard = track_spec.get("hard_constraints", {})
-        bounded = track_spec.get("bounded_preferences", {})
-        vocal = track_spec.get("vocal_spec", {})
-        genre = hard.get("genre") or bounded.get("genre") or "rnb"
-        bpm = bounded.get("bpm") or 80
-        moods = list(bounded.get("mood", []))
-        use_cases = list(bounded.get("use_case", []))
-        vocal_mode = vocal.get("vocal_mode") or hard.get("vocal_mode") or "vocal"
-        language = hard.get("language") or "english"
+    # 1. Core attributes, all from the parsed C3 spec (no fallbacks).
+    genre = track_spec.genre
+    bpm = track_spec.bpm
+    moods = list(track_spec.moods)
+    use_cases = list(track_spec.use_cases)
+    vocal_mode = track_spec.vocal_mode
+    language = track_spec.language
 
     # 2. Apply variant overrides if present
     if "bpm_offset" in delta:

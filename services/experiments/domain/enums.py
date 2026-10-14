@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from plm_contracts.seams.c3 import TrackRole as _SharedTrackRole
+
 
 class ExperimentType(StrEnum):
     """§16: Types of content experiments."""
@@ -55,15 +57,8 @@ class PackageStatus(StrEnum):
     REJECTED = "rejected"
 
 
-class TrackRole(StrEnum):
-    """Role of a track within a playlist or release package (§20)."""
-
-    FOCUS = "focus"
-    ANCHOR = "anchor"
-    SECONDARY = "secondary"
-    BRIDGE = "bridge"
-    AMBIENT = "ambient"
-    INTERLUDE = "interlude"
+TrackRole = _SharedTrackRole
+"""P3 §20 track roles; defined once in ``plm_contracts.seams.c3`` (C3 wire)."""
 
 
 class VocalMode(StrEnum):

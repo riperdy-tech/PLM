@@ -13,7 +13,6 @@ from ..domain.enums import (
     ExperimentStatus,
     ExperimentType,
     PackageStatus,
-    TrackRole,
     VariableClass,
 )
 from ..domain.experiment import (
@@ -293,22 +292,14 @@ def insert_content_package(session: Session, package: ContentPackage) -> None:
 
     # Track specs
     for trk in package.track_specs:
-        spec_content = {
-            "hard_constraints": trk.hard_constraints,
-            "bounded_preferences": trk.bounded_preferences,
-            "creative_latitude": trk.creative_latitude,
-            "lyric_spec": trk.lyric_spec,
-            "vocal_spec": trk.vocal_spec,
-            "instrumentation_spec": trk.instrumentation_spec,
-            "provider_policy": trk.provider_policy,
-        }
+        spec_content = trk.to_wire()
         session.execute(
             sa.insert(track_specs_table).values(
                 track_spec_id=trk.track_spec_id,
                 package_id=package.package_id,
                 playlist_spec_id=trk.playlist_spec_id,
-                experiment_id=trk.experiment_id,
-                content_arm_id=trk.content_arm_id,
+                experiment_id=trk.lineage.experiment_id,
+                content_arm_id=trk.lineage.content_arm_id,
                 brand_profile_id=trk.brand_profile_id,
                 track_role=trk.track_role.value,
                 requested_duration=trk.requested_duration,
@@ -382,29 +373,8 @@ def get_content_package(session: Session, package_id: str) -> ContentPackage | N
     trk_rows = session.execute(
         sa.select(track_specs_table).where(track_specs_table.c.package_id == package_id)
     ).mappings().all()
-    track_specs = tuple(
-        TrackSpec(
-            track_spec_id=t["track_spec_id"],
-            playlist_spec_id=t["playlist_spec_id"],
-            experiment_id=t["experiment_id"],
-            content_arm_id=t["content_arm_id"],
-            brand_profile_id=t["brand_profile_id"],
-            hard_constraints=json.loads(t["spec_json"]).get("hard_constraints", {}),
-            bounded_preferences=json.loads(t["spec_json"]).get("bounded_preferences", {}),
-            creative_latitude=json.loads(t["spec_json"]).get("creative_latitude", {}),
-            lyric_spec=json.loads(t["spec_json"]).get("lyric_spec", {}),
-            vocal_spec=json.loads(t["spec_json"]).get("vocal_spec", {}),
-            instrumentation_spec=json.loads(t["spec_json"]).get("instrumentation_spec", {}),
-            production_style="clean_modern",
-            track_role=TrackRole(t["track_role"]),
-            requested_duration=t["requested_duration"],
-            candidate_target=t["candidate_target"],
-            priority=t["priority"],
-            budget_limit=t["budget_limit"],
-            provider_policy=json.loads(t["spec_json"]).get("provider_policy", {}),
-        )
-        for t in trk_rows
-    )
+    # spec_json holds the full C3 wire the producer emitted; read it back verbatim.
+    track_specs = tuple(TrackSpec.model_validate(json.loads(t["spec_json"])) for t in trk_rows)
 
     # Playlist spec
     ply_row = session.execute(

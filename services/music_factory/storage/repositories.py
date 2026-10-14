@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy as sa
+from plm_contracts.seams import ExperimentLineage
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -64,6 +65,7 @@ def insert_generation_plan(session: Session, plan: GenerationPlan) -> None:
             id=plan.plan_id,
             track_spec_id=plan.track_spec_id,
             experiment_id=plan.experiment_id,
+            lineage_json=plan.lineage.model_dump(mode="json") if plan.lineage else None,
             candidate_target=plan.candidate_target,
             max_attempts=plan.max_attempts,
             budget_limit=plan.budget_limit,
@@ -91,6 +93,11 @@ def get_generation_plan(session: Session, plan_id: str) -> GenerationPlan | None
         plan_id=row["id"],
         track_spec_id=row["track_spec_id"],
         experiment_id=row["experiment_id"],
+        lineage=(
+            ExperimentLineage.model_validate(row["lineage_json"])
+            if row["lineage_json"] is not None
+            else None
+        ),
         candidate_target=row["candidate_target"],
         max_attempts=row["max_attempts"],
         budget_limit=row["budget_limit"],

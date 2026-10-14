@@ -39,6 +39,8 @@ generation_plans_table = sa.Table(
     sa.Column("id", sa.String(64), primary_key=True),
     sa.Column("track_spec_id", sa.String(64), nullable=False, index=True),
     sa.Column("experiment_id", sa.String(64), nullable=False, index=True),
+    # ExperimentLineage as JSON; NULL only for plans stored before ADR-0026.
+    sa.Column("lineage_json", sa.JSON, nullable=True),
     sa.Column("candidate_target", sa.Integer, nullable=False),
     sa.Column("max_attempts", sa.Integer, nullable=False),
     sa.Column("budget_limit", sa.Float, nullable=False),

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -44,30 +46,37 @@ def run_smoke_test() -> str | None:
     factory = session_factory(engine)
     with factory() as session:
         now = datetime.now(UTC)
-        wire_spec = {
-            "track_spec_id": f"trk_smoke_{int(now.timestamp())}",
-            "playlist_spec_id": f"ply_smoke_{int(now.timestamp())}",
-            "experiment_id": f"exp_smoke_{int(now.timestamp())}",
-            "content_arm_id": "arm_smoke_01",
-            "brand_profile_id": "neon_seoul",
-            "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
-            "bounded_preferences": {
+        stamp = int(now.timestamp())
+        wire_spec = TrackSpecPayload.build(
+            track_spec_id=f"trk_smoke_{stamp}",
+            playlist_spec_id=f"ply_smoke_{stamp}",
+            lineage=ExperimentLineage(
+                experiment_id=f"exp_smoke_{stamp}",
+                experiment_family_id="fam_smoke_01",
+                content_arm_id="arm_smoke_01",
+                content_genome_id="gen_smoke_01",
+                production_directive_id=f"dir_smoke_{stamp}",
+            ),
+            brand_profile_id="neon_seoul_profile",
+            hard_constraints={"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
+            bounded_preferences={
                 "bpm": 80,
+                "key_profile": None,
                 "mood": ["melancholic"],
                 "use_case": ["late_night_drive"],
             },
-            "creative_latitude": {},
-            "lyric_spec": {},
-            "vocal_spec": {"vocal_mode": "vocal"},
-            "instrumentation_spec": {},
-            "production_style": "lofi_contemporary",
-            "track_role": "standout_single",
-            "requested_duration": 60,
-            "candidate_target": 1,
-            "priority": 1,
-            "budget_limit": 50.0,
-            "provider_policy": {},
-        }
+            creative_latitude={},
+            lyric_spec={},
+            vocal_spec={"vocal_mode": "vocal"},
+            instrumentation_spec={},
+            production_style="lofi_contemporary",
+            track_role="focus",
+            requested_duration=60,
+            candidate_target=1,
+            priority=1,
+            budget_limit=50.0,
+            provider_policy={"allowed_providers": ["mock"]},
+        ).to_wire()
 
         # 1. Adapt P3 spec
         spec = adapt_track_spec(wire_spec)

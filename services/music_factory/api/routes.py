@@ -89,7 +89,7 @@ def build_router(
         except TrackSpecValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
+                detail=exc.error.model_dump(),
             ) from exc
 
         plan, variants = plan_generation(spec)
@@ -131,7 +131,7 @@ def build_router(
         except TrackSpecValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
+                detail=exc.error.model_dump(),
             ) from exc
 
         variants = list_creative_variants(session, plan_id)

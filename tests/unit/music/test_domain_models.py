@@ -27,6 +27,7 @@ from services.music_factory.domain.models import (
     ProviderCapabilities,
     RightsSnapshot,
 )
+from tests.support.seams import sample_lineage
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -47,6 +48,7 @@ def test_generation_plan_and_attempt_lifecycle() -> None:
         plan_id=pid,
         track_spec_id="trk_01",
         experiment_id="exp_01",
+        lineage=sample_lineage(experiment_id="exp_01"),
         candidate_target=3,
         budget_limit=60.0,
         status=PlanStatus.PLANNED,

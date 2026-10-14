@@ -219,13 +219,16 @@ interface P4), §58 (`track_specs`).
 **Endpoint / event:** `GET /content-packages/{package_id}` (P3 §45); the
 `music_specs[]` array of the content package (P3 §44).
 
-**Frozen field list (the union, canonical names = P4 §7; P3 emits every key — R5):**
+**Frozen field list (the union, canonical names = P4 §7; P3 emits every key — R5;
+amended by ADR-0025 and ADR-0026):**
 
 ```text
+schema_version      "<major>.<minor>" (ADR-0025)
 track_spec_id
 playlist_spec_id
-experiment_id
-content_arm_id
+lineage             {experiment_id, experiment_family_id, content_arm_id,
+                     content_genome_id, production_directive_id}  (ADR-0026;
+                     replaces the loose experiment_id / content_arm_id)
 brand_profile_id
 hard_constraints
 bounded_preferences
@@ -266,9 +269,20 @@ not emit.
 - P3 derives (documented rules): `candidate_target`, `priority`, `budget_limit`
   from the budget envelope (P3 §34/§44); `requested_duration` from
   `duration_range`; `provider_policy` from the experiment's provider constraints.
-- P4 must reject only what P4 §7 says it rejects — no extra strictness.
+- ~~P4 must reject only what P4 §7 says it rejects — no extra strictness.~~
+  Superseded by ADR-0026: P4 refuses any spec missing a required fact, because the
+  only alternative is substituting a value.
+- Typed sub-objects (shared model `plm_contracts.seams.c3.TrackSpecPayload`):
+  `hard_constraints {genre, language, vocal_mode}`, `bounded_preferences {bpm,
+  key_profile (null = open), mood[], use_case[]}`, `provider_policy
+  {allowed_providers[] (non-empty)}`; `track_role` is one of P3 §20's roles.
+- P3's derivation rules (R5, ADR-0026): `requested_duration` and `bpm` are the genome
+  target or the rounded midpoint of its range.
 
-**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists** (producer half shipped by P3.7).
+**Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists**. It runs
+P3's real `materialize_package` into P4's real `adapt_track_spec` and planner, asserts
+the lineage reaches the plan intact, and asserts refusal for every missing required
+fact, placeholder identity, unknown field and future major.
 
 ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import (
@@ -119,6 +120,9 @@ class GenerationPlan(BaseModel):
     plan_id: str
     track_spec_id: str
     experiment_id: str
+    lineage: ExperimentLineage | None
+    """From the C3 spec. ``None`` only for plans stored before lineage existed (ADR-0026);
+    such plans cannot export candidates to P5."""
     candidate_target: int = Field(default=2, ge=1)
     max_attempts: int = Field(default=5, ge=1)
     budget_limit: float = Field(default=50.0, ge=0.0)

@@ -130,8 +130,7 @@ def test_ac_05_creative_freedom() -> None:
     for trk in pkg.track_specs:
         assert "energy" in trk.creative_latitude
         assert "visual_motion" in trk.creative_latitude
-        assert "bpm" in trk.bounded_preferences
-        assert trk.bounded_preferences["bpm"] > 0
+        assert trk.bounded_preferences.bpm > 0
 
 
 def test_ac_06_duplicate_prevention(session) -> None:
