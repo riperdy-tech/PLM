@@ -312,3 +312,25 @@ def test_retirement_needs_mature_evidence_and_reopens_on_a_market_rise() -> None
                          state=retired) is None
     assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY,
                          state=ArmLifecycleStatus.ACTIVE) is None
+
+
+def test_every_directive_is_recorded_in_the_decision_log() -> None:
+    """PART XXI: each allocation carries its inputs, model and action; replaying the cycle
+    writes nothing new; confidence is left empty because P2 states none."""
+    from plm_platform.decision_log import allocation_decision_key, load_decision
+
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        market = _snapshot(_arm("rnb-1", score=82.0), _arm("citypop-2", score=78.0))
+        result = run_allocation_cycle(session, _request(slot_count=2), settings=SETTINGS,
+                                      market=market, now=NOW)
+        run_allocation_cycle(session, _request(slot_count=2), settings=SETTINGS,
+                             market=market, now=NOW)
+        for directive in result.directives:
+            entry = load_decision(session, allocation_decision_key(directive.directive_id))
+            assert entry is not None and entry.decision_kind == "allocation"
+            assert entry.action["directive_id"] == directive.directive_id
+            assert entry.input_data["feature_snapshot_id"]
+            assert entry.model_version == SETTINGS.model_version
+            assert entry.confidence is None and entry.result is None

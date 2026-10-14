@@ -99,11 +99,13 @@ __all__ = [
     "load_policy",
     "load_posterior",
     "load_posterior_update",
+    "load_reward_observation_by_key",
     "load_similarity",
     "load_terminal_update",
     "record_selection",
     "replace_baselines",
     "replace_similarity",
+    "reward_observation_id",
     "set_arm_status",
     "set_channel_state",
     "upsert_arm_state",
@@ -634,6 +636,23 @@ def insert_reward_observation(session: Session, observation: RewardObservation, 
         session.rollback()
         return observation_id, False
     return observation_id, True
+
+
+def reward_observation_id(key: str) -> str:
+    """The deterministic id `insert_reward_observation` stores a fact key under."""
+    return deterministic_id("reward_observation", key)
+
+
+def load_reward_observation_by_key(session: Session, key: str) -> dict[str, Any] | None:
+    """The stored observation for one fact key (`domain.reward.observation_key`), or `None`.
+
+    A lookup only: the reconciliation read behind `GET /ar/results`.
+    """
+    row = session.execute(
+        sa.select(ar_reward_observation)
+        .where(ar_reward_observation.c.id == reward_observation_id(key))
+    ).mappings().one_or_none()
+    return None if row is None else dict(row)
 
 
 def insert_experiment_result(session: Session, observation: RewardObservation, *,

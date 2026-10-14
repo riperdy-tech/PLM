@@ -8,11 +8,12 @@ from __future__ import annotations
 from typing import Any
 
 from plm_contracts.seams.c5 import ReleaseManifestPayload
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "EvaluationRequest",
     "EvaluationResponse",
+    "HoldResponse",
     "QuarantineCaseResponse",
     "QuarantineResolutionRequest",
     "ReleaseManifestPayload",
@@ -47,6 +48,21 @@ class EvaluationResponse(BaseModel):
     release_manifest_id: str | None = None
 
 
+class HoldResponse(BaseModel):
+    """One hold the platform exception queue keeps on a quarantine case (R3)."""
+
+    hold_id: str
+    reason_code: str
+    hold_class: str
+    severity: str
+    override_permitted: bool
+    required_evidence: list[str]
+    reviewer_role: str
+    policy_mapped: bool
+    status: str
+    resolution: str | None = None
+
+
 class QuarantineCaseResponse(BaseModel):
     """Response containing quarantine case summary."""
 
@@ -60,11 +76,20 @@ class QuarantineCaseResponse(BaseModel):
     resolved_at: str | None = None
     resolution: str | None = None
     resolution_notes: str | None = None
+    holds: list[HoldResponse] = Field(default_factory=list)
 
 
 class QuarantineResolutionRequest(BaseModel):
-    """Request to resolve a quarantine case."""
+    """Request to resolve a quarantine case.
+
+    An override (CLEARED_BY_OVERRIDE) is authorized by the exception queue per hold:
+    auditor_id must hold reviewer_role in the injected reviewer directory, and
+    evidence must name every item the hold's policy requires (item -> reference).
+    A hard stop is refused whatever the role or evidence.
+    """
 
     resolution: str  # "CLEARED_BY_OVERRIDE", "CONFIRMED_REJECTED", "RE_EVALUATE"
     auditor_id: str
     notes: str = ""
+    reviewer_role: str | None = None
+    evidence: dict[str, str] = Field(default_factory=dict)

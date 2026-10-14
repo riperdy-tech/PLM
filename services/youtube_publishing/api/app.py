@@ -16,6 +16,8 @@ from plm_platform.execution import (
     provider_mode_of,
     validate_integrations,
 )
+from plm_platform.health import health_router
+from plm_platform.ledger import budget_gate_for
 
 from .routes import create_youtube_router
 from .service_token import require_service_token
@@ -34,7 +36,9 @@ def create_app(
     Fails at boot when the configured YouTube provider mode has no implementation
     (only the mock exists today, unless a client is injected). ``clock`` is the one time
     source for every route, engine run and write-guard decision; the wall clock is used
-    only when none is injected.
+    only when none is injected. The write guard's budget gate is the persisted ledger
+    when ``PLM_BUDGET_LEDGER_CURRENCY`` is configured, else ``NoBudgetLedger`` (every live
+    write refused).
     """
     service_clock = SystemClock() if clock is None else clock
     platform_settings = load_settings() if settings is None else settings
@@ -65,7 +69,11 @@ def create_app(
         auth_dep,
         client=client,
         clock=service_clock,
-        write_guard=ExternalWriteGuard(execution_settings),
+        write_guard=ExternalWriteGuard(
+            execution_settings,
+            budget=budget_gate_for(execution_settings, session_factory, clock=service_clock),
+        ),
     )
     app.include_router(router)
+    app.include_router(health_router("youtube", session_factory))
     return app

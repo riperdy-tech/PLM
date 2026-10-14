@@ -148,10 +148,13 @@ def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
     assert run_lines[-1].api_quota_units == costs["api_quota_units"]
 
     with factory() as session:
+        # Only this run's rows: the table is shared with other tests (the §35 scenario
+        # stores fixture rows with no backing object), so the whole-table read made this
+        # test depend on test order and on what earlier runs left in the database.
         raw_rows = session.execute(sa.text(
             "SELECT payload_uri, payload_hash, request_context_hash "
-            "FROM market.market_raw_observations"
-        )).mappings().all()
+            "FROM market.market_raw_observations WHERE collection_run_id = :run_id"
+        ), {"run_id": str(first["costs"]["run_id"])}).mappings().all()
         observations = session.execute(sa.text(
             "SELECT count(*) FROM market.market_observations")).scalar_one()
         arms = session.execute(sa.text("SELECT count(*) FROM market.market_arms")).scalar_one()

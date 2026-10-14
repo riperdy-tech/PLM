@@ -6,18 +6,32 @@ when, and for which case (ADR-0028). Every manifest fact is read from the evalua
 immutable snapshot of the C4 event. An evaluation stored before lineage existed cannot be
 cleared into a manifest, and nothing is filled in with ``*_unknown`` or ``OVERRIDDEN``.
 
-Which holds a reviewer may clear (reviewable quarantine vs hard stop) and who may clear
-them is enforced by the exception queue in stage R3. This module only records the
-override faithfully.
+Whether a hold may be cleared at all, and by whom, is the platform exception queue's
+decision (R3, :mod:`plm_platform.exceptions`). Every reason code on a P5 quarantine case
+is raised into ``ops`` as its own hold (:func:`raise_quarantine_holds`), classified by the
+shipped hold-class policy. An override clears the P5 case only when
+:meth:`~plm_platform.exceptions.ExceptionQueue.authorize_resume` allows every hold: a hard
+stop is refused for any role, and a reviewable quarantine needs the reviewer role and
+every required evidence item. A refused override writes nothing in ``qa`` and raises
+:class:`OverrideRefusedError` carrying the refusal reason code.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from plm_contracts import GateOverrideStatus
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c5 import GateOverrideRecord
+from plm_platform.exceptions import (
+    CaseStatus,
+    ExceptionCase,
+    ExceptionQueue,
+    ResumeDecision,
+    ReviewDecision,
+    most_severe_refusal,
+)
 from sqlalchemy.orm import Session
 
 from ..domain.enums import GateDisposition, ResolutionCode
@@ -33,13 +47,92 @@ from ..storage.repositories import (
 )
 from .manifest import build_release_manifest
 
-__all__ = ["OverrideNotPossibleError", "resolve_quarantine"]
+__all__ = [
+    "HOLD_ORIGIN",
+    "UNSPECIFIED_QUARANTINE_REASON",
+    "OverrideNotPossibleError",
+    "OverrideRefusedError",
+    "QuarantineAlreadyResolvedError",
+    "hold_subject_ref",
+    "quarantine_holds",
+    "raise_quarantine_holds",
+    "resolve_quarantine",
+]
 
 _BLOCKED = (GateDisposition.QUARANTINED, GateDisposition.REJECTED)
+
+HOLD_ORIGIN = "P5"
+"""Origin phase of every hold P5 raises into the platform exception queue."""
+
+HOLD_RAISED_BY = "quality_gate"
+"""The system actor recorded as raising P5's holds."""
+
+UNSPECIFIED_QUARANTINE_REASON = "QUARANTINE_REVIEW_REQUIRED"
+"""Raised when a case carries no reason code. The policy does not map it, so the queue
+classifies it HARD_STOP: a quarantine without a stated reason never becomes reviewable."""
 
 
 class OverrideNotPossibleError(ValueError):
     """The case cannot be cleared into a manifest because a required fact is missing."""
+
+
+class QuarantineAlreadyResolvedError(ValueError):
+    """The case was already resolved; a second resolution would issue a second manifest."""
+
+
+class OverrideRefusedError(PermissionError):
+    """The exception queue refused to resume at least one of the case's holds.
+
+    ``refusal`` is the most severe refusal (its ``code`` is the API reason code);
+    ``decisions`` holds the verdict for every hold.
+    """
+
+    def __init__(self, refusal: ResumeDecision, decisions: Sequence[ResumeDecision]) -> None:
+        refused = [d for d in decisions if not d.allowed]
+        super().__init__("; ".join(f"{d.code.value}: {d.message}" for d in refused))
+        self.refusal = refusal
+        self.decisions = tuple(decisions)
+
+    @property
+    def missing_evidence(self) -> tuple[str, ...]:
+        return tuple(
+            sorted({item for d in self.decisions if not d.allowed for item in d.missing_evidence})
+        )
+
+
+def hold_subject_ref(case_id: str) -> str:
+    """The exception-queue subject for one P5 quarantine case (one per evaluation)."""
+    return f"qa.quarantine_case/{case_id}"
+
+
+def raise_quarantine_holds(
+    session: Session, queue: ExceptionQueue, case: QuarantineCase, *, now: datetime
+) -> list[ExceptionCase]:
+    """Raise one hold per reason code on ``case`` (idempotent) and return them all."""
+    reason_codes = sorted(set(case.reason_codes)) or [UNSPECIFIED_QUARANTINE_REASON]
+    return [
+        queue.raise_exception(
+            session,
+            origin_phase=HOLD_ORIGIN,
+            subject_ref=hold_subject_ref(case.id),
+            reason_code=reason_code,
+            raised_by=HOLD_RAISED_BY,
+            now=now,
+            details={
+                "candidate_id": case.candidate_id,
+                "evaluation_id": case.evaluation_id,
+                "quarantine_case_id": case.id,
+            },
+        ).case
+        for reason_code in reason_codes
+    ]
+
+
+def quarantine_holds(session: Session, queue: ExceptionQueue, case_id: str) -> list[ExceptionCase]:
+    """The holds already raised for one P5 quarantine case (read only)."""
+    return queue.cases_for_subject(
+        session, origin_phase=HOLD_ORIGIN, subject_ref=hold_subject_ref(case_id)
+    )
 
 
 def resolve_quarantine(
@@ -50,21 +143,75 @@ def resolve_quarantine(
     notes: str,
     *,
     now: datetime,
+    queue: ExceptionQueue,
+    reviewer_role: str | None = None,
+    evidence: Mapping[str, str] | None = None,
 ) -> tuple[QuarantineCase, ReleaseManifest | None]:
     """Resolve a quarantine case and, on an audited override, issue its manifest.
 
     ``now`` is the resolution instant: the case's ``resolved_at``, the override record's
     ``resolved_at`` and the override manifest's ``created_at``.
+
+    The case's holds are raised first (idempotent, so a case stored before R3 gains its
+    holds here). ``CLEARED_BY_OVERRIDE`` asks ``queue`` to authorize a resume of every
+    hold as ``auditor_id`` acting in ``reviewer_role`` with ``evidence``. Any refusal
+    raises :class:`OverrideRefusedError` before anything in ``qa`` changes; the refusals
+    are recorded in the queue. ``CONFIRMED_REJECTED`` rejects the open holds and
+    ``RE_EVALUATE`` withdraws them; neither lets the workflow continue.
     """
     case = get_quarantine_case(session, case_id)
     if not case:
         raise ValueError(f"Quarantine case {case_id} not found.")
+    if case.resolution is not None:
+        raise QuarantineAlreadyResolvedError(
+            f"quarantine case {case_id!r} was already resolved as {case.resolution}"
+        )
+
+    holds = raise_quarantine_holds(session, queue, case, now=now)
 
     manifest: ReleaseManifest | None = None
     if resolution == ResolutionCode.CLEARED_BY_OVERRIDE:
+        decisions = [
+            queue.authorize_resume(
+                session, hold.id, actor=auditor_id, role=reviewer_role, evidence=evidence, now=now
+            )
+            for hold in holds
+        ]
+        refusal = most_severe_refusal(decisions)
+        if refusal is not None:
+            raise OverrideRefusedError(refusal, decisions)
         # Build the manifest first: an override that cannot produce a complete manifest
         # must not leave the case marked resolved.
         manifest = _override_manifest(session, case, auditor_id, now=now)
+        for hold in holds:
+            queue.resolve(
+                session,
+                hold.id,
+                decision=ReviewDecision.RESUME,
+                actor=auditor_id,
+                role=reviewer_role,
+                evidence=evidence,
+                notes=notes,
+                now=now,
+            )
+    else:
+        closing = (
+            ReviewDecision.REJECT
+            if resolution == ResolutionCode.CONFIRMED_REJECTED
+            else ReviewDecision.WITHDRAW
+        )
+        for hold in holds:
+            if hold.status is CaseStatus.OPEN:
+                queue.resolve(
+                    session,
+                    hold.id,
+                    decision=closing,
+                    actor=auditor_id,
+                    role=reviewer_role,
+                    evidence=evidence,
+                    notes=notes,
+                    now=now,
+                )
 
     resolve_quarantine_case(session, case_id, resolution, auditor_id, notes, resolved_at=now)
     updated_case = case.resolve(resolution, auditor_id, notes, resolved_at=now)
@@ -84,6 +231,7 @@ def resolve_quarantine(
         )
 
     return updated_case, manifest
+
 
 
 def _override_manifest(

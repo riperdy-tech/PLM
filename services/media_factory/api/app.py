@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock
 from plm_platform.correlation import CorrelationIdMiddleware
+from plm_platform.health import health_router
 from sqlalchemy.orm import Session
 
 from ..config import MediaFactorySettings
@@ -45,4 +46,5 @@ def create_app(
             ).model_dump(),
         )
 
+    app.include_router(health_router("media", session_factory))
     return app

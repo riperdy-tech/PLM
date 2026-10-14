@@ -17,6 +17,7 @@ from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 
 from tests.support.analytics_db import create_analytics_engine
+from tests.support.decisions import log_allocation_decision
 from tests.support.seams import lineage_fields
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -36,6 +37,8 @@ MINIMAL_ENV = {
 
 def _client(reporting_currency: str | None = None) -> TestClient:
     engine = create_analytics_engine(static_pool=True)
+    log_allocation_decision(engine, directive_id=lineage_fields()["production_directive_id"],
+                            arm_id="arm_api_01", decided_at=NOW)
 
     def session_factory():
         from sqlalchemy.orm import sessionmaker

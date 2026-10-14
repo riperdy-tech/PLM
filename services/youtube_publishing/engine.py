@@ -78,7 +78,10 @@ class YouTubePublishingEngine:
 
     Every write to YouTube (upload, thumbnail, playlist placement) first passes the
     platform :class:`~plm_platform.execution.ExternalWriteGuard`. ``OperatingMode.DRY_RUN``
-    caps the policy at dry-run, so it can never upload to a real channel.
+    caps the policy at dry-run, so it can never upload to a real channel. A funded write
+    is settled with the guard after the provider call: committed once it returned,
+    released when the engine stops before calling. A provider call that raised leaves the
+    reservation held (outcome uncertain) for operator reconciliation.
 
     Every timestamp the engine records comes from the injected ``clock``, so a run
     replays to identical attempt and publication records under a ``FixedClock``.
@@ -244,9 +247,9 @@ class YouTubePublishingEngine:
             # 3. Resumable Upload (if not already uploaded)
             youtube_video_id = attempt.youtube_video_id
             if not youtube_video_id:
-                decision = self._authorize(CAPABILITY_UPLOAD, manifest, operating_mode)
-                if not decision.decision.may_call_provider:
-                    return self._halt_for(session, attempt, decision)
+                upload_decision = self._authorize(CAPABILITY_UPLOAD, manifest, operating_mode)
+                if not upload_decision.decision.may_call_provider:
+                    return self._halt_for(session, attempt, upload_decision)
                 # Step 3a: Create Upload Session
                 if not attempt.upload_session_uri:
                     update_publish_attempt(
@@ -313,6 +316,7 @@ class YouTubePublishingEngine:
                     raise YouTubeClientError("Upload completed but no video resource returned")
 
                 youtube_video_id = str(video_resource["id"])
+                self.write_guard.settle_external_write(upload_decision, performed=True)
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,
@@ -353,6 +357,9 @@ class YouTubePublishingEngine:
                 return self._halt_for(session, attempt, decision)
             thumb_bytes = self._media_bytes(thumbnail_data, "placeholder_thumbnail_bytes")
             if thumb_bytes is None:
+                self.write_guard.settle_external_write(
+                    decision, performed=False, reason="thumbnail_bytes_missing"
+                )
                 return self._missing_media(session, attempt, "thumbnail")
             update_publish_attempt(
                 session,
@@ -363,6 +370,7 @@ class YouTubePublishingEngine:
             session.commit()
 
             self.client.set_thumbnail(youtube_video_id, thumb_bytes)
+            self.write_guard.settle_external_write(decision, performed=True)
             update_publish_attempt(
                 session,
                 attempt.attempt_id,
@@ -388,6 +396,7 @@ class YouTubePublishingEngine:
                 session.commit()
 
                 item = self.client.insert_playlist_item(playlist_id, youtube_video_id)
+                self.write_guard.settle_external_write(decision, performed=True)
                 playlist_item_id = item.get("id")
                 update_publish_attempt(
                     session,

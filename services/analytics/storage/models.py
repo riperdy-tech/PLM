@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
+from plm_platform.outbox import outbox_table
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -160,7 +161,13 @@ class ExperimentOutcomeRow(Base):
 
 
 class RewardPostedRow(Base):
-    """Feedback reward post audit ledger (Ruling R11, Seam C7 Leg 2)."""
+    """The C7 leg-2 reward P9 produced for one P2 fact (Ruling R11, ADR-0030).
+
+    The table name predates the outbox: a row here means the reward was recorded and its
+    delivery enqueued in the same transaction, not that P2 received it. Delivery is the
+    ``outbox_events`` row with the same fact key; the reward is posted only when that row
+    is ``DELIVERED``. ``posted_at`` holds the payload's ``observed_at``.
+    """
 
     __tablename__ = "rewards_posted"
     __table_args__ = {"schema": "analytics"}  # noqa: RUF012
@@ -189,3 +196,8 @@ class ReleaseLinkRow(Base):
     media_package_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     lineage_json: Mapped[Any] = mapped_column(sa.JSON, nullable=False)
     linked_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
+OUTBOX_EVENTS = outbox_table(ANALYTICS_METADATA, "analytics")
+"""P9's transactional outbox (R3, ADR-0033): events P9 announces to other phases, committed
+with the fact they announce and delivered by `analytics.evaluation.delivery`."""

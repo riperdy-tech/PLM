@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 import sqlalchemy as sa
 from analytics.storage.models import ANALYTICS_METADATA
+from plm_platform.decision_log import DECISION_LOG_METADATA
 from sqlalchemy.orm import Session, sessionmaker
 
 __all__ = ["analytics_db_session", "analytics_session", "create_analytics_engine"]
@@ -24,7 +25,9 @@ def create_analytics_engine(*, static_pool: bool = False) -> sa.Engine:
         engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS analytics")
+        connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS ops")
     ANALYTICS_METADATA.create_all(engine)
+    DECISION_LOG_METADATA.create_all(engine)  # P9 attaches outcomes to P2's decisions
     return engine
 
 

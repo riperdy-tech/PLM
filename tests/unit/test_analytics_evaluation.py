@@ -20,7 +20,7 @@ from analytics.evaluation.feedback import (
     REWARD_VERSION,
     compute_normalized_reward,
     evaluate_experiment_outcome,
-    generate_and_post_reward,
+    record_and_enqueue_reward,
 )
 from analytics.storage.repositories import get_experiment_outcomes
 from plm_contracts.money import CurrencyMismatchError, FxRate, FxRateMissingError, FxTable, Money
@@ -169,10 +169,10 @@ def test_provisional_outcome_is_still_produced_and_posted_as_provisional() -> No
     with analytics_db_session() as session:
         outcome = _evaluate(session, window=ObservationWindow.D7,
                             published_at=NOW - timedelta(days=2))
-        payload = generate_and_post_reward(
+        payload = record_and_enqueue_reward(
             session, outcome, views=12000, watch_time_minutes=350.0,
             average_percentage_viewed=None, subscribers_gained=None, estimated_revenue=None,
-            now=NOW,
+            now=NOW, enqueued_at=NOW,
         )
     assert outcome.maturity is ObservationMaturity.PROVISIONAL
     assert 0.0 <= outcome.normalized_reward <= 1.0
@@ -198,7 +198,7 @@ def test_evaluate_and_post_reward_flow() -> None:
         assert outcome.primary_value_currency == "USD"
         assert outcome.maturity is ObservationMaturity.MATURE
 
-        payload = generate_and_post_reward(
+        payload = record_and_enqueue_reward(
             session,
             outcome,
             views=12000,
@@ -206,7 +206,7 @@ def test_evaluate_and_post_reward_flow() -> None:
             average_percentage_viewed=65.0,
             subscribers_gained=28,
             estimated_revenue=usd("95"),
-            now=NOW,
+            now=NOW, enqueued_at=NOW,
         )
 
         assert payload.experiment_id == "exp_rnb_01"
@@ -230,10 +230,10 @@ def test_estimated_revenue_must_be_in_the_outcome_currency() -> None:
     with analytics_db_session() as session:
         outcome = _evaluate(session)
         with pytest.raises(CurrencyMismatchError):
-            generate_and_post_reward(
+            record_and_enqueue_reward(
                 session, outcome, views=1, watch_time_minutes=1.0,
                 average_percentage_viewed=None, subscribers_gained=None,
-                estimated_revenue=Money.of(1000, "KRW"), now=NOW,
+                estimated_revenue=Money.of(1000, "KRW"), now=NOW, enqueued_at=NOW,
             )
 
 
@@ -241,10 +241,10 @@ def test_unmeasured_metrics_travel_as_null_not_zero() -> None:
     with analytics_db_session() as session:
         outcome = _evaluate(session, window=ObservationWindow.H24,
                             published_at=NOW - timedelta(hours=2), attribution_confidence=0.8)
-        payload = generate_and_post_reward(
+        payload = record_and_enqueue_reward(
             session, outcome, views=100, watch_time_minutes=5.0,
             average_percentage_viewed=None, subscribers_gained=None, estimated_revenue=None,
-            now=NOW,
+            now=NOW, enqueued_at=NOW,
         )
     wire = payload.to_wire()
     assert wire["raw_metrics"]["subscriber_gain"] is None

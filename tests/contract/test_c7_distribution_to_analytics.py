@@ -28,7 +28,7 @@ from plm_platform.clock import FixedClock
 
 from services.analytics.evaluation.feedback import (
     evaluate_experiment_outcome,
-    generate_and_post_reward,
+    record_and_enqueue_reward,
 )
 from services.analytics.ingestion.distributor import ingest_distributor_statement
 from services.analytics.ingestion.releases import (
@@ -80,11 +80,11 @@ def leg2() -> dict[str, Any]:
             published_at=NOW - timedelta(days=7), attribution_confidence=0.95,
             quality_status=None, observed_at=NOW,
         )
-        payload = generate_and_post_reward(
+        payload = record_and_enqueue_reward(
             session, outcome, views=5000, watch_time_minutes=900.0,
             average_percentage_viewed=None, subscribers_gained=None,
             estimated_revenue=Money.of("12.50", "USD"),
-            now=NOW,
+            now=NOW, enqueued_at=NOW,
         )
     return json.loads(json.dumps(payload.to_wire()))
 

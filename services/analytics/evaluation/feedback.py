@@ -1,10 +1,15 @@
-"""Experiment evaluation and feedback reward posting for Phase P9 (Ruling R11, Seam C7 Leg 2).
+"""Experiment evaluation and the C7 leg-2 reward for Phase P9 (Ruling R11, Seam C7 Leg 2).
 
 Implements Ruling R11:
-P9 posts normalized rewards to P2's `POST /ar/results`.
+P9 delivers normalized rewards to P2's `POST /ar/results`.
 P9 owns the reward arithmetic: `normalized_reward`, `reward_version`, window,
 maturity, attribution confidence, quality status.
 P2 owns posterior updates (P2 §74/§75).
+
+Delivery goes through P9's transactional outbox (stage R3): the reward record and its
+outbox event commit in the caller's transaction, and `evaluation.delivery` sends it.
+Nothing is sent in-request, and the reward counts as posted only once its outbox row is
+``DELIVERED``.
 
 The reward is ``engagement-contribution-proxy-v1`` (ADR-0031): a bounded proxy built
 from net contribution and engagement. It is **not** expected economic value and must
@@ -14,11 +19,9 @@ window (`plm_contracts.measurement.maturity_at`), never asserted by a caller.
 
 from __future__ import annotations
 
-import logging
 import math
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 from plm_contracts import QualityStatus
 from plm_contracts.measurement import maturity_at
@@ -34,17 +37,16 @@ from ..storage.repositories import (
     insert_experiment_outcome,
     insert_posted_reward,
 )
+from .delivery import enqueue_reward
 
 __all__ = [
     "REWARD_CONTRIBUTION_SCALE",
     "REWARD_VERSION",
     "compute_normalized_reward",
     "evaluate_experiment_outcome",
-    "generate_and_post_reward",
+    "record_and_enqueue_reward",
     "reward_contribution_scale",
 ]
-
-logger = logging.getLogger(__name__)
 
 REWARD_VERSION = "engagement-contribution-proxy-v1"
 """The version of :func:`compute_normalized_reward`. It is a bounded proxy of net
@@ -164,7 +166,7 @@ def evaluate_experiment_outcome(
     return outc
 
 
-def generate_and_post_reward(
+def record_and_enqueue_reward(
     session: Session,
     outcome: ExperimentOutcomeRecord,
     *,
@@ -174,18 +176,23 @@ def generate_and_post_reward(
     subscribers_gained: float | None,
     estimated_revenue: Money | None,
     now: datetime,
-    http_client: Any = None,
-    ar_results_url: str | None = None,
+    enqueued_at: datetime,
 ) -> NormalizedRewardPayload:
-    """Build the Seam C7 leg-2 payload through the shared model (R11, ADR-0030, ADR-0031).
+    """Build the Seam C7 leg-2 payload, record it and enqueue its delivery to P2.
 
-    A metric that was not measured is passed as ``None`` and travels as ``null``; it is
-    never sent as ``0``. ``estimated_revenue`` is a platform estimate in the outcome's
-    reporting currency; the C7 wire carries it as an unlabelled float in that currency
-    (ADR-0031 defers moving it to `Money`). ``now`` stamps ``observed_at``: P2 only
-    ingests observations at or before its own cycle clock, so the stamp must come from
-    the caller's clock. Delivery to P2 is not guaranteed here; the transactional outbox
-    is stage R3.
+    The payload is built through the shared model (R11, ADR-0030, ADR-0031). A metric
+    that was not measured is passed as ``None`` and travels as ``null``; it is never sent
+    as ``0``. ``estimated_revenue`` is a platform estimate in the outcome's reporting
+    currency; the C7 wire carries it as an unlabelled float in that currency (ADR-0031
+    defers moving it to `Money`). ``now`` stamps ``observed_at``: P2 only ingests
+    observations at or before its own cycle clock, so the stamp must come from the
+    caller's clock. ``enqueued_at`` is when the event joins the outbox (the caller's
+    clock at the edge).
+
+    The reward record and the outbox event are written in the caller's transaction and
+    commit together or not at all; nothing is sent here. A different payload for a fact
+    already queued raises `plm_platform.outbox.OutboxConflictError` (P2 keeps the first
+    write of a fact, so a silent second version would never be applied).
     """
     if estimated_revenue is not None and estimated_revenue.currency != outcome.primary_value_currency:
         raise CurrencyMismatchError(
@@ -214,13 +221,6 @@ def generate_and_post_reward(
         quality_status=outcome.quality_status,
     )
 
-    # Optional HTTP dispatch to P2 if client provided
-    if http_client is not None and ar_results_url:
-        try:
-            http_client.post(ar_results_url, json=payload.to_wire())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to post reward to P2: %s", exc)
-
-    # Record to audit table
+    enqueue_reward(session, payload, now=enqueued_at)
     insert_posted_reward(session, payload)
     return payload

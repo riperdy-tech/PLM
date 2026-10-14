@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from plm_contracts import ChannelActivationState, ErrorShape
+from plm_contracts import ChannelActivationState, ErrorShape, ObservationWindow
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,9 @@ from ..decisioning.cycle import (
     run_allocation_cycle,
 )
 from ..domain.directive import ProductionDirective
+from ..domain.enums import ObservationMaturity
 from ..domain.posterior import PosteriorState
+from ..domain.reward import observation_key
 from ..ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
 from ..ingestion.result_adapter import (
     ResultValidationError,
@@ -50,6 +52,7 @@ from .schemas import (
     CycleSummaryOut,
     DecisionOut,
     ResultAccepted,
+    ResultLookupOut,
     UpdateSummaryOut,
 )
 from .service_token import require_service_token
@@ -127,6 +130,10 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
     @router.post("/ar/results", response_model=ResultAccepted)
     def post_result(payload: dict[str, Any], _: Annotated[None, Depends(auth)],
                     session: Annotated[Session, Depends(dependency)]) -> ResultAccepted:
+        """Store one fact once (§73). A replay of a stored fact is a 200 with
+        ``stored: false``: an acknowledgement a producer's outbox can rely on, not an
+        error. A refused payload is a 422 with an ErrorShape reason code (a definite
+        failure the producer must not retry)."""
         try:
             observation = parse_result_payload(payload)
         except ResultValidationError as exc:
@@ -146,6 +153,34 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
         return ResultAccepted(observation_id=stored.observation_id,
                               experiment_result_id=stored.experiment_result_id,
                               stored=stored.stored)
+
+    @router.get("/ar/results", response_model=ResultLookupOut)
+    def get_result(_: Annotated[None, Depends(auth)],
+                   session: Annotated[Session, Depends(dependency)],
+                   experiment_id: str = Query(min_length=1),
+                   content_id: str = Query(min_length=1),
+                   observation_window: str = Query(min_length=1),
+                   status: str = Query(min_length=1)) -> ResultLookupOut:
+        """Is this fact stored? The reconciliation read for a producer whose delivery
+        timed out (R3 outbox): ``stored`` is a definite answer for the fact key
+        (experiment, content, window, maturity), never a guess."""
+        try:
+            window = ObservationWindow(observation_window)
+        except ValueError as exc:
+            raise _invalid_query("observation_window", observation_window) from exc
+        try:
+            maturity = ObservationMaturity(status)
+        except ValueError as exc:
+            raise _invalid_query("status", status) from exc
+        key = observation_key(experiment_id, content_id, window, maturity)
+        row = repositories.load_reward_observation_by_key(session, key)
+        return ResultLookupOut(
+            experiment_id=experiment_id, content_id=content_id,
+            observation_window=window.value, status=maturity.value,
+            observation_id=repositories.reward_observation_id(key)
+            if row is None else str(row["id"]),
+            stored=row is not None,
+        )
 
     @router.post("/ar/update", response_model=UpdateSummaryOut)
     def post_update(_: Annotated[None, Depends(auth)],
@@ -311,6 +346,13 @@ def _conflict(code: str, message: str) -> HTTPException:
 def _unavailable(message: str) -> HTTPException:
     return HTTPException(status_code=503, detail=ErrorShape(
         code="market_unavailable", field_paths=[], message=message,
+    ).model_dump())
+
+
+def _invalid_query(field: str, value: str) -> HTTPException:
+    return HTTPException(status_code=422, detail=ErrorShape(
+        code="invalid_query", field_paths=[field],
+        message=f"{field} {value!r} is not a recognised value",
     ).model_dump())
 
 

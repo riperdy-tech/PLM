@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from plm_platform.health import health_router
 from plm_platform.observability import CorrelationIdMiddleware
 from sqlalchemy.orm import Session
 
@@ -37,4 +38,5 @@ def create_app(*, session_factory: Callable[[], Session] | None,
             message=f"{type(exc).__name__}: {exc}",
         ).model_dump())
 
+    app.include_router(health_router("market", session_factory))
     return app

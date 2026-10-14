@@ -30,6 +30,7 @@ from plm_contracts import GateDisposition
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
+from plm_platform.exceptions import ExceptionQueue, StaticReviewerDirectory
 
 from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from services.media_factory.rendering.assembler import assemble_media_package
@@ -142,6 +143,17 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
             session, result.quarantine_case.id, ResolutionCode.CLEARED_BY_OVERRIDE,
             "auditor_01", "reviewed",
             now=FIXED_NOW,
+            # Unknown rights are reviewable only by a rights reviewer with the license
+            # evidence (R3 exception queue); that is the path exercised here.
+            queue=ExceptionQueue(
+                reviewers=StaticReviewerDirectory({"auditor_01": ["rights_reviewer"]})
+            ),
+            reviewer_role="rights_reviewer",
+            evidence={
+                "provider_license_document_ref": "doc://provider/license/42",
+                "license_terms_version": "2026-09",
+                "commercial_use_confirmation_ref": "ticket://provider/7781",
+            },
         )
     assert manifest is not None
     wire = json.loads(json.dumps(manifest.to_wire()))

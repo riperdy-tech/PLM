@@ -39,6 +39,10 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["packages", "services"]
 
+[tool.setuptools.package-data]
+# Versioned policy data read at runtime through importlib.resources (R3 hold classes).
+plm_platform = ["policy/*.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

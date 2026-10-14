@@ -13,11 +13,13 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, NoReturn
 
+import httpx
 import typer
 import uvicorn
 from plm_contracts.measurement import MeasurementKindError
 from plm_contracts.money import FxRateMissingError, Money
 from plm_platform.clock import SystemClock, require_aware
+from plm_platform.config import SERVICE_TOKEN_VAR, load_settings
 from plm_platform.db import build_engine, session_factory
 
 from .api.app import create_app
@@ -25,6 +27,7 @@ from .config import load_analytics_settings
 from .domain.amounts import AmountParseError, parse_amount
 from .domain.enums import CostCategory, ObservationWindow
 from .economics.ledger import entity_economics
+from .evaluation.delivery import dispatch_rewards
 from .ingestion.cost import ingest_cost_entry
 from .ingestion.distributor import StatementRejected, ingest_distributor_statement
 from .ingestion.youtube import ingest_youtube_metrics
@@ -280,6 +283,34 @@ def cli_rewards(experiment_id: str) -> None:
                 f"Reward proxy ({outc.reward_version}): {outc.normalized_reward:.4f} | "
                 f"Net: {outc.primary_value:.2f} {currency}"
             )
+
+
+def cli_dispatch(limit: int = 100, ar_base_url: str | None = None) -> None:
+    """One outbox pass: deliver due C7 leg-2 rewards to P2 and reconcile uncertain ones.
+
+    Refuses (exit 2) without ``PLM_SERVICE_TOKEN``: P2 would answer 401/503 to every
+    send, and a pass that cannot authenticate proves nothing.
+    """
+    if limit < 1:
+        _refuse("--limit must be positive")
+    platform = load_settings()
+    if platform.service_token is None:
+        _refuse(f"blocked_pending_credentials: set {SERVICE_TOKEN_VAR} to deliver rewards to P2")
+    overrides: dict[str, object] = {} if ar_base_url is None else {"ar_base_url": ar_base_url}
+    settings = load_analytics_settings(platform=platform, **overrides)
+    factory = session_factory(build_engine(platform))
+    with httpx.Client(base_url=settings.ar_base_url, timeout=settings.ar_timeout_seconds) as client:
+        report = dispatch_rewards(
+            factory, client=client, token=platform.service_token.get_secret_value(),
+            clock=SystemClock(), limit=limit,
+        )
+    typer.echo(
+        f"Reward outbox pass: claimed={report.claimed} delivered={report.delivered} "
+        f"failed={report.failed} retry_scheduled={report.retry_scheduled} "
+        f"uncertain={report.uncertain} reconciled_present={report.reconciled_present} "
+        f"reconciled_absent={report.reconciled_absent} "
+        f"reconcile_unknown={report.reconcile_unknown} skipped={report.skipped}"
+    )
 
 
 def serve(host: str = "127.0.0.1", port: int = 8009) -> None:

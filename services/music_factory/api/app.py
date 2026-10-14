@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
 from plm_platform.correlation import CorrelationIdMiddleware
+from plm_platform.health import health_router
 from sqlalchemy.orm import Session
 
 from ..config import MusicFactorySettings
@@ -42,4 +43,5 @@ def create_app(
             ).model_dump(),
         )
 
+    app.include_router(health_router("music", session_factory))
     return app

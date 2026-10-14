@@ -36,6 +36,17 @@ def build_outcome_id(experiment_id: str, arm_id: str, window: str) -> str:
     return f"outc_{compute_sha256(canonical)[:16]}"
 
 
+def build_reward_id(experiment_id: str, content_id: str, window: str, maturity: str) -> str:
+    """Deterministic C7 leg-2 reward record ID: one per fact P2 stores (ADR-0031).
+
+    P2 keys a result on (experiment, content, window, maturity). Keying the reward on
+    (experiment, arm, window) let a mature reward overwrite the provisional one before it
+    and two contents of one arm overwrite each other.
+    """
+    canonical = f"{experiment_id}|{content_id}|{window}|{maturity}"
+    return f"rwd_{compute_sha256(canonical)[:16]}"
+
+
 def build_fx_rate_id(base: str, quote: str, as_of_iso: str, source: str) -> str:
     """Build deterministic FX rate record ID (one per pair, instant and source)."""
     canonical = f"{base}|{quote}|{as_of_iso}|{source}"

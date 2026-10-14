@@ -2,10 +2,14 @@
 
 The API route and the CLI used to repeat the same sequence of inserts; this is the one
 copy. It does not commit: the caller owns the transaction.
+
+A quarantine case raises its holds into the platform exception queue (``ops``, R3) in the
+same transaction, so a P5 case never exists without its holds.
 """
 
 from __future__ import annotations
 
+from plm_platform.exceptions import ExceptionQueue
 from sqlalchemy.orm import Session
 
 from ..storage.repositories import (
@@ -24,12 +28,19 @@ from ..storage.repositories import (
     insert_technical_check,
 )
 from .engine import GateEngineResult
+from .quarantine import raise_quarantine_holds
 
 __all__ = ["persist_gate_result"]
 
 
-def persist_gate_result(session: Session, result: GateEngineResult) -> None:
-    """Insert the evaluation, its snapshot, every check, the decision and its outputs."""
+def persist_gate_result(
+    session: Session, result: GateEngineResult, *, queue: ExceptionQueue | None = None
+) -> None:
+    """Insert the evaluation, its snapshot, every check, the decision and its outputs.
+
+    ``queue`` is used only to raise holds, which needs no reviewer directory; the default
+    queue uses the shipped hold-class policy.
+    """
     evaluation = result.evaluation
     insert_candidate_evaluation(session, evaluation)
     insert_evaluation_snapshot(session, result.snapshot)
@@ -52,5 +63,11 @@ def persist_gate_result(session: Session, result: GateEngineResult) -> None:
     insert_gate_decision(session, result.decision)
     if result.quarantine_case:
         insert_quarantine_case(session, result.quarantine_case)
+        raise_quarantine_holds(
+            session,
+            queue if queue is not None else ExceptionQueue(),
+            result.quarantine_case,
+            now=result.quarantine_case.created_at,
+        )
     if result.release_manifest:
         insert_release_manifest(session, result.release_manifest)

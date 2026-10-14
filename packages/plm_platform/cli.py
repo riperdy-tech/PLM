@@ -11,8 +11,11 @@ Two commands are real, because the Wave 0 gate depends on them:
 
 ``plm doctor``
     Checks PostgreSQL reachability and whether the database is at the alembic
-    head, MinIO reachability, Temporal reachability, and that the nine phase
-    task-queue constants are intact. Prints a PASS/FAIL table and exits
+    head, MinIO reachability, Temporal reachability, that the nine phase
+    task-queue constants (and the platform queues) are intact, each phase API's
+    ``GET /readyz`` (R3: one container per phase, base URLs from
+    :mod:`plm_platform.service_urls`), and that the deployed workers' queues have
+    live pollers (``ph1.market`` and ``pipeline``). Prints a PASS/FAIL table and exits
     non-zero when anything fails. An unreachable dependency is reported as a
     FAIL row — the command never raises a traceback for one, and it never
     prints a secret (messages are redacted against the configured secrets).
@@ -29,11 +32,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Final, NoReturn
 
+import httpx
 import typer
 import urllib3
 from alembic import command
@@ -41,15 +48,26 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from minio import Minio
+from plm_contracts.money import Money
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 from temporalio.api.workflowservice.v1 import GetSystemInfoRequest
 
+from .clock import SystemClock, require_aware
 from .config import Settings, SettingsError, load_settings
 from .db import database_url, redacted_database_url
+from .ledger import BudgetLedger
+from .service_urls import LOOPBACK_HOST, service_urls
 from .storage import bucket_name, split_endpoint
-from .temporal import Phase, TaskQueue, all_task_queues, connect_client
+from .temporal import (
+    Phase,
+    TaskQueue,
+    all_task_queues,
+    connect_client,
+    platform_task_queues,
+    queue_is_polling,
+)
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 """The checkout this CLI runs from (the platform is installed editable from it)."""
@@ -64,6 +82,10 @@ _DOCTOR_TITLE: Final[str] = "plm doctor - Wave 0 gate"
 _CONNECT_TIMEOUT_SECONDS: Final[int] = 3
 _TEMPORAL_TIMEOUT_SECONDS: Final[float] = 5.0
 _MINIO_PROBE_TIMEOUT_SECONDS: Final[float] = 2.0
+_READYZ_TIMEOUT_SECONDS: Final[float] = 3.0
+DEPLOYED_WORKER_QUEUES: Final[tuple[TaskQueue, ...]] = (TaskQueue.MARKET, TaskQueue.PIPELINE)
+"""Queues the compose stack serves (``worker`` and ``pipeline-worker``); doctor requires a
+live poller on each."""
 _FAILURE_MESSAGE_LIMIT: Final[int] = 160
 
 PHASES_BY_GROUP: Final[dict[str, str]] = {
@@ -131,14 +153,16 @@ def run_doctor(
             )
         )
     if settings is None:
-        for name in ("postgres", "migrations", "minio", "temporal"):
+        for name in ("postgres", "migrations", "minio", "temporal", "worker_pollers"):
             checks.append(Check(name, False, "not checked - configuration failed to load"))
     else:
         checks.append(_postgres_check(settings, connect_timeout))
         checks.append(_migrations_check(settings, connect_timeout))
         checks.append(_minio_check(settings))
         checks.append(_temporal_check(settings, temporal_timeout))
+        checks.append(_worker_pollers_check(settings, temporal_timeout))
     checks.append(_task_queues_check())
+    checks.extend(_readyz_checks())
     return checks
 
 
@@ -245,12 +269,70 @@ async def _temporal_probe(settings: Settings) -> str:
 def _task_queues_check() -> Check:
     expected = tuple(f"{phase}.{phase.name.lower()}" for phase in Phase)
     actual = tuple(queue.value for queue in all_task_queues())
-    if len(TaskQueue) == len(Phase) == len(expected) and actual == expected:
-        return Check("task_queues", True, "9 phase queues intact (ph1.market .. ph9.analytics)")
+    platform = tuple(queue.value for queue in platform_task_queues())
+    phase_queues = [queue for queue in TaskQueue if queue.value.startswith("ph")]
+    if len(phase_queues) == len(Phase) == len(expected) and actual == expected and platform:
+        return Check(
+            "task_queues", True,
+            "9 phase queues intact (ph1.market .. ph9.analytics); platform: "
+            + ", ".join(platform),
+        )
     drift = [f"{want} != {got}" for want, got in zip(expected, actual) if want != got]
-    if len(actual) != len(expected):
-        drift.append(f"{len(actual)} queues, expected {len(expected)}")
+    if len(actual) != len(expected) or len(phase_queues) != len(expected):
+        drift.append(f"{len(phase_queues)} phase queues, expected {len(expected)}")
+    if not platform:
+        drift.append("no platform queue")
     return Check("task_queues", False, "constants drifted: " + "; ".join(drift or ["unknown"]))
+
+
+def _worker_pollers_check(settings: Settings, timeout: float) -> Check:
+    """The deployed workers are alive *and polling* (process liveness is not health)."""
+    async def probe() -> list[str]:
+        client = await connect_client(settings)
+        return [queue.value for queue in DEPLOYED_WORKER_QUEUES
+                if not await queue_is_polling(client, queue)]
+
+    try:
+        silent = asyncio.run(asyncio.wait_for(probe(), timeout=timeout))
+    except Exception as exc:  # noqa: BLE001 - doctor reports failures, it never raises them
+        return Check("worker_pollers", False, f"cannot ask Temporal - {_describe(exc, settings)}")
+    queues = ", ".join(queue.value for queue in DEPLOYED_WORKER_QUEUES)
+    if silent:
+        return Check("worker_pollers", False,
+                     f"no poller on {', '.join(silent)} (start: docker compose up -d --wait)")
+    return Check("worker_pollers", True, f"pollers present on {queues}")
+
+
+def _readyz_checks() -> list[Check]:
+    """``GET /readyz`` on every phase API, concurrently (R3: one container per phase).
+
+    Base URLs: ``PLM_SERVICE_URL__<PHASE>`` or the loopback port compose publishes.
+    """
+    try:
+        urls = service_urls(dotenv_path=REPO_ROOT / ".env", default_host=LOOPBACK_HOST)
+    except SettingsError as exc:
+        return [Check("api_readyz", False, str(exc))]
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        return list(pool.map(lambda item: _readyz_check(*item), urls.items()))
+
+
+def _readyz_check(phase: Phase, base_url: str) -> Check:
+    name = f"api_{phase.name.lower()}"
+    target = f"{base_url}/readyz"
+    try:
+        response = httpx.get(target, timeout=_READYZ_TIMEOUT_SECONDS)
+    except httpx.HTTPError as exc:
+        return Check(name, False, f"unreachable at {target} - {type(exc).__name__}")
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    reason = body.get("reason") if isinstance(body, dict) else None
+    if response.status_code == 200 and isinstance(body, dict) and body.get("status") == "ready":
+        return Check(name, True, f"ready at {target}")
+    return Check(name, False,
+                 f"not ready at {target} - HTTP {response.status_code}"
+                 + (f" ({reason})" if reason else ""))
 
 
 def _render_table(checks: Sequence[Check]) -> str:
@@ -307,7 +389,7 @@ def _redact(message: str, settings: Settings | None) -> str:
 
 @app.command()
 def doctor() -> None:
-    """Wave 0 gate: PostgreSQL + migration head, MinIO, Temporal, task queues."""
+    """PostgreSQL + migration head, MinIO, Temporal, worker pollers, task queues, phase APIs."""
     typer.echo(_DOCTOR_TITLE)
     checks = run_doctor()
     typer.echo(_render_table(checks))
@@ -871,6 +953,17 @@ def analytics_rewards(
     cli_rewards(experiment_id=experiment_id)
 
 
+@analytics_app.command(name="dispatch")
+def analytics_dispatch(
+    limit: int = typer.Option(100, "--limit", help="Most outbox events handled in this pass"),
+    ar_base_url: str | None = typer.Option(None, "--ar-base-url", help="P2 base URL override"),
+) -> None:
+    """Deliver due C7 leg-2 rewards from P9's outbox to P2 (R3; one pass)."""
+    from analytics.cli import cli_dispatch
+
+    cli_dispatch(limit=limit, ar_base_url=ar_base_url)
+
+
 @analytics_app.command(name="serve")
 def analytics_serve(host: str = "127.0.0.1", port: int = 8009) -> None:
     """Serve the `/analytics` API (P9)."""
@@ -937,6 +1030,220 @@ def dashboard_serve(
     _serve_dashboard(host, port, reload)
 
 
+# ---------------------------------------------------------------------------
+# budget: the persisted cost ledger and ceiling (R3, ADR-0033 ``ops``)
+
+budget_app = typer.Typer(
+    help=(
+        "Cost ledger and budget ceiling (R3): set ceilings and the rate card, show "
+        "remaining headroom, list and reconcile reservations."
+    ),
+    no_args_is_help=True,
+)
+
+
+def _budget_ledger(currency: str | None) -> BudgetLedger:
+    """The ledger in ``currency`` (default: ``PLM_BUDGET_LEDGER_CURRENCY``) on the
+    configured database."""
+    from .db import build_engine, session_factory
+    from .execution import BUDGET_LEDGER_CURRENCY_VAR, load_execution_settings
+
+    resolved = currency or load_execution_settings(dotenv_path=REPO_ROOT / ".env").budget_currency
+    if resolved is None:
+        typer.echo(f"budget: pass --currency or set {BUDGET_LEDGER_CURRENCY_VAR}", err=True)
+        raise typer.Exit(code=2)
+    settings = load_settings(dotenv_path=REPO_ROOT / ".env")
+    return BudgetLedger(session_factory(build_engine(settings)), currency=resolved)
+
+
+def _instant(raw: str | None, option: str) -> datetime:
+    """An ISO 8601 instant with an explicit offset; omitted means now (edge clock)."""
+    if raw is None:
+        return SystemClock().now()
+    try:
+        return require_aware(datetime.fromisoformat(raw))
+    except ValueError as exc:
+        typer.echo(f"budget: {option} must be an ISO 8601 instant with an offset ({exc})", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _money_arg(amount: str, currency: str) -> Money:
+    try:
+        return Money.of(amount, currency.upper())
+    except (ValueError, TypeError) as exc:
+        typer.echo(f"budget: invalid amount {amount!r} {currency!r} ({exc})", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _show(money: Money) -> str:
+    return f"{money.amount} {money.currency}"
+
+
+@contextmanager
+def _budget_errors() -> Iterator[None]:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from .ledger import LedgerError
+
+    try:
+        yield
+    except (LedgerError, ValueError, SQLAlchemyError) as exc:
+        typer.echo(f"budget: refused - {_describe_for_cli(exc)}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@budget_app.command(name="set-ceiling")
+def budget_set_ceiling(
+    amount: str = typer.Option(..., "--amount", help="Ceiling amount (decimal)"),
+    currency: str = typer.Option(..., "--currency", help="ISO 4217; must be the ledger currency"),
+    period_start: str = typer.Option(..., "--from", help="Period start, ISO 8601 with offset"),
+    period_end: str = typer.Option(..., "--until", help="Period end (exclusive), ISO 8601"),
+    set_by: str = typer.Option(..., "--set-by", help="Operator making the change"),
+    capability: str | None = typer.Option(
+        None, "--capability", help="Per-capability ceiling; omitted = the global ceiling"
+    ),
+    reference: str | None = typer.Option(None, "--reference", help="Ticket or approval ref"),
+) -> None:
+    """Create or change a ceiling for one period (global unless --capability)."""
+    from .ledger import GLOBAL_SCOPE, capability_scope
+
+    limit = _money_arg(amount, currency)
+    ledger = _budget_ledger(limit.currency)
+    with _budget_errors():
+        ceiling = ledger.set_ceiling(
+            limit=limit,
+            period_start=_instant(period_start, "--from"),
+            period_end=_instant(period_end, "--until"),
+            scope=GLOBAL_SCOPE if capability is None else capability_scope(capability),
+            set_by=set_by,
+            reference=reference,
+            now=SystemClock().now(),
+        )
+    typer.echo(
+        f"budget: ceiling {ceiling.ceiling_id} = {_show(ceiling.limit)} until "
+        f"{ceiling.period_end.isoformat()}"
+    )
+
+
+@budget_app.command(name="set-rate")
+def budget_set_rate(
+    capability: str = typer.Option(..., "--capability", help="e.g. youtube.upload"),
+    amount: str = typer.Option(..., "--amount", help="Cost of one write (decimal; 0 = free)"),
+    currency: str = typer.Option(..., "--currency", help="ISO 4217"),
+    effective_from: str = typer.Option(..., "--from", help="Effective from, ISO 8601"),
+    set_by: str = typer.Option(..., "--set-by", help="Operator making the change"),
+    reference: str | None = typer.Option(None, "--reference", help="Price source"),
+    ledger_currency: str | None = typer.Option(None, "--ledger-currency"),
+) -> None:
+    """Set the rate card entry that prices writes a caller cannot price itself."""
+    cost = _money_arg(amount, currency)
+    ledger = _budget_ledger(ledger_currency or cost.currency)
+    with _budget_errors():
+        rate = ledger.set_rate(
+            capability=capability, cost=cost, effective_from=_instant(effective_from, "--from"),
+            set_by=set_by, reference=reference, now=SystemClock().now(),
+        )
+    typer.echo(
+        f"budget: rate {rate.capability} = {_show(rate.cost)} from "
+        f"{rate.effective_from.isoformat()}"
+    )
+
+
+@budget_app.command(name="remaining")
+def budget_remaining(
+    capability: str | None = typer.Option(None, "--capability", help="Per-capability ceiling"),
+    at: str | None = typer.Option(None, "--at", help="Instant to evaluate (default: now)"),
+    currency: str | None = typer.Option(None, "--currency", help="Ledger currency override"),
+) -> None:
+    """Show the ceiling covering an instant: limit, reserved, committed and remaining."""
+    from .ledger import GLOBAL_SCOPE, Reason, capability_scope
+
+    scope = GLOBAL_SCOPE if capability is None else capability_scope(capability)
+    instant = _instant(at, "--at")
+    ledger = _budget_ledger(currency)
+    with _budget_errors():
+        status = ledger.ceiling_status(scope=scope, now=instant)
+    if status is None:
+        typer.echo(
+            f"budget: no single {scope} ceiling covers {instant.isoformat()}; live writes are "
+            f"refused ({Reason.NO_CEILING.value})",
+            err=True,
+        )
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
+    ceiling = status.ceiling
+    typer.echo(
+        f"{ceiling.scope} [{ceiling.period_start.isoformat()}, {ceiling.period_end.isoformat()})\n"
+        f"  limit     {_show(ceiling.limit)}\n"
+        f"  reserved  {_show(status.reserved)}\n"
+        f"  committed {_show(status.committed)}\n"
+        f"  remaining {_show(status.remaining)}"
+    )
+
+
+@budget_app.command(name="entries")
+def budget_entries_command(
+    status: str | None = typer.Option(None, "--status", help="reserved | committed | released"),
+    capability: str | None = typer.Option(None, "--capability"),
+    limit: int = typer.Option(100, "--limit"),
+    currency: str | None = typer.Option(None, "--currency", help="Ledger currency override"),
+) -> None:
+    """List ledger entries, oldest first."""
+    from .ledger import EntryStatus
+
+    wanted = None
+    if status is not None:
+        try:
+            wanted = EntryStatus(status.lower())
+        except ValueError as exc:
+            typer.echo(f"budget: unknown status {status!r}", err=True)
+            raise typer.Exit(code=2) from exc
+    ledger = _budget_ledger(currency)
+    with _budget_errors():
+        rows = ledger.entries(status=wanted, capability=capability, limit=limit)
+    for entry in rows:
+        actual = "-" if entry.actual is None else f"{_show(entry.actual)} ({entry.actual_basis})"
+        typer.echo(
+            f"{entry.reserved_at.isoformat()}  {entry.status.value:<9}  {entry.capability}  "
+            f"{entry.idempotency_key}  reserved {_show(entry.reserved)} "
+            f"[{entry.estimate_source}]  actual {actual}"
+        )
+    if not rows:
+        typer.echo("budget: no entries")
+
+
+@budget_app.command(name="commit")
+def budget_commit(
+    capability: str = typer.Argument(...),
+    idempotency_key: str = typer.Argument(...),
+    amount: str | None = typer.Option(None, "--amount", help="Actual cost; omitted = estimate"),
+    actual_currency: str | None = typer.Option(None, "--actual-currency"),
+    currency: str | None = typer.Option(None, "--currency", help="Ledger currency override"),
+) -> None:
+    """Reconcile a held reservation whose write did happen."""
+    ledger = _budget_ledger(currency)
+    actual = None
+    if amount is not None:
+        actual = _money_arg(amount, actual_currency or ledger.currency)
+    with _budget_errors():
+        entry = ledger.commit(capability, idempotency_key, actual=actual, now=SystemClock().now())
+    assert entry.actual is not None
+    typer.echo(f"budget: committed {capability}/{idempotency_key} at {_show(entry.actual)}")
+
+
+@budget_app.command(name="release")
+def budget_release(
+    capability: str = typer.Argument(...),
+    idempotency_key: str = typer.Argument(...),
+    reason: str = typer.Option(..., "--reason", help="Why the write did not happen"),
+    currency: str | None = typer.Option(None, "--currency", help="Ledger currency override"),
+) -> None:
+    """Reconcile a held reservation whose write did not happen; frees its headroom."""
+    ledger = _budget_ledger(currency)
+    with _budget_errors():
+        ledger.release(capability, idempotency_key, reason=reason, now=SystemClock().now())
+    typer.echo(f"budget: released {capability}/{idempotency_key}")
+
+
 app.add_typer(market_app, name="market")
 app.add_typer(ar_app, name="ar")
 app.add_typer(experiments_app, name="experiments")
@@ -947,6 +1254,7 @@ app.add_typer(youtube_app, name="youtube")
 app.add_typer(distribution_app, name="distribution")
 app.add_typer(analytics_app, name="analytics")
 app.add_typer(dashboard_app, name="dashboard")
+app.add_typer(budget_app, name="budget")
 
 
 def main() -> None:
