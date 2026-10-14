@@ -4,6 +4,30 @@ name: plm
 # its credentials are development placeholders. Containers reach each other by
 # service name on the compose network, which these bindings do not affect.
 
+x-plm-app: &plm-app
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  environment:
+    # Compose services reach each other by service name; these win over .env.
+    - TEMPORAL_HOST=temporal:7233
+    - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/plm
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    - MINIO_ENDPOINT=minio:9000
+    - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+    - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
+    - PLM_SERVICE_TOKEN=${PLM_SERVICE_TOKEN:-}
+  volumes:
+    - .:/app
+  depends_on:
+    postgres:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+    temporal:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:16
@@ -23,6 +47,17 @@ services:
       retries: 5
       start_period: 10s
 
+  minio-volume-owner:
+    # One-shot: Chainguard's MinIO runs as uid 65532, but volumes created by the earlier
+    # root-run image are owned by root and MinIO cannot write them. Same pinned image,
+    # run once as root, so upgraded dev machines and fresh CI volumes behave the same.
+    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
+    user: "0:0"
+    entrypoint: ["chown", "-R", "65532:65532", "/data"]
+    volumes:
+      - miniodata:/data
+    restart: "no"
+
   minio:
     # MinIO no longer publishes free images (the quay.io tag now answers "unauthorized").
     # Chainguard's maintained build is pinned by digest so CI is reproducible; to upgrade,
@@ -38,6 +73,9 @@ services:
       - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
+    depends_on:
+      minio-volume-owner:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "MC_HOST_local=http://$${MINIO_ROOT_USER}:$${MINIO_ROOT_PASSWORD}@localhost:9000 mc ready local"]
       interval: 10s
@@ -123,6 +161,117 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+      start_period: 20s
+
+  # R3 runtime: one API container per phase, same dev image and environment as the
+  # worker. Each mounts plm_platform.health, so readiness means the phase can reach its
+  # database. Mutating routes stay fail-closed until PLM_SERVICE_TOKEN is set.
+  api-market:
+    <<: *plm-app
+    command: ["plm", "market", "serve", "--host", "0.0.0.0", "--port", "8081"]
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-ar:
+    <<: *plm-app
+    command: ["plm", "ar", "serve", "--host", "0.0.0.0", "--port", "8082"]
+    ports:
+      - "127.0.0.1:8082:8082"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-experiments:
+    <<: *plm-app
+    command: ["plm", "experiments", "serve", "--host", "0.0.0.0", "--port", "8083"]
+    ports:
+      - "127.0.0.1:8083:8083"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-music:
+    <<: *plm-app
+    command: ["plm", "music", "serve", "--host", "0.0.0.0", "--port", "8004"]
+    ports:
+      - "127.0.0.1:8004:8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-qa:
+    <<: *plm-app
+    command: ["plm", "qa", "serve", "--host", "0.0.0.0", "--port", "8005"]
+    ports:
+      - "127.0.0.1:8005:8005"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-media:
+    <<: *plm-app
+    command: ["plm", "media", "serve", "--host", "0.0.0.0", "--port", "8006"]
+    ports:
+      - "127.0.0.1:8006:8006"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-youtube:
+    <<: *plm-app
+    command: ["plm", "youtube", "serve", "--host", "0.0.0.0", "--port", "8007"]
+    ports:
+      - "127.0.0.1:8007:8007"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8007/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-distribution:
+    <<: *plm-app
+    command: ["plm", "distribution", "serve", "--host", "0.0.0.0", "--port", "8008"]
+    ports:
+      - "127.0.0.1:8008:8008"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  api-analytics:
+    <<: *plm-app
+    command: ["plm", "analytics", "serve", "--host", "0.0.0.0", "--port", "8009"]
+    ports:
+      - "127.0.0.1:8009:8009"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
       start_period: 20s
 
 volumes:

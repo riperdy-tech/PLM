@@ -16,6 +16,7 @@ from plm_platform.execution import (
     provider_mode_of,
     validate_integrations,
 )
+from plm_platform.health import health_router
 from plm_platform.ledger import budget_gate_for
 
 from ..engine import DistributionEngine
@@ -76,4 +77,5 @@ def create_app(
         ),
     )
     app.include_router(router)
+    app.include_router(health_router("distribution", session_factory))
     return app

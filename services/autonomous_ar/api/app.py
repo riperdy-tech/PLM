@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from plm_platform.correlation import CorrelationIdMiddleware
+from plm_platform.health import health_router
 from sqlalchemy.orm import Session
 
 from ..config import ARSettings
@@ -37,4 +38,5 @@ def create_app(*, session_factory: Callable[[], Session] | None, settings: ARSet
             message=f"{type(exc).__name__}: {exc}",
         ).model_dump())
 
+    app.include_router(health_router("ar", session_factory))
     return app

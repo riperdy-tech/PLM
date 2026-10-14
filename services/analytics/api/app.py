@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import Settings, load_settings
+from plm_platform.health import health_router
 
 from ..config import AnalyticsSettings, load_analytics_settings
 from .routes import build_analytics_router
@@ -50,4 +51,5 @@ def create_app(
         settings=p9_settings,
     )
     app.include_router(router)
+    app.include_router(health_router("analytics", session_factory))
     return app
