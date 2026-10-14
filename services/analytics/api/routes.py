@@ -214,7 +214,13 @@ def build_analytics_router(
             outcomes = get_experiment_outcomes(session, experiment_id)
             views: list[P10FeatureView] = []
             for outc in outcomes:
-                view = build_p10_feature_view(outc)
+                # P9 does not yet store secondary metrics or quality per outcome; they are
+                # served as null (not measured), never as zeros (ADR-0025).
+                view = build_p10_feature_view(
+                    outc, views=None, watch_time_hours=None, subscribers_gained=None,
+                    spotify_streams=None, data_completeness=None, fidelity=None,
+                    contamination=None,
+                )
                 views.append(view)
             return views
 

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from plm_contracts import QualityStatus
 from plm_contracts.seams.c7 import ObservationMaturity, RewardResultPayload
+from plm_contracts.seams.c8 import P10FeatureViewPayload
 from pydantic import BaseModel, ConfigDict
 
 from .enums import (
@@ -141,17 +141,5 @@ NormalizedRewardPayload = RewardResultPayload
 """Seam C7 leg 2 (R11, P2 §72): the shared ``plm_contracts.seams.c7`` model."""
 
 
-class P10FeatureView(BaseModel):
-    """Seam C8 contract payload: P9 → P10 (GET /analytics/p10/features) (P9 §155)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    unit_id: str
-    experiment_id: str
-    arm_id: str
-    content_genome_id: str
-    observation_window: str
-    maturity: str
-    primary_outcome: dict[str, Any]
-    secondary_outcomes: dict[str, Any]
-    quality: dict[str, Any]
+P10FeatureView = P10FeatureViewPayload
+"""Seam C8 view (P9 §155): the shared ``plm_contracts.seams.c8`` model."""

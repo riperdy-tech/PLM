@@ -694,6 +694,13 @@ consumer.
 **Required amendments:** none for this build. P9 §86/§88 must still exist as
 frozen surfaces; P10 consumes them when it is scheduled.
 
+**Amended by ADR-0025:** the view is the shared model
+`plm_contracts.seams.c8.P10FeatureViewPayload` (schema 1.0). `maturity` and
+`primary_outcome.status` use `ObservationMaturity`, and `observation_window` uses the
+shared windows. Every `secondary_outcomes` value and `quality.data_completeness` /
+`fidelity` / `contamination` is `null` when not measured or not assessed. The producer
+used to serve `0`, `1.0`, `false` and a hardcoded `REPORTED` instead.
+
 **Seam test:** `tests/contract/test_c8_analytics_to_p10.py` — **exists**.
 
 ---

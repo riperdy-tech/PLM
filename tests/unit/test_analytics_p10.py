@@ -49,18 +49,28 @@ def test_build_p10_feature_view_conforms_to_c8() -> None:
         assert view.arm_id == "arm_synth_01"
         assert view.content_genome_id == "genome_synth_01"
         assert view.observation_window == "7d"
-        assert view.maturity == "MATURE"
+        assert view.maturity == "mature"
 
-        assert view.primary_outcome["metric"] == "net_contribution"
-        assert view.primary_outcome["value"] == 143.21
-        assert view.primary_outcome["status"] == "REPORTED"
+        assert view.primary_outcome.metric == "net_contribution"
+        assert view.primary_outcome.value == 143.21
+        assert view.primary_outcome.status == "mature"
 
-        assert view.secondary_outcomes["views"] == 85000
-        assert view.secondary_outcomes["watch_time_hours"] == 612.4
-        assert view.secondary_outcomes["subscribers_gained"] == 179
-        assert view.secondary_outcomes["spotify_streams"] == 1300
+        assert view.secondary_outcomes.views == 85000
+        assert view.secondary_outcomes.watch_time_hours == 612.4
+        assert view.secondary_outcomes.subscribers_gained == 179
+        assert view.secondary_outcomes.spotify_streams == 1300
 
-        assert view.quality["data_completeness"] == 0.98
-        assert view.quality["fidelity"] == 0.96
-        assert view.quality["contamination"] is False
-        assert view.quality["attribution_confidence"] == 1.0
+        assert view.quality.data_completeness == 0.98
+        assert view.quality.fidelity == 0.96
+        assert view.quality.contamination is False
+        assert view.quality.attribution_confidence == 1.0
+
+        unmeasured = build_p10_feature_view(
+            outcome, views=None, watch_time_hours=None, subscribers_gained=None,
+            spotify_streams=None, data_completeness=None, fidelity=None, contamination=None,
+        ).to_wire()
+        assert unmeasured["secondary_outcomes"] == {
+            "views": None, "watch_time_hours": None, "subscribers_gained": None,
+            "spotify_streams": None,
+        }
+        assert unmeasured["quality"]["contamination"] is None
