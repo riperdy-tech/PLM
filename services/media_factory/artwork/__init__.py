@@ -1,5 +1,5 @@
-"""Artwork package for Phase P6 (Playlist, Visual & Video Factory)."""
+"""Thumbnails and backgrounds for Media Factory (Phase P6)."""
 
-from .generator import ArtworkResult, generate_artwork_and_thumbnails
+from .generator import generate_thumbnails, render_background, render_thumbnail
 
-__all__ = ["ArtworkResult", "generate_artwork_and_thumbnails"]
+__all__ = ["generate_thumbnails", "render_background", "render_thumbnail"]

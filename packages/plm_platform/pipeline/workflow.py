@@ -216,7 +216,9 @@ class PipelineWorkflow:
         if not await self._qa(generated):
             return self._outcome()
 
-        assembled = await self._step(Step.ASSEMBLE, {"generate": generated.result.outputs},
+        # P6 needs the P3 packages (playlist, visual and title facts) and the candidates.
+        assembled = await self._step(Step.ASSEMBLE, {"policy_check": policy.result.outputs,
+                                                     "generate": generated.result.outputs},
                                      enter=PipelineState.ASSEMBLING)
         if assembled is None:
             return self._outcome()

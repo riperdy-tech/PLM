@@ -37,19 +37,23 @@ def compile_metadata_and_chapters(
     ai_disclosure_required: bool = True,
 ) -> MetadataCompilationResult:
     """Compile timestamped chapter markers, tracklist, and publishable metadata options."""
-    # 1. Compile Chapters (YouTube requires chapter 0 to start at 00:00)
+    # 1. Compile chapters from the final timeline
     chapter_objects: list[Chapter] = []
     chapters_json: list[dict[str, Any]] = []
 
     for idx, t in enumerate(tracks):
-        # Force first chapter to exactly 0.0s for YouTube compatibility
-        start_time = 0.0 if idx == 0 else t.start_offset_seconds
+        # A chapter starts where its track starts on the final timeline and runs to the
+        # next chapter. Nothing is moved to satisfy YouTube's rules; the chapter rules
+        # (:mod:`.chapters`) refuse a set that breaks them.
+        start_time = t.start_offset_seconds
+        end_time = (tracks[idx + 1].start_offset_seconds if idx + 1 < len(tracks)
+                    else t.end_offset_seconds)
         title = t.title or f"Track {idx + 1}"
 
         chapter = Chapter(
             title=title,
             start_seconds=start_time,
-            end_seconds=t.end_offset_seconds,
+            end_seconds=end_time,
             song_id=t.song_id,
         )
         chapter_objects.append(chapter)
@@ -57,7 +61,7 @@ def compile_metadata_and_chapters(
             {
                 "title": title,
                 "start_seconds": round(start_time, 2),
-                "end_seconds": round(t.end_offset_seconds, 2),
+                "end_seconds": round(end_time, 2),
                 "timestamp_str": chapter.format_timestamp(),
                 "song_id": t.song_id,
             }

@@ -1,4 +1,8 @@
-"""Unit tests for Phase P6 controlled dry-run smoke test (P6 §45, Ruling R9)."""
+"""Unit tests for Phase P6 controlled dry-run smoke test (P6 §45, Ruling R9).
+
+The successful run injects the in-memory store and the stand-in toolchain: it proves the
+smoke's wiring and persistence, not rendering (the ``media`` tests do that).
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
+from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain
 from tests.support.media_db import create_media_engine
 
 MINIMAL_ENV = {
@@ -71,5 +76,5 @@ def test_media_smoke_successful_execution(monkeypatch: pytest.MonkeyPatch) -> No
             return_value=sessionmaker(bind=media_engine),
         ),
     ):
-        reason = run_smoke_test()
+        reason = run_smoke_test(store=InMemoryArtifactStore(), toolchain=StandInToolchain())
         assert reason is None

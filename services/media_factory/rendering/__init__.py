@@ -1,18 +1,5 @@
-"""Rendering and packaging module for Media Factory (Phase P6)."""
+"""Rendering and packaging for Media Factory (Phase P6).
 
-from .assembler import AssemblyPipelineResult, assemble_media_package
-from .renderer import (
-    DeterministicRenderer,
-    PostRenderCheckResult,
-    PreflightCheckResult,
-    RenderExecutionResult,
-)
-
-__all__ = [
-    "AssemblyPipelineResult",
-    "DeterministicRenderer",
-    "PostRenderCheckResult",
-    "PreflightCheckResult",
-    "RenderExecutionResult",
-    "assemble_media_package",
-]
+Import from the submodules (``.assembler``, ``.renderer``, ``.ffmpeg``, ``.profiles``,
+``.qa``); this package imports nothing itself, so the planner can use the profiles.
+"""

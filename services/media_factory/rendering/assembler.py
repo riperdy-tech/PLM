@@ -1,18 +1,36 @@
-"""Media Package Assembler and Orchestrator (P6 §5, §8, §15, §28, Ruling R9).
+"""Media package assembly (P6 §5, §8, §28, Rulings R7, R9, ADR-0028, R4).
 
-Coordinates playlist assembly, visual planning, artwork/thumbnail generation,
-metadata compilation, deterministic rendering, and packaging into the frozen Seam C6 contract.
+From P5's per-track C5 manifests to a C6 media package, in this order, each step
+refusing with a reason code rather than guessing:
+
+1. clearance and lineage (R7, R8): every track cleared, one lineage;
+2. the source audio of every track, fetched by ``artifact_uri`` and verified against
+   ``artifact_sha256`` (a mismatch fails closed);
+3. sequencing features measured from those bytes (:mod:`..audio.features`);
+4. selection and order by beam search, enforcing the required duration
+   (:mod:`..playlist.sequencer`);
+5. chapters compiled from the final timeline and validated against YouTube's rules;
+6. the render: audio master, procedural video master, both stored, then post-render
+   QA via ffprobe and a loudness meter (:mod:`.renderer`);
+7. thumbnails A/B/C drawn and stored (:mod:`..artwork.generator`);
+8. the package, ``ready_for_publish`` only when the render passed QA, else ``failed``
+   with the QA reason codes in its render report.
+
+Every URI and checksum in the package is what the artifact store returned for bytes P6
+produced and stored.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import Clock
 
-from ..artwork.generator import generate_artwork_and_thumbnails
+from ..artifacts import ArtifactStore
+from ..artwork.generator import generate_thumbnails
+from ..audio.features import DEFAULT_FEATURE_POLICY, FeatureExtractionPolicy, measure_features
 from ..domain.enums import PackageStatus, TransitionType
 from ..domain.models import (
     MediaPackage,
@@ -23,12 +41,24 @@ from ..domain.models import (
     VisualAsset,
     VisualSession,
 )
+from ..metadata.chapters import require_valid_chapters
 from ..metadata.compiler import compile_metadata_and_chapters
-from ..playlist.assembler import assemble_playlist
+from ..playlist.assembler import assemble_playlist, check_clearance
+from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
 from ..visuals.planner import BrandProfile, plan_visual_session
-from .renderer import DeterministicRenderer, RenderExecutionResult
+from .profiles import RenderProfile, render_profile
+from .renderer import MediaRenderer, RenderExecutionResult
+from .toolchain import MediaToolchain
 
-__all__ = ["AssemblyPipelineResult", "assemble_media_package"]
+__all__ = ["AssemblyPipelineResult", "PackageAlreadyAssembled", "assemble_media_package"]
+
+
+class PackageAlreadyAssembled(Exception):
+    """The package this request resolves to exists already; nothing was rendered."""
+
+    def __init__(self, package: MediaPackage) -> None:
+        self.package = package
+        super().__init__(package.media_package_id)
 
 
 @dataclass(frozen=True)
@@ -52,84 +82,99 @@ def assemble_media_package(
     required_duration_seconds: float,
     visual_profile: str,
     playlist_concept: str,
-    render_profile: str = "yt_longform_1080p_v1",
-    sequence_version: str = "v1",
+    store: ArtifactStore,
+    toolchain: MediaToolchain,
+    render_profile_name: str | RenderProfile = "yt_longform_1080p_v1",
+    sequencing_policy: SequencingPolicy = DEFAULT_SEQUENCING_POLICY,
+    feature_policy: FeatureExtractionPolicy = DEFAULT_FEATURE_POLICY,
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
-    renderer: DeterministicRenderer | None = None,
+    existing: Callable[[str], MediaPackage | None] | None = None,
     clock: Clock,
 ) -> AssemblyPipelineResult:
-    """Assemble a media package from P5's per-track C5 manifests (R7, R9, ADR-0028).
+    """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
 
     ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
-    P3's playlist, visual and title specs; they have no defaults here. Track facts and
-    lineage come from the manifests; see :mod:`..playlist.assembler` for the refusals.
-    ``clock`` stamps each step: planning records carry the start instant, the render job
-    its own start and finish, and the thumbnails and package the instant they were made.
+    P3's playlist, visual and title specs; they have no defaults here. ``existing`` looks
+    a package id up: when the request resolves to a package already assembled,
+    :class:`PackageAlreadyAssembled` is raised before anything is rendered.
     """
+    profile = (render_profile_name if isinstance(render_profile_name, RenderProfile)
+               else render_profile(render_profile_name))
     brand_id = brand_profile.brand_id
     planned_at = clock.now()
 
-    # 1-3. Clearance, lineage and sequencing (Rulings R7, R8)
+    # 1-2. Clearance first, so nothing uncleared is even fetched; then verified bytes.
+    check_clearance(track_manifests)
+    sources = {m.candidate_id: store.fetch_verified(m.artifact_uri, m.artifact_sha256)
+               for m in track_manifests}
+    # 3-4. Measured features, then selection and order.
+    features = {cid: measure_features(cid, data, feature_policy) for cid, data in sources.items()}
     playlist_res = assemble_playlist(
         manifests=track_manifests,
+        features=features,
         brand_id=brand_id,
         required_duration_seconds=required_duration_seconds,
         transition_type=transition_type,
         transition_duration_seconds=transition_duration_seconds,
-        sequence_version=sequence_version,
+        policy=sequencing_policy,
         now=planned_at,
     )
     playlist_session = playlist_res.session
     tracks = playlist_res.tracks
     lineage = playlist_res.lineage
     rel_id = playlist_session.release_manifest_id
-    exp_id = lineage.experiment_id
-    arm_id = lineage.content_arm_id
+    package_version = sequencing_policy.version
+    package_id = MediaPackage.derive_id(rel_id, brand_id, package_version, profile.name)
+    if existing is not None:
+        found = existing(package_id)
+        if found is not None:
+            raise PackageAlreadyAssembled(found)
 
-    # 4. Plan Visual Session (P6 §12-§15, §25)
-    visual_res = plan_visual_session(
-        playlist_session_id_str=playlist_session.id,
-        brand_profile=brand_profile,
-        visual_profile=visual_profile,
-        total_duration_seconds=playlist_res.total_duration_seconds,
-        now=planned_at,
-    )
-    visual_session = visual_res.visual_session
-    visual_assets = visual_res.assets
-
-    # 5. Deterministic Rendering (P6 §28-§31)
-    active_renderer = renderer or DeterministicRenderer(render_profile=render_profile)
-    # Temporary mock media_package_id for rendering seed
-    pkg_id_seed = f"mp_{rel_id}_{brand_id}_{sequence_version}"
-    render_res = active_renderer.render(
-        media_package_id_str=pkg_id_seed,
-        playlist=playlist_session,
-        visual_session=visual_session,
-        clock=clock,
-    )
-    packaged_at = clock.now()
-
-    # 6. Artwork & Thumbnail Generation (P6 §8.5, §17, §18)
-    artwork_res = generate_artwork_and_thumbnails(
-        media_package_id_str=pkg_id_seed,
-        brand_profile=brand_profile,
-        playlist_title=playlist_concept,
-        now=packaged_at,
-    )
-    thumbnail_variants = artwork_res.thumbnails
-
-    # 7. Metadata, Chapter & Tracklist Compilation (P6 §13, §45, §178)
-    # Disclosure is required if P5 required it for any track.
-    ai_disclosure = any(m.ai_disclosure_required for m in track_manifests)
+    # 5. Chapters from the final timeline, validated before any render cost is spent.
+    ai_disclosure = any(m.ai_disclosure_required for m in playlist_res.manifests)
     meta_res = compile_metadata_and_chapters(
         tracks=tracks,
         brand_name=brand_profile.brand_name,
         playlist_concept=playlist_concept,
         ai_disclosure_required=ai_disclosure,
     )
+    require_valid_chapters(meta_res.chapter_objects, playlist_res.total_duration_seconds)
 
-    # 8. Short-Form Source Assets (P6 §15)
+    # 6. Visual plan and render.
+    visual_res = plan_visual_session(
+        playlist_session_id_str=playlist_session.id,
+        brand_profile=brand_profile,
+        visual_profile=visual_profile,
+        render_profile=profile,
+        total_duration_seconds=playlist_res.total_duration_seconds,
+        now=planned_at,
+    )
+    visual_session = visual_res.visual_session
+    renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
+    render_res = renderer.render(
+        media_package_id_str=package_id,
+        playlist=playlist_session,
+        visual_session=visual_session,
+        brand=brand_profile,
+        sources={t.song_id: sources[t.song_id] for t in tracks},
+        required_window_seconds=playlist_res.sequence.window,
+        clock=clock,
+    )
+    visual_session.assets = list(render_res.visual_assets)
+    visual_session.status = "rendered" if render_res.passed else "failed"
+    packaged_at = clock.now()
+
+    # 7. Thumbnails.
+    thumbnail_variants = generate_thumbnails(
+        media_package_id_str=package_id,
+        brand_profile=brand_profile,
+        playlist_concept=playlist_concept,
+        store=store,
+        now=packaged_at,
+    )
+
+    # 8. Short-form source descriptors (clip extraction itself is not rendered yet).
     short_source_assets = [
         {
             "clip_id": f"short_{t.song_id}_01",
@@ -142,37 +187,27 @@ def assemble_media_package(
         }
         for t in tracks[:3]
     ]
-
-    # Convert thumbnail variants to Seam C6 Hop 1 producer schema [{id, uri}, ...]
     thumbnails_c6 = [
-        {
-            "id": tv.variant_key,
-            "uri": tv.uri,
-            "checksum": tv.checksum,
-            "width": tv.width,
-            "height": tv.height,
-        }
+        {"id": tv.variant_key, "uri": tv.uri, "checksum": tv.checksum,
+         "width": tv.width, "height": tv.height}
         for tv in thumbnail_variants
     ]
-
-    # 9. Final MediaPackage instantiation (Seam C6 Hop 1, Ruling R9)
-    package_status = (
-        PackageStatus.READY_FOR_PUBLISH
-        if render_res.render_job.job_status.value == "completed"
-        else PackageStatus.FAILED
-    )
-
+    render_report = {
+        **render_res.render_report,
+        "sequencing": playlist_res.sequence.report,
+        "chapters": {"rules": "yt-chapters-v1", "count": len(meta_res.chapters)},
+    }
     media_package = MediaPackage.create(
         release_manifest_id=rel_id,
-        experiment_id=exp_id,
-        content_arm_id=arm_id,
+        experiment_id=lineage.experiment_id,
+        content_arm_id=lineage.content_arm_id,
         brand_id=brand_id,
         playlist_session_id=playlist_session.id,
         visual_session_id=visual_session.id,
         video_master_uri=render_res.video_master_uri,
         video_checksum=render_res.video_checksum,
         video_duration_seconds=render_res.duration_seconds,
-        render_profile=render_profile,
+        render_profile=profile.name,
         audio_master_uri=render_res.audio_master_uri,
         audio_checksum=render_res.audio_checksum,
         thumbnails=thumbnails_c6,
@@ -180,19 +215,21 @@ def assemble_media_package(
         chapters=meta_res.chapters,
         metadata_candidates=meta_res.metadata_candidates,
         short_source_assets=short_source_assets,
-        render_report=render_res.render_report,
+        render_report=render_report,
         lineage=lineage,
-        package_version=sequence_version,
-        status=package_status,
+        package_version=package_version,
+        status=PackageStatus.READY_FOR_PUBLISH if render_res.passed else PackageStatus.FAILED,
         now=packaged_at,
     )
+    if media_package.media_package_id != package_id:
+        raise RuntimeError("the package id derivation diverged from the rendered id")
 
     return AssemblyPipelineResult(
         media_package=media_package,
         playlist_session=playlist_session,
         playlist_tracks=tracks,
         visual_session=visual_session,
-        visual_assets=visual_assets,
+        visual_assets=list(render_res.visual_assets),
         thumbnail_variants=thumbnail_variants,
         render_job=render_res.render_job,
         render_result=render_res,

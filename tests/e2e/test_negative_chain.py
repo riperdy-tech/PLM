@@ -45,6 +45,7 @@ from services.youtube_publishing.preflight.gates import (
     evaluate_gate_b_artifact,
     evaluate_gate_c_metadata,
 )
+from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain
 from tests.support.seams import media_package, release_manifest, sample_lineage
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -80,9 +81,11 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
 
     # 2. P6 playlist assembly hard-blocks the unapproved candidate (Rulings R7, R8)
     with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
-        assemble_playlist(manifests=[track], brand_id="brand_neon", required_duration_seconds=120.0, now=NOW)
+        assemble_playlist(manifests=[track], features={}, brand_id="brand_neon",
+                          required_duration_seconds=120.0, now=NOW)
 
     # 3. P6 top-level media package assembler also refuses it
+    store, toolchain = InMemoryArtifactStore(), StandInToolchain()
     with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
         assemble_media_package(
             track_manifests=[track],
@@ -90,8 +93,12 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
             required_duration_seconds=120.0,
             visual_profile="brand_neon_rain_v1",
             playlist_concept="Never Published",
+            store=store,
+            toolchain=toolchain,
             clock=FixedClock(NOW),
         )
+    # Refused before its audio was even fetched, let alone rendered.
+    assert toolchain.calls == []
 
 
 def test_p7_preflight_failure_blocks_youtube_publishing() -> None:

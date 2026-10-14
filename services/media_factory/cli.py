@@ -7,26 +7,17 @@ from pathlib import Path
 
 import typer
 import uvicorn
-from plm_contracts.seams import SeamRejection, parse_seam
-from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
 
 from .api.schemas import AssemblePackageRequest
+from .backend import deployed_backend
 from .config import load_media_factory_settings
-from .rendering.assembler import assemble_media_package
-from .storage.repositories import (
-    get_media_package_by_id,
-    insert_media_package,
-    insert_playlist_session,
-    insert_playlist_track,
-    insert_render_job,
-    insert_thumbnail_variant,
-    insert_visual_asset,
-    insert_visual_session,
-)
-from .visuals.planner import BrandProfile
+from .domain.enums import PackageStatus
+from .errors import MediaAssemblyError, MediaInfrastructureError
+from .service import assemble_and_persist
+from .storage.repositories import get_media_package_by_id
 
 media_cli = typer.Typer(help="Media factory CLI commands")
 
@@ -37,33 +28,42 @@ def cli_assemble(
         ...,
         "--request",
         "-r",
-        help="Path to an assembly request JSON: track_manifests (C5), brand_id, brand_name, "
-        "required_duration_seconds, visual_profile, playlist_concept",
+        help="Path to an assembly request JSON: candidate_ids, brand_id, "
+        "required_duration_seconds, visual_profile, playlist_concept (render_profile and "
+        "transition optional)",
     ),
 ) -> None:
-    """Assemble and render a media package from P5 track manifests (ADR-0028)."""
+    """Assemble and render a media package from recordings P5 cleared (ADR-0028, R4).
+
+    The same path as ``POST /media/packages/assemble``: manifests are fetched from P5 by
+    candidate id, audio from the artifact store, and the render runs on FFmpeg.
+    """
     path = Path(request_path)
     if not path.is_file():
         typer.echo(f"Error: request file {request_path} does not exist.", err=True)
         raise typer.Exit(code=1)
     try:
         req = AssemblePackageRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
-        manifests = [parse_seam(ReleaseManifestPayload, m) for m in req.track_manifests]
-        result = assemble_media_package(
-            track_manifests=manifests,
-            brand_profile=BrandProfile(brand_id=req.brand_id, brand_name=req.brand_name),
-            required_duration_seconds=req.required_duration_seconds,
-            visual_profile=req.visual_profile,
-            playlist_concept=req.playlist_concept,
-            render_profile=req.render_profile,
-            sequence_version=req.sequence_version,
-            clock=SystemClock(),
-        )
-    except (ValueError, SeamRejection) as exc:
-        typer.echo(f"Error: assembly refused: {exc}", err=True)
+    except ValueError as exc:
+        typer.echo(f"Error: invalid request: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+    platform = load_settings()
+    factory = platform_session_factory()
+    backend = deployed_backend(platform, factory)
+    if backend is None:
+        typer.echo("blocked: no service token (PLM_SERVICE_TOKEN) to ask P5", err=True)
+        raise typer.Exit(code=3)
+    with factory() as session:
+        try:
+            pkg = assemble_and_persist(session, backend, req, clock=SystemClock())
+        except MediaAssemblyError as exc:
+            typer.echo(f"Error: assembly refused: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        except MediaInfrastructureError as exc:
+            typer.echo(f"Error: assembly unavailable: {exc}", err=True)
+            raise typer.Exit(code=3) from exc
+        session.commit()
 
-    pkg = result.media_package
     typer.echo(f"Media Package ID:    {pkg.media_package_id}")
     typer.echo(f"Release Manifest ID: {pkg.release_manifest_id}")
     typer.echo(f"Video Master:        {pkg.video_master_uri}")
@@ -72,25 +72,10 @@ def cli_assemble(
     typer.echo(f"Thumbnails:          {len(pkg.thumbnails)} variants")
     typer.echo(f"Chapters:            {len(pkg.chapters)}")
     typer.echo(f"Status:              {pkg.status.value}")
-
-    # Persist to database
-    factory = platform_session_factory()
-    with factory() as session:
-        insert_playlist_session(session, result.playlist_session)
-        for tr in result.playlist_tracks:
-            insert_playlist_track(session, tr)
-
-        insert_visual_session(session, result.visual_session)
-        for va in result.visual_assets:
-            insert_visual_asset(session, va)
-
-        for tv in result.thumbnail_variants:
-            insert_thumbnail_variant(session, tv)
-
-        insert_render_job(session, result.render_job)
-        insert_media_package(session, result.media_package)
-        session.commit()
-    typer.echo("Media package successfully persisted to database.")
+    if pkg.status is not PackageStatus.READY_FOR_PUBLISH:
+        codes = (pkg.render_report.get("qa") or {}).get("reason_codes") or []
+        typer.echo(f"Blocked by post-render QA: {', '.join(codes)}", err=True)
+        raise typer.Exit(code=2)
 
 
 @media_cli.command(name="package")
@@ -115,10 +100,12 @@ def cli_package(
 
 def serve(host: str = "127.0.0.1", port: int = 8006) -> None:
     """Serve the `/media` FastAPI application using uvicorn."""
-    settings = load_media_factory_settings(platform=load_settings(), host=host, port=port)
+    platform = load_settings()
+    settings = load_media_factory_settings(platform=platform, host=host, port=port)
     factory = platform_session_factory()
 
     from .api.app import create_app
 
-    app = create_app(session_factory=factory, settings=settings, clock=SystemClock())
+    app = create_app(session_factory=factory, settings=settings, clock=SystemClock(),
+                     backend=deployed_backend(platform, factory))
     uvicorn.run(app, host=host, port=port)

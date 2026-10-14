@@ -4,6 +4,9 @@
 Producer: P5's real gate engine, and its real audited-override path, serving manifests
 through ``ReleaseManifest.to_wire()``. Consumer: P6's real ``assemble_playlist`` /
 ``assemble_media_package``. Both use ``plm_contracts.seams.c5.ReleaseManifestPayload``.
+P6 reads each track's audio from an in-memory artifact store by the manifest's URI and
+checksum, and renders with the stand-in toolchain (no FFmpeg): this proves the seam,
+not the render.
 
 What this proves:
 
@@ -32,6 +35,7 @@ from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
 from plm_platform.exceptions import ExceptionQueue, StaticReviewerDirectory
 
+from services.media_factory.audio.features import measure_features
 from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from services.media_factory.rendering.assembler import assemble_media_package
 from services.media_factory.visuals.planner import BrandProfile
@@ -40,7 +44,9 @@ from services.quality_gate.gate.engine import run_candidate_evaluation
 from services.quality_gate.gate.persistence import persist_gate_result
 from services.quality_gate.gate.quarantine import resolve_quarantine
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
+from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain
 from tests.support.qa_db import qa_db_session
+from tests.support.rights_detectors import configured_detectors
 from tests.support.seams import candidate_event, lineage_fields, rights_fields
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -63,16 +69,26 @@ def _wav(tmp: Path, name: str, seconds: float = 2.0) -> Path:
     return path
 
 
-def _passed_manifest(tmp: Path, candidate_id: str, **event_kw: Any) -> dict[str, Any]:
-    path = _wav(tmp, candidate_id)
+def _passed_manifest(tmp: Path, candidate_id: str, *, seconds: int = 2,
+                     store: InMemoryArtifactStore | None = None,
+                     **event_kw: Any) -> dict[str, Any]:
+    path = _wav(tmp, candidate_id, float(seconds))
+    if store is not None:  # P6 reads the artifact by URI and checksum
+        stored = store.put_source(f"{candidate_id}/full_mix.wav", path.read_bytes())
+        event_kw = {"artifact_uri": stored.uri, "artifact_sha256": stored.sha256, **event_kw}
     result = run_candidate_evaluation(
         event=candidate_event(
-            candidate_id=candidate_id, requested_duration_seconds=2,
-            measured_audio={"duration_seconds": 2.0, "sample_rate": 44100, "channels": 2},
+            candidate_id=candidate_id, requested_duration_seconds=seconds,
+            requested_duration_range={"min_seconds": 1, "max_seconds": max(2, seconds)},
+            measured_audio={"duration_seconds": float(seconds), "sample_rate": 44100,
+                            "channels": 2},
             **event_kw,
         ),
         audio_path=path,
         clock=FixedClock(FIXED_NOW),
+        # R4: the rights detectors run on controlled synthetic references (ADR-0034);
+        # the P28 facts travel on the C4 event (ADR-0035).
+        detectors=configured_detectors(),
     )
     assert result.release_manifest is not None, result.disposition
     return json.loads(json.dumps(result.release_manifest.to_wire()))
@@ -99,28 +115,30 @@ def test_producer_emits_exactly_the_shared_wire(passed: dict[str, Any]) -> None:
     assert passed["lineage"] == lineage_fields()
 
 
-def test_real_manifests_assemble_into_a_package_with_their_lineage(
-    tmp: Path, passed: dict[str, Any]
-) -> None:
-    second = _passed_manifest(tmp, "cand_c5_b")
-    manifests = [parse_seam(ReleaseManifestPayload, m) for m in (passed, second)]
+def test_real_manifests_assemble_into_a_package_with_their_lineage(tmp: Path) -> None:
+    store = InMemoryArtifactStore()
+    wires = [_passed_manifest(tmp, f"cand_c5_{n}", seconds=12, store=store,
+                              track_spec_id=f"trk_c5_{n}") for n in "abc"]
+    manifests = [parse_seam(ReleaseManifestPayload, m) for m in wires]
     result = assemble_media_package(
         track_manifests=manifests,
         brand_profile=BRAND,
-        required_duration_seconds=4.0,
+        required_duration_seconds=32.0,
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Contract Session",
+        store=store,
+        toolchain=StandInToolchain(),
+        render_profile_name="preview_360p_v1",
         clock=FixedClock(FIXED_NOW),
     )
     pkg = result.media_package
     assert pkg.lineage is not None
-    assert pkg.lineage.model_dump() == passed["lineage"]
-    assert [t.audio_uri for t in result.playlist_tracks] == [
-        passed["artifact_uri"], second["artifact_uri"]
-    ]
-    assert [t.audio_checksum for t in result.playlist_tracks] == [
-        passed["artifact_sha256"], second["artifact_sha256"]
-    ]
+    assert pkg.lineage.model_dump() == wires[0]["lineage"]
+    by_song = {w["candidate_id"]: w for w in wires}
+    assert {t.song_id for t in result.playlist_tracks} == set(by_song)
+    for track in result.playlist_tracks:
+        assert track.audio_uri == by_song[track.song_id]["artifact_uri"]
+        assert track.audio_checksum == by_song[track.song_id]["artifact_sha256"]
 
 
 def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
@@ -133,6 +151,10 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
         ),
         audio_path=path,
         clock=FixedClock(FIXED_NOW),
+        # R4: the rights detectors run on controlled synthetic references and the P28
+        # generation facts are declared here, because C4 does not carry them yet
+        # (docs/STATUS.md; without them P5 quarantines, ADR-0034).
+        detectors=configured_detectors(),
     )
     assert result.disposition.value == "QUARANTINED"
     assert result.quarantine_case is not None and result.release_manifest is None
@@ -164,12 +186,15 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
 
     # P6 admits it only because of the override record.
     parsed = parse_seam(ReleaseManifestPayload, wire)
+    features = {"cand_c5_quar": measure_features("cand_c5_quar", path.read_bytes())}
     assert assemble_playlist(
-        manifests=[parsed], brand_id="brand_neon", required_duration_seconds=2.0, now=FIXED_NOW
+        manifests=[parsed], features=features, brand_id="brand_neon",
+        required_duration_seconds=2.0, now=FIXED_NOW,
     ).tracks
     stripped = parse_seam(ReleaseManifestPayload, with_value(wire, "override", None))
     with pytest.raises(PlaylistAssemblyError):
-        assemble_playlist(manifests=[stripped], brand_id="brand_neon", required_duration_seconds=2.0, now=FIXED_NOW)
+        assemble_playlist(manifests=[stripped], features=features, brand_id="brand_neon",
+                          required_duration_seconds=2.0, now=FIXED_NOW)
 
 
 @pytest.mark.parametrize(
@@ -228,5 +253,6 @@ def test_p6_refuses_tracks_from_two_arms(tmp: Path, passed: dict[str, Any]) -> N
     other = _passed_manifest(tmp, "cand_c5_other", lineage=lineage_fields(content_arm_id="arm_b"))
     manifests = [parse_seam(ReleaseManifestPayload, m) for m in (passed, other)]
     with pytest.raises(PlaylistAssemblyError) as exc:
-        assemble_playlist(manifests=manifests, brand_id="brand_neon", required_duration_seconds=4.0, now=FIXED_NOW)
+        assemble_playlist(manifests=manifests, features={}, brand_id="brand_neon",
+                          required_duration_seconds=4.0, now=FIXED_NOW)
     assert exc.value.error.code == "mixed_lineage"

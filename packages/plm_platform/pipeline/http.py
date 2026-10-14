@@ -12,7 +12,8 @@
 
 :class:`HttpPhaseSteps` implements a step over HTTP only where today's endpoints exist
 and carry complete facts: P2 -> P3 design (``research``), P3 validate + materialize
-(``policy_check``), and P4 plan + execute + export to P5 (``generate``). Every other step
+(``policy_check``), P4 plan + execute + export to P5 (``generate``), and P4's C4 event
+evaluated by P5, which reads the audio by URI and checksum (``qa``, R4). Every other step
 raises :class:`~plm_platform.temporal.CapabilityUnavailable` naming the stage that
 delivers it; the workflow turns that into a hold. Nothing is faked.
 
@@ -29,6 +30,8 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 import httpx
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 
 from ..config import SERVICE_TOKEN_HEADER, SERVICE_TOKEN_VAR
 from ..outbox import IDEMPOTENCY_KEY_HEADER
@@ -98,11 +101,15 @@ class PhaseClient:
             params: Mapping[str, str] | None = None) -> Any:
         return self._request("GET", path, idempotency_key=idempotency_key, params=params)
 
-    def post(self, path: str, *, idempotency_key: str, body: Any = None) -> Any:
-        return self._request("POST", path, idempotency_key=idempotency_key, body=body)
+    def post(self, path: str, *, idempotency_key: str, body: Any = None,
+             timeout_seconds: float | None = None) -> Any:
+        """``timeout_seconds`` overrides the client's timeout for a long call (a render)."""
+        return self._request("POST", path, idempotency_key=idempotency_key, body=body,
+                             timeout_seconds=timeout_seconds)
 
     def _request(self, method: str, path: str, *, idempotency_key: str,
-                 params: Mapping[str, str] | None = None, body: Any = None) -> Any:
+                 params: Mapping[str, str] | None = None, body: Any = None,
+                 timeout_seconds: float | None = None) -> Any:
         if not self._token:
             raise PhaseRequestRefused(
                 self.phase, path, 503, "blocked_pending_credentials",
@@ -116,6 +123,8 @@ class PhaseClient:
                 method, path, headers=headers,
                 params=None if params is None else dict(params),
                 json=body if method == "POST" else None,
+                timeout=(httpx.USE_CLIENT_DEFAULT if timeout_seconds is None
+                         else httpx.Timeout(timeout_seconds)),
             )
         except httpx.HTTPError as exc:
             raise PhaseRequestFailed(self.phase, path, type(exc).__name__, str(exc)) from exc
@@ -133,10 +142,6 @@ class PhaseClient:
 
 
 UNAVAILABLE_STEPS: Final[Mapping[Step, tuple[str, str]]] = {
-    Step.QA: ("R4", (
-        "P5 evaluates audio it reads by URI from the artifact store; P4 does not hand "
-        "audio bytes over by URI until R4")),
-    Step.ASSEMBLE: ("R4", "P6 needs P5 gate decisions and real FFmpeg rendering (R4)"),
     Step.UPLOAD: ("R5", (
         "P7 /youtube/publish needs a rendered C6 media package from P6, and its write "
         "guard must reserve under the pipeline's idempotency key")),
@@ -160,6 +165,67 @@ def _require(mapping: Any, key: str, where: str) -> Any:
     if not isinstance(mapping, dict) or key not in mapping or mapping[key] in (None, ""):
         raise ValidationFailure(f"{where}: required fact {key!r} is missing")
     return mapping[key]
+
+
+_QA_PASSING: Final[frozenset[str]] = frozenset({"PASSED", "PASSED_WITH_WARNINGS"})
+_QA_DISPOSITIONS: Final[frozenset[str]] = _QA_PASSING | {"REJECTED", "QUARANTINED"}
+
+
+def _qa_evaluation(candidate_id: str, evaluated: Any) -> dict[str, Any]:
+    """One P5 answer, checked: a disposition without the facts it implies is no answer."""
+    where = f"P5 evaluation of {candidate_id}"
+    disposition = str(_require(evaluated, "disposition", where))
+    if disposition not in _QA_DISPOSITIONS:
+        raise ValidationFailure(f"{where}: unknown disposition {disposition!r}")
+    record: dict[str, Any] = {
+        "candidate_id": candidate_id,
+        "evaluation_id": str(_require(evaluated, "evaluation_id", where)),
+        "disposition": disposition,
+        "release_manifest_id": None,
+        "quarantine_case_id": None,
+        "reason_codes": [],
+    }
+    if disposition in _QA_PASSING:
+        # A pass P5 issued no release manifest for is not a pass.
+        record["release_manifest_id"] = str(_require(evaluated, "release_manifest_id", where))
+    elif disposition == "QUARANTINED":
+        record["quarantine_case_id"] = str(_require(evaluated, "quarantine_case_id", where))
+        codes = _require(evaluated, "quarantine_reason_codes", where)
+        if not isinstance(codes, list) or not codes or not all(
+                isinstance(c, str) and c for c in codes):
+            raise ValidationFailure(f"{where}: quarantine reason codes {codes!r} are invalid")
+        record["reason_codes"] = list(codes)
+    return record
+
+
+def _qa_result(evaluations: list[dict[str, Any]]) -> StepResult:
+    if not evaluations:
+        raise ValidationFailure("qa: generate produced no candidates to evaluate")
+    passed = [e for e in evaluations if e["disposition"] in _QA_PASSING]
+    quarantined = [e for e in evaluations if e["disposition"] == "QUARANTINED"]
+    holds: list[dict[str, Any]] = []
+    if passed:
+        disposition = "PASSED"
+    elif quarantined:
+        disposition = "QUARANTINED"
+        holds = [
+            {"reason_code": code,
+             "details": {"candidate_id": e["candidate_id"], "evaluation_id": e["evaluation_id"],
+                         "quarantine_case_id": e["quarantine_case_id"]}}
+            for e in quarantined for code in e["reason_codes"]
+        ]
+    else:
+        disposition = "REJECTED"
+    return StepResult(
+        outputs={
+            "disposition": disposition,
+            "holds": holds,
+            "evaluations": evaluations,
+            "passed_candidate_ids": [e["candidate_id"] for e in passed],
+            "release_manifest_ids": [e["release_manifest_id"] for e in passed],
+        },
+        provider_ids={f"evaluation.{n}": e["evaluation_id"] for n, e in enumerate(evaluations)},
+    )
 
 
 class HttpPhaseSteps:
@@ -281,13 +347,169 @@ class HttpPhaseSteps:
             cost=None,  # P4 reports provider credits, not money; the ledger books the estimate
         )
 
-    # -- steps today's APIs cannot carry ---------------------------------------------------
+    # -- qa: P4's C4 event per candidate, evaluated by P5 from the artifact store (R4) -----
 
     async def qa(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.QA)
+        return await asyncio.to_thread(self._qa, request)
+
+    def _qa(self, request: StepRequest) -> StepResult:
+        """Evaluate every generated candidate and return one disposition for the run.
+
+        P4's export answers with the candidate's C4 event (re-exporting is idempotent);
+        P5 reads the audio by the event's URI and sha256. Any refusal, such as an
+        artifact that is missing or fails its checksum, ends the step; nothing is
+        skipped. The run's disposition: ``PASSED`` when at least one candidate passed
+        (with or without warnings, and with its release manifest); otherwise
+        ``QUARANTINED`` with one hold per quarantine reason code; otherwise
+        ``REJECTED``. Quarantine cases of candidates not carried forward stay open in P5.
+        """
+        key = request.idempotency_key
+        generated = _require(request.inputs, "generate", "qa inputs")
+        candidate_ids = _require(generated, "candidate_ids", "generate outputs")
+        if not isinstance(candidate_ids, list):
+            raise ValidationFailure("generate outputs: 'candidate_ids' is not a list")
+        p4, p5 = self._client(Phase.MUSIC), self._client(Phase.QA)
+        evaluations: list[dict[str, Any]] = []
+        for candidate_id in candidate_ids:
+            exported = p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
+                               idempotency_key=key)
+            event = _require(exported, "event", f"P4 export of {candidate_id}")
+            evaluated = p5.post("/qa/evaluations", idempotency_key=key,
+                                body={"candidate_event": event})
+            evaluations.append(_qa_evaluation(str(candidate_id), evaluated))
+        return _qa_result(evaluations)
+
+    # -- steps today's APIs cannot carry ---------------------------------------------------
+
+    # -- assemble: P6 assembles and renders each P3 package's cleared recordings (R4) -----
+
+    ASSEMBLE_TIMEOUT_SECONDS: Final[float] = 570.0
+    """P6 renders inside the request; this stays under the step's start-to-close."""
 
     async def assemble(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.ASSEMBLE)
+        return await asyncio.to_thread(self._assemble, request)
+
+    @staticmethod
+    def _playlist_facts(package: Any, package_id: str) -> dict[str, Any]:
+        """P3's playlist, visual and title facts for P6, never defaulted.
+
+        ``required_duration_seconds`` is the playlist spec's total duration;
+        ``visual_profile`` the visual spec's visual world; ``playlist_concept`` the title
+        spec's formatting pattern filled with the first track spec's genre, mood and use
+        case (P3's declared title rule over P3's own facts).
+        """
+        where = f"P3 package {package_id}"
+        playlist = _require(package, "playlist_spec", where)
+        visual = _require(package, "visual_spec", where)
+        title = _require(package, "title_spec", where)
+        specs = _require(package, "track_specs", where)
+        if not isinstance(specs, list) or not specs:
+            raise ValidationFailure(f"{where}: no track specs")
+        first = specs[0]
+        preferences = _require(first, "bounded_preferences", f"{where} track spec")
+        constraints = _require(first, "hard_constraints", f"{where} track spec")
+        moods = _require(preferences, "mood", f"{where} preferences")
+        uses = _require(preferences, "use_case", f"{where} preferences")
+        if not isinstance(moods, list) or not moods or not isinstance(uses, list) or not uses:
+            raise ValidationFailure(f"{where}: mood and use case are needed for the concept")
+        pattern = str(_require(title, "formatting_pattern", f"{where} title spec"))
+        try:
+            concept = pattern.format_map({
+                "mood": moods[0], "use_case": uses[0],
+                "genre": _require(constraints, "genre", f"{where} constraints")})
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ValidationFailure(
+                f"{where}: title pattern {pattern!r} needs a fact P3 does not give: {exc}"
+            ) from exc
+        minutes = _require(playlist, "total_duration_minutes", f"{where} playlist spec")
+        return {
+            "brand_id": str(_require(package, "brand_id", where)),
+            "required_duration_seconds": float(minutes) * 60.0,
+            "visual_profile": str(_require(visual, "visual_world", f"{where} visual spec")),
+            "playlist_concept": concept,
+            "track_spec_ids": {str(_require(s, "track_spec_id", where)) for s in specs},
+        }
+
+    def _cleared_track_specs(self, candidate_ids: list[Any], key: str) -> dict[str, str]:
+        """``candidate_id -> track_spec_id`` for every candidate P5 cleared for release.
+
+        P5 is asked for each candidate's manifest: none (404) or not cleared means the
+        candidate is not offered to P6. P6 re-verifies every id it is sent.
+        """
+        p5 = self._client(Phase.QA)
+        cleared: dict[str, str] = {}
+        for raw in candidate_ids:
+            candidate_id = str(raw)
+            try:
+                body = p5.get(f"/qa/release-manifests/{candidate_id}", idempotency_key=key)
+            except PhaseRequestRefused as exc:
+                if exc.status == 404:
+                    continue
+                raise
+            try:
+                manifest = parse_seam(ReleaseManifestPayload, body)
+            except SeamRejection as exc:
+                raise ValidationFailure(
+                    f"P5 manifest of {candidate_id} is unreadable: {exc}") from exc
+            if manifest.cleared_for_release:
+                cleared[candidate_id] = manifest.track_spec_id
+        return cleared
+
+    def _assemble(self, request: StepRequest) -> StepResult:
+        """One media package per P3 package that has cleared recordings.
+
+        Inputs: ``policy_check.package_ids`` (P3 packages) and ``generate.candidate_ids``.
+        Each package's cleared candidates (by track spec) go to
+        ``POST /media/packages/assemble`` by id with the package's playlist facts; P6
+        fetches the manifests from P5 itself. A package P6 assembled but whose render
+        post-render QA blocked fails the step with P6's reason codes; a P6 refusal fails
+        it with P6's code. No package with a cleared recording fails it too.
+        """
+        key = request.idempotency_key
+        policy = _require(request.inputs, "policy_check", "assemble inputs")
+        package_ids = _require(policy, "package_ids", "policy_check outputs")
+        generated = _require(request.inputs, "generate", "assemble inputs")
+        candidate_ids = _require(generated, "candidate_ids", "generate outputs")
+        if not isinstance(package_ids, list) or not isinstance(candidate_ids, list):
+            raise ValidationFailure("assemble inputs: package and candidate ids must be lists")
+        cleared = self._cleared_track_specs(candidate_ids, key)
+        p3, p6 = self._client(Phase.EXPERIMENTS), self._client(Phase.MEDIA)
+        packages: list[dict[str, Any]] = []
+        for raw_package_id in package_ids:
+            package_id = str(raw_package_id)
+            facts = self._playlist_facts(
+                p3.get(f"/experiments/v1/packages/{package_id}", idempotency_key=key),
+                package_id)
+            members = [cid for cid, spec in cleared.items() if spec in facts["track_spec_ids"]]
+            if not members:
+                continue
+            assembled = p6.post(
+                "/media/packages/assemble", idempotency_key=key,
+                timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS,
+                body={"candidate_ids": members, "brand_id": facts["brand_id"],
+                      "required_duration_seconds": facts["required_duration_seconds"],
+                      "visual_profile": facts["visual_profile"],
+                      "playlist_concept": facts["playlist_concept"]})
+            media_package_id = str(_require(assembled, "media_package_id", "P6 package"))
+            package_status = str(_require(assembled, "status", "P6 package"))
+            if package_status != "ready_for_publish":
+                codes = assembled.get("blocking_reason_codes") or []
+                raise ValidationFailure(
+                    f"P6 package {media_package_id} is {package_status}: post-render QA "
+                    f"blocked it ({', '.join(map(str, codes)) or 'no reason codes'})")
+            packages.append({"media_package_id": media_package_id, "p3_package_id": package_id,
+                             "candidate_ids": members,
+                             "video_checksum": _require(assembled, "video_checksum",
+                                                        "P6 package")})
+        if not packages:
+            raise ValidationFailure(
+                f"assemble: none of the P3 packages {package_ids} has a recording P5 cleared")
+        return StepResult(
+            outputs={"media_package_ids": [p["media_package_id"] for p in packages],
+                     "packages": packages},
+            provider_ids={f"media_package.{n}": p["media_package_id"]
+                          for n, p in enumerate(packages)},
+        )
 
     async def upload(self, request: StepRequest) -> StepResult:
         raise self._unavailable(Step.UPLOAD)
