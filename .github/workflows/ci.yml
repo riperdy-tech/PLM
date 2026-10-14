@@ -49,7 +49,7 @@ jobs:
             pip-${{ runner.os }}-
 
       - name: Install project (editable, dev extras)
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
 
       - name: Lint (ruff)
         run: ruff check .
