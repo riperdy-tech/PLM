@@ -104,6 +104,7 @@ def run_candidate_evaluation(
         },
         artifact_snapshot={
             "audio_path": str(audio_path),
+            "artifact_uri": event.artifact_uri,
             "artifact_sha256": event.artifact_sha256,
             "expected_duration_seconds": expected_duration_seconds,
             "measured_audio": event.measured_audio.model_dump(mode="json"),
@@ -230,14 +231,18 @@ def run_candidate_evaluation(
 
     # 6. Release Manifest Generation (Only if passed or passed with warnings)
     if disposition in (GateDisposition.PASSED, GateDisposition.PASSED_WITH_WARNINGS):
-        primary_evidence_id = evaluation.evidence_items[0].id if evaluation.evidence_items else "no_evidence"
+        # The rights evaluator always records the declaration (or its absence).
+        primary_evidence_id = evaluation.evidence_items[0].id
         release_manifest = build_release_manifest(
             candidate_id=candidate_id,
             canonical_artifact_id=artifact_id,
-            experiment_id=experiment_id,
+            artifact_uri=event.artifact_uri,
+            artifact_sha256=event.artifact_sha256,
+            measured_duration_seconds=event.measured_audio.duration_seconds,
             track_spec_id=track_spec_id,
-            content_arm_id=content_arm_id,
+            lineage=event.lineage,
             disposition=disposition,
+            override=None,
             technical_status=evaluation.technical_status,
             commercial_use_status=evaluation.rights_status,
             provenance_status=evaluation.provenance_status,

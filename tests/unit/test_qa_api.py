@@ -169,10 +169,13 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
         assert res_post.json()["status"] == "RESOLVED"
         assert res_post.json()["resolution"] == "CLEARED_BY_OVERRIDE"
 
-        # 4. Manifest is now available with CLEARED_BY_OVERRIDE
+        # 4. Manifest is available: automated disposition kept, override recorded (R8)
         man_res = qa_client.get("/qa/release-manifests/cand_quar_api_01", headers=headers)
         assert man_res.status_code == 200
-        assert man_res.json()["disposition"] == "CLEARED_BY_OVERRIDE"
+        assert man_res.json()["disposition"] == "QUARANTINED"
+        assert man_res.json()["override"]["status"] == "CLEARED_BY_OVERRIDE"
+        assert man_res.json()["override"]["quarantine_case_id"] == case_id
+        assert man_res.json()["lineage"]["content_arm_id"] == "arm_api_02"
 
     finally:
         if wav_path.is_file():

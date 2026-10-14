@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -411,6 +412,7 @@ def insert_media_package(session: Session, pkg: MediaPackage) -> None:
             release_manifest_id=pkg.release_manifest_id,
             experiment_id=pkg.experiment_id,
             content_arm_id=pkg.content_arm_id,
+            lineage_json=pkg.lineage.model_dump(mode="json") if pkg.lineage else None,
             brand_id=pkg.brand_id,
             playlist_session_id=pkg.playlist_session_id,
             visual_session_id=pkg.visual_session_id,
@@ -453,6 +455,11 @@ def get_media_package_by_id(session: Session, package_id: str) -> MediaPackage |
         release_manifest_id=row["release_manifest_id"],
         experiment_id=row["experiment_id"],
         content_arm_id=row["content_arm_id"],
+        lineage=(
+            ExperimentLineage.model_validate(row["lineage_json"])
+            if row["lineage_json"] is not None
+            else None
+        ),
         brand_id=row["brand_id"],
         playlist_session_id=row["playlist_session_id"],
         visual_session_id=row["visual_session_id"],
@@ -496,6 +503,11 @@ def get_media_package_by_release_manifest(
         release_manifest_id=row["release_manifest_id"],
         experiment_id=row["experiment_id"],
         content_arm_id=row["content_arm_id"],
+        lineage=(
+            ExperimentLineage.model_validate(row["lineage_json"])
+            if row["lineage_json"] is not None
+            else None
+        ),
         brand_id=row["brand_id"],
         playlist_session_id=row["playlist_session_id"],
         visual_session_id=row["visual_session_id"],

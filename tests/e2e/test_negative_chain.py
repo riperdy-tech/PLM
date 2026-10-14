@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 
 import pytest
 from plm_contracts import GateDisposition
+from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from sqlalchemy.orm import Session
 
 # P9
@@ -27,7 +29,7 @@ from services.distribution.compiler.release_compiler import compile_canonical_re
 from services.distribution.engine import DistributionEngine
 
 # P5 & P6
-from services.media_factory.playlist.assembler import assemble_playlist
+from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from services.media_factory.rendering.assembler import assemble_media_package
 from services.media_factory.visuals.planner import BrandProfile
 from services.quality_gate.gate.manifest import build_release_manifest
@@ -40,6 +42,7 @@ from services.youtube_publishing.preflight.gates import (
     evaluate_gate_b_artifact,
     evaluate_gate_c_metadata,
 )
+from tests.support.seams import sample_lineage
 
 
 def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
@@ -48,13 +51,16 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
     rejected_manifest = build_release_manifest(
         candidate_id="cand_rejected_001",
         canonical_artifact_id="art_defect_001",
-        experiment_id="exp_fail_001",
+        artifact_uri="music/test/art_defect_001.wav",
+        artifact_sha256="0" * 64,
+        measured_duration_seconds=120.0,
         track_spec_id="trk_spec_001",
-        content_arm_id="arm_fail_001",
+        lineage=sample_lineage(experiment_id="exp_fail_001", content_arm_id="arm_fail_001"),
         disposition=GateDisposition.REJECTED,
-        technical_status="FAIL",
-        commercial_use_status="INELIGIBLE",
-        provenance_status="FAILED",
+        override=None,
+        technical_status="FAILED",
+        commercial_use_status="ineligible",
+        provenance_status="COMPLETE",
         ai_disclosure_required=True,
         rights_risk="HIGH",
         policy_status="VIOLATION",
@@ -64,51 +70,20 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
         evidence_bundle_id="evi_fail_001",
     )
     assert rejected_manifest.disposition == GateDisposition.REJECTED
+    track = parse_seam(ReleaseManifestPayload, rejected_manifest.to_wire())
 
     # 2. P6 playlist assembly hard-blocks the unapproved candidate (Rulings R7, R8)
-    with pytest.raises(ValueError, match="not cleared"):
-        assemble_playlist(
-            release_manifest_id=rejected_manifest.p5_manifest_id,
-            experiment_id=rejected_manifest.experiment_id,
-            content_arm_id=rejected_manifest.content_arm_id,
-            brand_id="brand_neon",
-            candidate_manifests=[
-                {
-                    "candidate_id": rejected_manifest.candidate_id,
-                    "disposition": rejected_manifest.disposition.value,
-                    "canonical_artifact_id": rejected_manifest.canonical_artifact_id,
-                }
-            ],
-            track_details=[
-                {
-                    "candidate_id": rejected_manifest.candidate_id,
-                    "title": "Rejected Track",
-                    "duration_seconds": 120.0,
-                }
-            ],
-            required_duration_seconds=120.0,
-        )
+    with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
+        assemble_playlist(manifests=[track], brand_id="brand_neon", required_duration_seconds=120.0)
 
-    # 3. P6 top-level media package assembler also refuses to assemble unapproved candidate
-    with pytest.raises(ValueError, match="not cleared"):
+    # 3. P6 top-level media package assembler also refuses it
+    with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
         assemble_media_package(
-            release_manifest={
-                "release_manifest_id": rejected_manifest.p5_manifest_id,
-                "experiment_id": rejected_manifest.experiment_id,
-                "content_arm_id": rejected_manifest.content_arm_id,
-                "brand_id": "brand_neon",
-                "tracks": [
-                    {
-                        "song_id": rejected_manifest.candidate_id,
-                        "title": "Rejected Track",
-                        "duration_seconds": 120.0,
-                        "provenance_status": "REJECTED",
-                    }
-                ],
-            },
+            track_manifests=[track],
             brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
-            render_profile="yt_longform_1080p_v1",
             required_duration_seconds=120.0,
+            visual_profile="brand_neon_rain_v1",
+            playlist_concept="Never Published",
         )
 
 

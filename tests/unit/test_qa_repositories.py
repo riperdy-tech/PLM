@@ -31,6 +31,7 @@ from quality_gate.domain.models import (
 from quality_gate.storage import repositories
 
 from tests.support.qa_db import create_qa_engine, qa_session
+from tests.support.seams import sample_lineage
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)
 
@@ -206,10 +207,13 @@ def test_gate_decision_quarantine_and_manifest_crud() -> None:
         manifest = ReleaseManifest.create(
             candidate_id="cand_003",
             canonical_artifact_id="art_003",
-            experiment_id="exp_003",
+            artifact_uri="music/test/art_003.wav",
+            artifact_sha256="0" * 64,
+            measured_duration_seconds=180.0,
             track_spec_id="spec_003",
-            content_arm_id="arm_003",
+            lineage=sample_lineage(experiment_id="exp_003", content_arm_id="arm_003"),
             disposition=GateDisposition.PASSED,
+            override=None,
             technical_status="PASSED",
             commercial_use_status="ELIGIBLE",
             provenance_status="COMPLETE",

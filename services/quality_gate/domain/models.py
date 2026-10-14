@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts import GateDisposition as SharedGateDisposition
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c5 import GateOverrideRecord, ReleaseManifestPayload
+
 from .enums import (
     CheckSeverity,
     CheckStatus,
@@ -539,9 +543,18 @@ class QuarantineCase:
         )
 
 
+class LegacyManifestError(ValueError):
+    """A manifest stored before ADR-0028 lacks facts the C5 wire requires."""
+
+
 @dataclass(frozen=True)
 class ReleaseManifest:
-    """Downstream package contract for P6 (Seam C5, Ruling R7, R8, P5 §77, §92)."""
+    """P5's per-candidate release manifest (Seam C5, Rulings R7, R8, P5 §77, §92).
+
+    ``disposition`` is the automated gate decision; ``override`` records an audited
+    human override (ADR-0028). ``lineage`` and the artifact facts are ``None`` only on
+    rows stored before ADR-0028, which :meth:`to_wire` refuses to serve.
+    """
 
     p5_manifest_id: str
     release_manifest_version: str
@@ -562,17 +575,26 @@ class ReleaseManifest:
     warning_codes: list[str]
     evidence_bundle_id: str
     manifest_hash: str
+    lineage: ExperimentLineage | None = None
+    artifact_uri: str | None = None
+    artifact_sha256: str | None = None
+    measured_duration_seconds: float | None = None
+    override: GateOverrideRecord | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
     def create(
         cls,
+        *,
         candidate_id: str,
         canonical_artifact_id: str,
-        experiment_id: str,
+        artifact_uri: str,
+        artifact_sha256: str,
+        measured_duration_seconds: float,
         track_spec_id: str,
-        content_arm_id: str,
+        lineage: ExperimentLineage,
         disposition: GateDisposition,
+        override: GateOverrideRecord | None,
         technical_status: str,
         commercial_use_status: str,
         provenance_status: str,
@@ -589,10 +611,13 @@ class ReleaseManifest:
             {
                 "candidate_id": candidate_id,
                 "canonical_artifact_id": canonical_artifact_id,
-                "experiment_id": experiment_id,
+                "artifact_uri": artifact_uri,
+                "artifact_sha256": artifact_sha256,
+                "measured_duration_seconds": measured_duration_seconds,
                 "track_spec_id": track_spec_id,
-                "content_arm_id": content_arm_id,
+                "lineage": lineage.model_dump(mode="json"),
                 "disposition": disposition.value,
+                "override": override.model_dump(mode="json") if override else None,
                 "technical_status": technical_status,
                 "commercial_use_status": commercial_use_status,
                 "provenance_status": provenance_status,
@@ -609,14 +634,16 @@ class ReleaseManifest:
         ).encode("utf-8")
         m_hash = hashlib.sha256(content).hexdigest()
         mid = p5_manifest_id(candidate_id, evaluation_id_str, version)
+        if override is not None:
+            mid = p5_manifest_id(candidate_id, override.quarantine_case_id, version)
         return cls(
             p5_manifest_id=mid,
             release_manifest_version=version,
             candidate_id=candidate_id,
             canonical_artifact_id=canonical_artifact_id,
-            experiment_id=experiment_id,
+            experiment_id=lineage.experiment_id,
             track_spec_id=track_spec_id,
-            content_arm_id=content_arm_id,
+            content_arm_id=lineage.content_arm_id,
             disposition=disposition,
             technical_status=technical_status,
             commercial_use_status=commercial_use_status,
@@ -629,7 +656,49 @@ class ReleaseManifest:
             warning_codes=warning_codes,
             evidence_bundle_id=evidence_bundle_id,
             manifest_hash=m_hash,
+            lineage=lineage,
+            artifact_uri=artifact_uri,
+            artifact_sha256=artifact_sha256,
+            measured_duration_seconds=measured_duration_seconds,
+            override=override,
         )
+
+    def to_wire(self) -> dict[str, Any]:
+        """The C5 payload, through the shared model; legacy rows are refused."""
+        if (
+            self.lineage is None
+            or self.artifact_uri is None
+            or self.artifact_sha256 is None
+            or self.measured_duration_seconds is None
+            or self.disposition is GateDisposition.CLEARED_BY_OVERRIDE
+        ):
+            raise LegacyManifestError(
+                f"manifest {self.p5_manifest_id!r} predates ADR-0028 and lacks lineage, "
+                "artifact facts or a separate override record"
+            )
+        return ReleaseManifestPayload.build(
+            p5_manifest_id=self.p5_manifest_id,
+            release_manifest_version=self.release_manifest_version,
+            candidate_id=self.candidate_id,
+            canonical_artifact_id=self.canonical_artifact_id,
+            artifact_uri=self.artifact_uri,
+            artifact_sha256=self.artifact_sha256,
+            measured_duration_seconds=self.measured_duration_seconds,
+            track_spec_id=self.track_spec_id,
+            lineage=self.lineage,
+            disposition=SharedGateDisposition(self.disposition.value),
+            override=self.override,
+            technical_status=self.technical_status,
+            commercial_use_status=self.commercial_use_status,
+            provenance_status=self.provenance_status,
+            ai_disclosure_required=self.ai_disclosure_required,
+            rights_risk=self.rights_risk,
+            policy_status=self.policy_status,
+            evaluation_id=self.evaluation_id,
+            evaluation_policy_version=self.evaluation_policy_version,
+            warning_codes=tuple(self.warning_codes),
+            evidence_bundle_id=self.evidence_bundle_id,
+        ).to_wire()
 
 
 @dataclass

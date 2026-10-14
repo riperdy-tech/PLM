@@ -306,6 +306,7 @@ schema_version              "<major>.<minor>"
 event_type                  = "music_candidate_ready_for_p5"
 candidate_id
 artifact_id
+artifact_uri                where the artifact is stored (C9)
 artifact_sha256             hex SHA-256 of the artifact bytes
 track_spec_id
 lineage                     ExperimentLineage (ADR-0026)
@@ -378,9 +379,17 @@ manifest** rather than receiving one.
 **Endpoint / event:** per-track `GET /qa/release-manifests/{candidate_id}` (P5
 §94) — P6 calls it for each track of the playlist it assembles.
 
-**Producer fields (frozen names, P5 §77; `p5_manifest_id` added by R7):**
+**Producer fields (frozen names, P5 §77; `p5_manifest_id` added by R7; amended by
+ADR-0025/ADR-0028 — shared model `plm_contracts.seams.c5.ReleaseManifestPayload`):**
 
 ```text
+schema_version              "<major>.<minor>"
+artifact_uri                from the C4 event (ADR-0028)
+artifact_sha256             from the C4 event (ADR-0028)
+measured_duration_seconds   from the C4 event (ADR-0028)
+lineage                     ExperimentLineage (ADR-0026)
+override                    null, or {status: CLEARED_BY_OVERRIDE, quarantine_case_id,
+                             auditor_id, resolved_at, reason_codes} (ADR-0028)
 p5_manifest_id
 release_manifest_version
 candidate_id
@@ -434,7 +443,17 @@ assembling the playlist-level manifest; vocabulary drifted (`cleared` vs `PASSED
   means "`PASSED`, or `PASSED_WITH_WARNINGS` where that phase's own policy
   permits warnings".
 
-**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **exists**.
+- ADR-0028: `disposition` is always the automated decision (four values). An
+  override is the separate `override` record and is valid only with `QUARANTINED` or
+  `REJECTED`. P6 assembles only from C5 manifests and refuses any that are uncleared,
+  incomplete, or mixed-lineage. `experiment_id` / `content_arm_id` travel inside
+  `lineage`.
+
+**Seam test:** `tests/contract/test_c5_qa_to_media.py` — **exists**. It runs P5's real gate
+engine and real override path into P6's real assembler. It proves lineage and artifact
+facts arrive unchanged and that an override is admitted only through its record. It
+also proves refusal for missing facts, a fifth disposition, old vocabulary, placeholder
+ids, an override on a passing manifest, and tracks from two arms.
 
 ---
 

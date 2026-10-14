@@ -73,6 +73,8 @@ class CandidateReadyPayload(SeamModel):
     event_type: Literal["music_candidate_ready_for_p5"]
     candidate_id: NonEmpty
     artifact_id: NonEmpty
+    artifact_uri: NonEmpty
+    """Where the artifact is stored (C9); consumers read it by this URI and checksum."""
     artifact_sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     track_spec_id: NonEmpty
     lineage: ExperimentLineage

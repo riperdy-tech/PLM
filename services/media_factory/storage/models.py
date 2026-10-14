@@ -123,6 +123,8 @@ media_packages_table = sa.Table(
     sa.Column("release_manifest_id", sa.String(64), nullable=False, index=True),
     sa.Column("experiment_id", sa.String(64), nullable=False, index=True),
     sa.Column("content_arm_id", sa.String(64), nullable=False),
+    # ExperimentLineage (ADR-0028); NULL only for packages stored before it.
+    sa.Column("lineage_json", sa.JSON, nullable=True),
     sa.Column("brand_id", sa.String(64), nullable=False),
     sa.Column("playlist_session_id", sa.String(64), nullable=False),
     sa.Column("visual_session_id", sa.String(64), nullable=False),

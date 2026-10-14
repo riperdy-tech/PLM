@@ -13,26 +13,15 @@ from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
 from ..domain.enums import ResolutionCode
+from ..domain.models import LegacyManifestError
 from ..gate.engine import run_candidate_evaluation
-from ..gate.quarantine import resolve_quarantine
+from ..gate.persistence import persist_gate_result
+from ..gate.quarantine import OverrideNotPossibleError, resolve_quarantine
 from ..ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from ..storage.repositories import (
     get_candidate_evaluation,
     get_quarantine_case,
     get_release_manifest_by_candidate,
-    insert_candidate_evaluation,
-    insert_evaluation_snapshot,
-    insert_evidence_item,
-    insert_gate_decision,
-    insert_lyric_check,
-    insert_musical_check,
-    insert_policy_check,
-    insert_provenance_check,
-    insert_quarantine_case,
-    insert_release_manifest,
-    insert_rights_check,
-    insert_risk_finding,
-    insert_technical_check,
     list_open_quarantine_cases,
 )
 from .schemas import (
@@ -92,25 +81,18 @@ def build_router(
                     message=f"No release manifest found for candidate {candidate_id}.",
                 ).model_dump(),
             )
-        return ReleaseManifestPayload(
-            p5_manifest_id=manifest.p5_manifest_id,
-            release_manifest_version=manifest.release_manifest_version,
-            candidate_id=manifest.candidate_id,
-            canonical_artifact_id=manifest.canonical_artifact_id,
-            experiment_id=manifest.experiment_id,
-            track_spec_id=manifest.track_spec_id,
-            disposition=manifest.disposition.value,
-            technical_status=manifest.technical_status,
-            commercial_use_status=manifest.commercial_use_status,
-            provenance_status=manifest.provenance_status,
-            ai_disclosure_required=manifest.ai_disclosure_required,
-            rights_risk=manifest.rights_risk,
-            policy_status=manifest.policy_status,
-            evaluation_id=manifest.evaluation_id,
-            evaluation_policy_version=manifest.evaluation_policy_version,
-            warning_codes=manifest.warning_codes,
-            evidence_bundle_id=manifest.evidence_bundle_id,
-        )
+        try:
+            wire = manifest.to_wire()
+        except LegacyManifestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="legacy_manifest",
+                    field_paths=["candidate_id"],
+                    message=str(exc),
+                ).model_dump(),
+            ) from exc
+        return ReleaseManifestPayload.model_validate(wire)
 
     @router.post(
         "/evaluations",
@@ -142,32 +124,7 @@ def build_router(
         )
 
         # Persist aggregate to database
-        insert_candidate_evaluation(session, result.evaluation)
-        insert_evaluation_snapshot(session, result.snapshot)
-
-        for tc in result.evaluation.technical_checks:
-            insert_technical_check(session, tc)
-        for mc in result.evaluation.musical_checks:
-            insert_musical_check(session, mc)
-        for lc in result.evaluation.lyric_checks:
-            insert_lyric_check(session, lc)
-        for pc in result.evaluation.provenance_checks:
-            insert_provenance_check(session, pc)
-        for rc in result.evaluation.rights_checks:
-            insert_rights_check(session, rc)
-        for pol in result.evaluation.policy_checks:
-            insert_policy_check(session, pol)
-        for rf in result.evaluation.risk_findings:
-            insert_risk_finding(session, rf)
-        for ev in result.evaluation.evidence_items:
-            insert_evidence_item(session, ev)
-
-        insert_gate_decision(session, result.decision)
-
-        if result.quarantine_case:
-            insert_quarantine_case(session, result.quarantine_case)
-        if result.release_manifest:
-            insert_release_manifest(session, result.release_manifest)
+        persist_gate_result(session, result)
 
         session.commit()
 
@@ -279,13 +236,22 @@ def build_router(
                 ).model_dump(),
             )
 
-        case, _ = resolve_quarantine(
-            session=session,
-            case_id=case_id,
-            resolution=res_code,
-            auditor_id=req.auditor_id,
-            notes=req.notes,
-        )
+        try:
+            case, _ = resolve_quarantine(
+                session=session,
+                case_id=case_id,
+                resolution=res_code,
+                auditor_id=req.auditor_id,
+                notes=req.notes,
+            )
+        except OverrideNotPossibleError as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="override_not_possible", field_paths=["case_id"], message=str(exc)
+                ).model_dump(),
+            ) from exc
         session.commit()
 
         return QuarantineCaseResponse(

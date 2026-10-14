@@ -6,6 +6,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c5 import GateOverrideRecord
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -603,6 +605,13 @@ def insert_release_manifest(session: Session, manifest: ReleaseManifest) -> None
             warning_codes_json=json.dumps(manifest.warning_codes),
             evidence_bundle_id=manifest.evidence_bundle_id,
             manifest_hash=manifest.manifest_hash,
+            lineage_json=manifest.lineage.model_dump(mode="json") if manifest.lineage else None,
+            artifact_uri=manifest.artifact_uri,
+            artifact_sha256=manifest.artifact_sha256,
+            measured_duration_seconds=manifest.measured_duration_seconds,
+            override_json=(
+                manifest.override.model_dump(mode="json") if manifest.override else None
+            ),
             created_at=manifest.created_at,
         )
     )
@@ -636,6 +645,19 @@ def get_release_manifest_by_candidate(session: Session, candidate_id: str) -> Re
         warning_codes=json.loads(row["warning_codes_json"]),
         evidence_bundle_id=row["evidence_bundle_id"],
         manifest_hash=row["manifest_hash"],
+        lineage=(
+            ExperimentLineage.model_validate(row["lineage_json"])
+            if row["lineage_json"] is not None
+            else None
+        ),
+        artifact_uri=row["artifact_uri"],
+        artifact_sha256=row["artifact_sha256"],
+        measured_duration_seconds=row["measured_duration_seconds"],
+        override=(
+            GateOverrideRecord.model_validate(row["override_json"])
+            if row["override_json"] is not None
+            else None
+        ),
         created_at=row["created_at"],
     )
 
@@ -666,5 +688,18 @@ def get_release_manifest_by_id(session: Session, manifest_id: str) -> ReleaseMan
         warning_codes=json.loads(row["warning_codes_json"]),
         evidence_bundle_id=row["evidence_bundle_id"],
         manifest_hash=row["manifest_hash"],
+        lineage=(
+            ExperimentLineage.model_validate(row["lineage_json"])
+            if row["lineage_json"] is not None
+            else None
+        ),
+        artifact_uri=row["artifact_uri"],
+        artifact_sha256=row["artifact_sha256"],
+        measured_duration_seconds=row["measured_duration_seconds"],
+        override=(
+            GateOverrideRecord.model_validate(row["override_json"])
+            if row["override_json"] is not None
+            else None
+        ),
         created_at=row["created_at"],
     )

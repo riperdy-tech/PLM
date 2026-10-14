@@ -7,15 +7,19 @@ fields they care about.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c4 import CandidateReadyPayload
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 
 __all__ = [
     "candidate_event",
     "candidate_event_fields",
     "lineage_fields",
+    "release_manifest",
+    "release_manifest_fields",
     "rights_fields",
     "sample_lineage",
     "track_spec_fields",
@@ -93,6 +97,7 @@ def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
         "event_type": "music_candidate_ready_for_p5",
         "candidate_id": "cand_test_01",
         "artifact_id": "art_test_01",
+        "artifact_uri": "music/test/art_test_01.wav",
         "artifact_sha256": "0" * 64,
         "track_spec_id": "trk_test_01",
         "lineage": lineage_fields(),
@@ -112,3 +117,37 @@ def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
 
 def candidate_event(**overrides: Any) -> CandidateReadyPayload:
     return CandidateReadyPayload.build(**candidate_event_fields(**overrides))
+
+
+def release_manifest_fields(**overrides: Any) -> dict[str, Any]:
+    """Keyword arguments for a complete C5 track manifest (no ``schema_version``)."""
+    candidate = overrides.get("candidate_id", "cand_test_01")
+    fields: dict[str, Any] = {
+        "p5_manifest_id": f"rel_man_{candidate}",
+        "release_manifest_version": "1.0",
+        "candidate_id": candidate,
+        "canonical_artifact_id": f"art_{candidate}",
+        "artifact_uri": f"music/test/{candidate}.wav",
+        "artifact_sha256": hashlib.sha256(candidate.encode()).hexdigest(),
+        "measured_duration_seconds": 150.0,
+        "track_spec_id": "trk_test_01",
+        "lineage": lineage_fields(),
+        "disposition": "PASSED",
+        "override": None,
+        "technical_status": "PASSED",
+        "commercial_use_status": "eligible",
+        "provenance_status": "COMPLETE",
+        "ai_disclosure_required": True,
+        "rights_risk": "LOW",
+        "policy_status": "COMPLIANT",
+        "evaluation_id": f"eval_{candidate}",
+        "evaluation_policy_version": "p5-v1",
+        "warning_codes": [],
+        "evidence_bundle_id": f"evi_{candidate}",
+    }
+    fields.update(overrides)
+    return fields
+
+
+def release_manifest(**overrides: Any) -> ReleaseManifestPayload:
+    return ReleaseManifestPayload.build(**release_manifest_fields(**overrides))

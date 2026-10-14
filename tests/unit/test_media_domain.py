@@ -19,6 +19,8 @@ from media_factory.domain.models import (
     MediaPackage,
 )
 
+from tests.support.seams import sample_lineage
+
 
 def test_deterministic_identifiers() -> None:
     ps_id1 = playlist_session_id("exp_01", "brand_01", "v1")
@@ -76,6 +78,7 @@ def test_media_package_creation_and_c6_payload() -> None:
         metadata_candidates=[{"variant_id": "meta_a", "title": "Great Mix"}],
         short_source_assets=[{"clip_id": "clip_01"}],
         render_report={"status": "passed"},
+        lineage=sample_lineage(),
         package_version="v1",
         status=PackageStatus.READY_FOR_PUBLISH,
     )

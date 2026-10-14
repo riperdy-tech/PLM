@@ -14,6 +14,7 @@ from media_factory.visuals.planner import BrandProfile
 from pydantic import BaseModel, ConfigDict
 
 from tests.support.contract import SeamRegistry, assert_seam_payload
+from tests.support.seams import release_manifest
 
 REGISTRY_ENTRY = "C6 · PHASE-P6 → PHASE-P7 → PHASE-P8"
 
@@ -81,44 +82,17 @@ def test_declared_fields_match_registry() -> None:
 def test_producer_event_validates_against_consumer_schema(contract_registry: SeamRegistry) -> None:
     contract_registry.require_entry(REGISTRY_ENTRY)
 
-    # 1. Assemble media package via P6 pipeline
-    manifest = {
-        "release_manifest_id": "rm_test_001",
-        "experiment_id": "exp_synth_01",
-        "content_arm_id": "arm_synth_01",
-        "brand_id": "brand_neon",
-        "tracks": [
-            {
-                "song_id": "song_01",
-                "title": "Midnight Drive",
-                "duration_seconds": 180.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "media/audio/song_01.wav",
-                "audio_checksum": "chk_01",
-            },
-            {
-                "song_id": "song_02",
-                "title": "City Lights",
-                "duration_seconds": 210.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "media/audio/song_02.wav",
-                "audio_checksum": "chk_02",
-            },
-        ],
-        "playlist_intent": "Late Night Synthwave",
-        "policy_flags": {"ai_disclosure_required": True},
-    }
-
-    brand = BrandProfile(
-        brand_id="brand_neon",
-        brand_name="Neon Dreams",
-    )
-
+    # 1. Assemble media package via P6 pipeline from C5 track manifests
+    brand = BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams")
     assembly_result = assemble_media_package(
-        release_manifest=manifest,
+        track_manifests=[
+            release_manifest(candidate_id="song_01", measured_duration_seconds=180.0),
+            release_manifest(candidate_id="song_02", measured_duration_seconds=210.0),
+        ],
         brand_profile=brand,
-        render_profile="yt_longform_1080p_v1",
         required_duration_seconds=390.0,
+        visual_profile="brand_neon_rain_v1",
+        playlist_concept="Late Night Synthwave",
     )
 
     pkg = assembly_result.media_package
@@ -135,8 +109,8 @@ def test_producer_event_validates_against_consumer_schema(contract_registry: Sea
 
     assert isinstance(validated, ConsumerMediaPackageSchema)
     assert validated.media_package_id == pkg.media_package_id
-    assert validated.release_manifest_id == "rm_test_001"
-    assert validated.experiment_id == "exp_synth_01"
+    assert validated.release_manifest_id.startswith("plm_")  # P6 mints the playlist manifest id (R7)
+    assert validated.experiment_id == "exp_test_01"
     assert validated.brand_id == "brand_neon"
     assert validated.video.master_uri.endswith(".mp4")
     assert validated.video.render_profile == "yt_longform_1080p_v1"

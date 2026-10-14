@@ -677,30 +677,18 @@ def qa_smoke() -> None:
 
 @media_app.command(name="assemble")
 def media_assemble(
-    manifest_path: str = typer.Option(
-        ..., "--manifest", "-m", help="Path to P5 release manifest JSON file"
+    request_path: str = typer.Option(
+        ...,
+        "--request",
+        "-r",
+        help="Path to an assembly request JSON (track_manifests, brand, duration, visual "
+        "profile, playlist concept)",
     ),
-    brand_id: str = typer.Option("brand_neon", "--brand-id", help="Brand ID"),
-    brand_name: str = typer.Option("Neon Records", "--brand-name", help="Brand display name"),
-    render_profile: str = typer.Option(
-        "yt_longform_1080p_v1", "--render-profile", help="Render profile"
-    ),
-    duration_seconds: float = typer.Option(
-        3600.0, "--duration", "-d", help="Required playlist duration in seconds"
-    ),
-    version: str = typer.Option("v1", "--version", help="Package sequence version"),
 ) -> None:
-    """Assemble and render a media package from a release manifest file."""
+    """Assemble and render a media package from P5 track manifests."""
     from media_factory.cli import cli_assemble
 
-    cli_assemble(
-        manifest_path=manifest_path,
-        brand_id=brand_id,
-        brand_name=brand_name,
-        render_profile=render_profile,
-        duration_seconds=duration_seconds,
-        version=version,
-    )
+    cli_assemble(request_path=request_path)
 
 
 @media_app.command(name="package")

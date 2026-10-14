@@ -19,13 +19,22 @@ __all__ = [
 
 
 class AssemblePackageRequest(BaseModel):
-    """Request to assemble a full media package from a P5 release manifest."""
+    """Assemble a media package from P5's per-track C5 manifests (R7, ADR-0028).
 
-    release_manifest: dict[str, Any]
-    brand_id: str = "brand_neon"
-    brand_name: str = "Neon Records"
+    ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
+    P3's playlist, visual and title specs and have no defaults. Render profile and
+    sequence version are P6's own settings.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    track_manifests: list[dict[str, Any]] = Field(min_length=1)
+    brand_id: str = Field(min_length=1)
+    brand_name: str = Field(min_length=1)
+    required_duration_seconds: float = Field(gt=0.0)
+    visual_profile: str = Field(min_length=1)
+    playlist_concept: str = Field(min_length=1)
     render_profile: str = "yt_longform_1080p_v1"
-    required_duration_seconds: float = 3600.0
     sequence_version: str = "v1"
 
 

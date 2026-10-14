@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_contracts.seams import ExperimentLineage
+
 from .enums import (
     PackageStatus,
     PlaylistStatus,
@@ -118,7 +120,7 @@ class PlaylistSession:
         requested_duration_seconds: float,
         sequence_version: str = "v1",
     ) -> PlaylistSession:
-        sid = playlist_session_id(experiment_id, brand_id, sequence_version)
+        sid = playlist_session_id(release_manifest_id, brand_id, sequence_version)
         return cls(
             id=sid,
             release_manifest_id=release_manifest_id,
@@ -364,6 +366,8 @@ class MediaPackage:
     short_source_assets: list[dict[str, Any]]
     render_report: dict[str, Any]
     status: PackageStatus
+    lineage: ExperimentLineage | None = None
+    """The tracks' common lineage (ADR-0028); ``None`` only on legacy rows."""
     package_version: str = "v1"
     manifest_uri: str = ""
     manifest_hash: str = ""
@@ -391,16 +395,18 @@ class MediaPackage:
         metadata_candidates: list[dict[str, Any]],
         short_source_assets: list[dict[str, Any]],
         render_report: dict[str, Any],
+        lineage: ExperimentLineage,
         package_version: str = "v1",
         status: PackageStatus = PackageStatus.READY_FOR_PUBLISH,
     ) -> MediaPackage:
-        mpid = media_package_id(experiment_id, brand_id, package_version)
+        mpid = media_package_id(release_manifest_id, brand_id, package_version)
         content = json.dumps(
             {
                 "media_package_id": mpid,
                 "release_manifest_id": release_manifest_id,
                 "experiment_id": experiment_id,
                 "content_arm_id": content_arm_id,
+                "lineage": lineage.model_dump(mode="json"),
                 "brand_id": brand_id,
                 "video_checksum": video_checksum,
                 "audio_checksum": audio_checksum,
@@ -431,6 +437,7 @@ class MediaPackage:
             short_source_assets=short_source_assets,
             render_report=render_report,
             status=status,
+            lineage=lineage,
             package_version=package_version,
             manifest_hash=m_hash,
         )

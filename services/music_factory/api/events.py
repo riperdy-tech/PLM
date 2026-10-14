@@ -130,6 +130,7 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
         event_type=EVENT_TYPE,
         candidate_id=cand.candidate_id,
         artifact_id=art.artifact_id,
+        artifact_uri=art.object_uri,
         artifact_sha256=art.sha256,
         track_spec_id=spec.track_spec_id,
         lineage=spec.lineage,

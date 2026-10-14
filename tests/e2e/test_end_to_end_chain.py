@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from plm_contracts import AllocationType, GateDisposition
+from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from sqlalchemy.orm import Session
 
 # P9
@@ -261,15 +263,21 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 5: P5 Quality & Release Gate — Verdict & Release Clearance (Seam C5)
     # =========================================================================
+    # Still hand-built (STATUS.md): a real P5 run would reject the mock's 30 s audio
+    # against the 150 s spec until R2 resolves the duration seam. Every fact below is
+    # taken from the real C4 event, including its lineage.
     manifest = build_release_manifest(
         candidate_id=candidate_id,
         canonical_artifact_id=artifact_id,
-        experiment_id=experiment.experiment_id,
-        track_spec_id=track_spec.track_spec_id,
-        content_arm_id=directive.arm_id,
+        artifact_uri=ready_event.artifact_uri,
+        artifact_sha256=ready_event.artifact_sha256,
+        measured_duration_seconds=ready_event.measured_audio.duration_seconds,
+        track_spec_id=ready_event.track_spec_id,
+        lineage=ready_event.lineage,
         disposition=GateDisposition.PASSED,
+        override=None,
         technical_status="PASSED",
-        commercial_use_status="ELIGIBLE",
+        commercial_use_status="eligible",
         provenance_status="COMPLETE",
         ai_disclosure_required=True,
         rights_risk="LOW",
@@ -285,30 +293,15 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 6: P6 Media Factory — Playlist Video & Packaging (Seam C6 Hop 1)
     # =========================================================================
-    playlist_manifest_input = {
-        "release_manifest_id": manifest.p5_manifest_id,
-        "experiment_id": experiment.experiment_id,
-        "content_arm_id": directive.arm_id,
-        "brand_id": "brand_neon",
-        "tracks": [
-            {
-                "song_id": candidate_id,
-                "title": "Rainy Window Coffee",
-                "duration_seconds": 150.0,
-                "provenance_status": "PASSED",
-                "audio_uri": "music/neon/lofi_001.wav/abc123hash",
-                "audio_checksum": "chk_lofi_audio_001",
-            }
-        ],
-        "playlist_intent": "Lofi Study Session",
-        "policy_flags": {"ai_disclosure_required": True},
-    }
+    track_manifest = parse_seam(ReleaseManifestPayload, manifest.to_wire())
     brand_profile = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats")
     assembled = assemble_media_package(
-        release_manifest=playlist_manifest_input,
+        track_manifests=[track_manifest],
         brand_profile=brand_profile,
+        required_duration_seconds=track_manifest.measured_duration_seconds,
+        visual_profile="brand_neon_rain_v1",
+        playlist_concept="Lofi Study Session",
         render_profile="yt_longform_1080p_v1",
-        required_duration_seconds=150.0,
     )
     media_pkg = assembled.media_package
     c6_hop1 = media_pkg.to_c6_payload()

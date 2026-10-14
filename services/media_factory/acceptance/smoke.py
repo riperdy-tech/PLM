@@ -8,8 +8,12 @@ C5 release manifest ingestion → playlist sequencing → visual session plannin
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
+from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -50,32 +54,39 @@ def run_smoke_test() -> str | None:
     now = datetime.now(UTC)
     ts = int(now.timestamp())
 
-    release_manifest = {
-        "release_manifest_id": f"rm_smoke_{ts}",
-        "experiment_id": f"exp_smoke_{ts}",
-        "content_arm_id": f"arm_smoke_{ts}",
-        "brand_id": "brand_neon",
-        "tracks": [
-            {
-                "song_id": f"song_smoke_{ts}_01",
-                "title": "Neon Skyline",
-                "duration_seconds": 120.0,
-                "provenance_status": "PASSED",
-                "audio_uri": f"media/audio/song_smoke_{ts}_01.wav",
-                "audio_checksum": f"chk_smoke_{ts}_01",
-            },
-            {
-                "song_id": f"song_smoke_{ts}_02",
-                "title": "Cyber Rain",
-                "duration_seconds": 150.0,
-                "provenance_status": "PASSED",
-                "audio_uri": f"media/audio/song_smoke_{ts}_02.wav",
-                "audio_checksum": f"chk_smoke_{ts}_02",
-            },
-        ],
-        "playlist_intent": "Midnight Study Session",
-        "policy_flags": {"ai_disclosure_required": True},
-    }
+    lineage = ExperimentLineage(
+        experiment_id=f"exp_smoke_{ts}",
+        experiment_family_id="fam_smoke_01",
+        content_arm_id=f"arm_smoke_{ts}",
+        content_genome_id="gen_smoke_01",
+        production_directive_id=f"dir_smoke_{ts}",
+    )
+    track_manifests = [
+        ReleaseManifestPayload.build(
+            p5_manifest_id=f"rel_man_smoke_{ts}_{n}",
+            release_manifest_version="1.0",
+            candidate_id=f"song_smoke_{ts}_{n}",
+            canonical_artifact_id=f"art_smoke_{ts}_{n}",
+            artifact_uri=f"music/smoke/song_smoke_{ts}_{n}.wav",
+            artifact_sha256=hashlib.sha256(f"song_smoke_{ts}_{n}".encode()).hexdigest(),
+            measured_duration_seconds=duration,
+            track_spec_id=f"trk_smoke_{n}",
+            lineage=lineage,
+            disposition=GateDisposition.PASSED,
+            override=None,
+            technical_status="PASSED",
+            commercial_use_status=CommercialUseEligibility.ELIGIBLE,
+            provenance_status=ProvenanceStatus.COMPLETE,
+            ai_disclosure_required=True,
+            rights_risk="LOW",
+            policy_status="COMPLIANT",
+            evaluation_id=f"eval_smoke_{ts}_{n}",
+            evaluation_policy_version="p5-v1",
+            warning_codes=(),
+            evidence_bundle_id=f"evi_smoke_{ts}_{n}",
+        )
+        for n, duration in (("01", 120.0), ("02", 150.0))
+    ]
 
     brand = BrandProfile(
         brand_id="brand_neon",
@@ -84,10 +95,12 @@ def run_smoke_test() -> str | None:
 
     try:
         res = assemble_media_package(
-            release_manifest=release_manifest,
+            track_manifests=track_manifests,
             brand_profile=brand,
-            render_profile="yt_longform_1080p_v1",
             required_duration_seconds=270.0,
+            visual_profile="brand_neon_rain_v1",
+            playlist_concept="Midnight Study Session",
+            render_profile="yt_longform_1080p_v1",
         )
 
         if res.media_package.status != PackageStatus.READY_FOR_PUBLISH:

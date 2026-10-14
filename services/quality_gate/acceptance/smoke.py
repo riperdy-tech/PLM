@@ -83,6 +83,7 @@ def run_smoke_test() -> str | None:
                 event_type="music_candidate_ready_for_p5",
                 candidate_id=candidate_id,
                 artifact_id=artifact_id,
+                artifact_uri=str(wav_path),
                 artifact_sha256=hashlib.sha256(wav_path.read_bytes()).hexdigest(),
                 track_spec_id="spec_smoke_01",
                 lineage=ExperimentLineage(

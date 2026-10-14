@@ -25,8 +25,8 @@ def deterministic_id(prefix: str, *keys: str) -> str:
     return f"{prefix}_{digest}"
 
 
-def playlist_session_id(experiment_id: str, brand_id: str, version: str = "v1") -> str:
-    return deterministic_id("ply", experiment_id, brand_id, version)
+def playlist_session_id(release_manifest_id: str, brand_id: str, version: str = "v1") -> str:
+    return deterministic_id("ply", release_manifest_id, brand_id, version)
 
 
 def playlist_track_id(session_id: str, song_id: str, position: int) -> str:
@@ -49,5 +49,7 @@ def render_job_id(media_package_id_str: str, render_profile: str, attempt: int) 
     return deterministic_id("rjob", media_package_id_str, render_profile, str(attempt))
 
 
-def media_package_id(experiment_id: str, brand_id: str, package_version: str = "v1") -> str:
-    return deterministic_id("mpkg", experiment_id, brand_id, package_version)
+def media_package_id(
+    release_manifest_id: str, brand_id: str, package_version: str = "v1"
+) -> str:
+    return deterministic_id("mpkg", release_manifest_id, brand_id, package_version)

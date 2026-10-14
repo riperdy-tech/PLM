@@ -6,8 +6,10 @@ metadata compilation, deterministic rendering, and packaging into the frozen Sea
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+
+from plm_contracts.seams.c5 import ReleaseManifestPayload
 
 from ..artwork.generator import generate_artwork_and_thumbnails
 from ..domain.enums import PackageStatus, TransitionType
@@ -44,71 +46,29 @@ class AssemblyPipelineResult:
 
 def assemble_media_package(
     *,
-    release_manifest: dict[str, Any],
+    track_manifests: Sequence[ReleaseManifestPayload],
     brand_profile: BrandProfile,
+    required_duration_seconds: float,
+    visual_profile: str,
+    playlist_concept: str,
     render_profile: str = "yt_longform_1080p_v1",
-    required_duration_seconds: float = 3600.0,
     sequence_version: str = "v1",
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     renderer: DeterministicRenderer | None = None,
 ) -> AssemblyPipelineResult:
-    """Orchestrate end-to-end media packaging conforming to Seam C6 Hop 1 (Ruling R9)."""
-    # 1. Extract core lineage & manifest attributes (Ruling R9)
-    rel_id = release_manifest.get("release_manifest_id") or release_manifest.get(
-        "p5_manifest_id", ""
-    )
-    exp_id = release_manifest.get("experiment_id", "")
-    arm_id = release_manifest.get("content_arm_id", "")
-    brand_id = release_manifest.get("brand_id", brand_profile.brand_id)
+    """Assemble a media package from P5's per-track C5 manifests (R7, R9, ADR-0028).
 
-    if not rel_id or not exp_id or not arm_id:
-        raise ValueError(
-            f"Release manifest missing required lineage identifiers: "
-            f"release_manifest_id={rel_id}, experiment_id={exp_id}, content_arm_id={arm_id} — Ruling R9."
-        )
+    ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
+    P3's playlist, visual and title specs; they have no defaults here. Track facts and
+    lineage come from the manifests; see :mod:`..playlist.assembler` for the refusals.
+    """
+    brand_id = brand_profile.brand_id
 
-    # 2. Extract candidate manifests and track details
-    # P5 manifests can supply tracks either via 'tracks' or 'candidate_manifests'/'candidates'
-    raw_tracks = (
-        release_manifest.get("tracks")
-        or release_manifest.get("candidates")
-        or release_manifest.get("candidate_manifests")
-        or []
-    )
-
-    candidate_manifests: list[dict[str, Any]] = []
-    track_details: list[dict[str, Any]] = []
-
-    for t in raw_tracks:
-        cand_id = t.get("candidate_id") or t.get("song_id", "")
-        cand_manifest = {
-            "candidate_id": cand_id,
-            "disposition": t.get("disposition", t.get("provenance_status", "PASSED")),
-            "canonical_artifact_id": t.get(
-                "canonical_artifact_id", t.get("artifact_id", f"art_{cand_id}")
-            ),
-        }
-        candidate_manifests.append(cand_manifest)
-
-        track_detail = {
-            "candidate_id": cand_id,
-            "title": t.get("title", f"Track {cand_id}"),
-            "duration_seconds": float(t.get("duration_seconds", 180.0)),
-            "artifact_id": cand_manifest["canonical_artifact_id"],
-            "audio_uri": t.get("audio_uri", f"media/audio/{cand_id}.wav"),
-            "audio_checksum": t.get("audio_checksum", f"chk_{cand_id}"),
-        }
-        track_details.append(track_detail)
-
-    # 3. Assemble Playlist Session (P6 §4, §9, §10, Rulings R7, R8)
+    # 1-3. Clearance, lineage and sequencing (Rulings R7, R8)
     playlist_res = assemble_playlist(
-        release_manifest_id=rel_id,
-        experiment_id=exp_id,
-        content_arm_id=arm_id,
+        manifests=track_manifests,
         brand_id=brand_id,
-        candidate_manifests=candidate_manifests,
-        track_details=track_details,
         required_duration_seconds=required_duration_seconds,
         transition_type=transition_type,
         transition_duration_seconds=transition_duration_seconds,
@@ -116,9 +76,12 @@ def assemble_media_package(
     )
     playlist_session = playlist_res.session
     tracks = playlist_res.tracks
+    lineage = playlist_res.lineage
+    rel_id = playlist_session.release_manifest_id
+    exp_id = lineage.experiment_id
+    arm_id = lineage.content_arm_id
 
     # 4. Plan Visual Session (P6 §12-§15, §25)
-    visual_profile = release_manifest.get("visual_profile", f"{brand_id}_rain_v1")
     visual_res = plan_visual_session(
         playlist_session_id_str=playlist_session.id,
         brand_profile=brand_profile,
@@ -131,7 +94,7 @@ def assemble_media_package(
     # 5. Deterministic Rendering (P6 §28-§31)
     active_renderer = renderer or DeterministicRenderer(render_profile=render_profile)
     # Temporary mock media_package_id for rendering seed
-    pkg_id_seed = f"mp_{exp_id}_{brand_id}_{sequence_version}"
+    pkg_id_seed = f"mp_{rel_id}_{brand_id}_{sequence_version}"
     render_res = active_renderer.render(
         media_package_id_str=pkg_id_seed,
         playlist=playlist_session,
@@ -139,9 +102,6 @@ def assemble_media_package(
     )
 
     # 6. Artwork & Thumbnail Generation (P6 §8.5, §17, §18)
-    playlist_concept = release_manifest.get(
-        "playlist_intent", f"{brand_profile.brand_name} Session"
-    )
     artwork_res = generate_artwork_and_thumbnails(
         media_package_id_str=pkg_id_seed,
         brand_profile=brand_profile,
@@ -150,9 +110,8 @@ def assemble_media_package(
     thumbnail_variants = artwork_res.thumbnails
 
     # 7. Metadata, Chapter & Tracklist Compilation (P6 §13, §45, §178)
-    ai_disclosure = bool(
-        release_manifest.get("policy_flags", {}).get("ai_disclosure_required", True)
-    )
+    # Disclosure is required if P5 required it for any track.
+    ai_disclosure = any(m.ai_disclosure_required for m in track_manifests)
     meta_res = compile_metadata_and_chapters(
         tracks=tracks,
         brand_name=brand_profile.brand_name,
@@ -212,6 +171,7 @@ def assemble_media_package(
         metadata_candidates=meta_res.metadata_candidates,
         short_source_assets=short_source_assets,
         render_report=render_res.render_report,
+        lineage=lineage,
         package_version=sequence_version,
         status=package_status,
     )
