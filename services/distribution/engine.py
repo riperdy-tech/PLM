@@ -10,6 +10,7 @@ from plm_platform.clock import require_aware
 from plm_platform.execution import (
     ExternalWriteGuard,
     ExternalWriteRefusedError,
+    GuardDecision,
     provider_mode_of,
 )
 from sqlalchemy.orm import Session
@@ -83,7 +84,10 @@ class DistributionEngine:
     Submissions and takedowns first pass the platform
     :class:`~plm_platform.execution.ExternalWriteGuard`. A write the guard does not
     permit raises :class:`~plm_platform.execution.ExternalWriteRefusedError` before
-    anything is persisted; the guard keeps the decision record.
+    anything is persisted; the guard keeps the decision record. A funded write is settled
+    with the guard: committed once the distributor call returned, released when the
+    engine fails before calling it. A distributor call that raised leaves the
+    reservation held (outcome uncertain) for operator reconciliation.
     """
 
     def __init__(
@@ -98,7 +102,9 @@ class DistributionEngine:
         self.write_guard = write_guard or ExternalWriteGuard()
         self.provider_mode = provider_mode_of(client)
 
-    def _require_write(self, capability: str, idempotency_key: str, *, now: datetime) -> None:
+    def _require_write(
+        self, capability: str, idempotency_key: str, *, now: datetime
+    ) -> GuardDecision:
         decision = self.write_guard.authorize_external_write(
             capability,
             provider_mode=self.provider_mode,
@@ -107,6 +113,7 @@ class DistributionEngine:
         )
         if not decision.decision.may_call_provider:
             raise ExternalWriteRefusedError(decision)
+        return decision
 
     def submit_release(
         self,
@@ -148,16 +155,23 @@ class DistributionEngine:
             raise DistributionPreflightError(errors)
 
         # 3. External-write gate: nothing is persisted for a write that will not happen.
-        self._require_write(
+        decision = self._require_write(
             CAPABILITY_SUBMIT, f"{package.submission_fingerprint}:submit", now=now
         )
 
         # 4. Persist Tracks
-        for track in package.tracks:
-            insert_track(session, track)
+        try:
+            for track in package.tracks:
+                insert_track(session, track)
+        except Exception:
+            self.write_guard.settle_external_write(
+                decision, performed=False, reason="tracks_not_persisted"
+            )
+            raise
 
         # 5. Submit to Distributor
         submission_res = self.client.submit_release(package)
+        self.write_guard.settle_external_write(decision, performed=True)
 
         # 6. Build Initial Delivery Targets
         standard_stores = [
@@ -271,10 +285,11 @@ class DistributionEngine:
         if not release.provider_release_id:
             raise ValueError(f"Release {release_id} has no provider_release_id")
 
-        self._require_write(
+        decision = self._require_write(
             CAPABILITY_TAKEDOWN, f"{release.submission_fingerprint}:takedown", now=now
         )
         takedown_res = self.client.request_takedown(release.provider_release_id)
+        self.write_guard.settle_external_write(decision, performed=True)
 
         update_release_status(
             session,

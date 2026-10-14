@@ -16,6 +16,7 @@ from plm_platform.execution import (
     provider_mode_of,
     validate_integrations,
 )
+from plm_platform.ledger import budget_gate_for
 
 from ..engine import DistributionEngine
 from .routes import build_distribution_router
@@ -34,6 +35,9 @@ def create_app(
 
     Fails at boot when the configured distributor provider mode has no implementation
     (only the mock exists today, unless an engine with a real client is injected).
+    The write guard's budget gate is the persisted ledger when
+    ``PLM_BUDGET_LEDGER_CURRENCY`` is configured, else ``NoBudgetLedger`` (every live
+    write refused). An injected ``engine`` keeps its own guard.
     """
     platform_settings = load_settings() if settings is None else settings
     execution_settings = load_execution_settings() if execution is None else execution
@@ -60,12 +64,16 @@ def create_app(
         db_engine = build_engine(platform_settings)
         session_factory = default_factory(db_engine)
 
+    service_clock = SystemClock() if clock is None else clock
     router = build_distribution_router(
         session_factory,
         auth_dep,
         engine=engine,
-        clock=SystemClock() if clock is None else clock,
-        write_guard=ExternalWriteGuard(execution_settings),
+        clock=service_clock,
+        write_guard=ExternalWriteGuard(
+            execution_settings,
+            budget=budget_gate_for(execution_settings, session_factory, clock=service_clock),
+        ),
     )
     app.include_router(router)
     return app
