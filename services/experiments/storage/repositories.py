@@ -12,16 +12,20 @@ from sqlalchemy.orm import Session
 from ..domain.enums import (
     ExperimentStatus,
     ExperimentType,
+    FactorDesign,
     PackageStatus,
     VariableClass,
 )
+from ..domain.errors import LegacyExperimentError
 from ..domain.experiment import (
     Experiment,
     ExperimentVariable,
     Hypothesis,
+    RandomizationRecord,
     Treatment,
 )
 from ..domain.genome import ConstraintEnvelope, ContentGenome
+from ..domain.measurement import MeasurementPlan
 from ..domain.package import (
     ContentPackage,
     PlaylistSpec,
@@ -135,6 +139,16 @@ def insert_experiment(session: Session, experiment: Experiment) -> None:
             experiment_version=experiment.experiment_version,
             created_at=now,
             updated_at=now,
+            measurement_plan_json=experiment.measurement_plan.model_dump_json(),
+            budget_limit=experiment.budget_limit,
+            design_json=json.dumps(
+                {
+                    "factor_design": experiment.factor_design.value,
+                    "randomization": experiment.randomization.model_dump(mode="json"),
+                    "design_notes": list(experiment.design_notes),
+                },
+                sort_keys=True,
+            ),
         )
     )
 
@@ -184,6 +198,20 @@ def get_experiment(session: Session, experiment_id: str) -> Experiment | None:
     ).mappings().one_or_none()
     if row is None:
         return None
+    missing = [
+        column
+        for column in ("measurement_plan_json", "budget_limit", "design_json")
+        if row[column] is None
+    ]
+    if missing:
+        raise LegacyExperimentError(
+            "legacy_experiment_without_measurement_plan",
+            f"Experiment {experiment_id!r} predates the predeclared measurement plan and "
+            f"budget record (missing {missing}); it is refused rather than given an invented "
+            "horizon or budget. Redesign it from its directive.",
+            field_paths=missing,
+        )
+    design = json.loads(row["design_json"])
 
     # Load variables
     var_rows = session.execute(
@@ -237,6 +265,11 @@ def get_experiment(session: Session, experiment_id: str) -> Experiment | None:
         base_genome_fingerprint=row["base_genome_fingerprint"],
         experiment_version=row["experiment_version"],
         created_at=row["created_at"],
+        factor_design=FactorDesign(design["factor_design"]),
+        measurement_plan=MeasurementPlan.model_validate_json(row["measurement_plan_json"]),
+        budget_limit=row["budget_limit"],
+        randomization=RandomizationRecord.model_validate(design["randomization"]),
+        design_notes=tuple(design["design_notes"]),
     )
 
 

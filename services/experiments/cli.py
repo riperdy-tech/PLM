@@ -21,7 +21,7 @@ from .observability.metrics import (
     record_validation_failure,
 )
 from .storage import repositories
-from .validation.engine import validate_experiment
+from .validation.engine import promote_to_validated, validate_experiment
 
 __all__ = [
     "DEFAULT_BRAND_ID",
@@ -57,6 +57,11 @@ def show_experiment(experiment_id: str, *, session_factory: SessionFactory | Non
         f"  target metric: {exp.hypothesis.target_metric} ({exp.hypothesis.expected_direction})",
         f"  variables ({len(exp.variables)}): " + ", ".join(v.name for v in exp.variables),
         f"  treatments ({len(exp.treatments)}): " + ", ".join(t.name for t in exp.treatments),
+        (
+            f"  outcome horizon: {exp.measurement_plan.outcome_horizon.value} "
+            f"({exp.measurement_plan.maturity_rule.value})"
+        ),
+        f"  budget limit: {exp.budget_limit}",
         f"  base genome fingerprint: {exp.base_genome_fingerprint[:16]}...",
         f"  created at: {exp.created_at.isoformat()}",
     ]
@@ -95,6 +100,13 @@ def validate_experiment_cli(
 
         report = validate_experiment(exp, genome)
         record_experiment_validated(passed=report.passed)
+        status = exp.status
+        if report.passed and exp.status is ExperimentStatus.DRAFT:
+            status = promote_to_validated(exp, report).status
+            repositories.update_experiment_status(
+                session, experiment_id, status, now=SystemClock().now()
+            )
+            session.commit()
         if not report.passed:
             for err in report.errors:
                 record_validation_failure(error_code=err[:32])
@@ -103,6 +115,7 @@ def validate_experiment_cli(
     lines = [
         f"Validation {status_str} for experiment {experiment_id}:",
         f"  passed: {report.passed}",
+        f"  status: {status.value}",
         f"  errors ({len(report.errors)}): {list(report.errors)}",
         f"  warnings ({len(report.warnings)}): {list(report.warnings)}",
         f"  contradictions ({len(report.contradictions)}): {list(report.contradictions)}",
@@ -115,7 +128,7 @@ def materialize_treatment_cli(
     treatment_id: str,
     *,
     brand_id: str = DEFAULT_BRAND_ID,
-    budget_envelope: float = 100.0,
+    budget_envelope: float | None = None,
     track_count: int = 5,
     total_duration_minutes: int = 60,
     session_factory: SessionFactory | None = None,

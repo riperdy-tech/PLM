@@ -22,6 +22,7 @@ def _directive(**overrides: object) -> ProductionDirective:
         "directive_version": "p2-directive-v1", "policy_version": "p2-v1",
         "expires_at": datetime(2026, 9, 27, 6, 0, tzinfo=UTC),
         "exploration_fraction": 0.70, "value_model": "early-stage-proxy-v1",
+        "outcome_horizon": "28d",
     }
     base.update(overrides)
     return ProductionDirective(**base)  # type: ignore[arg-type]
@@ -33,7 +34,7 @@ def test_directive_carries_the_seventeen_frozen_fields_and_forbids_extras() -> N
         "directive_id", "decision_id", "arm_id", "allocation_type", "priority", "quantity",
         "brief", "expected_value", "uncertainty", "budget_limit", "market_context",
         "selection_reason", "directive_version", "policy_version", "expires_at",
-        "exploration_fraction", "value_model",
+        "exploration_fraction", "value_model", "outcome_horizon",
     }
     assert "status" not in ProductionDirective.model_fields, "status is persistence-only (§52)"
     with pytest.raises(ValueError):

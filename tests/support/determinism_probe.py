@@ -25,6 +25,7 @@ from services.experiments.experiments.engine import design_experiment
 from services.experiments.genome.engine import build_genome_from_directive
 from services.experiments.ingestion.p2_adapter import adapt_directive
 from services.experiments.materialization.builder import materialize_package
+from services.experiments.validation.engine import promote_to_validated, validate_experiment
 from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
@@ -48,6 +49,7 @@ def _p3_p4() -> dict[str, Any]:
     directive = adapt_directive(ProductionDirectivePayload.build(**directive_fields()).to_wire())
     genome = build_genome_from_directive(directive)
     experiment = design_experiment(directive, genome, seed=7, created_at=T0)
+    experiment = promote_to_validated(experiment, validate_experiment(experiment, genome))
     package = materialize_package(
         experiment, experiment.treatments[0], genome, created_at=T0, budget_envelope=30.0
     )

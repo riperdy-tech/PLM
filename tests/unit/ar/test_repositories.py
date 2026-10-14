@@ -123,7 +123,7 @@ def _directive(*, directive_id: str, decision_id: str, arm_id: str) -> Productio
         market_context={"source": "live", "as_of": NOW.isoformat()},
         selection_reason=("STRONG_POSTERIOR",), directive_version="p2-directive-v1",
         policy_version="p2-v1", expires_at=NOW + timedelta(hours=168), exploration_fraction=0.3,
-        value_model="early-stage-proxy-v1",
+        value_model="early-stage-proxy-v1", outcome_horizon="28d",
     )
 
 

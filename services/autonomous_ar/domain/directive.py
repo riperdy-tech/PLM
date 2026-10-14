@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any
 
-from plm_contracts import AllocationType
+from plm_contracts import AllocationType, ObservationWindow
 from plm_contracts.seams.c2 import C2_WIRE_FIELDS, DirectiveBrief, ProductionDirectivePayload
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,6 +61,7 @@ class ProductionDirective(BaseModel):
     expires_at: datetime
     exploration_fraction: float = Field(ge=0.0, le=1.0)
     value_model: str = Field(min_length=1)
+    outcome_horizon: ObservationWindow
 
     def to_wire(self) -> dict[str, Any]:
         """The JSON-safe payload that crosses C2; keys are exactly DIRECTIVE_WIRE_FIELDS.

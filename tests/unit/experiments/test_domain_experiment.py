@@ -35,6 +35,7 @@ from services.experiments.domain.package import (
     TrackSpec,
     VisualSpec,
 )
+from tests.support.experiments_factories import design_facts
 from tests.support.seams import lineage_fields, track_spec_fields
 
 
@@ -111,6 +112,7 @@ def test_experiment_definition_and_immutability() -> None:
         base_genome_fingerprint=compute_genome_fingerprint(_sample_genome()),
         experiment_version="p3-exp-v1",
         created_at=now,
+        **design_facts("exp_01"),
     )
 
     assert exp.experiment_id == "exp_01"
@@ -119,6 +121,16 @@ def test_experiment_definition_and_immutability() -> None:
     # Immutability
     with pytest.raises((TypeError, ValidationError)):
         exp.status = ExperimentStatus.COMPLETED  # type: ignore[misc]
+
+    # The measurement plan and budget ceiling are required facts, never defaulted.
+    facts = design_facts("exp_01")
+    for missing in ("measurement_plan", "budget_limit", "randomization"):
+        partial = {k: v for k, v in facts.items() if k != missing}
+        with pytest.raises(ValidationError):
+            Experiment(**{**exp.model_dump(exclude=set(facts)), **partial})
+    # A plan designed for another experiment cannot be attached.
+    with pytest.raises(ValidationError, match="does not match"):
+        Experiment(**{**exp.model_dump(exclude=set(facts)), **design_facts("exp_other")})
 
 
 def test_experiment_fingerprint_computation() -> None:

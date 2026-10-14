@@ -156,9 +156,11 @@ def seed_environment(session: Session, environment: AcceptanceEnvironment, *,
         repositories.upsert_posterior(session, model.initialize_prior(arm, prior),
                                       brand_id=brand_id, expected_version=0)
     for arm_id, maturity, rewards in _history_rows(environment):
-        for window, reward in zip((ObservationWindow.D7, ObservationWindow.D28), rewards,
-                                  strict=True):
-            store_result(session, _payload(arm_id, maturity, window, reward, now=now),
+        # Two distinct experiments per arm, each reported at the policy's outcome horizon
+        # (ADR-0031): two windows of one content would be one effective outcome, not two.
+        for index, reward in enumerate(rewards):
+            store_result(session, _payload(arm_id, maturity, resolved_policy.outcome_horizon,
+                                           reward, index=index, now=now),
                          brand_id=brand_id, now=now)
     apply_pending_updates(session, settings=resolved_settings, now=now, policy=resolved_policy)
 
@@ -175,10 +177,10 @@ def _history_rows(
 
 
 def _payload(arm_id: str, maturity: ObservationMaturity, window: ObservationWindow,
-             reward: float, *, now: datetime) -> dict[str, Any]:
+             reward: float, *, index: int, now: datetime) -> dict[str, Any]:
     return {
-        "schema_version": "1.0", "experiment_id": f"p215-history-{arm_id}-{window.value}",
-        "arm_id": arm_id, "content_id": f"p215-content-{arm_id}",
+        "schema_version": "1.0", "experiment_id": f"p215-history-{arm_id}-{index}",
+        "arm_id": arm_id, "content_id": f"p215-content-{arm_id}-{index}",
         "observation_window": window.value, "status": maturity.value,
         "observed_at": (now - timedelta(days=3)).isoformat(), "raw_metrics": unmeasured_raw_metrics(),
         "normalized_reward": reward, "reward_version": "p9-reward-v1",

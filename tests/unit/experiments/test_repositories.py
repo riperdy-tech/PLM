@@ -40,6 +40,7 @@ from services.experiments.domain.package import (
 )
 from services.experiments.storage import repositories
 from tests.support.experiments_db import create_experiments_engine, experiments_session
+from tests.support.experiments_factories import design_facts
 from tests.support.seams import lineage_fields, track_spec_fields
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -120,6 +121,7 @@ def test_experiment_persistence_and_status_update() -> None:
             treatments=(trt,),
             base_genome_fingerprint=compute_genome_fingerprint(_sample_genome()),
             created_at=NOW,
+            **design_facts("exp_test_01"),
         )
 
         repositories.insert_experiment(session, exp)
@@ -157,6 +159,7 @@ def test_content_package_persistence_and_retrieval() -> None:
             hypothesis=hyp,
             base_genome_fingerprint=compute_genome_fingerprint(_sample_genome()),
             created_at=NOW,
+            **design_facts("exp_test_02"),
         )
         repositories.insert_experiment(session, exp)
 
@@ -233,3 +236,65 @@ def test_audit_event_recording() -> None:
             created_at=NOW,
         )
         session.commit()
+
+
+def test_measurement_plan_budget_and_design_round_trip() -> None:
+    from plm_contracts.seams.c2 import ProductionDirectivePayload
+
+    from services.experiments.experiments.engine import design_experiment
+    from services.experiments.genome.engine import build_genome_from_directive
+    from services.experiments.ingestion.p2_adapter import adapt_directive
+    from tests.support.seams import directive_fields
+
+    directive = adapt_directive(
+        ProductionDirectivePayload.build(
+            **directive_fields(outcome_horizon="7d", budget_limit=55.0, quantity=6)
+        ).to_wire()
+    )
+    genome = build_genome_from_directive(directive)
+    exp = design_experiment(directive, genome, target_variable="energy", seed=3, created_at=NOW)
+    assert exp.design_notes  # energy has fewer alternatives than requested
+    engine = create_experiments_engine()
+    with experiments_session(engine) as session:
+        repositories.insert_experiment(session, exp)
+        session.commit()
+        loaded = repositories.get_experiment(session, exp.experiment_id)
+    assert loaded is not None
+    assert loaded.measurement_plan == exp.measurement_plan
+    assert loaded.measurement_plan.outcome_horizon.value == "7d"
+    assert loaded.budget_limit == 55.0
+    assert loaded.randomization == exp.randomization
+    assert loaded.factor_design is exp.factor_design
+    assert loaded.design_notes == exp.design_notes
+
+
+def test_legacy_row_without_a_measurement_plan_is_refused_on_load() -> None:
+    import pytest
+    import sqlalchemy as sa
+
+    from services.experiments.domain.errors import LegacyExperimentError
+    from services.experiments.storage.models import experiments_table
+
+    engine = create_experiments_engine()
+    with experiments_session(engine) as session:
+        session.execute(
+            sa.insert(experiments_table).values(
+                experiment_id="exp_legacy",
+                content_arm_id="arm_01",
+                production_directive_id="dir_01",
+                experiment_type="single_factor",
+                status="validated",
+                hypothesis_statement="old",
+                target_metric="retention_30s",
+                expected_direction="increase",
+                rationale="",
+                base_genome_fingerprint="fp",
+                experiment_version="p3-exp-v1",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.commit()
+        with pytest.raises(LegacyExperimentError) as exc:
+            repositories.get_experiment(session, "exp_legacy")
+    assert exc.value.code == "legacy_experiment_without_measurement_plan"

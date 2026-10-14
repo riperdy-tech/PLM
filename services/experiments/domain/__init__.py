@@ -7,6 +7,7 @@ from .enums import (
     EnergyLevel,
     ExperimentStatus,
     ExperimentType,
+    FactorDesign,
     PackageStatus,
     TrackRole,
     VariableClass,
@@ -17,6 +18,7 @@ from .experiment import (
     Experiment,
     ExperimentVariable,
     Hypothesis,
+    RandomizationRecord,
     Treatment,
 )
 from .fingerprint import (
@@ -54,10 +56,12 @@ __all__ = [
     "ExperimentStatus",
     "ExperimentType",
     "ExperimentVariable",
+    "FactorDesign",
     "GenomeDimensionValue",
     "Hypothesis",
     "PackageStatus",
     "PlaylistSpec",
+    "RandomizationRecord",
     "ThumbnailSpec",
     "TitleSpec",
     "TrackRole",

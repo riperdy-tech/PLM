@@ -61,6 +61,7 @@ def directive_fields(**overrides: Any) -> dict[str, Any]:
         "expires_at": "2026-11-01T00:00:00Z",
         "exploration_fraction": 0.25,
         "value_model": "early-stage-proxy-v1",
+        "outcome_horizon": "28d",
     }
     fields.update(overrides)
     return fields
@@ -103,6 +104,7 @@ def track_spec_fields(**overrides: Any) -> dict[str, Any]:
         "production_style": "clean_modern",
         "track_role": "focus",
         "requested_duration": 180,
+        "duration_range": {"min_seconds": 60, "max_seconds": 240},
         "candidate_target": 2,
         "priority": 1,
         "budget_limit": 20.0,
@@ -145,6 +147,7 @@ def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
         "model_id": "mock-v1",
         "measured_audio": {"duration_seconds": 1.0, "sample_rate": 44100, "channels": 2},
         "requested_duration_seconds": 1,
+        "requested_duration_range": {"min_seconds": 1, "max_seconds": 2},
         "vocal_mode": "instrumental",
         "genre_tags": ["ambient"],
         "prompt_text": "ambient synth pad electronic chill",

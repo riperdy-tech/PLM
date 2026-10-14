@@ -24,7 +24,7 @@ CYCLE_BODY = {
 
 RESULT_BODY = {
     "schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-0", "content_id": "c-1",
-    "observation_window": "7d", "status": "mature",
+    "observation_window": "28d", "status": "mature",
     "observed_at": "2026-10-01T00:00:00+00:00", "raw_metrics": unmeasured_raw_metrics(),
     "normalized_reward": 0.8, "reward_version": "p9-reward-v1",
     "attribution_confidence": 0.9,

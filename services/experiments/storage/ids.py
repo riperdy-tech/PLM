@@ -17,8 +17,9 @@ def deterministic_id(prefix: str, *parts: str) -> str:
     return f"{prefix}_{raw_uuid.hex[:16]}"
 
 
-def experiment_id(arm_id: str, directive_id: str, experiment_type: str) -> str:
-    return deterministic_id("exp", arm_id, directive_id, experiment_type)
+def experiment_id(arm_id: str, directive_id: str, experiment_type: str, *design_keys: str) -> str:
+    """Identity of one design: same directive + type + factors + seed => same experiment."""
+    return deterministic_id("exp", arm_id, directive_id, experiment_type, *design_keys)
 
 
 def treatment_id(exp_id: str, treatment_index: int) -> str:

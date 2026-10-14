@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol
@@ -33,6 +34,9 @@ class RewardModel(Protocol):
 
     def update(self, posterior: PosteriorState, observation: RewardObservation, *,
                effective_weight: float, received_at: datetime) -> PosteriorState: ...
+
+    def posterior_at(self, base: PosteriorState, evidence: Sequence[tuple[float, float]], *,
+                     as_of: datetime) -> PosteriorState: ...
 
     def sample(self, posterior: PosteriorState, rng: random.Random) -> float: ...
 
@@ -90,6 +94,37 @@ class NormalNormalRewardModel:
             effective_observation_count=posterior.effective_observation_count + effective_weight,
             update_version=posterior.update_version + 1,
             last_update_at=received_at,
+        )
+
+    def posterior_at(self, base: PosteriorState, evidence: Sequence[tuple[float, float]], *,
+                     as_of: datetime) -> PosteriorState:
+        """The posterior from the prior and every effective outcome, in one batch.
+
+        `evidence` is `(normalized_reward, recency_weight_at_as_of)` per effective outcome.
+        A batch conjugate combination is exact and order-free, unlike folding clamped
+        sequential updates, so the result depends only on the stored evidence and `as_of`
+        (ADR-0031). `update_version` is the stored row's; this is a view, not a write.
+        """
+        prior_variance = max(base.prior_variance, self.variance_floor)
+        precision = 1.0 / prior_variance
+        weighted_sum = base.prior_mean / prior_variance
+        effective = 0.0
+        for value, weight in evidence:
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"normalized_reward {value!r} outside [0, 1] (§72)")
+            if weight <= 0.0:
+                raise ValueError("an effective outcome needs a positive weight")
+            precision += weight / self.observation_variance
+            weighted_sum += weight * value / self.observation_variance
+            effective += weight
+        variance = max(1.0 / precision, self.variance_floor)
+        return replace(
+            base,
+            posterior_mean=min(1.0, max(0.0, variance * weighted_sum)),
+            posterior_variance=variance,
+            observation_count=len(evidence),
+            effective_observation_count=effective,
+            last_update_at=as_of if evidence else base.last_update_at,
         )
 
     def sample(self, posterior: PosteriorState, rng: random.Random) -> float:

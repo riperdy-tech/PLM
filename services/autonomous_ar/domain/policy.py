@@ -1,15 +1,17 @@
 """The versioned allocation policy (§49/§90/§91) with ADR-0023's arithmetic rules baked in.
 
-Validation is §91's list plus the freeze: fractions >= 0 and <= 1, their sum must not
-exceed 1.0 (a remainder is reserved capacity, not an error), `baseline_fraction` is a
-residual *inside* the exploit slice and may never exceed it, and half-lives/slot-adjacent
-knobs must be positive.
+Validation is §91's list plus the freeze: fractions >= 0 and <= 1 and their sum is
+exactly 1.0 (ADR-0023 #3; a smaller sum would leave slots allocated to nobody),
+`baseline_fraction` is a residual *inside* the exploit slice and may never exceed it, and
+half-lives/slot-adjacent knobs must be positive. `outcome_horizon` is the one observation
+window whose mature outcome may move a posterior (ADR-0031).
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
+from plm_contracts import ObservationWindow
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
@@ -72,6 +74,7 @@ class PolicyConfig(_Frozen):
     directive_ttl_hours: Annotated[float, Field(gt=0.0)] = 168.0
     exploration_boost: Annotated[float, Field(ge=0.0, le=0.3)] = 0.10
     value_model: str = "early-stage-proxy-v1"
+    outcome_horizon: ObservationWindow = ObservationWindow.D28
     fatigue: FatigueConfig = Field(default_factory=FatigueConfig)
     nonstationarity: NonstationarityConfig = Field(default_factory=NonstationarityConfig)
     retirement: RetirementConfig = Field(default_factory=RetirementConfig)
@@ -80,9 +83,9 @@ class PolicyConfig(_Frozen):
     def _validate_fractions_and_baseline(self) -> PolicyConfig:
         total = (self.exploit_fraction + self.adjacent_explore_fraction
                  + self.radical_explore_fraction)
-        if total > 1.0 + 1e-9:
+        if abs(total - 1.0) > 1e-9:
             raise ValueError(
-                f"exploration fractions must not exceed 1.0, got {round(total, 6)} "
+                f"exploit + adjacent + radical fractions must sum to 1.0, got {round(total, 6)} "
                 "(ADR-0023 #3; §13 governs §90)"
             )
         if self.baseline_fraction > self.exploit_fraction + 1e-9:

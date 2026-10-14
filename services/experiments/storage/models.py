@@ -34,6 +34,11 @@ experiments_table = Table(
     Column("experiment_version", String(32), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    # 0024 (ADR-0031, R2): nullable only because legacy rows predate them; such rows are
+    # refused on load. Every insert writes all three.
+    Column("measurement_plan_json", Text, nullable=True),
+    Column("budget_limit", Float, nullable=True),
+    Column("design_json", Text, nullable=True),
 )
 
 # 2. Experiment Versions Table (§52)

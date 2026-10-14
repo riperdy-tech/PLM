@@ -18,6 +18,20 @@ class ExperimentType(StrEnum):
     FOLLOW_UP = "follow_up"
 
 
+class FactorDesign(StrEnum):
+    """§15, §38: how treatments relate to control when more than one factor is declared.
+
+    * ``one_factor_per_treatment``: every treatment differs from control in exactly one
+      declared factor. The default, and the only design for a single-factor experiment.
+    * ``full_factorial``: two levels (control value, one alternative) per factor and every
+      combination of them as a treatment. Factors move together only inside this
+      explicitly stated design.
+    """
+
+    ONE_FACTOR_PER_TREATMENT = "one_factor_per_treatment"
+    FULL_FACTORIAL = "full_factorial"
+
+
 class VariableClass(StrEnum):
     """§14: Classification of variables within an experiment."""
 

@@ -22,7 +22,7 @@ from ..materialization.builder import materialize_package
 from ..observability.logging import StructuredEvent, emit_event
 from ..storage import repositories
 from ..storage.ids import deterministic_id
-from ..validation.engine import validate_experiment
+from ..validation.engine import promote_to_validated, validate_experiment
 
 __all__ = ["run_smoke_test"]
 
@@ -57,7 +57,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
                 "vocal_mode": "vocal",
                 "duration_bucket": "45_75m",
                 "visual_world": "rainy_asian_city",
-            }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": brand}, selection_reason=["smoke_test"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-12-31T23:59:59Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1").to_wire()
+            }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": brand}, selection_reason=["smoke_test"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-12-31T23:59:59Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d").to_wire()
 
         # 1. Ingest
         adapted = adapt_directive(wire_directive)
@@ -75,6 +75,8 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
         report = validate_experiment(exp, base_genome)
         if not report.passed:
             return f"failed: validation errors {report.errors}"
+        exp = promote_to_validated(exp, report)
+        repositories.update_experiment_status(session, exp.experiment_id, exp.status, now=now)
 
         # 5. Materialize package
         target_treatment = exp.treatments[0]
@@ -106,7 +108,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
             StructuredEvent(
                 experiment_id=exp.experiment_id,
                 event="smoke_test_completed",
-                state_before="designed",
+                state_before="draft",
                 state_after="materialized",
                 package_id=pkg.package_id,
             ),

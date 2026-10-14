@@ -33,7 +33,7 @@ SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1"
+    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
 
 
@@ -100,8 +100,10 @@ def test_experiment_full_api_lifecycle() -> None:
     exp = data["experiment"]
     exp_id = exp["experiment_id"]
     assert exp_id.startswith("exp_")
-    assert exp["status"] == "validated"
+    assert exp["status"] == "draft"  # design never self-certifies
     assert len(exp["treatments"]) == 2
+    assert exp["measurement_plan"]["outcome_horizon"] == "28d"
+    assert exp["budget_limit"] == 100.0
 
     # 2. List experiments
     list_resp = client.get("/experiments/v1/experiments", headers=headers)
@@ -127,6 +129,18 @@ def test_experiment_full_api_lifecycle() -> None:
     report = val_resp.json()["report"]
     assert report["passed"] is True
     assert len(report["errors"]) == 0
+    assert val_resp.json()["status"] == "validated"
+    stored = client.get(f"/experiments/v1/experiments/{exp_id}", headers=headers).json()
+    assert stored["status"] == "validated"
+
+    # A request may lower the directive's budget limit, never raise it.
+    over = client.post(
+        f"/experiments/v1/experiments/{exp_id}/materialize",
+        json={"treatment_id": treatments[1]["treatment_id"], "budget_envelope": 100.5},
+        headers=headers,
+    )
+    assert over.status_code == 422
+    assert over.json()["detail"]["code"] == "budget_envelope_exceeds_limit"
 
     # 6. Materialize package
     target_trt_id = treatments[1]["treatment_id"]
@@ -180,3 +194,20 @@ def test_api_404_handling() -> None:
     pkg_resp = client.get("/experiments/v1/packages/pkg_nonexistent", headers=headers)
     assert pkg_resp.status_code == 404
     assert pkg_resp.json()["detail"]["code"] == "package_not_found"
+
+
+def test_design_refusals_are_typed_422s() -> None:
+    client = TestClient(_app(with_token=True, with_db=True))
+    headers = {"X-PLM-Service-Token": "experiments-seam-token"}
+    unknown = client.post(
+        "/experiments/v1/experiments",
+        json={"directive": SAMPLE_DIRECTIVE, "target_variable": "mood_lighting"},
+        headers=headers,
+    )
+    assert unknown.status_code == 422
+    assert unknown.json()["detail"]["code"] == "no_value_generator"
+
+    polka = dict(SAMPLE_DIRECTIVE, brief={**SAMPLE_DIRECTIVE["brief"], "genre": "polka"})
+    resp = client.post("/experiments/v1/experiments", json={"directive": polka}, headers=headers)
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "unknown_genre"

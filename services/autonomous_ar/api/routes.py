@@ -171,7 +171,9 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
         session.commit()
         return UpdateSummaryOut(applied=summary.applied,
                                 skipped_duplicate=summary.skipped_duplicate,
-                                quarantined=summary.quarantined, failed=summary.failed)
+                                quarantined=summary.quarantined, failed=summary.failed,
+                                provisional=summary.provisional,
+                                off_horizon=summary.off_horizon)
 
     return router
 
@@ -266,6 +268,7 @@ def _directive(row: Mapping[str, Any]) -> ProductionDirective:
         directive_version=row["directive_version"], policy_version=row["policy_version"],
         expires_at=_instant(row["expires_at"]),
         exploration_fraction=row["exploration_fraction"], value_model=row["value_model"],
+        outcome_horizon=row["outcome_horizon"],
     )
 
 

@@ -29,6 +29,7 @@ from ..domain.enums import (
 )
 from ..domain.posterior import PosteriorState
 from ..modeling.decay import detect_regime_shift
+from ..modeling.evidence import posterior_as_of
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
 from ..observability.logging import emit_alert, evaluate_cycle_alerts, log_cycle
@@ -94,7 +95,7 @@ def _row_to_directive(row: Any) -> ProductionDirective:
         selection_reason=tuple(row["selection_reason_json"]),
         directive_version=row["directive_version"], policy_version=row["policy_version"],
         expires_at=row["expires_at"], exploration_fraction=row["exploration_fraction"],
-        value_model=row["value_model"],
+        value_model=row["value_model"], outcome_horizon=row["outcome_horizon"],
     )
 
 
@@ -182,7 +183,10 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
             )
             repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
                                           expected_version=0)
-        posteriors[arm.arm_id] = existing
+        # ADR-0031: draw from the posterior as of this cycle, recomputed from the stored
+        # effective outcomes, so evidence decays from the draw's own instant.
+        posteriors[arm.arm_id] = posterior_as_of(session, existing, model=resolved_model,
+                                                 policy=policy, as_of=now)
     # 5 — freshness gate; 6 — blocked/policy constraints; 7 — cooldown/fatigue
     state_rows = {row["arm_id"]: row for row in repositories.load_arm_states(session)}
     states = {arm_id: ArmLifecycleStatus(row["status"]) for arm_id, row in state_rows.items()}

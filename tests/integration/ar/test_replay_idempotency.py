@@ -123,7 +123,7 @@ def _write_leg(engine: sa.Engine) -> tuple[str, ...]:
             market_context={"source": "live", "as_of": NOW.isoformat()},
             selection_reason=("STRONG_POSTERIOR",), directive_version="p2-directive-v1",
             policy_version=POLICY.version, expires_at=NOW + timedelta(hours=168),
-            exploration_fraction=0.3, value_model="early-stage-proxy-v1",
+            exploration_fraction=0.3, value_model="early-stage-proxy-v1", outcome_horizon="28d",
         )
         repositories.insert_directive(
             session, directive, brand_id=BRAND, status=DirectiveStatus.QUEUED, created_at=NOW

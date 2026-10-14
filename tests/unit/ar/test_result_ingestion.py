@@ -38,7 +38,7 @@ def test_payload_parses_with_null_metrics_staying_unknown() -> None:
     assert observation.raw_metrics["estimated_revenue"].state.value == "unknown", (
         "a null metric on the wire is unknown, never 0.0"
     )
-    assert observation.key == "exp-1|7d"
+    assert observation.key == "exp-1|content-1|7d|mature"
 
 
 def test_unmeasured_reward_is_refused_with_the_field_named() -> None:

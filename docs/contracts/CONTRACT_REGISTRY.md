@@ -120,7 +120,7 @@ expected by P3).
 `GET /ar/directives` (P2 §71).
 
 **Producer fields (frozen names, P2 §32, as amended by R4; `schema_version` added by
-ADR-0025):**
+ADR-0025; `outcome_horizon` added by ADR-0031, schema 2.0):**
 
 ```text
 schema_version      "<major>.<minor>"; P3 accepts the current and previous major
@@ -142,6 +142,8 @@ policy_version
 expires_at
 exploration_fraction
 value_model
+outcome_horizon     ObservationWindow; the one window whose mature outcome P2 learns
+                    from (policy-versioned); P3 records it in the measurement plan
 ```
 
 P2 §52 (`production_directive` table) additionally persists: `id`, `status`,
@@ -227,10 +229,10 @@ interface P4), §58 (`track_specs`).
 `music_specs[]` array of the content package (P3 §44).
 
 **Frozen field list (the union, canonical names = P4 §7; P3 emits every key — R5;
-amended by ADR-0025 and ADR-0026):**
+amended by ADR-0025, ADR-0026 and ADR-0032; schema `2.0`):**
 
 ```text
-schema_version      "<major>.<minor>" (ADR-0025)
+schema_version      "<major>.<minor>" (ADR-0025); 2.0 since ADR-0032
 track_spec_id
 playlist_spec_id
 lineage             {experiment_id, experiment_family_id, content_arm_id,
@@ -245,7 +247,9 @@ vocal_spec
 instrumentation_spec
 production_style
 track_role
-requested_duration
+requested_duration  seconds; the point P4 asks the provider for; inside duration_range
+duration_range      {min_seconds, max_seconds}, inclusive: the genome's track_duration
+                    range (ADR-0032); the declared tolerance P5 judges audio against
 candidate_target
 priority
 budget_limit
@@ -285,11 +289,17 @@ not emit.
   {allowed_providers[] (non-empty)}`; `track_role` is one of P3 §20's roles.
 - P3's derivation rules (R5, ADR-0026): `requested_duration` and `bpm` are the genome
   target or the rounded midpoint of its range.
+- ADR-0032: `duration_range` is the genome's `track_duration` `{min_seconds,
+  max_seconds}` as declared, not derived. It is required: a spec without it
+  (every 1.x spec) is refused with `missing_required_field`. A range with
+  `min_seconds > max_seconds`, or a `requested_duration` outside it, is refused with
+  `invalid_field_value`. P4 forwards it unchanged on C4.
 
 **Seam test:** `tests/contract/test_c3_experiments_to_music.py` — **exists**. It runs
 P3's real `materialize_package` into P4's real `adapt_track_spec` and planner, asserts
-the lineage reaches the plan intact, and asserts refusal for every missing required
-fact, placeholder identity, unknown field and future major.
+the lineage and the genome's duration range reach the plan intact, and asserts refusal
+for every missing required fact (including a 1.0 spec without `duration_range`),
+placeholder identity, inconsistent duration, unknown field and future major.
 
 ---
 
@@ -302,11 +312,11 @@ fact, placeholder identity, unknown field and future major.
 commercial rights — the scenario that quarantines when the snapshot is thin).
 
 **Endpoint / event:** event `music_candidate_ready_for_p5` (P4 §68), schema
-`1.0` (ADR-0025, ADR-0027). Shared model:
+`2.0` (ADR-0025, ADR-0027, ADR-0032). Shared model:
 `plm_contracts.seams.c4.CandidateReadyPayload`.
 
-**Producer fields (amended by ADR-0027; `event_version`, `rights_status` and
-`provenance_complete` are replaced):**
+**Producer fields (amended by ADR-0027 and ADR-0032; `event_version`, `rights_status`
+and `provenance_complete` are replaced):**
 
 ```text
 schema_version              "<major>.<minor>"
@@ -320,7 +330,10 @@ lineage                     ExperimentLineage (ADR-0026)
 provider_id
 model_id
 measured_audio              {duration_seconds, sample_rate, channels}
-requested_duration_seconds  from the C3 spec
+requested_duration_seconds  from the C3 spec; informational, not the gate
+requested_duration_range    {min_seconds, max_seconds}, inclusive: the C3 spec's
+                            duration_range (ADR-0032); P5 judges the measured
+                            duration against it
 vocal_mode                  from the C3 spec
 genre_tags[]                genre + moods from the C3 spec (non-empty)
 prompt_text                 the prompt that produced the attempt
@@ -365,12 +378,18 @@ reconstructing generation history from raw provider logs.
 - ADR-0027: P4 builds the event only from stored facts and refuses an export with
   any fact missing. P5 parses only through the shared model. A null `rights` is
   quarantined and never cleared. A plan-tier label can only downgrade eligibility.
+- ADR-0032: P5's technical gate passes a measured duration inside
+  `requested_duration_range` (bounds included) and otherwise records the blocking
+  finding `DURATION_OUT_OF_RANGE`. P5 has no tolerance of its own. An event without the
+  range (every 1.x event) is refused with `missing_required_field`.
 
 **Seam test:** `tests/contract/test_c4_music_to_qa.py` — **exists**. It runs P4's real
 generation engine and event builder into P5's real consumer and gate engine. It
 asserts that lineage and declared rights arrive intact and are read as eligible, that
-undeclared rights are quarantined, and that every missing, placeholder, old-vocabulary,
-unknown or future field is refused.
+undeclared rights are quarantined, that the mock's audio for a 180 s spec passes P5's
+real duration gate and is rejected with `DURATION_OUT_OF_RANGE` against a range it
+misses, and that every missing, placeholder, old-vocabulary, unknown or future field
+is refused.
 
 ---
 

@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from services.experiments.domain.enums import PackageStatus, TrackRole
+from services.experiments.domain.enums import ExperimentStatus, PackageStatus, TrackRole
+from services.experiments.domain.errors import ExperimentStateError
 from services.experiments.domain.experiment import (
     Experiment,
     Hypothesis,
@@ -17,6 +18,7 @@ from services.experiments.materialization.builder import (
     BudgetEnvelopeExceededError,
     materialize_package,
 )
+from tests.support.experiments_factories import design_facts
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
@@ -51,6 +53,7 @@ def _sample_experiment() -> tuple[Experiment, Treatment, ContentGenome]:
         treatments=(trt,),
         base_genome_fingerprint="fp_dummy",
         created_at=NOW,
+        **design_facts("exp_mat_01", budget_limit=200.0),
     )
     return exp, trt, genome
 
@@ -86,3 +89,26 @@ def test_budget_envelope_must_be_positive() -> None:
     exp, trt, genome = _sample_experiment()
     with pytest.raises(BudgetEnvelopeExceededError):
         materialize_package(exp, trt, genome, budget_envelope=-10.0, created_at=FIXED_NOW)
+    with pytest.raises(BudgetEnvelopeExceededError):
+        materialize_package(exp, trt, genome, budget_envelope=0.0, created_at=FIXED_NOW)
+
+
+def test_request_above_the_directive_budget_limit_is_refused() -> None:
+    exp, trt, genome = _sample_experiment()
+    with pytest.raises(BudgetEnvelopeExceededError, match="exceeds the directive's budget limit"):
+        materialize_package(exp, trt, genome, budget_envelope=200.01, created_at=FIXED_NOW)
+
+
+def test_omitted_budget_uses_the_directive_limit_not_a_default() -> None:
+    exp, trt, genome = _sample_experiment()
+    pkg = materialize_package(exp, trt, genome, track_count=4, created_at=FIXED_NOW)
+    assert pkg.budget_envelope == exp.budget_limit == 200.0
+    assert pkg.track_specs[0].budget_limit == 50.0
+
+
+def test_unvalidated_experiment_is_not_materialized() -> None:
+    exp, trt, genome = _sample_experiment()
+    draft = exp.model_copy(update={"status": ExperimentStatus.DRAFT})
+    with pytest.raises(ExperimentStateError) as exc:
+        materialize_package(draft, trt, genome, created_at=FIXED_NOW)
+    assert exc.value.code == "experiment_not_validated"
