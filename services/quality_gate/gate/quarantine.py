@@ -52,6 +52,7 @@ __all__ = [
     "UNSPECIFIED_QUARANTINE_REASON",
     "OverrideNotPossibleError",
     "OverrideRefusedError",
+    "QuarantineAlreadyResolvedError",
     "hold_subject_ref",
     "quarantine_holds",
     "raise_quarantine_holds",
@@ -73,6 +74,10 @@ classifies it HARD_STOP: a quarantine without a stated reason never becomes revi
 
 class OverrideNotPossibleError(ValueError):
     """The case cannot be cleared into a manifest because a required fact is missing."""
+
+
+class QuarantineAlreadyResolvedError(ValueError):
+    """The case was already resolved; a second resolution would issue a second manifest."""
 
 
 class OverrideRefusedError(PermissionError):
@@ -157,6 +162,10 @@ def resolve_quarantine(
     case = get_quarantine_case(session, case_id)
     if not case:
         raise ValueError(f"Quarantine case {case_id} not found.")
+    if case.resolution is not None:
+        raise QuarantineAlreadyResolvedError(
+            f"quarantine case {case_id!r} was already resolved as {case.resolution}"
+        )
 
     holds = raise_quarantine_holds(session, queue, case, now=now)
 

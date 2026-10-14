@@ -21,6 +21,7 @@ from ..gate.persistence import persist_gate_result
 from ..gate.quarantine import (
     OverrideNotPossibleError,
     OverrideRefusedError,
+    QuarantineAlreadyResolvedError,
     quarantine_holds,
     resolve_quarantine,
 )
@@ -281,6 +282,15 @@ def build_router(
                 detail=ErrorShape(
                     code=refusal.code.value,
                     field_paths=field_paths or ["case_id"],
+                    message=str(exc),
+                ).model_dump(),
+            ) from exc
+        except QuarantineAlreadyResolvedError as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="quarantine_already_resolved", field_paths=["case_id"],
                     message=str(exc),
                 ).model_dump(),
             ) from exc

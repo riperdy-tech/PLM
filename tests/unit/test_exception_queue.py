@@ -653,3 +653,18 @@ def test_p5_confirmed_rejection_closes_the_holds(
     )
     assert res.status_code == 200
     assert [h["status"] for h in res.json()["holds"]] == ["REJECTED"]
+
+
+def test_p5_a_resolved_case_cannot_be_resolved_again(
+    qa_client: TestClient, tmp_path: Path
+) -> None:
+    """Proves: a second override of an already-resolved case is refused (409) instead of
+    issuing a second release manifest."""
+    case_id = _quarantined(qa_client, tmp_path)["quarantine_case_id"]
+    url = f"/qa/quarantine/{case_id}/resolve"
+    body = {"resolution": "CLEARED_BY_OVERRIDE", "auditor_id": "rita",
+            "reviewer_role": "rights_reviewer", "evidence": UNKNOWN_RIGHTS_EVIDENCE}
+    assert qa_client.post(url, json=body, headers=_HEADERS).status_code == 200
+    again = qa_client.post(url, json=body, headers=_HEADERS)
+    assert again.status_code == 409
+    assert again.json()["detail"]["code"] == "quarantine_already_resolved"
