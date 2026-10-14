@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .config import Settings, load_settings
 
 __all__ = [
+    "PLATFORM_SCHEMA",
     "SCHEMAS",
     "SchemaScopeError",
     "build_engine",
@@ -50,6 +51,11 @@ SCHEMAS: Final[tuple[str, ...]] = (
     "analytics",  # P9
 )
 """The nine phase schemas in dependency (creation) order — P0 §4, R13-era layout."""
+
+PLATFORM_SCHEMA: Final[str] = "ops"
+"""Cross-phase runtime state owned by ``plm_platform`` (ADR-0033): the cost ledger, the
+exception queue and the decision log. No phase owns it; phases reach it only through
+``plm_platform`` APIs, never by writing its tables directly."""
 
 
 class SchemaScopeError(ValueError):
