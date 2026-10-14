@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from sqlalchemy import text
@@ -49,14 +50,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
     factory = session_factory(engine)
     with factory() as session:
         now = datetime.now(UTC)
-        wire_directive = {
-            "directive_id": f"dir_smoke_{int(now.timestamp())}",
-            "decision_id": f"dec_smoke_{int(now.timestamp())}",
-            "arm_id": "rnb_late_night_drive_english_vocal_45_75m",
-            "allocation_type": "exploit",
-            "priority": 1,
-            "quantity": 1,
-            "brief": {
+        wire_directive = ProductionDirectivePayload.build(directive_id=f"dir_smoke_{int(now.timestamp())}", decision_id=f"dec_smoke_{int(now.timestamp())}", arm_id="rnb_late_night_drive_english_vocal_45_75m", allocation_type="exploit", priority=1, quantity=1, brief={
                 "genre": "rnb",
                 "mood": ["melancholic", "intimate"],
                 "use_case": ["late_night_drive"],
@@ -64,18 +58,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
                 "vocal_mode": "vocal",
                 "duration_bucket": "45_75m",
                 "visual_world": "rainy_asian_city",
-            },
-            "expected_value": 85.0,
-            "uncertainty": 0.15,
-            "budget_limit": 100.0,
-            "market_context": {"brand_id": brand},
-            "selection_reason": ["smoke_test"],
-            "directive_version": "p2-dir-v1",
-            "policy_version": "p2-v1",
-            "expires_at": "2026-12-31T23:59:59Z",
-            "exploration_fraction": 0.2,
-            "value_model": "early-stage-proxy-v1",
-        }
+            }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": brand}, selection_reason=["smoke_test"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-12-31T23:59:59Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1").to_wire()
 
         # 1. Ingest
         adapted = adapt_directive(wire_directive)

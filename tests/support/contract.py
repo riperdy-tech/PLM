@@ -20,7 +20,8 @@ really changes), then applied to producer and consumer in the same change.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -124,3 +125,47 @@ def assert_seam_payload(
             f"{seam}: payload field names match {consumer_name} but values do not validate:\n"
             f"{details}"
         ) from exc
+
+
+# --- behavioural seam checks (ADR-0025) --------------------------------------------------
+#
+# The checks above compare names. The ones below exercise the real consumer: a seam is
+# fail-closed only if removing any required fact, adding an unknown one, or sending a
+# future major version makes the consumer refuse the payload.
+
+
+def without(payload: Mapping[str, Any], field: str) -> dict[str, Any]:
+    """A copy of ``payload`` with one (possibly dotted) field removed."""
+    copy: dict[str, Any] = json.loads(json.dumps(payload, default=str))
+    *parents, leaf = field.split(".")
+    node = copy
+    for part in parents:
+        node = node[part]
+    del node[leaf]
+    return copy
+
+
+def with_value(payload: Mapping[str, Any], field: str, value: Any) -> dict[str, Any]:
+    """A copy of ``payload`` with one (possibly dotted) field replaced."""
+    copy: dict[str, Any] = json.loads(json.dumps(payload, default=str))
+    *parents, leaf = field.split(".")
+    node = copy
+    for part in parents:
+        node = node[part]
+    node[leaf] = value
+    return copy
+
+
+def assert_refused(
+    consume: Callable[[dict[str, Any]], object],
+    payload: dict[str, Any],
+    refusal: type[BaseException] | tuple[type[BaseException], ...],
+    *,
+    because: str,
+) -> BaseException:
+    """``consume(payload)`` must raise ``refusal``; return the exception for inspection."""
+    try:
+        consume(payload)
+    except refusal as exc:
+        return exc
+    raise AssertionError(f"consumer accepted a payload it must refuse ({because})")

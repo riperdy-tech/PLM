@@ -112,9 +112,11 @@ expected by P3).
 **Endpoint / event:** the directive handoff; queued directives are served by
 `GET /ar/directives` (P2 §71).
 
-**Producer fields (frozen names, P2 §32, as amended by R4):**
+**Producer fields (frozen names, P2 §32, as amended by R4; `schema_version` added by
+ADR-0025):**
 
 ```text
+schema_version      "<major>.<minor>"; P3 accepts the current and previous major
 directive_id
 decision_id
 arm_id
@@ -198,13 +200,11 @@ change is a registry amendment first, then both sides in one change (R2).
    confidence; under-covered arms are returned flagged, never silently mixed into
    the ranking. The human partner holds override at all times (P2 §107).
 
-**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **exists** (P2's producer half,
-shipped by task P2.1A: it asserts the serialised directive payload against the registry's frozen
-names above, so a rename fails loudly and names the field that moved). P3's consumer half — its
-adapter ingesting P2's real payload, including the `allocation_type` → `exploration_level` enum
-map and the `quantity` → `requested_experiment_count` rename — lands with task P3.4 and extends
-this same file. Until then the enforcement is producer-side only, which the test's own docstring
-states so it is never mistaken for the whole seam.
+**Seam test:** `tests/contract/test_c2_ar_to_experiments.py` — **exists**. Since
+ADR-0025 both sides use the shared model `plm_contracts.seams.c2.ProductionDirectivePayload`;
+the test runs P2's real allocation cycle, feeds the wire to P3's real `adapt_directive`,
+checks every field arrives without invention, and checks that removing any field, adding
+an unknown one, a future major version or an invalid value is refused with a reason code.
 
 ---
 

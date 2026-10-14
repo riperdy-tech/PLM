@@ -74,9 +74,9 @@ def build_router(
             raise HTTPException(
                 status_code=422,
                 detail=ErrorShape(
-                    code="directive_validation_error",
-                    field_paths=["directive"],
-                    message=str(err),
+                    code=err.error.code,
+                    field_paths=[f"directive.{path}" for path in err.error.field_paths],
+                    message=err.error.message,
                 ).model_dump(),
             ) from err
 

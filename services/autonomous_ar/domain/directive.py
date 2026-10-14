@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from plm_contracts import AllocationType
+from plm_contracts.seams.c2 import C2_WIRE_FIELDS, DirectiveBrief, ProductionDirectivePayload
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
@@ -24,30 +25,12 @@ class DirectiveWireError(RuntimeError):
     """Raised when the serialised directive drifts from the frozen C2 wire (ADR-0023)."""
 
 
-DIRECTIVE_WIRE_FIELDS: tuple[str, ...] = (
-    "directive_id", "decision_id", "arm_id", "allocation_type", "priority", "quantity",
-    "brief", "expected_value", "uncertainty", "budget_limit", "market_context",
-    "selection_reason", "directive_version", "policy_version", "expires_at",
-    "exploration_fraction", "value_model",
-)
-"""The frozen C2 producer fields, in registry order (ADR-0023). Persistence-only fields
+DIRECTIVE_WIRE_FIELDS: tuple[str, ...] = C2_WIRE_FIELDS
+"""``schema_version`` plus the frozen C2 fields, in registry order (ADR-0023, ADR-0025).
+Defined once in ``plm_contracts.seams.c2``. Persistence-only fields
 (`id`, `status`, `brief_json`, `created_at`, `consumed_at`, and the extra columns P2.3
 stores to serve the wire) must never be added here — a wire change is a registry
 amendment first (R2)."""
-
-
-class DirectiveBrief(BaseModel):
-    """§33: a creative search region, not an over-constrained song prompt."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    genre: str | None = None
-    mood: tuple[str, ...] = ()
-    use_case: tuple[str, ...] = ()
-    language: str | None = None
-    vocal_mode: str | None = None
-    duration_bucket: str | None = None
-    visual_world: str | None = None
 
 
 class ProductionDirective(BaseModel):
@@ -80,8 +63,13 @@ class ProductionDirective(BaseModel):
     value_model: str = Field(min_length=1)
 
     def to_wire(self) -> dict[str, Any]:
-        """The JSON-safe payload that crosses C2; keys are exactly DIRECTIVE_WIRE_FIELDS."""
-        payload: dict[str, Any] = json.loads(self.model_dump_json())
+        """The JSON-safe payload that crosses C2; keys are exactly DIRECTIVE_WIRE_FIELDS.
+
+        Serialised through the shared seam model, so P2 and P3 read one definition.
+        """
+        payload = ProductionDirectivePayload.build(
+            **json.loads(self.model_dump_json())
+        ).to_wire()
         if tuple(payload) != DIRECTIVE_WIRE_FIELDS:
             raise DirectiveWireError(
                 f"C2 wire drift: produced {tuple(payload)}; "
