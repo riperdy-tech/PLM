@@ -51,6 +51,9 @@ class CheckStatus(str, Enum):
     WARN = "WARN"
     FAIL = "FAIL"
     SKIPPED = "SKIPPED"
+    # The check could not be measured (R4). Distinct from FAIL and never a pass: the
+    # evaluator pairs it with a blocking finding that names the reason.
+    UNKNOWN = "UNKNOWN"
 
 
 class GateCategory(str, Enum):

@@ -137,6 +137,7 @@ def test_technical_audio_validator_total_silence() -> None:
 
 
 def test_technical_audio_validator_clipping() -> None:
+    """A full-scale run of samples is clipping, and clipping blocks (R4)."""
     wav_path = _make_test_wav(duration=1.0, sample_rate=44100, amplitude=32767, clip=True)
     try:
         res = validate_technical_audio(
@@ -145,9 +146,10 @@ def test_technical_audio_validator_clipping() -> None:
             allowed_duration=ONE_SECOND,
             now=NOW,
         )
-        # Clipping is a warning, not hard blocking
-        assert not res.has_blocking_defects
-        assert any(f.finding_code == "SEVERE_CLIPPING_DETECTED" for f in res.findings)
+        assert res.has_blocking_defects
+        assert any(
+            f.finding_code == "SEVERE_CLIPPING_DETECTED" and f.blocking for f in res.findings
+        )
     finally:
         if wav_path.is_file():
             wav_path.unlink()

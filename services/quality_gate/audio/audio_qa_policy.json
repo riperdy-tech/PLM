@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "p5-audio-qa-v1",
+  "notes": [
+    "Declared thresholds for the P5 technical and musical audio checks (R4). Loaded and validated by quality_gate.audio.policy.load_audio_qa_policy; no threshold lives in evaluator code.",
+    "policy_version is stamped on every technical check (config_version), every musical check (model_version), the audio_measurements evidence item and the evaluator results, so a decision can be replayed against the exact thresholds that produced it. Change any value only together with a new policy_version.",
+    "Measurement methods are documented in quality_gate/audio/measure.py. A measurement that cannot be made is UNKNOWN with a reason and is a blocking finding; it never passes.",
+    "Citations: docs/P5_quality_rights_provenance_release_gate_implementation_plan.md sections 11-19; docs/reviews/2026-10-13-system-review-and-remediation-plan.md R4 'P5 technical checks'."
+  ],
+  "decode": {
+    "ffmpeg_timeout_seconds": 300,
+    "source": "Non-WAV inputs are decoded to 32-bit float PCM by ffmpeg; WAV (RIFF/RF64/BW64) is read by libsndfile. A decode that exceeds the timeout is a blocking DECODE_FAILED."
+  },
+  "format": {
+    "expected_sample_rate_hz": 44100,
+    "expected_channels": 2,
+    "source": "The P4 mock and the C3 default delivery profile are 44.1 kHz stereo. A deviation is a recorded LOW-severity variance, not a rejection (P5 plan section 14)."
+  },
+  "loudness": {
+    "method": "ITU-R BS.1770-4 integrated loudness (K-weighting, 400 ms blocks, 75 % overlap, -70 LUFS absolute and -10 LU relative gates) via pyloudnorm",
+    "target_lufs": -14.0,
+    "tolerance_lu": 6.0,
+    "escalation_lu": 4.0,
+    "source": "-14 LUFS is the YouTube/Spotify normalisation reference; target and tolerance are the values the evaluator previously took as parameters, moved here unchanged. Deviation beyond tolerance is a LOW warning, beyond tolerance + escalation a MEDIUM warning (P5 plan section 15: a quality signal, not a universal release rule)."
+  },
+  "true_peak": {
+    "oversampling_factor": 4,
+    "ceiling_dbtp": -1.0,
+    "source": "ITU-R BS.1770-4 Annex 2 (4x oversampling). -1 dBTP is the common streaming delivery ceiling. Above the ceiling is a LOW warning; above 0 dBTP (inter-sample over) a MEDIUM warning. It does not block: P6 renders through loudness normalisation, and sample-domain clipping is judged separately below."
+  },
+  "clipping": {
+    "full_scale_dbfs": -0.01,
+    "min_run_samples": 3,
+    "block_min_events": 1,
+    "source": "A clip event is a run of at least min_run_samples consecutive samples in one channel at or above full_scale_dbfs (16-bit full scale 32767/32768 is -0.0003 dBFS). A single near-full-scale sample is not an event (P5 plan section 16). block_min_events or more events is the blocking CLIPPING_DETECTED."
+  },
+  "silence": {
+    "threshold_dbfs": -60.0,
+    "max_leading_seconds": 2.0,
+    "max_trailing_seconds": 3.0,
+    "source": "A frame is silent when its peak over all channels is below threshold_dbfs. Edge silence beyond the maxima is a MEDIUM warning (P5 plan section 17: silence can be intentional). A file with no frame at or above the threshold is the blocking TOTAL_SILENCE_DETECTED."
+  },
+  "stereo": {
+    "warn_below_correlation": 0.0,
+    "block_below_correlation": -0.5,
+    "source": "Whole-file phase correlation of L and R (sum(L*R)/sqrt(sum(L^2)*sum(R^2))). A negative whole-file value is a MEDIUM warning; at or below the block value the mono fold-down largely cancels (near mono-inverted content), which blocks (P5 plan section 18)."
+  },
+  "dynamics": {
+    "crest_factor_min_db": 6.0,
+    "crest_factor_max_db": 18.0,
+    "in_range_score": 0.9,
+    "out_of_range_score": 0.6,
+    "source": "Crest factor (sample peak dBFS minus RMS dBFS) as a quality signal, not a release rule (P5 plan section 19). Values moved unchanged from the previous evaluator."
+  },
+  "musical_scoring": {
+    "loudness_score_span_lu": 20.0,
+    "loudness_weight": 0.6,
+    "dynamics_weight": 0.4,
+    "loudness_confidence": 0.95,
+    "dynamics_confidence": 0.8,
+    "composite_confidence": 0.85,
+    "source": "Heuristic composite of the loudness and dynamics signals; weights moved unchanged from the previous evaluator. The loudness score is 1 - |measured - target| / loudness_score_span_lu, clamped to [0, 1]."
+  }
+}
