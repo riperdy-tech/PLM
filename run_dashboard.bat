@@ -2,8 +2,8 @@
 setlocal
 if exist "%~dp0.venv\Scripts\python.exe" (
     echo ==========================================================
-    echo   PLM Autonomous Music Engine - Visual Control Deck
-    echo   URL: http://127.0.0.1:8000
+    echo   PLM Control Deck - DEMO DATA ^(not connected to the pipeline^)
+    echo   URL: printed by the server below ^(default http://127.0.0.1:8000^)
     echo ==========================================================
     "%~dp0.venv\Scripts\python.exe" -m plm_platform.cli dashboard %*
 ) else (

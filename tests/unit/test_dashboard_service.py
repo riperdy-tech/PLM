@@ -5,7 +5,8 @@ from __future__ import annotations
 import io
 import wave
 
-from packages.plm_platform.dashboard.service import DashboardService
+import pytest
+from plm_platform.dashboard.service import DashboardService, UnknownCaseError
 
 
 def test_dashboard_service_stats() -> None:
@@ -73,7 +74,12 @@ def test_dashboard_service_synthesizes_wav() -> None:
 
 def test_dashboard_service_qa_resolve() -> None:
     service = DashboardService()
-    result = service.resolve_qa_case("case_123", "CLEARED_BY_OVERRIDE", "Audited by operator")
+    result = service.resolve_qa_case("case_001", "CLEARED_BY_OVERRIDE", "Audited by operator")
     assert result["status"] == "resolved"
-    assert result["case_id"] == "case_123"
+    assert result["case_id"] == "case_001"
     assert result["resolution"] == "CLEARED_BY_OVERRIDE"
+
+
+def test_dashboard_service_refuses_unknown_case() -> None:
+    with pytest.raises(UnknownCaseError):
+        DashboardService().resolve_qa_case("case_123", "CLEARED_BY_OVERRIDE", "no such case")

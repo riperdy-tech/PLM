@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from plm_contracts import ErrorShape
+from plm_platform.execution import ExternalWriteGuard
 
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import OperatingMode, PrivacyStatus
@@ -33,9 +34,12 @@ def create_youtube_router(
     session_factory: Any,
     auth_dependency: Any,
     client: Any = None,
+    *,
+    write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/youtube", tags=["youtube"])
     yt_client = client or MockYouTubeClient()
+    guard = write_guard or ExternalWriteGuard()
 
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -145,7 +149,7 @@ def create_youtube_router(
             session.commit()
 
             # 4. Execute Publishing Engine
-            engine = YouTubePublishingEngine(yt_client)
+            engine = YouTubePublishingEngine(yt_client, write_guard=guard)
             result = engine.execute_publish(
                 session,
                 manifest,

@@ -888,3 +888,17 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* Persistent provenance label: the dashboard serves demo data until wired to the pipeline. */
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  padding: 10px 16px;
+  background: #f59e0b;
+  color: #111827;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}

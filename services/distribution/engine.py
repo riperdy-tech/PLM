@@ -6,6 +6,11 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from plm_platform.execution import (
+    ExternalWriteGuard,
+    ExternalWriteRefusedError,
+    provider_mode_of,
+)
 from sqlalchemy.orm import Session
 
 from .client.base import (
@@ -66,12 +71,39 @@ class DistributionEngineResult:
         }
 
 
-class DistributionEngine:
-    """Core distribution orchestrator managing lifecycle, idempotency, and DSP delivery."""
+CAPABILITY_SUBMIT = "distribution.submit"
+CAPABILITY_TAKEDOWN = "distribution.takedown"
 
-    def __init__(self, client: DistributorClientProtocol, provider_name: str = "mock_distributor") -> None:
+
+class DistributionEngine:
+    """Core distribution orchestrator managing lifecycle, idempotency, and DSP delivery.
+
+    Submissions and takedowns first pass the platform
+    :class:`~plm_platform.execution.ExternalWriteGuard`. A write the guard does not
+    permit raises :class:`~plm_platform.execution.ExternalWriteRefusedError` before
+    anything is persisted; the guard keeps the decision record.
+    """
+
+    def __init__(
+        self,
+        client: DistributorClientProtocol,
+        provider_name: str = "mock_distributor",
+        *,
+        write_guard: ExternalWriteGuard | None = None,
+    ) -> None:
         self.client = client
         self.provider_name = provider_name
+        self.write_guard = write_guard or ExternalWriteGuard()
+        self.provider_mode = provider_mode_of(client)
+
+    def _require_write(self, capability: str, idempotency_key: str) -> None:
+        decision = self.write_guard.authorize_external_write(
+            capability,
+            provider_mode=self.provider_mode,
+            idempotency_key=idempotency_key,
+        )
+        if not decision.decision.may_call_provider:
+            raise ExternalWriteRefusedError(decision)
 
     def submit_release(
         self,
@@ -116,14 +148,17 @@ class DistributionEngine:
         if errors:
             raise DistributionPreflightError(errors)
 
-        # 3. Persist Tracks
+        # 3. External-write gate: nothing is persisted for a write that will not happen.
+        self._require_write(CAPABILITY_SUBMIT, f"{package.submission_fingerprint}:submit")
+
+        # 4. Persist Tracks
         for track in package.tracks:
             insert_track(session, track)
 
-        # 4. Submit to Distributor
+        # 5. Submit to Distributor
         submission_res = self.client.submit_release(package)
 
-        # 5. Build Initial Delivery Targets
+        # 6. Build Initial Delivery Targets
         standard_stores = [
             StorePlatform.SPOTIFY,
             StorePlatform.APPLE_MUSIC,
@@ -142,7 +177,7 @@ class DistributionEngine:
             for st in standard_stores
         ]
 
-        # 6. Persist Release
+        # 7. Persist Release
         release = DistributionRelease(
             id=f"dist_rel_{package.release_id}",
             release_id=package.release_id,
@@ -249,6 +284,9 @@ class DistributionEngine:
         if not release.provider_release_id:
             raise ValueError(f"Release {release_id} has no provider_release_id")
 
+        self._require_write(
+            CAPABILITY_TAKEDOWN, f"{release.submission_fingerprint}:takedown"
+        )
         takedown_res = self.client.request_takedown(release.provider_release_id)
 
         update_release_status(

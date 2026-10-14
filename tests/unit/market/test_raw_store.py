@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 import sqlalchemy as sa
 from plm_platform.storage import ObjectAlreadyExistsError, StoredObject, sha256_digest
 
@@ -17,6 +18,9 @@ from services.market_intelligence.domain.enums import (
 from services.market_intelligence.storage import repositories
 from services.market_intelligence.storage.models import raw_observations
 from services.market_intelligence.storage.raw_store import store_raw_observation
+
+# Exercises code that loads platform settings; the values are set explicitly.
+pytestmark = pytest.mark.usefixtures("platform_env")
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 

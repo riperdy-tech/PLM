@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from plm_contracts import ProviderMode
+
 from ..domain.enums import DeliveryStatus, ReleaseStatus, StorePlatform
 from ..domain.models import CanonicalReleasePackage, DeliveryTarget
 from .base import (
@@ -20,6 +22,8 @@ from .base import (
 
 class MockDistributorClient(DistributorClientProtocol):
     """Deterministic in-memory distributor adapter simulating DSP submissions."""
+
+    provider_mode = ProviderMode.MOCK
 
     def __init__(
         self,

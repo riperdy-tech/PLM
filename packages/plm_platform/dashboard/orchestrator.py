@@ -1,4 +1,10 @@
-"""In-process pipeline orchestrator and real-time SSE event broadcaster."""
+"""Scripted demo playback of the pipeline stages, broadcast over SSE.
+
+:class:`DemoOrchestrator` calls no PLM service. Each stage's log line and output are
+fixed literals replayed on a timer, so a "run" always ends the same way. It exists to
+exercise the dashboard UI. The real pipeline workflow is stage R3 of the remediation
+plan; until then nothing here is evidence that the pipeline works.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +14,11 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from .service import DATA_SOURCE
 
-class PipelineOrchestrator:
-    """Orchestrates autonomous PLM pipeline runs and broadcasts execution events."""
+
+class DemoOrchestrator:
+    """Replays scripted stage events for the dashboard UI. Calls no PLM service."""
 
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -24,6 +32,7 @@ class PipelineOrchestrator:
             "is_running": self._is_running,
             "last_run_id": self._last_run_id,
             "subscriber_count": len(self._subscribers),
+            "data_source": DATA_SOURCE,
         }
 
     async def subscribe(self) -> AsyncGenerator[dict[str, Any], None]:
@@ -40,11 +49,12 @@ class PipelineOrchestrator:
     async def broadcast(self, event: dict[str, Any]) -> None:
         """Push an event to all active subscriber queues."""
         event["timestamp"] = time.time()
+        event["data_source"] = DATA_SOURCE
         for q in list(self._subscribers):
             await q.put(event)
 
     async def start_run(self, mode: str = "full") -> str:
-        """Launch an autonomous pipeline run in the background."""
+        """Start a scripted demo playback in the background."""
         run_id = f"run_{uuid.uuid4().hex[:8]}"
         self._is_running = True
         self._last_run_id = run_id
@@ -52,12 +62,12 @@ class PipelineOrchestrator:
         return run_id
 
     async def _execute_pipeline(self, run_id: str, mode: str = "full") -> None:
-        """Execute the 10-step autonomous loop with stage notifications."""
+        """Replay the ten scripted stage events. No service is called."""
         await self.broadcast({
             "type": "pipeline_start",
             "run_id": run_id,
             "mode": mode,
-            "message": "Initiating PLM autonomous music & media pipeline.",
+            "message": "Demo playback started: scripted stage events, no PLM service is called.",
         })
 
         stages = [
@@ -133,7 +143,7 @@ class PipelineOrchestrator:
                     "title": title,
                 })
 
-                # Short delay simulating execution pacing for realistic UI telemetry
+                # Fixed pacing so the UI can animate; no work happens here.
                 await asyncio.sleep(0.15)
 
                 await self.broadcast({
@@ -157,14 +167,14 @@ class PipelineOrchestrator:
             await self.broadcast({
                 "type": "pipeline_complete",
                 "run_id": run_id,
-                "status": "SUCCESS",
+                "status": "DEMO_COMPLETE",
                 "final_reward": 0.86,
                 "arm_updated": "arm_synthwave_night",
-                "message": "Full 10-step autonomous loop completed successfully. Posterior shift verified.",
+                "message": "Demo playback finished. Nothing was generated, published or learned.",
             })
             self._history.append({
                 "run_id": run_id,
-                "status": "SUCCESS",
+                "status": "DEMO_COMPLETE",
                 "timestamp": time.time(),
                 "reward": 0.86,
             })

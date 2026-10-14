@@ -29,6 +29,7 @@ class PublishState(str, Enum):
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
     VERIFIED = "verified"
+    INTENT_RECORDED = "intent_recorded"  # dry-run/shadow: write evaluated, not sent"
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_PERMANENT = "failed_permanent"
     QUARANTINED = "quarantined"
@@ -86,3 +87,4 @@ class FailureReasonCode(str, Enum):
     PROCESSING_TIMEOUT_EXCEEDED = "processing_timeout_exceeded"
     POLICY_VIOLATION = "policy_violation"
     REMOTE_NOT_FOUND = "remote_not_found"
+    EXTERNAL_WRITE_NOT_AUTHORIZED = "external_write_not_authorized"

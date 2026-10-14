@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from plm_contracts import ProviderMode
+
 from .base import (
     YouTubeAuthError,
     YouTubeQuotaExceededError,
@@ -14,6 +16,8 @@ from .base import (
 
 class MockYouTubeClient:
     """In-memory deterministic mock of YouTube Data API v3."""
+
+    provider_mode = ProviderMode.MOCK
 
     def __init__(
         self,

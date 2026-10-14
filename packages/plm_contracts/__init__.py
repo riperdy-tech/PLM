@@ -24,6 +24,8 @@ from .envelopes import Envelope as Envelope
 from .envelopes import Page as Page
 from .errors import ErrorShape as ErrorShape
 from .events import EventEnvelope as EventEnvelope
+from .execution import ExecutionPolicy as ExecutionPolicy
+from .execution import ProviderMode as ProviderMode
 from .ids import VERSIONED_ID_PATTERN as VERSIONED_ID_PATTERN
 from .ids import BrandId as BrandId
 from .ids import BrandScoped as BrandScoped
@@ -47,6 +49,7 @@ __all__ = [
     "Envelope",
     "ErrorShape",
     "EventEnvelope",
+    "ExecutionPolicy",
     "GateDisposition",
     "GateOutcome",
     "GateOverrideStatus",
@@ -54,6 +57,7 @@ __all__ = [
     "Page",
     "PolicyAction",
     "ProvenanceStatus",
+    "ProviderMode",
     "QualityStatus",
     "ReviewResult",
     "SourceFreshness",

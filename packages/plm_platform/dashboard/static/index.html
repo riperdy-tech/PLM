@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PLM | Autonomous Music-Media Control Deck</title>
+  <title>PLM | Control Deck (Demo Data)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <div class="demo-banner" role="alert">
+    DEMO DATA &mdash; not connected to the pipeline. Every number, track and run on this page is a fixed sample; nothing shown here was generated, published or measured.
+  </div>
   <div class="app-container">
     <!-- Top Navigation Header -->
     <header class="app-header">
@@ -30,14 +33,14 @@
 
       <div class="header-actions">
         <div class="status-pill">
-          <span class="status-indicator online"></span>
-          <span class="status-text">SYSTEM OPERATIONAL</span>
+          <span class="status-indicator"></span>
+          <span class="status-text">DEMO DATA</span>
         </div>
         <button id="header-run-btn" class="btn btn-primary glow-button">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
-          Run Autonomous Loop
+          Play Demo Run
         </button>
       </div>
     </header>

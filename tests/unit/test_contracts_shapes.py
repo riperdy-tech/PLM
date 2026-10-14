@@ -95,7 +95,7 @@ class TestEnvelope:
     def test_naive_timestamps_are_rejected(self) -> None:
         with pytest.raises(ValidationError):
             Envelope[float](
-                as_of=datetime(2026, 9, 20, 12, 0),  # noqa: DTZ001 — deliberately naive
+                as_of=datetime(2026, 9, 20, 12, 0),
                 source_freshness=SourceFreshness.FRESH,
                 quality_status=QualityStatus.VALID,
                 metric_version="revenue_v2",
@@ -285,7 +285,7 @@ class TestEventEnvelope:
             EventEnvelope(
                 event_id="evt_5",
                 event_type="EXPERIMENT_CLOSED",
-                occurred_at=datetime(2026, 9, 20),  # noqa: DTZ001 — deliberately naive
+                occurred_at=datetime(2026, 9, 20),
                 actor="p3.worker",
                 software_version="p3-v1",
             )

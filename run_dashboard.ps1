@@ -29,7 +29,7 @@ if ($Port -eq 0) {
 }
 
 Write-Host "==========================================================" -ForegroundColor Magenta
-Write-Host "  PLM Autonomous Music Engine - Visual Control Deck" -ForegroundColor Cyan
+Write-Host "  PLM Control Deck - DEMO DATA (not connected to the pipeline)" -ForegroundColor Cyan
 Write-Host "  URL: http://127.0.0.1:$Port" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Magenta
 

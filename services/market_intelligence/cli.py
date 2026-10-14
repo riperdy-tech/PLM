@@ -359,7 +359,7 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
             "the fixture-backed connector is for ENV=ci only; configure YOUTUBE_API_KEY for "
             "a real run — a mock must never masquerade as a provider"
         )
-    from tests.support.http import MockHTTP
+    from plm_platform.testing.http import MockHTTP
 
     from .collection.seeds import load_bootstrap_seeds
 

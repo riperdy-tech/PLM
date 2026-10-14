@@ -259,11 +259,11 @@ class TestEnvExampleDrift:
         assert settings.env is Env.LOCAL
         assert settings.log_level is LogLevel.INFO
         assert settings.postgres_password.get_secret_value() == "change-me"
-        expected_url = "postgresql://plm:change-me@localhost:5432/plm"
+        expected_url = "postgresql://plm:change-me@127.0.0.1:5432/plm"
         assert settings.database_url.get_secret_value() == expected_url
-        assert settings.minio_endpoint == "localhost:9000"
+        assert settings.minio_endpoint == "127.0.0.1:9000"
         assert settings.minio_root_user == "plm"
         assert settings.minio_root_password.get_secret_value() == "change-me"
         assert settings.minio_bucket == "plm-media"
-        assert settings.temporal_host == "localhost:7233"
+        assert settings.temporal_host == "127.0.0.1:7233"
         assert settings.is_mock_mode()

@@ -1,4 +1,10 @@
-"""Dashboard data access service and audio synthesis provider."""
+"""Demo data for the visual dashboard. Nothing here is read from the PLM pipeline.
+
+Every KPI, arm, candidate and release below is a fixed literal, and the audio is one
+synthesized loop. The API stamps every payload with :data:`DATA_SOURCE` so no consumer
+can mistake it for live data. Wiring the dashboard to the phase repositories is stage
+R5 of the remediation plan (docs/reviews/2026-10-13-system-review-and-remediation-plan.md).
+"""
 
 from __future__ import annotations
 
@@ -6,11 +12,18 @@ import io
 import math
 import struct
 import wave
-from typing import Any
+from typing import Any, Final
+
+DATA_SOURCE: Final[str] = "demo"
+"""Provenance label carried by every dashboard payload until the dashboard reads real data."""
+
+
+class UnknownCaseError(KeyError):
+    """A QA resolution named a case the dashboard does not hold."""
 
 
 class DashboardService:
-    """Provides platform data and synthetic audio assets for the visual dashboard."""
+    """Fixed demo data and synthetic audio for the visual dashboard (not pipeline data)."""
 
     def __init__(self) -> None:
         self._cases: dict[str, dict[str, Any]] = {
@@ -219,12 +232,13 @@ class DashboardService:
         return buf.getvalue()
 
     def resolve_qa_case(self, case_id: str, resolution: str, notes: str) -> dict[str, Any]:
-        """Resolve a quarantined QA case."""
+        """Resolve a quarantined demo case; an unknown case id raises, never "resolves"."""
         case = self._cases.get(case_id)
-        if case:
-            case["status"] = "CLEARED" if resolution == "CLEARED_BY_OVERRIDE" else "REJECTED"
-            case["resolution"] = resolution
-            case["notes"] = notes
+        if case is None:
+            raise UnknownCaseError(case_id)
+        case["status"] = "CLEARED" if resolution == "CLEARED_BY_OVERRIDE" else "REJECTED"
+        case["resolution"] = resolution
+        case["notes"] = notes
         return {
             "case_id": case_id,
             "status": "resolved",

@@ -908,9 +908,28 @@ def analytics_smoke() -> None:
 
 
 dashboard_app = typer.Typer(
-    help="Visual control deck & monitoring dashboard.",
+    help="Visual dashboard (demo data; not yet connected to the pipeline).",
     no_args_is_help=False,
 )
+
+
+def _serve_dashboard(host: str, port: int, reload: bool) -> None:
+    import uvicorn
+
+    from .config import SERVICE_TOKEN_VAR, SettingsError, load_settings
+    from .dashboard.app import create_app
+
+    try:
+        platform = load_settings()
+    except SettingsError as exc:
+        typer.echo(f"settings unavailable ({exc}); mutating dashboard routes stay closed", err=True)
+        platform = None
+    if platform is None or platform.service_token is None:
+        typer.echo(
+            f"{SERVICE_TOKEN_VAR} is not set: run/resolve actions will answer 503 (R15)", err=True
+        )
+    typer.echo(f"Starting PLM Control Deck (DEMO DATA) on http://{host}:{port} ...")
+    uvicorn.run(create_app(platform=platform), host=host, port=port, reload=reload)
 
 
 @dashboard_app.callback(invoke_without_command=True)
@@ -920,15 +939,9 @@ def dashboard_main(
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
     reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
 ) -> None:
-    """Launch the PLM Visual Control Deck web dashboard server."""
+    """Launch the PLM dashboard (serves demo data until wired to the pipeline)."""
     if ctx.invoked_subcommand is None:
-        import uvicorn
-
-        from .dashboard.app import create_app
-
-        typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")
-        dashboard_app_instance = create_app()
-        uvicorn.run(dashboard_app_instance, host=host, port=port, reload=reload)
+        _serve_dashboard(host, port, reload)
 
 
 @dashboard_app.command(name="serve")
@@ -937,14 +950,8 @@ def dashboard_serve(
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
     reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
 ) -> None:
-    """Serve the PLM Visual Control Deck."""
-    import uvicorn
-
-    from .dashboard.app import create_app
-
-    typer.echo(f"Starting PLM Control Deck on http://{host}:{port} ...")
-    dashboard_app_instance = create_app()
-    uvicorn.run(dashboard_app_instance, host=host, port=port, reload=reload)
+    """Serve the PLM dashboard (demo data)."""
+    _serve_dashboard(host, port, reload)
 
 
 app.add_typer(market_app, name="market")

@@ -49,13 +49,13 @@ jobs:
             pip-${{ runner.os }}-
 
       - name: Install project (editable, dev extras)
-        run: pip install -e ".[dev]"
+        run: pip install -c constraints.txt -e ".[dev]"
 
       - name: Lint (ruff)
         run: ruff check .
 
       - name: Type-check (mypy)
-        run: mypy packages/
+        run: mypy packages services
 
       # Hermetic: no services, no .env (the unit tests inject their settings).
       - name: Unit and contract tests
@@ -68,6 +68,11 @@ jobs:
 
       - name: Start the compose stack and wait for health
         run: docker compose up -d --wait --wait-timeout 420
+
+      # The integration tier assumes a migrated database (`plm migrate`, as the README
+      # documents); without this step it ran against empty schemas.
+      - name: Apply migrations
+        run: plm migrate
 
       - name: Integration tests
         run: pytest -q -m integration
