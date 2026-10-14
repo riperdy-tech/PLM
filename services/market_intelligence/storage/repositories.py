@@ -318,6 +318,7 @@ def insert_normalized_observation(
         "channel_video_count": _tri_value(draft.channel_video_count),
         "text_title": draft.text_title, "text_description": draft.text_description,
         "country_signal": draft.country_signal, "language_signal": draft.language_signal,
+        "channel_id": draft.channel_id,
         "normalization_version": normalization_version,
         "not_ready_metrics": sorted(
             name for name in _OBSERVATION_METRIC_FIELDS if getattr(draft, name).is_not_ready
@@ -362,7 +363,7 @@ def _enrich_existing_observation(
         elif metric.is_not_ready and row[name] is None and name not in not_ready:
             not_ready.add(name)
     for name in ("published_at", "text_title", "text_description", "country_signal",
-                 "language_signal"):
+                 "language_signal", "channel_id"):
         value = getattr(draft, name)
         if value is not None and row[name] is None:
             updates[name] = value
@@ -448,7 +449,7 @@ def _rows_to_observations(rows: Iterable[RowMapping]) -> list[NormalizedObservat
         records.append(NormalizedObservation(
             entity_id=str(row["entity_id"]), source_id=str(row["source_id"]),
             raw_observation_id=str(row["raw_observation_id"]), observed_at=row["observed_at"],
-            published_at=row["published_at"],
+            published_at=row["published_at"], channel_id=row["channel_id"],
             views=_tri_from_row(row, "views", not_ready),
             likes=_tri_from_row(row, "likes", not_ready),
             comments=_tri_from_row(row, "comments", not_ready),

@@ -3,12 +3,19 @@
 
 Concentration is an analytic indicator over channel-normalised activity, not a legal
 statement; both raw and normalised values are persisted with the sample size.
+
+The channel-keyed metrics (channel count, top-10 share, concentration, channel size)
+are `Tri`: when the arm's activity cannot be attributed to channels they are unknown.
+They are never computed over video ids, which made every arm look perfectly
+fragmented (review R2).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+
+from plm_contracts import Tri
 
 __all__ = [
     "ArmCompetition",
@@ -21,16 +28,16 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ArmCompetition:
-    active_channel_count: int
+    active_channel_count: Tri[int]
     active_video_count: int
     median_video_velocity: float
     p75_video_velocity: float
     p90_video_velocity: float
-    median_channel_size: float
-    top_10_channel_share: float
+    median_channel_size: Tri[float]
+    top_10_channel_share: Tri[float]
     new_upload_rate: float
-    concentration_raw: float
-    concentration_normalized: float
+    concentration_raw: Tri[float]
+    concentration_normalized: Tri[float]
     sample_size: int
 
 
@@ -65,27 +72,48 @@ def competition_metrics(
     *,
     video_velocities: Sequence[float],
     channel_sizes: Sequence[float],
-    channel_activities: Sequence[float],
+    channel_activities: Sequence[float] | None,
     uploads_last_window: int,
     window_days: int,
 ) -> ArmCompetition:
-    """One arm's competitive profile; `concentration_normalized` is HHI scaled to 0–1."""
-    activity_total = float(sum(channel_activities))
-    shares = [activity / activity_total for activity in channel_activities] \
-        if activity_total > 0 else []
-    raw = herfindahl_index(shares)
-    normalized = 0.0 if not shares else (raw - 1.0 / len(shares)) / (1.0 - 1.0 / len(shares)) \
-        if len(shares) > 1 else raw
+    """One arm's competitive profile; `concentration_normalized` is HHI scaled to 0–1.
+
+    `video_velocities` has one entry per video, `channel_activities` and
+    `channel_sizes` one entry per channel. `channel_activities=None` means the
+    activity could not be attributed to channels: every channel-keyed metric is then
+    unknown. No activity at all (an empty or all-zero list) has no shares, so
+    concentration is unknown too — never a measured 0.
+    """
+    concentration_raw: Tri[float] = Tri.unknown()
+    concentration_normalized: Tri[float] = Tri.unknown()
+    top_share: Tri[float] = Tri.unknown()
+    channel_count: Tri[int] = Tri.unknown()
+    if channel_activities is not None:
+        channel_count = Tri.known(len(channel_activities))
+        activity_total = float(sum(channel_activities))
+        if activity_total > 0:
+            shares = [activity / activity_total for activity in channel_activities]
+            raw = herfindahl_index(shares)
+            if len(shares) == 1:
+                normalized = raw
+            else:
+                normalized = (raw - 1.0 / len(shares)) / (1.0 - 1.0 / len(shares))
+            concentration_raw = Tri.known(raw)
+            concentration_normalized = Tri.known(max(0.0, min(normalized, 1.0)))
+            top_share = Tri.known(top_n_share(channel_activities, 10))
+    median_size: Tri[float] = (
+        Tri.known(percentile(channel_sizes, 0.5)) if channel_sizes else Tri.unknown()
+    )
     return ArmCompetition(
-        active_channel_count=len(channel_activities),
+        active_channel_count=channel_count,
         active_video_count=len(video_velocities),
         median_video_velocity=percentile(video_velocities, 0.5),
         p75_video_velocity=percentile(video_velocities, 0.75),
         p90_video_velocity=percentile(video_velocities, 0.9),
-        median_channel_size=percentile(channel_sizes, 0.5),
-        top_10_channel_share=top_n_share(channel_activities, 10),
+        median_channel_size=median_size,
+        top_10_channel_share=top_share,
         new_upload_rate=uploads_last_window / window_days if window_days > 0 else 0.0,
-        concentration_raw=raw,
-        concentration_normalized=max(0.0, min(normalized, 1.0)),
+        concentration_raw=concentration_raw,
+        concentration_normalized=concentration_normalized,
         sample_size=len(video_velocities),
     )

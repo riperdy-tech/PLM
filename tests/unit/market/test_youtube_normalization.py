@@ -2,7 +2,7 @@
 import json
 from datetime import UTC, datetime
 
-from plm_contracts import TriState
+from plm_contracts import Tri, TriState
 
 from services.market_intelligence.connectors.base import FetchedObject
 from services.market_intelligence.domain.enums import ProviderObjectType
@@ -77,3 +77,33 @@ def test_golden_normalized_video_pins_the_whole_mapping() -> None:
                for name in outcome.observation.__dataclass_fields__}
     assert_golden(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
                   golden_path("market", "normalized_video.json"))
+
+# -- R2: the publishing channel and its audience ride on the video observation --
+
+def test_video_draft_carries_its_channel_and_the_batch_subscriber_count() -> None:
+    outcome = normalize_video_object(
+        _video(), entity_id="entity-1", source_id="source-1", raw_observation_id="raw-1",
+        observed_at=FIXED_NOW, channel_subscribers=Tri.known(820_000.0),
+    )
+    assert outcome.observation is not None
+    assert outcome.observation.channel_id == "UC" + "a" * 22
+    assert outcome.observation.subscriber_count.unwrap() == 820_000.0
+
+
+def test_without_a_channel_fetch_subscribers_stay_unknown() -> None:
+    outcome = normalize_video_object(
+        _video(), entity_id="entity-1", source_id="source-1", raw_observation_id="raw-1",
+        observed_at=FIXED_NOW,
+    )
+    assert outcome.observation is not None
+    assert outcome.observation.subscriber_count.is_unknown
+
+
+def test_a_malformed_channel_id_is_unknown_attribution_not_a_guess() -> None:
+    payload = {**VIDEO_PAYLOAD, "snippet": {**VIDEO_PAYLOAD["snippet"], "channelId": "nope"}}
+    fetched = FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
+                            provider_object_id="vid00000001", observed_at=FIXED_NOW,
+                            payload=payload)
+    outcome = normalize_video_object(fetched, entity_id="entity-1", source_id="source-1",
+                                     raw_observation_id="raw-1", observed_at=FIXED_NOW)
+    assert outcome.observation is not None and outcome.observation.channel_id is None

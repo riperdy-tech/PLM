@@ -8,6 +8,7 @@ silently repaired or dropped: the caller writes `market_quarantined_records`.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -27,6 +28,7 @@ __all__ = [
     "normalize_channel_object",
     "normalize_search_hit",
     "normalize_video_object",
+    "video_channel_id",
 ]
 
 NORMALIZATION_VERSION: Final[str] = "p1-norm-v1"
@@ -59,6 +61,7 @@ class NormalizedObservationDraft:
     text_description: str | None
     country_signal: str | None
     language_signal: str | None
+    channel_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,8 +72,14 @@ class NormalizationOutcome:
 
 def normalize_video_object(
     fetched: FetchedObject, *, entity_id: str, source_id: str, raw_observation_id: str,
-    observed_at: datetime,
+    observed_at: datetime, channel_subscribers: Tri[float] | None = None,
 ) -> NormalizationOutcome:
+    """videos.list item → draft. `videos.list` never carries channel size.
+
+    `channel_subscribers` is the publishing channel's subscriber count from a
+    `channels.list` fetch in the same collection batch (§11.3); `None` or unknown
+    leaves it unknown — a missing channel fetch is never a zero audience.
+    """
     if not is_valid_video_id(fetched.provider_object_id):
         return _quarantined("malformed_provider_id",
                             f"video id {fetched.provider_object_id!r} is not 11 URL-safe chars",
@@ -87,11 +96,13 @@ def normalize_video_object(
         views=tri_from_optional(_count(statistics.get("viewCount"))),
         likes=tri_from_optional(_count(statistics.get("likeCount"))),
         comments=tri_from_optional(_count(statistics.get("commentCount"))),
-        subscriber_count=Tri.unknown(),  # videos.list never carries channel size
+        subscriber_count=channel_subscribers if channel_subscribers is not None
+        else Tri.unknown(),
         video_duration_seconds=tri_from_optional(duration),
         playlist_item_count=Tri.unknown(), channel_video_count=Tri.unknown(),
         text_title=snippet.get("title"), text_description=snippet.get("description"),
         country_signal=None, language_signal=snippet.get("defaultLanguage"),
+        channel_id=video_channel_id(fetched.payload),
     )
     return _validated(draft, fetched)
 
@@ -117,6 +128,7 @@ def normalize_channel_object(
         channel_video_count=tri_from_optional(_count(statistics.get("videoCount"))),
         text_title=snippet.get("title"), text_description=snippet.get("description"),
         country_signal=snippet.get("country"), language_signal=snippet.get("defaultLanguage"),
+        channel_id=fetched.provider_object_id,
     )
     return _validated(draft, fetched)
 
@@ -138,8 +150,22 @@ def normalize_search_hit(
         playlist_item_count=Tri.unknown(), channel_video_count=Tri.unknown(),
         text_title=snippet.get("title"), text_description=snippet.get("description"),
         country_signal=None, language_signal=None,
+        channel_id=video_channel_id(fetched.payload),
     )
     return _validated(draft, fetched)
+
+
+def video_channel_id(payload: Mapping[str, Any]) -> str | None:
+    """The publishing channel named by a video/search snippet, if it is a valid id.
+
+    A missing or malformed id is `None` (unknown attribution): it is never guessed
+    and never replaced by the video id.
+    """
+    snippet = payload.get("snippet")
+    candidate = snippet.get("channelId") if isinstance(snippet, Mapping) else None
+    if isinstance(candidate, str) and is_valid_channel_id(candidate):
+        return candidate
+    return None
 
 
 def _validated(draft: NormalizedObservationDraft, fetched: FetchedObject) -> NormalizationOutcome:

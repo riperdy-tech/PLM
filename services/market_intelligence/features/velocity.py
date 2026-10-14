@@ -4,7 +4,8 @@ observation instants as arguments — no clock access, no randomness (P0 §2).""
 
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 from typing import Final
 
 from plm_contracts import Tri
@@ -15,6 +16,7 @@ __all__ = [
     "comment_rate",
     "lifetime_views_per_day",
     "like_rate",
+    "recent_views_per_day",
     "video_age_hours",
     "windowed_views_per_day",
 ]
@@ -63,6 +65,43 @@ def windowed_views_per_day(
     if delta < 0:
         return Tri.unknown()  # a provider correction, not negative growth: call it unknown
     return Tri.known(delta / window_days)
+
+
+def recent_views_per_day(
+    sightings: Sequence[tuple[datetime, Tri[float]]], *, now: datetime, window_hours: float,
+    min_span_fraction: float,
+) -> Tri[float]:
+    """§11.5 over a short trailing horizon (24h/72h): views/day of one entity.
+
+    The window is `(now - window_hours, now]` relative to the injected `now`; a
+    sighting after `now` is not evidence yet and is ignored. The rate is the delta
+    between the earliest and latest sightings with known views inside the window.
+
+    Insufficient evidence is `unknown`, never zero and never a lifetime fallback:
+    fewer than two known sightings, sightings spanning less than
+    `min_span_fraction` of the window, or a negative delta (a provider correction).
+    """
+    if window_hours <= 0:
+        raise ValueError("window_hours must be positive")
+    if not 0.0 < min_span_fraction <= 1.0:
+        raise ValueError("min_span_fraction must be in (0, 1]")
+    _require_aware(now, *(moment for moment, _views in sightings))
+    start = now - timedelta(hours=window_hours)
+    inside = sorted(
+        ((moment, float(views.unwrap())) for moment, views in sightings
+         if start < moment <= now and views.is_known),
+        key=lambda pair: pair[0],
+    )
+    if len(inside) < 2:
+        return Tri.unknown()
+    (first_at, first_views), (last_at, last_views) = inside[0], inside[-1]
+    span_hours = (last_at - first_at).total_seconds() / 3600.0
+    if span_hours <= 0 or span_hours < window_hours * min_span_fraction:
+        return Tri.unknown()
+    delta = last_views - first_views
+    if delta < 0:
+        return Tri.unknown()
+    return Tri.known(delta / (span_hours / 24.0))
 
 
 def like_rate(likes: Tri[float], views: Tri[float]) -> Tri[float]:

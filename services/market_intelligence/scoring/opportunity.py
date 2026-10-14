@@ -27,7 +27,7 @@ from ..domain.entities import OpportunityScore
 from ..domain.enums import ScoringComponent
 from ..domain.value_objects import EvidenceSummary, ScoreComponents
 from ..features.arm_features import ArmFeatures
-from .calibration import SCORE_VERSION, ScoreWeights, default_weights
+from .calibration import SCORE_VERSION, ScoreWeights
 from .normalization import percentile_score
 
 if TYPE_CHECKING:
@@ -89,9 +89,10 @@ def _demand_value(features: ArmFeatures) -> float | None:
 
 
 def _growth_value(features: ArmFeatures) -> float | None:
-    if not features.growth_30d_vs_prev30d.is_known:
+    """§12/§17.3: the current 30 days against the preceding comparable 30 days."""
+    if not features.growth_d0_30_vs_d30_60.is_known:
         return None
-    return float(features.growth_30d_vs_prev30d.unwrap())
+    return float(features.growth_d0_30_vs_d30_60.unwrap())
 
 
 def _competitor_velocity_value(features: ArmFeatures) -> float | None:
@@ -108,11 +109,20 @@ def _competitor_velocity_value(features: ArmFeatures) -> float | None:
 
 
 def _competition_penalty_value(features: ArmFeatures) -> float | None:
-    """What must *not* help: saturation and concentration, both higher-is-worse."""
-    if not features.competition.sample_size:
+    """What must *not* help: saturation and concentration, both higher-is-worse.
+
+    Both inputs are channel-keyed (§13). When the arm's activity cannot be
+    attributed to channels they are unknown, and so is this component: it is not
+    computed from video ids and not floored to a value.
+    """
+    competition = features.competition
+    if not competition.sample_size:
         return None
-    return (features.competition.concentration_normalized * 100.0
-            + features.competition.top_10_channel_share * 100.0)
+    if not (competition.concentration_normalized.is_known
+            and competition.top_10_channel_share.is_known):
+        return None
+    return (float(competition.concentration_normalized.unwrap()) * 100.0
+            + float(competition.top_10_channel_share.unwrap()) * 100.0)
 
 
 def _audience_value(features: ArmFeatures) -> float | None:
@@ -244,7 +254,12 @@ def score_all_arms(
     features_by_arm: Mapping[str, ArmFeatures], *, as_of: datetime, settings: MarketSettings,
     weights: ScoreWeights | None = None,
 ) -> dict[str, OpportunityScore]:
-    active_weights = default_weights() if weights is None else weights
+    """Score every arm with the configured weights (`settings.score_weights`, §17.2).
+
+    `weights` is an explicit per-call override (calibration experiments); without it
+    the scorer uses the settings the run was configured with — never a code literal.
+    """
+    active_weights = settings.score_weights if weights is None else weights
     components_by_arm = compute_component_scores(features_by_arm, settings=settings)
     return {
         arm_fingerprint: score_arm(

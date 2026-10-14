@@ -26,6 +26,10 @@ class NormalizedObservation:
     raw_observation_id: str
     observed_at: datetime
     published_at: datetime | None = None
+    # The publishing channel's provider id, or `None` when the source did not say
+    # (rows stored before R2 have none). Channel-keyed metrics (§13 concentration)
+    # treat `None` as unknown attribution — never as "its own channel".
+    channel_id: str | None = None
     views: Tri[float] = field(default_factory=Tri.unknown)
     likes: Tri[float] = field(default_factory=Tri.unknown)
     comments: Tri[float] = field(default_factory=Tri.unknown)

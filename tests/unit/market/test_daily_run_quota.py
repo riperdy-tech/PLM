@@ -159,6 +159,7 @@ def test_a_day_with_room_runs_and_charges_the_ledger(market_session, memory_obje
     mock = MockHTTP(repeat_last=True)
     mock.enqueue_json(_fixture("search_lofi_p1.json"))
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))
+    mock.enqueue_json(_fixture("channels_lofi_batch.json"))
 
     result = _run_due_collection(market_session, now=NOW, settings=SETTINGS,
                                  connector=_connector(mock, units=SETTINGS.quota_units_per_run))
@@ -166,11 +167,11 @@ def test_a_day_with_room_runs_and_charges_the_ledger(market_session, memory_obje
     assert result["status"] == "succeeded"
     run = repositories.load_run(market_session, result["run_id"])
     assert run is not None
-    # one 100-unit search + one 1-unit hydration list call, charged to the day
-    assert run["cost_api_quota_units"] == 101
+    # one 100-unit search + 1-unit videos.list + 1-unit channels.list, charged to the day
+    assert run["cost_api_quota_units"] == 102
     state = daily_quota_state(market_session, now=NOW, settings=SETTINGS)
-    assert state.used_units == 101
-    assert state.remaining_units == SETTINGS.quota_units_per_day - 101
+    assert state.used_units == 102
+    assert state.remaining_units == SETTINGS.quota_units_per_day - 102
 
 
 def test_the_ledger_ignores_previous_days(market_session) -> None:

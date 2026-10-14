@@ -17,11 +17,26 @@ from .competition import ArmCompetition, competition_metrics
 from .confidence import ConfidenceBreakdown, confidence
 from .cross_platform import cross_platform_signal
 from .demand import DemandInputs, demand_inputs
-from .growth import growth_30d_vs_prev30d, growth_30d_vs_prev90d, median_velocity
+from .growth import (
+    growth_d0_30_vs_d30_60,
+    growth_d0_30_vs_d30_90,
+    growth_d0_30_vs_d90_180,
+    median_recent_velocity,
+    median_velocity,
+)
 from .production_fit import ProductionFitInputs, production_fit_inputs
 from .velocity import lifetime_views_per_day
 
-__all__ = ["ArmFeatures", "compute_arm_features", "features_freshness"]
+__all__ = [
+    "VELOCITY_24H_HOURS", "VELOCITY_72H_HOURS", "ArmFeatures", "arm_competition",
+    "compute_arm_features", "features_freshness",
+]
+
+_COMPETITION_WINDOW_DAYS = 30
+# Short-horizon velocity windows (§9's 24h/72h cadences). The feature names state the
+# span, so the spans are fixed here rather than configured under a misleading name.
+VELOCITY_24H_HOURS = 24.0
+VELOCITY_72H_HOURS = 72.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,11 +47,14 @@ class ArmFeatures:
     observation_count: int
     source_count: int
     observation_ids: tuple[str, ...]
+    median_velocity_24h: Tri[float]
+    median_velocity_72h: Tri[float]
     median_velocity_7d: Tri[float]
     median_velocity_30d: Tri[float]
     median_velocity_90d: Tri[float]
-    growth_30d_vs_prev30d: Tri[float]
-    growth_30d_vs_prev90d: Tri[float]
+    growth_d0_30_vs_d30_60: Tri[float]
+    growth_d0_30_vs_d30_90: Tri[float]
+    growth_d0_30_vs_d90_180: Tri[float]
     competition: ArmCompetition
     demand: DemandInputs
     audience: AudienceQualityInputs
@@ -64,6 +82,68 @@ def features_freshness(observations: Sequence[NormalizedObservation], *, now: da
     )
 
 
+def arm_competition(
+    observations: Sequence[NormalizedObservation], *, as_of: datetime,
+) -> ArmCompetition:
+    """§13 for one arm: one vote per video, activity attributed to its channel.
+
+    Each video contributes its newest sighting with a measurable velocity, so a
+    video sighted five times is not five competitors. Its channel is the newest
+    channel id any of its sightings names. Concentration (HHI) is over channels:
+    two videos from one channel are one channel with all the activity. If any active
+    video has no channel, attribution is incomplete and the channel-keyed metrics
+    are unknown — they are never computed over video ids.
+    """
+    by_video: dict[str, list[NormalizedObservation]] = {}
+    for observation in observations:
+        by_video.setdefault(observation.entity_id, []).append(observation)
+    video_velocities: list[float] = []
+    channel_activity: dict[str, float] = {}
+    channel_size: dict[str, tuple[datetime, float]] = {}
+    attributable = True
+    uploads = 0
+    for video_id in sorted(by_video):
+        sightings = sorted(by_video[video_id], key=lambda o: o.observed_at)
+        channel_id = next((o.channel_id for o in reversed(sightings) if o.channel_id), None)
+        for sighting in sightings:
+            if channel_id is not None and sighting.subscriber_count.is_known:
+                previous = channel_size.get(channel_id)
+                if previous is None or sighting.observed_at >= previous[0]:
+                    channel_size[channel_id] = (
+                        sighting.observed_at, float(sighting.subscriber_count.unwrap()),
+                    )
+        published = next((o.published_at for o in sightings if o.published_at is not None),
+                          None)
+        if published is not None and (
+            (as_of - published).total_seconds() <= _COMPETITION_WINDOW_DAYS * 86400
+        ):
+            uploads += 1
+        velocity: Tri[float] = Tri.unknown()
+        for sighting in reversed(sightings):
+            if sighting.published_at is not None and sighting.views.is_known:
+                velocity = lifetime_views_per_day(
+                    sighting.views, observed_at=sighting.observed_at,
+                    published_at=sighting.published_at,
+                )
+                break
+        if not velocity.is_known:
+            continue
+        video_velocities.append(float(velocity.unwrap()))
+        if channel_id is None:
+            attributable = False
+            continue
+        channel_activity[channel_id] = (
+            channel_activity.get(channel_id, 0.0) + float(velocity.unwrap())
+        )
+    return competition_metrics(
+        video_velocities=video_velocities,
+        channel_sizes=[size for _at, size in channel_size.values()],
+        channel_activities=[channel_activity[key] for key in sorted(channel_activity)]
+        if attributable else None,
+        uploads_last_window=uploads, window_days=_COMPETITION_WINDOW_DAYS,
+    )
+
+
 def compute_arm_features(
     observations_by_arm: Mapping[str, Sequence[NormalizedObservation]],
     *,
@@ -76,33 +156,7 @@ def compute_arm_features(
     """`observations_by_arm` is keyed by arm fingerprint (P1.9 owns the identity)."""
     features: dict[str, ArmFeatures] = {}
     for arm_fingerprint, observations in observations_by_arm.items():
-        velocities: list[float] = []
-        channel_sizes: list[float] = []
-        channel_activity: dict[str, float] = {}
-        uploads = 0
-        for observation in observations:
-            if observation.published_at is not None and observation.views.is_known:
-                velocity = lifetime_views_per_day(
-                    observation.views, observed_at=observation.observed_at,
-                    published_at=observation.published_at,
-                )
-                if velocity.is_known:
-                    velocities.append(float(velocity.unwrap()))
-                    channel_activity[observation.entity_id] = (
-                        channel_activity.get(observation.entity_id, 0.0)
-                        + float(velocity.unwrap())
-                    )
-            if observation.subscriber_count.is_known:
-                channel_sizes.append(float(observation.subscriber_count.unwrap()))
-            if observation.published_at is not None and (
-                (as_of - observation.published_at).total_seconds() <= 30 * 86400
-            ):
-                uploads += 1
-        competition = competition_metrics(
-            video_velocities=velocities, channel_sizes=channel_sizes,
-            channel_activities=list(channel_activity.values()),
-            uploads_last_window=uploads, window_days=30,
-        )
+        competition = arm_competition(observations, as_of=as_of)
         freshness = features_freshness(observations, now=as_of, settings=settings)
         sources = {observation.source_id for observation in observations}
         series_depth = _series_depth(observations)
@@ -122,13 +176,20 @@ def compute_arm_features(
             fingerprint=arm_fingerprint, as_of=as_of,
             observation_count=len(observations), source_count=len(sources),
             observation_ids=tuple(o.raw_observation_id for o in observations),
+            median_velocity_24h=median_recent_velocity(
+                observations, now=as_of, window_hours=VELOCITY_24H_HOURS,
+                min_span_fraction=settings.velocity_min_span_fraction,
+            ),
+            median_velocity_72h=median_recent_velocity(
+                observations, now=as_of, window_hours=VELOCITY_72H_HOURS,
+                min_span_fraction=settings.velocity_min_span_fraction,
+            ),
             median_velocity_7d=median_velocity(observations, as_of=as_of, window_days=7),
             median_velocity_30d=median_velocity(observations, as_of=as_of, window_days=30),
             median_velocity_90d=median_velocity(observations, as_of=as_of, window_days=90),
-            growth_30d_vs_prev30d=growth_30d_vs_prev30d(observations, as_of=as_of,
-                                                        settings=settings),
-            growth_30d_vs_prev90d=growth_30d_vs_prev90d(observations, as_of=as_of,
-                                                        settings=settings),
+            growth_d0_30_vs_d30_60=growth_d0_30_vs_d30_60(observations, as_of=as_of),
+            growth_d0_30_vs_d30_90=growth_d0_30_vs_d30_90(observations, as_of=as_of),
+            growth_d0_30_vs_d90_180=growth_d0_30_vs_d90_180(observations, as_of=as_of),
             competition=competition, demand=demand_inputs(observations, as_of=as_of,
                                                           window_days=30),
             audience=audience_quality_inputs(observations),

@@ -78,7 +78,7 @@ def stack() -> tuple[sa.Engine, object]:
 
 
 def _mock_connector(*, rate_limits: int = 0) -> YouTubeDataAPIConnector:
-    """The CI-mock shape: one search + one hydration per bootstrap seed.
+    """The CI-mock shape: one search + one hydration (videos, channels) per bootstrap seed.
 
     `search_multi_p1.json` extends the repo's `search_lofi_p1.json` with four more
     videos so two taxonomy profiles reach §16's arm support floor (2) — with the
@@ -87,9 +87,10 @@ def _mock_connector(*, rate_limits: int = 0) -> YouTubeDataAPIConnector:
     mock = MockHTTP(repeat_last=True)
     for _ in range(rate_limits):
         mock.enqueue_rate_limit(retry_after="60")
-    for _ in load_bootstrap_seeds():  # one search + one hydration per query
+    for _ in load_bootstrap_seeds():  # search + videos.list + channels.list per query
         mock.enqueue_json(_fixture("search_multi_p1.json"))
         mock.enqueue_json(_fixture("videos_multi_batch.json"))
+        mock.enqueue_json(_fixture("channels_lofi_batch.json"))
     return YouTubeDataAPIConnector(
         client=mock.client(base_url=BASE_URL),
         credentials=YouTubeCredentials(api_key=Secret("acceptance")),

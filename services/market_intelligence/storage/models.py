@@ -176,6 +176,9 @@ observations = sa.Table(
     sa.Column("text_description", sa.Text, nullable=True),
     sa.Column("country_signal", sa.Text, nullable=True),
     sa.Column("language_signal", sa.Text, nullable=True),
+    # the publishing channel (R2, migration 0021); NULL = unknown attribution, which
+    # is what every row stored before the column existed carries
+    sa.Column("channel_id", sa.Text, nullable=True),
     sa.Column("normalization_version", sa.Text, nullable=False),
     # which metrics are `not_ready` (their numeric columns are NULL): NULL/absent ⇒ unknown
     sa.Column("not_ready_metrics", _json, nullable=True),
