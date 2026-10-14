@@ -68,6 +68,6 @@ def test_naive_as_of_is_refused() -> None:
                               ("demand", "growth", "competitor_velocity", "competition",
                                "audience_quality", "cross_platform", "production_fit")},
             observation_count=0, source_count=0,
-            as_of=datetime(2026, 9, 20),  # noqa: DTZ001 — deliberately naive
+            as_of=datetime(2026, 9, 20),
             score_version="p1-v1", freshness_seconds=0.0,
         )

@@ -21,7 +21,7 @@ def test_age_is_hours_and_never_below_the_epsilon() -> None:
     assert video_age_hours(observed_at=OBSERVED, published_at=PUBLISHED) == 48.0
     assert video_age_hours(observed_at=OBSERVED, published_at=OBSERVED) > 0.0
     with pytest.raises(ValueError, match="timezone-aware"):
-        video_age_hours(observed_at=OBSERVED, published_at=datetime(2026, 9, 18, 6, 0))  # noqa: DTZ001 — deliberately naive
+        video_age_hours(observed_at=OBSERVED, published_at=datetime(2026, 9, 18, 6, 0))
 
 
 def test_lifetime_velocity_uses_an_explicit_age_and_keeps_unknown_unknown() -> None:
