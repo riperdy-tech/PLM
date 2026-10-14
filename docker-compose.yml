@@ -24,8 +24,11 @@ services:
       start_period: 10s
 
   minio:
-    # minio/minio was removed from Docker Hub; quay.io serves the official image.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # MinIO no longer publishes free images (the quay.io tag now answers "unauthorized").
+    # Chainguard's maintained build is pinned by digest so CI is reproducible; to upgrade,
+    # resolve the new digest of cgr.dev/chainguard/minio:latest and rerun the integration
+    # tier. The hardened image has no curl, so the healthcheck uses the bundled `mc`.
+    image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -36,7 +39,7 @@ services:
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD-SHELL", "MC_HOST_local=http://$${MINIO_ROOT_USER}:$${MINIO_ROOT_PASSWORD}@localhost:9000 mc ready local"]
       interval: 10s
       timeout: 5s
       retries: 5
