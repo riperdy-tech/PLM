@@ -34,3 +34,9 @@ def build_outcome_id(experiment_id: str, arm_id: str, window: str) -> str:
     """Build deterministic experiment outcome ID."""
     canonical = f"{experiment_id}|{arm_id}|{window}"
     return f"outc_{compute_sha256(canonical)[:16]}"
+
+
+def build_fx_rate_id(base: str, quote: str, as_of_iso: str, source: str) -> str:
+    """Build deterministic FX rate record ID (one per pair, instant and source)."""
+    canonical = f"{base}|{quote}|{as_of_iso}|{source}"
+    return f"fx_{compute_sha256(canonical)[:16]}"

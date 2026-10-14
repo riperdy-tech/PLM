@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from analytics.domain.enums import (
     CostCategory,
@@ -23,6 +24,7 @@ from analytics.domain.models import (
     RevenueStatement,
     VideoMetricObservation,
 )
+from plm_contracts.money import Money
 
 
 def test_enums_values() -> None:
@@ -65,20 +67,37 @@ def test_domain_models_creation() -> None:
         date_str="2026-09-26",
         views=1200,
         watch_time_minutes=45.2,
+        average_view_duration_seconds=None,
+        average_percentage_viewed=None,
+        subscribers_gained=None,
+        subscribers_lost=None,
+        estimated_revenue=None,
         observed_at=now,
     )
     assert obs.views == 1200
+    assert obs.observation_kind.value == "cumulative_snapshot"
 
     stmt = RevenueStatement(
         id="stmt_01",
         provider="spotify",
         period="2026-09",
-        total_revenue_usd=150.0,
+        currency="USD",
+        total_revenue_amount=Decimal("150.10"),
         total_streams=40000,
         file_hash="chk_123",
         source_reference="statement.csv",
         received_at=now,
-        unattributed_revenue_usd=0.0,
+        unattributed_revenue_amount=Decimal(0),
         unattributed_row_count=0,
     )
-    assert stmt.total_revenue_usd == 150.0
+    assert stmt.total_revenue == Money.of("150.10", "USD")
+
+
+def test_statement_without_declared_currency_has_no_money() -> None:
+    stmt = RevenueStatement(
+        id="stmt_legacy", provider="spotify", period="2026-08", currency=None,
+        total_revenue_amount=Decimal(1), total_streams=1, file_hash="h",
+        source_reference="legacy.csv", received_at=datetime(2026, 9, 1, tzinfo=UTC),
+        unattributed_revenue_amount=Decimal(0), unattributed_row_count=0,
+    )
+    assert stmt.total_revenue is None

@@ -14,14 +14,14 @@ maturity vocabulary is the only one either side accepts.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from plm_contracts import ObservationWindow
+from plm_contracts.money import FxTable, Money
 from plm_contracts.seams.c7 import (
     DistributionRecordPayload,
-    ObservationMaturity,
     RewardResultPayload,
 )
 from plm_platform.clock import FixedClock
@@ -75,13 +75,15 @@ def leg2() -> dict[str, Any]:
     with analytics_db_session() as session:
         outcome = evaluate_experiment_outcome(
             session, lineage=sample_lineage(), unit_id="vid_loop_01",
-            net_contribution_usd=40.0, views=5000, watch_time_minutes=900.0,
-            window=ObservationWindow.D7, maturity=ObservationMaturity.MATURE,
-            attribution_confidence=0.95, quality_status=None, now=NOW,
+            net_contribution=Money.of("40.00", "USD"), reporting_currency="USD", fx=FxTable(),
+            views=5000, watch_time_minutes=900.0, window=ObservationWindow.D7,
+            published_at=NOW - timedelta(days=7), attribution_confidence=0.95,
+            quality_status=None, observed_at=NOW,
         )
         payload = generate_and_post_reward(
             session, outcome, views=5000, watch_time_minutes=900.0,
-            average_percentage_viewed=None, subscribers_gained=None, estimated_revenue=12.5,
+            average_percentage_viewed=None, subscribers_gained=None,
+            estimated_revenue=Money.of("12.50", "USD"),
             now=NOW,
         )
     return json.loads(json.dumps(payload.to_wire()))
@@ -109,12 +111,12 @@ def test_leg1_p9_links_each_isrc_to_the_lineage_and_attributes_revenue(
         ingest_distribution_record(session, leg1, now=NOW)  # idempotent replay
         link = lineage_for_isrc(session, isrc_a)
         statement, rows = ingest_distributor_statement(
-            session, provider="mock", period="2026-10", source_reference="stmt.csv",
-            raw_content="statement-1",
+            session, provider="mock", period="2026-10", currency="USD",
+            source_reference="stmt.csv", raw_content="statement-1",
             rows=[
-                {"isrc": isrc_a, "streams": 100, "revenue_usd": 1.5},
-                {"isrc": isrc_b, "streams": 50, "revenue_usd": 0.5},
-                {"isrc": "", "streams": 10, "revenue_usd": 0.25},  # no recording named
+                {"isrc": isrc_a, "streams": 100, "revenue_usd": "1.50"},
+                {"isrc": isrc_b, "streams": 50, "revenue_usd": "0.50"},
+                {"isrc": "", "streams": 10, "revenue_usd": "0.25"},  # no recording named
             ],
             now=NOW,
         )
@@ -124,8 +126,8 @@ def test_leg1_p9_links_each_isrc_to_the_lineage_and_attributes_revenue(
     assert {r.isrc for r in rows} == {isrc_a, isrc_b}
     assert all(r.release_id == leg1["release_id"] for r in rows)
     assert statement.unattributed_row_count == 1
-    assert statement.unattributed_revenue_usd == 0.25
-    assert statement.total_revenue_usd == 2.25  # unattributed revenue is still counted
+    assert statement.unattributed_revenue == Money.of("0.25", "USD")
+    assert statement.total_revenue == Money.of("2.25", "USD")  # unattributed revenue is still counted
 
 
 def test_leg1_p9_refuses_a_conflicting_lineage(leg1: dict[str, Any]) -> None:

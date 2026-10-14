@@ -1,9 +1,17 @@
-"""YouTube analytics ingestion module (P9 §16, §55)."""
+"""YouTube analytics ingestion module (P9 §16, §55, ADR-0031).
+
+Each call stores one cumulative snapshot of a video for one window. Every metric that
+was not measured is ``None`` and stored as NULL, never ``0``. Estimated revenue is a
+platform estimate (``revenue_status = estimated``, P9 §111) and must arrive with the
+currency YouTube reported it in; no currency is assumed.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 
+from plm_contracts.measurement import ObservationKind
+from plm_contracts.money import Money
 from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
@@ -19,19 +27,23 @@ def ingest_youtube_metrics(
     video_id: str,
     channel_id: str,
     date_str: str,
-    views: int,
-    watch_time_minutes: float,
-    average_view_duration_seconds: float = 0.0,
-    average_percentage_viewed: float = 0.0,
-    subscribers_gained: int = 0,
-    subscribers_lost: int = 0,
-    estimated_revenue_usd: float = 0.0,
-    window: ObservationWindow = ObservationWindow.H24,
+    window: ObservationWindow,
+    observed_at: datetime,
+    views: int | None = None,
+    watch_time_minutes: float | None = None,
+    average_view_duration_seconds: float | None = None,
+    average_percentage_viewed: float | None = None,
+    subscribers_gained: int | None = None,
+    subscribers_lost: int | None = None,
+    estimated_revenue: Money | None = None,
     source: MetricSource = MetricSource.YOUTUBE_ANALYTICS,
     status: MetricStatus = MetricStatus.VALID,
-    observed_at: datetime,
 ) -> VideoMetricObservation:
-    """Ingest and normalize YouTube video metrics."""
+    """Store one cumulative snapshot of a video for ``window`` as of ``observed_at``.
+
+    The identifying facts (video, channel, date, window, observation instant) have no
+    defaults. Metric arguments left as ``None`` were not measured.
+    """
     now = require_aware(observed_at)
     obs_id = build_observation_id(video_id, "views", window.value, date_str)
 
@@ -41,13 +53,14 @@ def ingest_youtube_metrics(
         channel_id=channel_id,
         window=window,
         date_str=date_str,
+        observation_kind=ObservationKind.CUMULATIVE_SNAPSHOT,
         views=views,
         watch_time_minutes=watch_time_minutes,
         average_view_duration_seconds=average_view_duration_seconds,
         average_percentage_viewed=average_percentage_viewed,
         subscribers_gained=subscribers_gained,
         subscribers_lost=subscribers_lost,
-        estimated_revenue_usd=estimated_revenue_usd,
+        estimated_revenue=estimated_revenue,
         revenue_status=RevenueStatus.ESTIMATED,
         source=source,
         status=status,
