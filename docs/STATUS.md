@@ -4,9 +4,8 @@
 commit messages and the dashboard record intent or progress; this file records verified
 capability. Update it in the same change that alters a capability.
 
-- Last verified: 2026-10-14, branch `review/r2-correctness-determinism` (R2 of the
-  remediation plan, in progress; R1 on `review/r1-fail-closed-seams`, R0 on
-  `review/r0-truth-baseline`).
+- Last verified: 2026-10-14, branch `review/r3-runtime` (R3 of the remediation plan; R2,
+  R1 and R0 on their own `review/*` branches).
 - Evidence: the review in
   [`reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md),
   which has file:line references for every finding.
@@ -16,14 +15,15 @@ capability. Update it in the same change that alters a capability.
 The P0 §1 success sentence is **not yet true** of the running system. Each phase has real
 domain logic, persistence and unit tests, but the phases do not yet run together.
 
-- Only the P1 worker is deployed.
-- No workflow drives the pipeline.
-- P3 has no transport.
-- P9 computes a reward but never delivers it to P2.
+- The nine phase APIs, the P1 worker and a pipeline worker run in compose, and a Temporal
+  workflow drives the PART XIV states, but only research, policy check and generation are
+  wired over HTTP; the rest of the chain is R4/R5.
+- P9's reward reaches P2 through a transactional outbox (proven over real HTTP to the
+  P2 container), but nothing yet measures real outcomes to feed it (R5/R6).
 - The P4, P7 and P8 providers exist only as mocks, and P6 renders nothing.
-- The W6 end-to-end test runs the phases in process on SQLite. Since R1 it uses the
-  real P2 → P8 producers and consumers, but the P5 manifest and the P9 revenue figures
-  are still built inside the test.
+- The W6 end-to-end test runs the phases in process on SQLite with the real P2 → P8
+  producers and consumers and the real P5 gate; its P3 experiment and P9 revenue
+  figures are still built inside the test.
 - The dashboard serves demo data.
 
 Closing these gaps is stages R1–R6 of the remediation plan. Each stage is approved
@@ -51,11 +51,14 @@ separately against its own evidence gate.
 | Provider mode × execution policy | real | `plm_contracts/execution.py`, `plm_platform/execution.py`; defaults are mock + dry_run |
 | External-write guard | real | P7 upload/thumbnail/playlist and P8 submit/takedown pass through it |
 | Write authorizations | partial | Guard checks them, but they are only supplied in code. No persisted store or operator path yet (R3). |
-| Budget ceiling | stub | Default `NoBudgetLedger` refuses every live write. `CostTracker` (`observability.py`) is in-memory and used only by the P1 CLI (R3). |
-| Pipeline workflow (PART XIV lifecycle) | absent | R3 |
-| Outbox / cross-service delivery | absent | R3 |
-| Exception queue with hold classes (PART XVIII) | absent | R3 |
-| Decision log (PART XXI) | absent | R3 |
+| Budget ceiling | partial | `plm_platform/ledger.py` (ops, migration 0027): ceilings per scope and period with a currency, an operator rate card, entries reserved → committed/released, idempotent per key, serialised on the ceiling row (FOR UPDATE; proven by `tests/integration/test_ledger_postgres.py`). Fails closed on no ceiling, exhaustion, currency mismatch, unknown cost. P7/P8 use it when `PLM_BUDGET_LEDGER_CURRENCY` is set, otherwise every live write is refused. P4 does not reserve yet. |
+| Pipeline workflow (PART XIV lifecycle) | partial | `plm_platform/pipeline/workflow.py`: one Temporal run per directive through the PART XIV states plus HELD; every transition persisted in `ops` (migration 0030, append-only) with attempts, errors, provider ids, costs (Money with basis) and inputs/outputs. Paid steps reserve budget first; a refusal holds without calling the provider. Holds resume only through `authorize_resume` (signals `resume`, `external_resolution`); ANALYZING waits on a durable timer to the declared horizon. Gate R3 evidence (`tests/integration/pipeline/`) uses controlled mock steps against compose Temporal and Postgres. |
+| Pipeline HTTP steps | partial | research, policy_check, generate call P2/P3/P4 over HTTP (`pipeline/http.py`) with the service token and an Idempotency-Key, but P3/P4 ignore the key, so a retry after a lost response fails closed instead of replaying (R5). QA and assemble raise `CapabilityUnavailable` (R4); upload, distribution, processing, outcome evaluation and reward dispatch raise it too (R5). `CAPABILITY_UNAVAILABLE` is a classified hard stop. |
+| Pipeline/guard reservation keys | absent | P7/P8's write guards reserve under their own keys, so once the pipeline drives them a write would be reserved twice (R5) |
+| Runtime in compose | real | Nine phase APIs, the P1 worker and the pipeline worker run in compose, health-checked (`/readyz` through each service's own database session; worker pollers). `plm doctor` checks all of them. A MinIO volume-owner init makes upgraded dev volumes writable. Verified locally with `docker compose up -d --wait`. |
+| Outbox / cross-service delivery | real | `plm_platform/outbox.py`: per-schema outbox, enqueue in the producer's transaction, Dispatcher: DELIVERED only on acknowledgement, refusal FAILED, transient backoff (deterministic), timeout UNCERTAIN → reconciled by asking the receiver. In-process tests against P2's real app; real-HTTP proof is part of the R3 gate. Stuck rows raise no alert yet. |
+| Exception queue with hold classes (PART XVIII) | partial | `plm_platform/exceptions.py` (ops, migration 0028) with policy data `policy/hold_classes.json`: hard stops (copyright, platform policy, KYC, account security, payment change, every P29 category, unmapped codes) never resume on approval; reviewable holds resume only for the policy's reviewer role with every evidence item. P5 raises holds and routes overrides through it. Not yet: P7/P8 holds, an HTTP route for external resolution, the dashboard view, real reviewer identity (static mapping). |
+| Decision log (PART XXI) | real | `plm_platform/decision_log.py` (ops, migration 0029): every P2 allocation is logged with inputs, model, policy and action (confidence left empty; P2 states none); P9 attaches mature/closed outcomes per window through the lineage, and refuses an outcome whose directive was never logged. |
 | Seam payloads C1–C8 | real | One shared, versioned model per seam in `plm_contracts/seams/` (ADR-0025). Producers serialise and consumers parse with it; missing, unknown, placeholder and future-major payloads are refused with a reason code. |
 | Experiment lineage | real | `ExperimentLineage` (ADR-0026) travels from P3 through C3–C7 to P9's ISRC links and P2's reward. Placeholder ids are refused. |
 | Injected time and derived seeds | real | `plm_platform/clock.py`: `Clock`/`SystemClock`/`FixedClock`, `stable_seed` (sha256). P3–P9 domain and engine code take `now` or a `Clock`; only API routes, CLIs, smoke scripts and connectors read the wall clock. The external-write guard takes `now` per decision. Enforced by `tests/unit/test_no_ambient_nondeterminism.py` (static) and `tests/unit/test_cross_process_determinism.py` (two interpreters with different `PYTHONHASHSEED` produce identical P2 draws, P3 experiments/track specs, and P4 plans, seeds, attempt/candidate ids and artifact digests). |
@@ -128,7 +131,8 @@ separately against its own evidence gate.
 | Audio / lyric similarity, voice cloning | absent | `similarity_score` is never computed (R4) |
 | Rights / provenance (P28) | partial | Judges the declared C4 snapshot (R6 fields) in the shared vocabulary. No snapshot means quarantine; a tier label can no longer upgrade unknown to eligible (R1). The other P28 fields (generator, model version, human contribution, …) are R4. |
 | Intake | real | `POST /qa/evaluations` takes the C4 event; no defaulted vocal mode or rights (R1). The audio is read from a caller-given path; fetching it by URI and checksum is R4. |
-| Override | partial | Recorded separately from the automated disposition (ADR-0028). Who may override, and hard-stop classes, are R3. |
+| Override | real | Recorded separately from the automated disposition (ADR-0028) and authorized by the exception queue: hard stops are refused for every role; reviewable holds need the reviewer role and evidence (409 with the refusal code otherwise); a resolved case cannot be resolved again. Reviewer identity is a static mapping, and `auditor_id` is self-asserted. |
+| Rights classification gap | partial | Conditional and expired declarations are reported as `UNKNOWN_COMMERCIAL_LICENSE` (reviewable) instead of `COMMERCIAL_LICENSE_UNCERTAIN` (hard stop) (R4) |
 
 ### P6 Media factory
 | Capability | Status | Where / gap |
@@ -175,7 +179,7 @@ separately against its own evidence gate.
 | C8 feature view | real | Unmeasured values served as null (no zeros, `1.0`, `false` or hardcoded `REPORTED`) |
 | Currency, decimal money | real | `Numeric(20,6)` plus currency columns (migration `0022_analytics_money`); `fx_rates` table and `POST /analytics/fx-rates`; reporting currency KRW by default; a missing rate is HTTP 409 `fx_rate_missing`; legacy rows with no currency are unreconciled, never assumed USD. C7 `raw_metrics.estimated_revenue` is still a float in the reporting currency (economics gate) |
 | Reward computation | partial | `engagement-contribution-proxy-v1`, a bounded proxy, not economic value (economics gate). Net contribution as `Money` in the reporting currency; the USD 50 scale is converted through FX; attribution confidence passed through; sensitivity tests pin bounds and monotonicity |
-| Reward delivery to P2 | absent | The route never sends it; a failed POST is still recorded as posted (R3) |
+| Reward delivery to P2 | partial | Recorded and enqueued in one transaction (`analytics.outbox_events`, 0026); `plm analytics dispatch` delivers with an idempotency key; P2 dedupes and answers `GET /ar/results` for reconciliation. Not yet driven by the pipeline workflow (R3) |
 
 ### Architecture parts with no code
 PART X (weekly multi-agent review / LLM router), XII (Shorts engine), XIII (community),
@@ -186,8 +190,8 @@ deferred and tracked here; they are not scheduled before the economics gate.
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1441 passed, 1 skipped, ~36 s. Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
-| Integration, compose up (CI) | `plm migrate` then `pytest -m integration` | Green in CI on 2026-10-14 for R0, R1 and R2: migrations `0001`–`0024` upgrade, downgrade and re-upgrade on Postgres 16, and the schema matches the models. MinIO is Chainguard's build pinned by digest. Not run locally (no Docker on the dev machine). |
+| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1604 passed, 1 skipped, ~48 s (R3). Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
+| Integration, compose up | `plm migrate` then `pytest -m integration` | R3: 42 passed locally against the full compose stack (twice), including the Gate R3 pipeline and outbox tests. Green in CI on 2026-10-14 for R0, R1 and R2: migrations `0001`–`0024` upgrade, downgrade and re-upgrade on Postgres 16, and the schema matches the models. MinIO is Chainguard's build pinned by digest. Not run locally (no Docker on the dev machine). |
 | Lint | `ruff check .` | clean |
 | Types | `mypy packages services` | clean (374 files) |
 | Cross-process determinism | `tests/unit/test_cross_process_determinism.py` | P2 draws, P3 design/package, P4 plan/seeds/ids/artifact digests identical under two `PYTHONHASHSEED` values |
