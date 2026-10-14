@@ -64,6 +64,7 @@ from services.autonomous_ar.storage import repositories as ar_repositories
 from services.autonomous_ar.storage.models import ar_reward_observation
 from tests.support.analytics_db import create_analytics_engine
 from tests.support.ar_db import create_ar_engine
+from tests.support.decisions import log_allocation_decision
 from tests.support.seams import lineage_fields, sample_lineage
 
 NOW = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
@@ -100,6 +101,8 @@ class Loop:
 @pytest.fixture
 def loop() -> Iterator[Loop]:
     p9_engine = create_analytics_engine(static_pool=True)
+    log_allocation_decision(p9_engine, directive_id=LINEAGE.production_directive_id,
+                            arm_id=LINEAGE.content_arm_id, decided_at=NOW)
     p2_engine = create_ar_engine(static_pool=True)
     p2_factory: Callable[[], Session] = sessionmaker(bind=p2_engine)
     with p2_factory() as session:  # P2 only accepts results for arms it knows (§72)
@@ -214,6 +217,8 @@ def test_feedback_api_queues_the_reward_and_refuses_a_conflicting_one() -> None:
     """The P9 route enqueues instead of posting: 200 and a PENDING event; the identical
     replay is 200; a different reward for the same fact is 409 reward_fact_conflict."""
     engine = create_analytics_engine(static_pool=True)
+    log_allocation_decision(engine, directive_id=LINEAGE.production_directive_id,
+                            arm_id=LINEAGE.content_arm_id, decided_at=NOW)
     factory = sessionmaker(bind=engine)
     app = create_analytics_app(session_factory=factory, settings=load_settings(env=ENV),
                                clock=FixedClock(NOW),
