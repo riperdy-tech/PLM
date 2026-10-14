@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from plm_contracts import AllocationType, ChannelActivationState
+from plm_platform.decision_log import DecisionRecord, allocation_decision_key, record_decision
 
 from ..config import ARSettings
 from ..domain.arm import ContentArm
@@ -292,9 +293,15 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
             p1_score_version=arms[sample.arm_id].score_version,
             feature_snapshot_id=snapshot_ids[sample.arm_id], created_at=now,
         )
+    samples = {sample.arm_id: sample for sample in prepared.ranked}
     for directive in directives:
         repositories.insert_directive(session, directive, brand_id=request.brand_id,
                                       status=DirectiveStatus.QUEUED, created_at=now)
+        _log_allocation(session, directive=directive, cycle_id=cycle_id,
+                        posterior=posteriors[directive.arm_id],
+                        sampled_reward=samples[directive.arm_id].sampled_reward,
+                        snapshot_id=snapshot_ids[directive.arm_id], arm=arms[directive.arm_id],
+                        settings=settings, now=now)
         repositories.record_selection(
             session, arm_id=directive.arm_id, now=now, cooldown_until=None,
             recent_exposure_score=selection_recency.get(directive.arm_id, 0.0) + 1.0,
@@ -343,3 +350,30 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                    detail=(f"cycle {cycle_id}: {len(directives)} selected of "
                            f"{len(snapshot_arms)} eligible"))
     return result
+
+
+def _log_allocation(session: Any, *, directive: ProductionDirective, cycle_id: str,
+                    posterior: PosteriorState, sampled_reward: float, snapshot_id: str,
+                    arm: ContentArm, settings: ARSettings, now: datetime) -> None:
+    """PART XXI: the allocation, its evidence and the model behind it. P2 states no
+    calibrated confidence, so ``confidence`` is left empty rather than invented; the
+    posterior's uncertainty is recorded with the inputs instead."""
+    record_decision(session, DecisionRecord(
+        decision_key=allocation_decision_key(directive.directive_id),
+        decision_kind="allocation", origin_phase="ar", subject_ref=directive.arm_id,
+        decided_at=now,
+        decision=f"{directive.allocation_type.value} allocation to {directive.arm_id}",
+        action={"directive_id": directive.directive_id, "quantity": directive.quantity,
+                "budget_limit": str(directive.budget_limit),
+                "allocation_type": directive.allocation_type.value,
+                "outcome_horizon": directive.outcome_horizon.value},
+        input_data={"cycle_id": cycle_id, "feature_snapshot_id": snapshot_id,
+                    "p1_score": arm.p1_score, "p1_confidence": arm.p1_confidence,
+                    "p1_score_version": arm.score_version,
+                    "posterior_mean": posterior.posterior_mean,
+                    "posterior_variance": posterior.posterior_variance,
+                    "observation_count": posterior.observation_count,
+                    "sampled_reward": sampled_reward},
+        model_version=settings.model_version, policy_version=directive.policy_version,
+        confidence=None,
+    ))
