@@ -25,32 +25,38 @@ def synthesize_mock_wav(
     frequency: float = 440.0,
     seed: int = 0,
 ) -> bytes:
-    """Generate deterministic, valid PCM 16-bit stereo/mono WAV audio bytes.
+    """Generate deterministic, valid PCM 16-bit WAV bytes of exactly ``duration_seconds``.
 
-    Uses standard `wave` module so the output is verifiable by any audio reader.
+    One second of a seed-dependent sine is synthesised and its bytes are repeated to the
+    full length, so a three-minute track costs one second of arithmetic. With the default
+    integer frequency a second holds a whole number of cycles, so the repeat is seamless.
+    Samples are packed little-endian explicitly, so the bytes do not depend on the host.
     """
-    total_frames = int(duration_seconds * sample_rate)
-    buffer = io.BytesIO()
+    total_frames = round(duration_seconds * sample_rate)
+    freq = frequency + (seed % 100)
+    amplitude = 16000  # comfortable non-clipping volume for 16-bit (-32768 to 32767)
 
+    block_frames = min(total_frames, sample_rate)
+    samples = [
+        int(amplitude * math.sin(2.0 * math.pi * freq * i / sample_rate))
+        for i in range(block_frames)
+    ]
+    interleaved = [sample for sample in samples for _ in range(channels)]
+    block = struct.pack(f"<{len(interleaved)}h", *interleaved)
+
+    frame_bytes = 2 * channels
+    if block_frames:
+        whole, rest = divmod(total_frames, block_frames)
+        frames = block * whole + block[: rest * frame_bytes]
+    else:
+        frames = b""
+
+    buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
         wav_file.setnchannels(channels)
         wav_file.setsampwidth(2)  # 16-bit
         wav_file.setframerate(sample_rate)
-
-        # Generate a simple deterministic sine wave modulated by seed
-        freq = frequency + (seed % 100)
-        frames = bytearray()
-        amplitude = 16000  # comfortable non-clipping volume for 16-bit (-32768 to 32767)
-
-        for i in range(total_frames):
-            t = float(i) / sample_rate
-            sample = int(amplitude * math.sin(2.0 * math.pi * freq * t))
-            packed = struct.pack("<h", sample)
-            for _ in range(channels):
-                frames.extend(packed)
-
-        wav_file.writeframes(bytes(frames))
-
+        wav_file.writeframes(frames)
     return buffer.getvalue()
 
 
@@ -96,9 +102,9 @@ class MockMusicProvider:
                 error_message="Prompt flagged by safety filters",
             )
 
-        # 2. Synthesize audio
-        # Clamp duration for mock tests (e.g. generate 5 seconds to keep tests fast, or actual)
-        duration = min(float(request.duration_seconds), 30.0)
+        # 2. Synthesize audio of exactly the requested duration (ADR-0032): a mock run must
+        # exercise P5's real duration gate, not be shortened to dodge it.
+        duration = float(request.duration_seconds)
         audio_bytes = synthesize_mock_wav(
             duration_seconds=duration,
             sample_rate=44100,

@@ -71,6 +71,7 @@ def run_smoke_test() -> str | None:
             production_style="lofi_contemporary",
             track_role="focus",
             requested_duration=60,
+            duration_range={"min_seconds": 45, "max_seconds": 75},
             candidate_target=1,
             priority=1,
             budget_limit=50.0,

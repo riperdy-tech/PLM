@@ -43,13 +43,37 @@ def test_mock_provider_success_flow() -> None:
         seed=1,
     )
     resp = provider.generate(req)
-    assert (
-        resp.status_code if hasattr(resp, "status_code") else resp.status == AttemptStatus.SUCCEEDED
-    )
+    assert resp.status == AttemptStatus.SUCCEEDED
     assert resp.audio_data is not None
     assert len(resp.audio_data) > 1000
     assert resp.mime_type == "audio/wav"
     assert resp.cost_credits == 1.0
+
+
+def test_mock_provider_honours_a_three_minute_request() -> None:
+    """ADR-0032: no 30 s clamp, so a mock run exercises P5's real duration gate."""
+    provider = MockMusicProvider()
+    req = GenerationRequest(
+        track_spec_id="trk_long", experiment_id="exp_01", prompt="rainy lofi", duration_seconds=180, seed=7
+    )
+    resp = provider.generate(req)
+    assert resp.status == AttemptStatus.SUCCEEDED
+    assert resp.actual_duration_seconds == 180.0
+    assert resp.audio_data is not None
+    with wave.open(io.BytesIO(resp.audio_data), "rb") as reader:
+        assert reader.getframerate() == 44100  # what P5's technical check expects
+        assert reader.getnchannels() == 2
+        assert reader.getnframes() == 180 * 44100
+        frames = reader.readframes(reader.getnframes())
+    assert any(frames)  # not silence, which P5 would block
+    assert provider.generate(req).audio_data == resp.audio_data  # deterministic
+
+
+def test_synthesize_mock_wav_handles_fractional_and_sub_second_durations() -> None:
+    for duration in (0.25, 1.5, 2.75):
+        data = synthesize_mock_wav(duration_seconds=duration, seed=3)
+        with wave.open(io.BytesIO(data), "rb") as reader:
+            assert reader.getnframes() == round(duration * 44100)
 
 
 def test_mock_provider_error_simulation_hooks() -> None:

@@ -144,6 +144,33 @@ def test_scenario_4_free_tier_hard_reject() -> None:
             wav_path.unlink()
 
 
+def test_duration_outside_the_spec_range_rejects_with_reason_code() -> None:
+    """ADR-0032: the C4 range is the only tolerance; a 1 s file for a 2-3 s spec fails."""
+    wav_path = _make_wav(duration=1.0)
+    try:
+        res = run_candidate_evaluation(
+            event=candidate_event(
+                candidate_id="cand_short_01",
+                requested_duration_seconds=2,
+                requested_duration_range={"min_seconds": 2, "max_seconds": 3},
+            ),
+            audio_path=wav_path,
+            clock=FixedClock(NOW),
+        )
+        assert res.disposition == GateDisposition.REJECTED
+        assert res.evaluation.technical_status == "FAILED"
+        blocking = [f.finding_code for f in res.evaluation.risk_findings if f.blocking]
+        assert blocking == ["DURATION_OUT_OF_RANGE"]
+        assert res.release_manifest is None
+        assert res.snapshot.artifact_snapshot["requested_duration_range"] == {
+            "min_seconds": 2,
+            "max_seconds": 3,
+        }
+    finally:
+        if wav_path.is_file():
+            wav_path.unlink()
+
+
 def test_scenario_5_corrupt_or_missing_audio_hard_reject() -> None:
     res = run_candidate_evaluation(
             event=candidate_event(

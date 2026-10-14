@@ -2,7 +2,8 @@
 
 The event is assembled only from facts P4 stored when it generated the candidate:
 
-* the plan's C3 spec (lineage, vocal mode, genre, moods, requested duration);
+* the plan's C3 spec (lineage, vocal mode, genre, moods, requested duration and its
+  declared duration range, ADR-0032);
 * the candidate's own producing attempt and its creative variant, from which the prompt
   is rebuilt deterministically;
 * the candidate's single full-mix artifact;
@@ -142,6 +143,7 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
             channels=art.channels,
         ),
         requested_duration_seconds=spec.requested_duration,
+        requested_duration_range=spec.duration_range,
         vocal_mode=spec.vocal_mode,
         genre_tags=(spec.genre, *spec.moods),
         prompt_text=prompt.prompt,

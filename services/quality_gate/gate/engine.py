@@ -65,7 +65,7 @@ def run_candidate_evaluation(
 ) -> GateEngineResult:
     """Evaluate one candidate described by its Seam C4 event (ADR-0027).
 
-    Every candidate fact comes from the event: lineage, expected duration, vocal mode,
+    Every candidate fact comes from the event: lineage, declared duration range, vocal mode,
     genre tags, prompt, lyrics and the declared rights. ``evaluation_policy_version`` and
     ``trigger`` are P5's own settings. ``audio_path`` is where P5 can read the artifact;
     fetching it from storage by URI and checksum is stage R4. ``clock`` stamps the start
@@ -77,7 +77,7 @@ def run_candidate_evaluation(
     track_spec_id = event.track_spec_id
     experiment_id = event.lineage.experiment_id
     content_arm_id = event.lineage.content_arm_id
-    expected_duration_seconds = float(event.requested_duration_seconds)
+    duration_range = event.requested_duration_range
     vocal_mode = event.vocal_mode
     lyrics_text = event.lyrics_text
     prompt_text = event.prompt_text
@@ -110,7 +110,8 @@ def run_candidate_evaluation(
             "audio_path": str(audio_path),
             "artifact_uri": event.artifact_uri,
             "artifact_sha256": event.artifact_sha256,
-            "expected_duration_seconds": expected_duration_seconds,
+            "requested_duration_seconds": event.requested_duration_seconds,
+            "requested_duration_range": duration_range.model_dump(mode="json"),
             "measured_audio": event.measured_audio.model_dump(mode="json"),
         },
         provider_snapshot={"provider_id": event.provider_id, "model_id": event.model_id},
@@ -126,7 +127,7 @@ def run_candidate_evaluation(
     tech_res = validate_technical_audio(
         evaluation_id=evaluation.id,
         audio_path=audio_path,
-        expected_duration_seconds=expected_duration_seconds,
+        allowed_duration=duration_range,
         now=now,
     )
     evaluation.technical_checks.extend(tech_res.checks)

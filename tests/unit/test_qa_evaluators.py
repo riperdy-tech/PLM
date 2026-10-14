@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from plm_contracts import CommercialUseEligibility, ProvenanceStatus
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c4 import RightsSnapshotPayload
 from quality_gate.evaluators.lyrics import evaluate_lyrics
 from quality_gate.evaluators.musical import evaluate_musical_qualities
@@ -20,6 +21,7 @@ from quality_gate.evaluators.technical import validate_technical_audio
 from tests.support.seams import rights_fields
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+ONE_SECOND = DurationRangeSeconds(min_seconds=1, max_seconds=1)
 
 
 def _make_test_wav(
@@ -51,7 +53,7 @@ def test_technical_audio_validator_clean_file() -> None:
         res = validate_technical_audio(
             evaluation_id="eval_test",
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
+            allowed_duration=ONE_SECOND,
             expected_sample_rate=44100,
             expected_channels=2,
             now=NOW,
@@ -66,11 +68,52 @@ def test_technical_audio_validator_clean_file() -> None:
             wav_path.unlink()
 
 
+def test_technical_duration_inside_the_declared_range_passes_bounds_included() -> None:
+    wav_path = _make_test_wav(duration=2.0, sample_rate=44100, amplitude=15000)
+    try:
+        for allowed in (
+            DurationRangeSeconds(min_seconds=1, max_seconds=3),
+            DurationRangeSeconds(min_seconds=2, max_seconds=3),  # on the lower bound
+            DurationRangeSeconds(min_seconds=1, max_seconds=2),  # on the upper bound
+        ):
+            res = validate_technical_audio(
+                evaluation_id="eval_test", audio_path=wav_path, allowed_duration=allowed, now=NOW
+            )
+            check = next(c for c in res.checks if c.check_type == "duration_in_range")
+            assert check.status == "PASS", allowed
+            assert check.expected_value == f"[{allowed.min_seconds}, {allowed.max_seconds}]"
+            assert not any(f.finding_code == "DURATION_OUT_OF_RANGE" for f in res.findings)
+    finally:
+        if wav_path.is_file():
+            wav_path.unlink()
+
+
+def test_technical_duration_outside_the_declared_range_is_a_blocking_finding() -> None:
+    wav_path = _make_test_wav(duration=2.0, sample_rate=44100, amplitude=15000)
+    try:
+        for allowed in (
+            DurationRangeSeconds(min_seconds=3, max_seconds=4),  # too short
+            DurationRangeSeconds(min_seconds=1, max_seconds=1),  # too long
+        ):
+            res = validate_technical_audio(
+                evaluation_id="eval_test", audio_path=wav_path, allowed_duration=allowed, now=NOW
+            )
+            assert res.has_blocking_defects, allowed
+            finding = next(f for f in res.findings if f.finding_code == "DURATION_OUT_OF_RANGE")
+            assert finding.blocking
+            check = next(c for c in res.checks if c.check_type == "duration_in_range")
+            assert check.status == "FAIL"
+            assert check.measured_value == 2.0
+    finally:
+        if wav_path.is_file():
+            wav_path.unlink()
+
+
 def test_technical_audio_validator_file_not_found() -> None:
     res = validate_technical_audio(
         evaluation_id="eval_test",
         audio_path="nonexistent_audio_file.wav",
-        expected_duration_seconds=1.0,
+        allowed_duration=ONE_SECOND,
         now=NOW,
     )
     assert res.has_blocking_defects
@@ -83,7 +126,7 @@ def test_technical_audio_validator_total_silence() -> None:
         res = validate_technical_audio(
             evaluation_id="eval_test",
             audio_path=wav_path,
-            expected_duration_seconds=1.0,
+            allowed_duration=ONE_SECOND,
             now=NOW,
         )
         assert res.has_blocking_defects
@@ -94,12 +137,12 @@ def test_technical_audio_validator_total_silence() -> None:
 
 
 def test_technical_audio_validator_clipping() -> None:
-    wav_path = _make_test_wav(duration=0.5, sample_rate=44100, amplitude=32767, clip=True)
+    wav_path = _make_test_wav(duration=1.0, sample_rate=44100, amplitude=32767, clip=True)
     try:
         res = validate_technical_audio(
             evaluation_id="eval_test",
             audio_path=wav_path,
-            expected_duration_seconds=0.5,
+            allowed_duration=ONE_SECOND,
             now=NOW,
         )
         # Clipping is a warning, not hard blocking

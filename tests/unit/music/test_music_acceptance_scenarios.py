@@ -218,8 +218,9 @@ def test_ac10_seam_c4_event_generation() -> None:
 
     wire = event.to_wire()
     assert wire["event_type"] == "music_candidate_ready_for_p5"
-    assert wire["schema_version"] == "1.0"
+    assert wire["schema_version"] == "2.0"  # ADR-0032
     assert wire["lineage"] == SAMPLE_C3_SPEC["lineage"]
     assert wire["requested_duration_seconds"] == SAMPLE_C3_SPEC["requested_duration"]
+    assert wire["requested_duration_range"] == SAMPLE_C3_SPEC["duration_range"]
     assert wire["rights"]["commercial_use_status"] == "eligible"
     assert wire["rights"]["attempt_id"] == cand.source_attempt_id

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from plm_contracts import CommercialUseEligibility
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c4 import CandidateReadyPayload, MeasuredAudio, RightsSnapshotPayload
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
@@ -100,6 +101,7 @@ def run_smoke_test(*, clock: Clock | None = None) -> str | None:
                 model_id="mock-v1",
                 measured_audio=MeasuredAudio(duration_seconds=2.0, sample_rate=44100, channels=2),
                 requested_duration_seconds=2,
+                requested_duration_range=DurationRangeSeconds(min_seconds=1, max_seconds=3),
                 vocal_mode="instrumental",
                 genre_tags=("ambient",),
                 prompt_text="ambient electronic relaxing beat",

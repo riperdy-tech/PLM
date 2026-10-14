@@ -1,7 +1,11 @@
 """Technical audio validator for Phase P5 (P5 §11-§15, §84).
 
 Evaluates audio container integrity, format consistency, sample rate, channels,
-duration matching, silence, clipping, and cryptographic SHA-256 integrity.
+duration, silence, clipping, and cryptographic SHA-256 integrity.
+
+Duration is judged against the declared range the candidate's C3 spec carries on C4
+(``requested_duration_range``, ADR-0032), bounds included. P5 has no tolerance of its
+own: inside the range passes; outside is the blocking ``DURATION_OUT_OF_RANGE`` finding.
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ import struct
 import wave
 from datetime import datetime
 from pathlib import Path
+
+from plm_contracts.seams.c3 import DurationRangeSeconds
 
 from ..domain.enums import CheckSeverity, CheckStatus, GateCategory
 from ..domain.models import EvidenceItem, RiskFinding, TechnicalCheck
@@ -47,14 +53,17 @@ class TechnicalValidationResult:
 def validate_technical_audio(
     evaluation_id: str,
     audio_path: str | Path,
-    expected_duration_seconds: float,
+    allowed_duration: DurationRangeSeconds,
     expected_sample_rate: int = 44100,
     expected_channels: int = 2,
-    duration_tolerance_seconds: float = 1.0,
     *,
     now: datetime,
 ) -> TechnicalValidationResult:
-    """Perform deterministic technical checks on an audio file."""
+    """Perform deterministic technical checks on an audio file.
+
+    ``allowed_duration`` is the spec's declared duration range from the C4 event; it is
+    required because a duration cannot be judged without one.
+    """
     path = Path(audio_path)
     checks: list[TechnicalCheck] = []
     findings: list[RiskFinding] = []
@@ -208,42 +217,41 @@ def validate_technical_audio(
         )
     )
 
-    # 6. Duration measurement and tolerance
+    # 6. Duration measurement against the declared range (ADR-0032)
     measured_duration = num_frames / float(framerate) if framerate > 0 else 0.0
-    duration_delta = abs(measured_duration - expected_duration_seconds)
-    if duration_delta > duration_tolerance_seconds:
+    expected_range = f"[{allowed_duration.min_seconds}, {allowed_duration.max_seconds}]"
+    if allowed_duration.contains(measured_duration):
+        dur_status = CheckStatus.PASS
+        dur_severity = CheckSeverity.INFO
+    else:
         dur_status = CheckStatus.FAIL
         dur_severity = CheckSeverity.HIGH
         findings.append(
             RiskFinding.create(
                 evaluation_id_str=evaluation_id,
-                finding_code="DURATION_DISCREPANCY",
+                finding_code="DURATION_OUT_OF_RANGE",
                 category=GateCategory.TECHNICAL_GATE,
                 severity=CheckSeverity.HIGH,
                 status="FAIL",
-                confidence=0.95,
+                confidence=1.0,
                 message=(
-                    f"Measured duration {measured_duration:.2f}s deviates from expected "
-                    f"{expected_duration_seconds:.2f}s by {duration_delta:.2f}s "
-                    f"(tolerance {duration_tolerance_seconds:.2f}s)"
+                    f"Measured duration {measured_duration:.2f}s lies outside the spec's "
+                    f"declared range {expected_range}s"
                 ),
                 blocking=True,
                 evidence_item_ids=[evidence_item.id],
                 now=now,
             )
         )
-    else:
-        dur_status = CheckStatus.PASS
-        dur_severity = CheckSeverity.INFO
 
     checks.append(
         TechnicalCheck.create(
             evaluation_id_str=evaluation_id,
-            check_type="duration_match",
+            check_type="duration_in_range",
             status=dur_status,
             severity=dur_severity,
             measured_value=round(measured_duration, 3),
-            expected_value=round(expected_duration_seconds, 3),
+            expected_value=expected_range,
             unit="seconds",
             now=now,
         )
