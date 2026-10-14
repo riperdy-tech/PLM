@@ -11,8 +11,11 @@ Two commands are real, because the Wave 0 gate depends on them:
 
 ``plm doctor``
     Checks PostgreSQL reachability and whether the database is at the alembic
-    head, MinIO reachability, Temporal reachability, and that the nine phase
-    task-queue constants are intact. Prints a PASS/FAIL table and exits
+    head, MinIO reachability, Temporal reachability, that the nine phase
+    task-queue constants (and the platform queues) are intact, each phase API's
+    ``GET /readyz`` (R3: one container per phase, base URLs from
+    :mod:`plm_platform.service_urls`), and that the deployed workers' queues have
+    live pollers (``ph1.market`` and ``pipeline``). Prints a PASS/FAIL table and exits
     non-zero when anything fails. An unreachable dependency is reported as a
     FAIL row — the command never raises a traceback for one, and it never
     prints a secret (messages are redacted against the configured secrets).
@@ -30,12 +33,14 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Final, NoReturn
 
+import httpx
 import typer
 import urllib3
 from alembic import command
@@ -53,8 +58,16 @@ from .clock import SystemClock, require_aware
 from .config import Settings, SettingsError, load_settings
 from .db import database_url, redacted_database_url
 from .ledger import BudgetLedger
+from .service_urls import LOOPBACK_HOST, service_urls
 from .storage import bucket_name, split_endpoint
-from .temporal import Phase, TaskQueue, all_task_queues, connect_client
+from .temporal import (
+    Phase,
+    TaskQueue,
+    all_task_queues,
+    connect_client,
+    platform_task_queues,
+    queue_is_polling,
+)
 
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 """The checkout this CLI runs from (the platform is installed editable from it)."""
@@ -69,6 +82,10 @@ _DOCTOR_TITLE: Final[str] = "plm doctor - Wave 0 gate"
 _CONNECT_TIMEOUT_SECONDS: Final[int] = 3
 _TEMPORAL_TIMEOUT_SECONDS: Final[float] = 5.0
 _MINIO_PROBE_TIMEOUT_SECONDS: Final[float] = 2.0
+_READYZ_TIMEOUT_SECONDS: Final[float] = 3.0
+DEPLOYED_WORKER_QUEUES: Final[tuple[TaskQueue, ...]] = (TaskQueue.MARKET, TaskQueue.PIPELINE)
+"""Queues the compose stack serves (``worker`` and ``pipeline-worker``); doctor requires a
+live poller on each."""
 _FAILURE_MESSAGE_LIMIT: Final[int] = 160
 
 PHASES_BY_GROUP: Final[dict[str, str]] = {
@@ -136,14 +153,16 @@ def run_doctor(
             )
         )
     if settings is None:
-        for name in ("postgres", "migrations", "minio", "temporal"):
+        for name in ("postgres", "migrations", "minio", "temporal", "worker_pollers"):
             checks.append(Check(name, False, "not checked - configuration failed to load"))
     else:
         checks.append(_postgres_check(settings, connect_timeout))
         checks.append(_migrations_check(settings, connect_timeout))
         checks.append(_minio_check(settings))
         checks.append(_temporal_check(settings, temporal_timeout))
+        checks.append(_worker_pollers_check(settings, temporal_timeout))
     checks.append(_task_queues_check())
+    checks.extend(_readyz_checks())
     return checks
 
 
@@ -250,12 +269,70 @@ async def _temporal_probe(settings: Settings) -> str:
 def _task_queues_check() -> Check:
     expected = tuple(f"{phase}.{phase.name.lower()}" for phase in Phase)
     actual = tuple(queue.value for queue in all_task_queues())
-    if len(TaskQueue) == len(Phase) == len(expected) and actual == expected:
-        return Check("task_queues", True, "9 phase queues intact (ph1.market .. ph9.analytics)")
+    platform = tuple(queue.value for queue in platform_task_queues())
+    phase_queues = [queue for queue in TaskQueue if queue.value.startswith("ph")]
+    if len(phase_queues) == len(Phase) == len(expected) and actual == expected and platform:
+        return Check(
+            "task_queues", True,
+            "9 phase queues intact (ph1.market .. ph9.analytics); platform: "
+            + ", ".join(platform),
+        )
     drift = [f"{want} != {got}" for want, got in zip(expected, actual) if want != got]
-    if len(actual) != len(expected):
-        drift.append(f"{len(actual)} queues, expected {len(expected)}")
+    if len(actual) != len(expected) or len(phase_queues) != len(expected):
+        drift.append(f"{len(phase_queues)} phase queues, expected {len(expected)}")
+    if not platform:
+        drift.append("no platform queue")
     return Check("task_queues", False, "constants drifted: " + "; ".join(drift or ["unknown"]))
+
+
+def _worker_pollers_check(settings: Settings, timeout: float) -> Check:
+    """The deployed workers are alive *and polling* (process liveness is not health)."""
+    async def probe() -> list[str]:
+        client = await connect_client(settings)
+        return [queue.value for queue in DEPLOYED_WORKER_QUEUES
+                if not await queue_is_polling(client, queue)]
+
+    try:
+        silent = asyncio.run(asyncio.wait_for(probe(), timeout=timeout))
+    except Exception as exc:  # noqa: BLE001 - doctor reports failures, it never raises them
+        return Check("worker_pollers", False, f"cannot ask Temporal - {_describe(exc, settings)}")
+    queues = ", ".join(queue.value for queue in DEPLOYED_WORKER_QUEUES)
+    if silent:
+        return Check("worker_pollers", False,
+                     f"no poller on {', '.join(silent)} (start: docker compose up -d --wait)")
+    return Check("worker_pollers", True, f"pollers present on {queues}")
+
+
+def _readyz_checks() -> list[Check]:
+    """``GET /readyz`` on every phase API, concurrently (R3: one container per phase).
+
+    Base URLs: ``PLM_SERVICE_URL__<PHASE>`` or the loopback port compose publishes.
+    """
+    try:
+        urls = service_urls(dotenv_path=REPO_ROOT / ".env", default_host=LOOPBACK_HOST)
+    except SettingsError as exc:
+        return [Check("api_readyz", False, str(exc))]
+    with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+        return list(pool.map(lambda item: _readyz_check(*item), urls.items()))
+
+
+def _readyz_check(phase: Phase, base_url: str) -> Check:
+    name = f"api_{phase.name.lower()}"
+    target = f"{base_url}/readyz"
+    try:
+        response = httpx.get(target, timeout=_READYZ_TIMEOUT_SECONDS)
+    except httpx.HTTPError as exc:
+        return Check(name, False, f"unreachable at {target} - {type(exc).__name__}")
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    reason = body.get("reason") if isinstance(body, dict) else None
+    if response.status_code == 200 and isinstance(body, dict) and body.get("status") == "ready":
+        return Check(name, True, f"ready at {target}")
+    return Check(name, False,
+                 f"not ready at {target} - HTTP {response.status_code}"
+                 + (f" ({reason})" if reason else ""))
 
 
 def _render_table(checks: Sequence[Check]) -> str:
@@ -312,7 +389,7 @@ def _redact(message: str, settings: Settings | None) -> str:
 
 @app.command()
 def doctor() -> None:
-    """Wave 0 gate: PostgreSQL + migration head, MinIO, Temporal, task queues."""
+    """PostgreSQL + migration head, MinIO, Temporal, worker pollers, task queues, phase APIs."""
     typer.echo(_DOCTOR_TITLE)
     checks = run_doctor()
     typer.echo(_render_table(checks))

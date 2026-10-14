@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v1",
+  "policy_version": "hold-classes-v3",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -169,6 +169,16 @@
       "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1429 ('license evidence missing'); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:187; emitted by services/quality_gate/evaluators/rights.py",
       "description": "The provider declared no license terms for the producing attempt. Resumes only with the recovered license terms."
     },
+    "BUDGET_RESERVATION_REFUSED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["budget_change_ref", "budget_approval_ref"],
+      "reviewer_role": "budget_owner",
+      "category": "budget_ceiling",
+      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:184-186 (cost ledger and ceiling: fail closed when the ceiling is exhausted); docs/adr/0033-platform-ops-schema.md (one program ceiling in ops); raised by plm_platform.pipeline.workflow before a paid step",
+      "description": "The ledger refused to fund a paid step (generation, upload, distribution submission): ceiling exhausted, no covering ceiling, no rate for an unpriced write, a currency without an FX rate, or no ledger configured. The paid call is never made. Reviewable, not a hard stop: the ceiling is PLM's own operator control, not an external dispute, KYC, account-security or payment-method event, and it is cleared by an operator act inside PLM. The budget owner resumes only with the reference of the ceiling or rate-card change that funds the write and the approval behind it; the workflow then reserves again against the new headroom, so a resume never bypasses the ledger."
+    },
     "SEVERE_CLIPPING_DETECTED": {
       "hold_class": "REVIEWABLE_QUARANTINE",
       "severity": "MEDIUM",
@@ -178,6 +188,16 @@
       "category": "technical_quality",
       "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (HIGH, non-blocking) by services/quality_gate/evaluators/technical.py",
       "description": "Clipping above the warning threshold. A quality reviewer may clear it with a recorded listening review."
+    },
+    "CAPABILITY_UNAVAILABLE": {
+      "hold_class": "HARD_STOP",
+      "severity": "HIGH",
+      "override_permitted": false,
+      "required_evidence": ["capability_release_ref", "rerun_ref"],
+      "reviewer_role": "platform_owner",
+      "category": "capability_unavailable",
+      "source": "AGENTS.md:33 ('A missing required fact can never become a passing decision'); docs/reviews/2026-10-13-system-review-and-remediation-plan.md (R4/R5 own the missing pipeline steps)",
+      "description": "A pipeline step has no implementation yet (the owning stage is named in the case). No approval can produce the missing work; the case closes only when the capability ships and the step is re-run."
     }
   }
 }

@@ -12,6 +12,7 @@ import pytest
 from plm_platform.temporal import (
     DEFAULT_RETRY_POLICY,
     NON_RETRYABLE_ERROR_TYPES,
+    CapabilityUnavailable,
     CreativeRejection,
     NonRetryableError,
     Phase,
@@ -21,6 +22,7 @@ from plm_platform.temporal import (
     all_task_queues,
     business_workflow_id,
     idempotency_key,
+    platform_task_queues,
     task_queue,
 )
 
@@ -37,9 +39,22 @@ EXPECTED_QUEUES = (
 )
 
 
-def test_task_queue_members_are_exactly_the_nine_documented_names() -> None:
-    assert tuple(queue.value for queue in TaskQueue) == EXPECTED_QUEUES
-    assert len(set(EXPECTED_QUEUES)) == len(EXPECTED_QUEUES)
+EXPECTED_PLATFORM_QUEUES = ("pipeline", "pipeline.acceptance")
+"""R3: the pipeline workflow's queue, and the Gate R3 acceptance queue no deployed worker
+polls (so a test run with controlled activities never reaches the compose worker)."""
+
+
+def test_task_queue_members_are_the_nine_phase_names_then_the_platform_queues() -> None:
+    assert tuple(queue.value for queue in TaskQueue) == (
+        EXPECTED_QUEUES + EXPECTED_PLATFORM_QUEUES
+    )
+    assert len(set(TaskQueue)) == len(EXPECTED_QUEUES) + len(EXPECTED_PLATFORM_QUEUES)
+
+
+def test_only_the_pipeline_queue_is_a_deployed_platform_queue() -> None:
+    assert tuple(queue.value for queue in platform_task_queues()) == ("pipeline",)
+    assert TaskQueue.PIPELINE_ACCEPTANCE not in platform_task_queues()
+    assert TaskQueue.PIPELINE_ACCEPTANCE not in all_task_queues()
 
 
 def test_every_phase_has_exactly_one_queue_and_pipeline_order_holds() -> None:
@@ -82,7 +97,27 @@ def test_default_retry_policy_matches_the_documented_table() -> None:
 
 
 def test_non_retryable_policy_list_names_the_error_classes() -> None:
-    classes = (ValidationFailure, PolicyRejection, CreativeRejection)
+    classes = (ValidationFailure, PolicyRejection, CreativeRejection, CapabilityUnavailable)
     assert tuple(cls.__name__ for cls in classes) == NON_RETRYABLE_ERROR_TYPES
     for cls in classes:
         assert issubclass(cls, NonRetryableError)
+
+
+def test_every_non_retryable_subclass_in_this_module_is_listed_by_name() -> None:
+    """Temporal matches non-retryable types by exact class name, not by inheritance."""
+    from plm_platform import temporal
+
+    subclasses = {
+        name for name, value in vars(temporal).items()
+        if isinstance(value, type) and issubclass(value, NonRetryableError)
+        and value is not NonRetryableError
+    }
+    assert subclasses == set(NON_RETRYABLE_ERROR_TYPES)
+
+
+def test_capability_unavailable_names_its_owning_stage() -> None:
+    error = CapabilityUnavailable("pipeline.qa", owning_stage="R4", reason="no audio by URI")
+    assert error.owning_stage == "R4"
+    assert "R4" in str(error)
+    with pytest.raises(ValueError):
+        CapabilityUnavailable("pipeline.qa", owning_stage="", reason="x")

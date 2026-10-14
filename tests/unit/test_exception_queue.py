@@ -668,3 +668,12 @@ def test_p5_a_resolved_case_cannot_be_resolved_again(
     again = qa_client.post(url, json=body, headers=_HEADERS)
     assert again.status_code == 409
     assert again.json()["detail"]["code"] == "quarantine_already_resolved"
+
+
+def test_a_missing_pipeline_capability_is_a_classified_hard_stop() -> None:
+    """Proves: a step with no implementation yet (R4/R5) holds as a mapped hard stop. No
+    approval can produce the missing work, so it closes only when the capability ships."""
+    classification = load_hold_class_policy().classify("CAPABILITY_UNAVAILABLE")
+    assert classification.mapped is True
+    assert classification.rule.hold_class.value == "HARD_STOP"
+    assert classification.rule.override_permitted is False

@@ -163,6 +163,25 @@ services:
       retries: 5
       start_period: 20s
 
+  # R3: the PART XIV pipeline workflow (one run per P2 directive) on the `pipeline` task
+  # queue. Phase steps call the phase APIs over HTTP (base URLs default to the api-*
+  # service names; override with PLM_SERVICE_URL__<PHASE>) with PLM_SERVICE_TOKEN; steps
+  # today's APIs cannot carry hold the run with CAPABILITY_UNAVAILABLE. Paid steps reserve
+  # in the ledger named by PLM_BUDGET_LEDGER_CURRENCY (read from the mounted .env); unset,
+  # every reservation is refused and the run holds. Reviewers come from
+  # PLM_PIPELINE_REVIEWERS_FILE (unset: nobody can resume a reviewable hold).
+  pipeline-worker:
+    <<: *plm-app
+    command: ["python", "-m", "plm_platform.worker", "--task-queue", "pipeline",
+              "--load", "plm_platform.pipeline.worker:REGISTRATIONS"]
+    healthcheck:
+      # Real probe: the process is alive AND its pollers are visible on `pipeline`.
+      test: ["CMD", "python", "-m", "plm_platform.worker", "--healthcheck", "--task-queue", "pipeline"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
   # R3 runtime: one API container per phase, same dev image and environment as the
   # worker. Each mounts plm_platform.health, so readiness means the phase can reach its
   # database. Mutating routes stay fail-closed until PLM_SERVICE_TOKEN is set.

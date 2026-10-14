@@ -6,7 +6,11 @@ ad-hoc retry objects at call sites:
 
 * **Task-queue names are defined once, here.** :class:`TaskQueue` holds the nine
   phase queues (``ph1.market`` … ``ph9.analytics``) and :func:`task_queue` is the
-  typed accessor over them. Call sites never spell a queue name as a literal.
+  typed accessor over them. The platform queues (:func:`platform_task_queues`) carry
+  cross-phase workflows: ``pipeline`` runs the PART XIV pipeline workflow (R3), and
+  ``pipeline.acceptance`` is the queue the Gate R3 acceptance tests serve with
+  controlled activities, so a deployed pipeline worker never picks up a test run.
+  Call sites never spell a queue name as a literal.
 * **Workflow IDs are business keys, not random UUIDs.** Build them with
   :func:`business_workflow_id` (e.g. ``music.track.track_01HQ``) so that two
   dispatches of the same business intent address the same execution and
@@ -23,7 +27,9 @@ ad-hoc retry objects at call sites:
   backoff coefficient 2.0, maximum interval 60s, maximum attempts 5, and the
   permanent failure classes in :data:`NON_RETRYABLE_ERROR_TYPES`
   (:class:`NonRetryableError` and its subclasses) fail fast instead of burning
-  attempts.
+  attempts. Temporal matches non-retryable types by exact class name, so every
+  subclass is listed there; :class:`CapabilityUnavailable` marks a step that today's
+  runtime cannot perform at all (the owning remediation stage is in the message).
 * **Global constraint "No silent transformation" (P0 §2):** a creative failure
   must never be retried as a transport failure (or the reverse). Transport
   errors are retried under the policy above; a rejected creation is a business
@@ -53,6 +59,7 @@ __all__ = [
     "DEFAULT_NAMESPACE",
     "DEFAULT_RETRY_POLICY",
     "NON_RETRYABLE_ERROR_TYPES",
+    "CapabilityUnavailable",
     "CreativeRejection",
     "NonRetryableError",
     "Phase",
@@ -65,6 +72,7 @@ __all__ = [
     "connect_client",
     "create_worker",
     "idempotency_key",
+    "platform_task_queues",
     "queue_is_polling",
     "queue_pollers",
     "task_queue",
@@ -89,9 +97,10 @@ class Phase(StrEnum):
 
 
 class TaskQueue(StrEnum):
-    """Task-queue names, defined once for the whole platform — one per phase.
+    """Task-queue names, defined once for the whole platform.
 
-    The member value is the queue name that workers poll and callers pass to
+    One per phase, plus the platform queues (:func:`platform_task_queues`). The member
+    value is the queue name that workers poll and callers pass to
     ``start_workflow``/``execute_workflow``.
     """
 
@@ -104,6 +113,13 @@ class TaskQueue(StrEnum):
     YOUTUBE = "ph7.youtube"
     DISTRIBUTION = "ph8.distribution"
     ANALYTICS = "ph9.analytics"
+    PIPELINE = "pipeline"
+    """The PART XIV pipeline workflow, one run per P2 directive (R3)."""
+    PIPELINE_ACCEPTANCE = "pipeline.acceptance"
+    """Gate R3 acceptance runs with controlled activities; no deployed worker polls it."""
+
+
+_PLATFORM_QUEUES: Final[tuple[TaskQueue, ...]] = (TaskQueue.PIPELINE,)
 
 
 _TASK_QUEUES: Final[Mapping[Phase, TaskQueue]] = MappingProxyType(
@@ -129,6 +145,11 @@ def task_queue(phase: Phase) -> TaskQueue:
 def all_task_queues() -> tuple[TaskQueue, ...]:
     """Every phase queue, in pipeline order (the dev worker's default scope)."""
     return tuple(_TASK_QUEUES[phase] for phase in Phase)
+
+
+def platform_task_queues() -> tuple[TaskQueue, ...]:
+    """The deployed cross-phase queues (today: the pipeline workflow's queue)."""
+    return _PLATFORM_QUEUES
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,10 +196,28 @@ class CreativeRejection(NonRetryableError):
     """The creative artifact was rejected on its merits — never silently re-rolled."""
 
 
+class CapabilityUnavailable(NonRetryableError):
+    """The runtime cannot perform this step at all today; retrying cannot change that.
+
+    Raised instead of faking data when a step's provider or endpoint does not exist yet.
+    ``owning_stage`` names the remediation stage that delivers it (e.g. ``R4``); the
+    caller turns it into a hold with an explicit reason code, never into a pass.
+    """
+
+    def __init__(self, capability: str, *, owning_stage: str, reason: str) -> None:
+        if not capability.strip() or not owning_stage.strip() or not reason.strip():
+            raise ValueError("capability, owning_stage and reason are all required")
+        self.capability = capability
+        self.owning_stage = owning_stage
+        self.reason = reason
+        super().__init__(f"{capability} unavailable until stage {owning_stage}: {reason}")
+
+
 NON_RETRYABLE_ERROR_TYPES: Final[tuple[str, ...]] = (
     "ValidationFailure",
     "PolicyRejection",
     "CreativeRejection",
+    "CapabilityUnavailable",
 )
 """Permanent failure class names for ``RetryPolicy(non_retryable_error_types=...)``."""
 

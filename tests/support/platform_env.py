@@ -22,6 +22,7 @@ from tests.support.paths import REPO_ROOT
 PLATFORM_VARS: Final[tuple[str, ...]] = (
     "ENV", "LOG_LEVEL", "POSTGRES_PASSWORD", "DATABASE_URL", "MINIO_ROOT_USER",
     "MINIO_ROOT_PASSWORD", "MINIO_ENDPOINT", "MINIO_BUCKET", "TEMPORAL_HOST",
+    "PLM_SERVICE_TOKEN",
 )
 
 

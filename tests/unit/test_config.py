@@ -28,7 +28,9 @@ from plm_platform.config import (
 )
 
 INTERNAL_SECRET_VARS = (SERVICE_TOKEN_VAR,)
-"""Operator-configured secrets that are not provider credentials (R15)."""
+"""Operator-configured secrets that are not provider credentials (R15). The example sets a
+documented development placeholder for them (R3: the compose APIs and the pipeline worker
+need a token), like the change-me passwords."""
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
@@ -248,8 +250,8 @@ class TestServiceToken:
 class TestEnvExampleDrift:
     def test_loader_variable_names_match_the_example_exactly(self) -> None:
         active, commented = env_example_names()
-        assert active == set(REQUIRED_VARS)
-        assert commented == set(PROVIDER_SECRET_VARS) | set(INTERNAL_SECRET_VARS)
+        assert active == set(REQUIRED_VARS) | set(INTERNAL_SECRET_VARS)
+        assert commented == set(PROVIDER_SECRET_VARS)
         # ENV and LOG_LEVEL are operator knobs with code defaults, not deployment
         # values; .env.example must not grow or lose entries silently.
         assert set(DEFAULTS) & (active | commented) == set()
@@ -266,4 +268,6 @@ class TestEnvExampleDrift:
         assert settings.minio_root_password.get_secret_value() == "change-me"
         assert settings.minio_bucket == "plm-media"
         assert settings.temporal_host == "127.0.0.1:7233"
+        assert settings.service_token is not None
+        assert settings.service_token.get_secret_value().startswith("change-me")
         assert settings.is_mock_mode()
