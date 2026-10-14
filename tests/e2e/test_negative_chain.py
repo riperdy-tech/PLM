@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 import pytest
 from plm_contracts import GateDisposition
+from plm_contracts.money import Money
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
@@ -188,11 +189,12 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
         analytics_db,
         provider="spotify",
         period="2026-10",
+        currency="USD",
         raw_content=raw_statement_csv,
         source_reference="spotify_royalty_2026_10.csv",
         now=NOW,
     )
-    assert stmt1.total_revenue_usd == 120.0
+    assert stmt1.total_revenue == Money.of("120.00", "USD")
     assert stmt1.total_streams == 30000
     assert len(tracks1) == 2
 
@@ -201,6 +203,7 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
         analytics_db,
         provider="spotify",
         period="2026-10",
+        currency="USD",
         raw_content=raw_statement_csv,
         source_reference="spotify_royalty_2026_10.csv",
         now=NOW,
@@ -214,4 +217,4 @@ def test_p9_duplicate_statement_ingestion_prevents_double_counting(analytics_db:
     metrics_trk1 = get_track_metrics(analytics_db, "trk_lofi_01")
     assert len(metrics_trk1) == 1
     assert metrics_trk1[0].streams == 20000
-    assert metrics_trk1[0].reported_revenue_usd == 80.00
+    assert metrics_trk1[0].reported_revenue == Money.of("80.00", "USD")

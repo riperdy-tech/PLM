@@ -68,13 +68,13 @@ separately against its own evidence gate.
 | Capability | Status | Where / gap |
 |---|---|---|
 | YouTube Data API search + video details | real | `connectors/youtube.py` |
-| Channel statistics (subscribers) | stub | `fetch_channels` is never called, so Demand (25% weight) is always unknown (R2) |
+| Channel statistics (subscribers) | real | `collection/collectors.py` `fetch_channel_subscribers`: one `channels.list` call per hydration batch; subscribers and `channel_id` are stamped on video observations; a hidden or failed channel is unknown. Proven against recorded fixtures only; the live smoke does not exercise it. |
 | Spotify, Trends connectors | stub | Real clients with no callers, so cross-platform (10%) is always unknown (R6) |
 | Browser connector | stub | Always raises |
-| Opportunity score, 7 weights summing to 1 | real | `scoring/calibration.py`. Weights are not in settings and not learnable (R2). |
-| Growth windows | partial | "prev90d" is days 90–180, there is no 180d window, and it uses lifetime views/day (R2) |
-| Velocity 24h / 72h | absent | Only 7/30/90-day medians exist (R2) |
-| Competition concentration | partial | HHI is keyed on video id, not channel (R2) |
+| Opportunity score, 7 weights summing to 1 | real | `MarketSettings.score_weights`, validated at load (finite, ≥ 0, sum 1). Not learnable. |
+| Growth windows | real | `features/growth.py`: named windows d0_30, d30_60, d30_90, d90_180; median of in-window view deltas; an empty window is unknown. Scoring uses d0_30 vs d30_60. |
+| Velocity 24h / 72h | real | `ArmFeatures.median_velocity_24h/72h` from timestamped sightings relative to an injected `now`; too few sightings is unknown |
+| Competition concentration | real | HHI over channel activity, one vote per video; any active video without a channel makes it unknown, and the competition component is then unknown. Rows stored before migration 0021 have no channel. |
 | 13-dimension taxonomy | partial | Keyword classifier only; the LLM path is absent |
 | Daily/weekly/backfill Temporal jobs | real | `jobs/`; the only deployed worker |
 | `ENV=ci` fixture connector | mock | `cli.py`. It reads fixtures from `tests/fixtures`, so it needs a source checkout. |
@@ -85,34 +85,37 @@ separately against its own evidence gate.
 | Normal–Normal posterior, Thompson sampling | real | `modeling/reward_model.py` |
 | Prior from P1 score/confidence/staleness | real | `modeling/prior.py` |
 | P1 intake over HTTP | real | `ingestion/p1_adapter.py`; parses the shared C1 page, and a malformed page is `MarketUnavailable` |
-| `POST /ar/results` storage, idempotent | real | Parses the shared C7 leg-2 model. Only stores; posteriors change on `POST /ar/update` |
-| Posterior update | partial | Every observation window of one content is a full-weight update, so it is counted several times (R2) |
-| Exploration split 70/20/10 | partial | Configurable, but fractions may sum below 1 and under-fill slots (R2) |
+| `POST /ar/results` storage, idempotent | real | Parses the shared C7 leg-2 model. One stored fact per (experiment, content, window, maturity); the old (experiment, window) key dropped a mature result that followed a provisional one and collided across contents (ADR-0031). Only stores; posteriors change on `POST /ar/update` |
+| Posterior update | real | One effective outcome per (experiment, content): the mature result at the policy's `outcome_horizon` (default 28d). Other results are recorded as `provisional`, `off_horizon` or `skipped_duplicate` and never move the posterior (ADR-0031). The posterior is recomputed from the prior and the applied outcomes at the draw's `as_of`, so decay is measured from the draw (`modeling/evidence.py`). A revision protocol for a corrected outcome is absent; a second mature fact is refused as a duplicate. |
+| Policy persistence | real | The whole validated config is stored (`config_json`); rows from before ADR-0031 are refused on load instead of being completed from code defaults |
+| Outcome horizon on C2 | real | `outcome_horizon` (C2 schema 2.0) tells P3 the window P2 learns from |
+| Exploration split 70/20/10 | real | Configurable; exploit + adjacent + radical must sum to 1.0 (ADR-0023 #3, enforced since R2) |
 | Budget allocation (PART XI) | stub | Equal split per slot (later stage) |
 | Reward as expected economic value | absent | Uses P9's proxy as-is (economics gate) |
 
 ### P3 Experiments
 | Capability | Status | Where / gap |
 |---|---|---|
-| Content genome (21 dimensions) | partial | Defaults fill unknowns. Only an rnb template exists; other genres reuse lofi (R2). |
-| Treatment generation | stub | Variables other than bpm/visual_world get literal `variant_{idx}`; no variable isolation; seed ignored (R2) |
-| Validation | partial | Status is set to `VALIDATED` before validation runs (R2) |
+| Content genome (21 dimensions) | real | Templates are data (`genome/templates/genome_templates.json`, versioned and validated on load) for rnb, lofi, city_pop, jazz, ambient and house, each with the genre's ontology of alternatives. An unknown or missing genre is refused (`unknown_genre` / `genre_unspecified`); no genre borrows another's template. Template values are seed configuration awaiting creative review. |
+| Treatment generation | real | Registry-driven (`experiments/values.py`): bpm, energy and categorical dimensions from the genre ontology, inside the exploration level's creative latitude. Unknown, hard-constraint, out-of-latitude or exhausted variables are refused with a reason code. One factor at a time by default; multi-factor needs declared factors and a stated design (`one_factor_per_treatment` or `full_factorial`). Treatments are pairwise distinct; fewer are designed when values run out, with the reason recorded. Seeded via `stable_seed`. Portfolio/probe/replication/follow-up types use the single-factor design (no replication lineage yet). |
+| Validation | real | Design returns `draft`; only `promote_to_validated` (a passing report for the same experiment) sets `validated`. Materialisation refuses anything not validated. Contamination and treatments identical to control fail validation. |
 | Directive parsing (C2) | real | `ingestion/p2_adapter.py` parses the shared model with no defaults (R1) |
 | Directive transport from P2 | absent | No HTTP client; `GET /ar/directives` is never consumed (R3) |
-| `budget_limit` from P2 | stub | Parsed, but materialization still uses a request `budget_envelope` that defaults to 100.0 (R2) |
+| `budget_limit` from P2 | real | Stored on the experiment as the ceiling; materialisation uses it when no budget is requested, accepts a lower request and refuses a higher one. Amount is a float with no currency (C2 wire). |
+| Measurement plan | real | The experiment records P2's `outcome_horizon` and `maturity_rule=publication_plus_horizon` at design time (ADR-0031, migration 0024); legacy rows without a plan are refused on load. The primary metric is still fixed at `retention_30s`. |
 | Lineage origination | real | `experiment_family_id` (P3 §12) and `content_genome_id` are minted and carried on every track spec (ADR-0026) |
-| Track spec derivation | real | BPM and duration are the genome target or range midpoint (R5 rule), not invented defaults. The provider allow-list is still a fixed list (R2). |
+| Track spec derivation | real | BPM and duration are the genome target or range midpoint (R5 rule), not invented defaults. The genome's duration range itself travels on C3 as `duration_range` (schema 2.0, ADR-0032). The provider allow-list is still a fixed list (R6). |
 
 ### P4 Music factory
 | Capability | Status | Where / gap |
 |---|---|---|
 | Generation engine, planner, candidate bank | partial | At most 3 variants; no funnel or ranking; plan marked complete when short |
-| Mock provider | mock | Sine-wave audio capped at 30 s |
+| Mock provider | mock | Deterministic sine-wave audio of exactly the requested duration (44.1 kHz stereo; one second synthesised and repeated). The 30 s cap is gone, so mock runs exercise P5's real duration gate (ADR-0032). |
 | Suno / ElevenLabs adapters | stub | Always return FAILED (R6) |
 | Seed determinism | real | `stable_seed("p4.generation", track_spec_id, variant_code)`; identical across processes (R2) |
 | Artifact storage via API | stub | In-memory; stored URIs point at nothing (R4) |
 | Rights snapshot | real | Records the terms the provider adapter declares (`license_terms()`, ADR-0027). The mock declares PLM-owned synthesis; Suno and ElevenLabs declare nothing, which means unknown. |
-| C4 event | real | Built only from stored facts (plan spec, the candidate's own attempt, its single full-mix artifact); refused with 409 when a fact is missing |
+| C4 event | real | Built only from stored facts (plan spec, the candidate's own attempt, its single full-mix artifact); refused with 409 when a fact is missing. Carries the spec's `requested_duration_range`; schema 2.0 (ADR-0032). |
 | Provider selection | partial | The engine ignores the spec's `allowed_providers` and uses its default (mock). That is the intended mock-mode behaviour, but it is implicit; real provider selection is R6. |
 | Cost tracking / budget enforcement | stub | `credits*0.05` is invented; `budget_limit` is not enforced |
 | Protected-artist prompt blocking | absent | Exists only in P5 (R4) |
@@ -120,7 +123,7 @@ separately against its own evidence gate.
 ### P5 Quality gate
 | Capability | Status | Where / gap |
 |---|---|---|
-| WAV integrity, sample rate, channels, duration, all-zero silence, clipping | partial | `evaluators/technical.py`. WAV only; clipping never blocks; no edge-silence check |
+| WAV integrity, sample rate, channels, duration, all-zero silence, clipping | partial | `evaluators/technical.py`. Duration is judged against the spec's declared range carried on C4 (`requested_duration_range`, bounds inclusive); outside it is the blocking `DURATION_OUT_OF_RANGE` (ADR-0032). WAV only; clipping never blocks; no edge-silence check |
 | Loudness (LUFS), true peak | stub | RMS−3 dB approximation; no true peak (R4) |
 | Audio / lyric similarity, voice cloning | absent | `similarity_score` is never computed (R4) |
 | Rights / provenance (P28) | partial | Judges the declared C4 snapshot (R6 fields) in the shared vocabulary. No snapshot means quarantine; a tier label can no longer upgrade unknown to eligible (R1). The other P28 fields (generator, model version, human contribution, …) are R4. |
@@ -162,16 +165,16 @@ separately against its own evidence gate.
 ### P9 Analytics / economics
 | Capability | Status | Where / gap |
 |---|---|---|
-| Unit economics calculator | real | `economics/calculator.py` |
-| Economics endpoint aggregation | stub | Sums overlapping window snapshots (R2) |
-| YouTube Analytics ingestion | stub | Stores caller-supplied numbers; no API client (R6). `observed_at` and cost `incurred_at` are required facts of the measurement (HTTP 422 when missing), never stamped at receipt. |
-| Analytics CLI ingest | stub | `cli_ingest` still fills missing facts (`period`, `provider`, `views` = 0), which breaks the missing-fact rule (R2 measurement item) |
-| Distributor statement ingestion | real | No invented ids. Rows without an ISRC are counted as unattributed revenue; an ISRC's release comes from its C7 link (ADR-0030). |
+| Unit economics calculator | real | `economics/calculator.py`: `Money` in the reporting currency; estimated (YouTube) revenue kept apart from realized (reported/final) revenue; net contribution on realized revenue only, `None` with a reason when revenue or cost is unknown or unreconciled; undefined ratios are `None` (ADR-0031) |
+| Economics endpoint aggregation | real | `economics/ledger.py`: latest snapshot of one window (default `lifetime`) for views and estimated revenue; `sum_incremental` for statement lines and costs. Gate R2 tests `test_gate_r2_*` (in-process SQLite) |
+| YouTube Analytics ingestion | stub | Stores caller-supplied numbers; no API client (R6). Unmeasured metrics are stored as NULL; window, `observed_at` and the revenue currency are required facts (HTTP 422 when missing) |
+| Analytics CLI ingest | real | Missing facts are refused with exit code 2 (the platform `plm analytics ingest` forwards `--provider/--period/--currency`); JSON amounts parse to `Decimal` |
+| Distributor statement ingestion | real | Declared statement currency required; amounts parsed to `Decimal`; a bad line refuses the whole statement before anything is stored; lines stored as incremental per period. No invented ids; rows without an ISRC are counted as unattributed (ADR-0030) |
 | C7 leg-1 release links | real | `ingestion/releases.py` links each (release, ISRC) to its lineage, idempotently |
-| Outcome measurement inputs | partial | Window, maturity, attribution and quality are explicit inputs with the shared vocabulary; deriving maturity from publish time is R2 |
+| Outcome measurement inputs | real | Maturity is derived from `published_at` and the window (`maturity_at`); caller-asserted maturity and an observation before publication are refused (422) |
 | C8 feature view | real | Unmeasured values served as null (no zeros, `1.0`, `false` or hardcoded `REPORTED`) |
-| Currency, decimal money | absent | All `*_usd` floats (R2) |
-| Reward computation | partial | A bounded engagement/contribution proxy, not economic value (R2, economics gate) |
+| Currency, decimal money | real | `Numeric(20,6)` plus currency columns (migration `0022_analytics_money`); `fx_rates` table and `POST /analytics/fx-rates`; reporting currency KRW by default; a missing rate is HTTP 409 `fx_rate_missing`; legacy rows with no currency are unreconciled, never assumed USD. C7 `raw_metrics.estimated_revenue` is still a float in the reporting currency (economics gate) |
+| Reward computation | partial | `engagement-contribution-proxy-v1`, a bounded proxy, not economic value (economics gate). Net contribution as `Money` in the reporting currency; the USD 50 scale is converted through FX; attribution confidence passed through; sensitivity tests pin bounds and monotonicity |
 | Reward delivery to P2 | absent | The route never sends it; a failed POST is still recorded as posted (R3) |
 
 ### Architecture parts with no code
@@ -179,15 +182,16 @@ PART X (weekly multi-agent review / LLM router), XII (Shorts engine), XIII (comm
 XXIII (multi-brand beyond a `brand_id` column), and P10 recursive allocation. These are
 deferred and tracked here; they are not scheduled before the economics gate.
 
-## Test baseline (2026-10-14, after R1)
+## Test baseline (2026-10-14, after R2)
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1216 passed, 1 skipped, ~35 s |
+| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1439 passed, 1 skipped, ~36 s. Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
 | Integration, compose **down** | `pytest -m integration` | 3 passed, 27 skipped, ~2.5 min (collection and imports verified) |
-| Integration, compose **up** | `pytest -m integration` | Not run (no containers). The migrations `0016`–`0020` and the schema-matches-models tests have therefore **not** been exercised against Postgres. |
+| Integration, compose **up** | `pytest -m integration` | Not run (no containers). The migrations `0016`–`0024` and the schema-matches-models tests have therefore **not** been exercised against Postgres. |
 | Lint | `ruff check .` | clean |
-| Types | `mypy packages services` | clean (365 files) |
+| Types | `mypy packages services` | clean (374 files) |
+| Cross-process determinism | `tests/unit/test_cross_process_determinism.py` | P2 draws, P3 design/package, P4 plan/seeds/ids/artifact digests identical under two `PYTHONHASHSEED` values |
 
 Before R0:
 
@@ -209,9 +213,10 @@ the pipeline.
 The e2e test still has these gaps:
 - It runs in process on SQLite, with no HTTP, Temporal or Postgres.
 - Its P1 opportunity and P2 directive are hand-built.
-- Its P5 manifest is hand-built from the real C4 event's facts. A real P5 run rejects
-  the mock's 30 s audio against the 150 s spec until R2 resolves the duration seam.
-- Its P9 revenue figures are literals.
+- Its P3 experiment is hand-built (its P5 gate is now real: the mock's audio passes the
+  declared duration range, ADR-0032).
+- Its P9 revenue figures are literals. The reward is posted at the declared 28d horizon
+  and is the one effective outcome P2 applies (ADR-0031).
 - It never runs a second allocation cycle.
 
 R5 replaces it.
