@@ -30,9 +30,11 @@ def build_cost_id(entity_id: str, category: str, period: str) -> str:
     return f"cost_{compute_sha256(canonical)[:16]}"
 
 
-def build_outcome_id(experiment_id: str, arm_id: str, window: str) -> str:
-    """Build deterministic experiment outcome ID."""
-    canonical = f"{experiment_id}|{arm_id}|{window}"
+def build_outcome_id(experiment_id: str, unit_id: str, window: str, maturity: str) -> str:
+    """One measured fact: an experiment's unit (its content: a video, a release) over one
+    window at one maturity. An experiment has several treatments and so several units;
+    keying on the arm made the second unit overwrite the first (ADR-0031)."""
+    canonical = f"{experiment_id}|{unit_id}|{window}|{maturity}"
     return f"outc_{compute_sha256(canonical)[:16]}"
 
 

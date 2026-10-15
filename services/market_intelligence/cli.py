@@ -82,7 +82,7 @@ def run_daily(now: datetime | None = None, *, session_factory: SessionFactory | 
     This is the single orchestration entry point: the Temporal activities call
     `run_daily_step`, the CLI calls this, and the acceptance test calls this.
     """
-    resolved = settings if settings is not None else load_market_settings()
+    resolved = settings if settings is not None else _settings()
     moment = now if now is not None else datetime.now(UTC)
     steps: dict[str, Any] = {}
     with _session(session_factory) as session:
@@ -588,7 +588,11 @@ def _stale_inventory(session: Session, *, now: datetime, settings: MarketSetting
 
 
 def _settings() -> MarketSettings:
-    return load_market_settings()
+    """P1 settings over the platform layer: without it the deployed API never sees the
+    service token and refuses every request (blocked_pending_credentials)."""
+    from plm_platform.config import load_settings
+
+    return load_market_settings(platform=load_settings())
 
 
 def _session(session_factory: SessionFactory | None = None,

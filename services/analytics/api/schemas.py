@@ -8,11 +8,12 @@ that was not measured is omitted or ``null``, never ``0``.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from plm_contracts import CurrencyCode, ObservationWindow, QualityStatus
 from plm_contracts.money import FxRate, Money
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c7 import ObservationMaturity
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -82,6 +83,9 @@ class YouTubeIngestRequest(BaseModel):
     subscribers_lost: int | None = Field(default=None, ge=0)
     estimated_revenue: WireAmount | None = None
     revenue_currency: CurrencyCode | None = None
+    source: Literal["youtube_analytics", "synthetic"] = "youtube_analytics"
+    """``synthetic`` labels numbers from a mock source (R5), so they are never read as a
+    real audience."""
 
     @model_validator(mode="after")
     def _revenue_has_currency(self) -> Self:
@@ -107,6 +111,58 @@ class DistributorIngestRequest(BaseModel):
     source_reference: NonEmpty
     rows: list[dict[str, Any]] | None = None
     revenue_status: RevenueStatus = RevenueStatus.REPORTED
+    received_at: AwareDatetime | None = None
+    """When the statement was obtained, if the caller knows it (the pipeline passes its
+    ``workflow.now()``); otherwise P9's clock. Its lines are observed at this instant."""
+
+
+class ReleaseRecordIngestRequest(BaseModel):
+    """P8's Seam C7 leg-1 distribution record (ADR-0030), parsed with the shared model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    record: dict[str, Any]
+
+
+class MeasureRequest(BaseModel):
+    """Measure one published unit from the facts P9 stored, and enqueue its reward (R5).
+
+    The caller names *what* to measure, never a number: the unit and its lineage and
+    publication time come from P7's publication event (C6 hop 2), the recordings from
+    their ISRCs (each must be linked to the same lineage by an ingested C7 leg-1
+    record). Views and watch time are the latest snapshot of ``window`` observed at or
+    before ``observed_at``; realized revenue the statement lines of the ISRCs; costs the
+    unit's recorded costs; all converted into the reporting currency through recorded
+    FX rates. Maturity is derived. The reward is the ``engagement-contribution-proxy-v1``
+    proxy, not expected economic value.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    publication: dict[str, Any]
+    isrcs: list[str] = Field(min_length=1)
+    window: ObservationWindow
+    observed_at: AwareDatetime
+    closed_by_source: bool = False
+    quality_status: QualityStatus | None
+
+
+class DispatchFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    experiment_id: NonEmpty
+    content_id: NonEmpty
+    observation_window: ObservationWindow
+    status: ObservationMaturity
+
+
+class DispatchRequest(BaseModel):
+    """Run one outbox pass and report the delivery status of each named reward fact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    facts: list[DispatchFact] = Field(min_length=1)
+    limit: int = Field(default=100, ge=1, le=1000)
 
 
 class CostIngestRequest(BaseModel):

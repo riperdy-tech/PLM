@@ -1,0 +1,16 @@
+{
+  "_comment": "The deterministic mock outcome model (plm_platform.testing.mock_outcomes) behind P7's mock YouTube Analytics source and P8's mock distributor statements. A simulation for the local stack, labelled mock everywhere; never evidence about a real audience. arm_effects pins an arm's true effect; any other arm gets a seeded effect inside effect_range.",
+  "model_version": "mock-outcomes-v1",
+  "currency": "USD",
+  "views_per_day": "120",
+  "watch_minutes_per_view": "6.5",
+  "average_percentage_viewed": "18",
+  "subscribers_per_thousand_views": "4",
+  "unsubscribe_ratio": "0.1",
+  "estimated_rpm": "1.20",
+  "streams_per_track_per_day": "40",
+  "revenue_per_stream": "0.0035",
+  "noise": "0.05",
+  "arm_effects": {},
+  "effect_range": ["0.5", "1.5"]
+}

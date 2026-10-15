@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
 from plm_platform.clock import FixedClock
 
@@ -72,7 +73,7 @@ def hop1() -> dict[str, Any]:
     result = assemble_media_package(
         track_manifests=MANIFESTS,
         brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
-        required_duration_seconds=536.0,
+        duration_range=DurationRangeSeconds(min_seconds=510, max_seconds=562),
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Late Night Synthwave",
         store=STORE,

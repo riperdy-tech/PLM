@@ -46,7 +46,7 @@ def test_a_mature_outcome_becomes_the_decisions_result_for_its_window() -> None:
     assert response.status_code == 200, response.text
     decision = _decision(engine)
     assert decision is not None and set(decision.result) == {"7d"}
-    result = decision.result["7d"]
+    result = decision.result["7d"]["vid_api_01"]
     assert result["maturity"] == "mature"
     assert result["net_contribution"] == {"amount": "25.0", "currency": "USD"}
     assert result["reward_version"] == "engagement-contribution-proxy-v1"
@@ -70,3 +70,19 @@ def test_a_provisional_outcome_is_not_a_realized_result() -> None:
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "provisional"
     assert _decision(engine).result is None
+
+
+def test_two_videos_of_one_experiment_are_two_results_of_one_decision() -> None:
+    """Proves: an experiment's treatments produce several units (videos); each unit's
+    outcome is its own measured fact and its own result on the allocation decision. Keying
+    on the arm made the second video collide with the first (decision_result_conflict)."""
+    engine = create_analytics_engine(static_pool=True)
+    log_allocation_decision(engine, directive_id=DIRECTIVE, arm_id="arm_api_01",
+                            decided_at=NOW)
+    app = _app(engine)
+    for unit in ("vid_api_01", "vid_api_02"):
+        response = app.post("/analytics/evaluation/feedback", json=_feedback(unit_id=unit),
+                            headers=HEADERS)
+        assert response.status_code == 200, response.text
+    decision = _decision(engine)
+    assert set(decision.result["7d"]) == {"vid_api_01", "vid_api_02"}

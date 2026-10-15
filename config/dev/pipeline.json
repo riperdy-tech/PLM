@@ -1,0 +1,30 @@
+{
+  "_comment": "Development configuration for the pipeline worker's R5 steps (plm_platform.pipeline.config). Placeholders for the local compose stack only: the channel is a mock channel an operator must still configure in P7, the release facts are not a real label, and the FX rate is a fixed development rate, not a market quote.",
+  "publish": {
+    "channel_id": "UC_plm_dev_mock_channel",
+    "operating_mode": "private_only"
+  },
+  "release": {
+    "artist_name": "PLM Development Artist",
+    "label_name": "PLM Development Label",
+    "copyright_line": "(C) 2026 PLM Development Label",
+    "publisher_line": "(P) 2026 PLM Development Label",
+    "territories": "WORLDWIDE",
+    "release_date_offset_days": 0
+  },
+  "fx_rates": [
+    {
+      "base": "USD",
+      "quote": "KRW",
+      "rate": "1380.00",
+      "source": "dev-config: fixed development rate, not a market quote",
+      "as_of": "2026-01-01T00:00:00+00:00"
+    }
+  ],
+  "learning": {
+    "slot_count": 3,
+    "budget": 30.0,
+    "policy_version": "p2-v1",
+    "activation_state": "AUTONOMOUS"
+  }
+}

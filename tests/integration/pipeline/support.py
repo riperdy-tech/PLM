@@ -25,20 +25,25 @@ import psycopg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from plm_contracts import ExecutionPolicy
 from plm_contracts.money import Money
+from plm_platform.clock import SystemClock
 from plm_platform.config import Settings, SettingsError, load_settings
 from plm_platform.db import build_engine, database_url
 from plm_platform.exceptions import ExceptionQueue, StaticReviewerDirectory
+from plm_platform.execution import ExecutionSettings, ExternalWriteGuard, WriteAuthorization
 from plm_platform.ledger import (
     GLOBAL_SCOPE,
     BudgetLedger,
+    PersistentBudgetGate,
     budget_ceilings,
     budget_entries,
     budget_rates,
 )
 from plm_platform.pipeline.activities import PlatformOperations, build_activities
 from plm_platform.pipeline.client import pipeline_workflow_id, start_pipeline
-from plm_platform.pipeline.mock import MockPhaseSteps
+from plm_platform.pipeline.mock import MockPhaseSteps, ScriptedStep
+from plm_platform.pipeline.states import PAID_STEP_CAPABILITIES, Step
 from plm_platform.pipeline.store import PipelineStore, StoredTransition
 from plm_platform.pipeline.types import PipelineOptions, PipelineStatus
 from plm_platform.pipeline.workflow import PipelineWorkflow
@@ -57,6 +62,8 @@ REVIEWERS = {
     "olga": ["budget_owner"],
     "admin": ["admin"],
     "counsel": ["rights_counsel"],
+    "pia": ["production_owner"],
+    "otto": ["platform_owner"],
 }
 OPTIONS = PipelineOptions(step_start_to_close_seconds=120.0, step_heartbeat_seconds=5.0,
                           step_maximum_attempts=5, platform_start_to_close_seconds=30.0,
@@ -156,6 +163,24 @@ def platform(factory: sessionmaker[Session]) -> PlatformOperations:
     return PlatformOperations(
         factory, queue=ExceptionQueue(reviewers=StaticReviewerDirectory(REVIEWERS)),
         ledger=BudgetLedger(factory, currency=CURRENCY))
+
+
+def guarded_steps(factory: sessionmaker[Session], scripts: dict[Step, ScriptedStep], *,
+                  authorized: tuple[str, ...] = tuple(PAID_STEP_CAPABILITIES.values()),
+                  ) -> MockPhaseSteps:
+    """Mock steps whose paid steps behave like a phase guarding a *live* write: the
+    phase's guard (live policy, an operator authorization per capability in
+    ``authorized``, the persisted ledger) is the only reservation, under the step's
+    idempotency key (R5)."""
+    ledger = BudgetLedger(factory, currency=CURRENCY)
+    capabilities = tuple(PAID_STEP_CAPABILITIES.values())
+    granted = datetime(2026, 1, 1, tzinfo=UTC)
+    guard = ExternalWriteGuard(
+        ExecutionSettings(policies=dict.fromkeys(capabilities, ExecutionPolicy.LIVE)),
+        authorizations=[WriteAuthorization(capability=c, granted_by=SET_BY, granted_at=granted)
+                        for c in authorized],
+        budget=PersistentBudgetGate(ledger, clock=SystemClock()))
+    return MockPhaseSteps(scripts, guard=guard, ledger=ledger)
 
 
 def new_run() -> tuple[str, str]:

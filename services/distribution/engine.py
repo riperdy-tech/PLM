@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from plm_contracts import ProviderMode
 from plm_contracts.seams import ExperimentLineage
 from plm_platform.clock import require_aware
 from plm_platform.execution import (
     ExternalWriteGuard,
     ExternalWriteRefusedError,
     GuardDecision,
+    WriteDecision,
     provider_mode_of,
 )
 from sqlalchemy.orm import Session
@@ -57,11 +59,14 @@ class DistributionEngineResult:
         payload: DistributionRecordPayload | None = None,
         is_duplicate: bool = False,
         error: str | None = None,
+        decisions: list[GuardDecision] | None = None,
     ) -> None:
         self.release = release
         self.payload = payload
         self.is_duplicate = is_duplicate
         self.error = error
+        self.decisions: list[GuardDecision] = list(decisions or [])
+        """The guard decisions this call asked for (none for a duplicate)."""
 
     @property
     def is_success(self) -> bool:
@@ -101,6 +106,33 @@ class DistributionEngine:
         self.provider_name = provider_name
         self.write_guard = write_guard or ExternalWriteGuard()
         self.provider_mode = provider_mode_of(client)
+
+    def submit_receipts(
+        self, result: DistributionEngineResult
+    ) -> list[dict[str, str]]:
+        """The receipt of the submission write behind ``result`` (R5).
+
+        A submission decided in this call reports its decision. A duplicate replays a
+        release submitted earlier, so it reports what must have been decided for that
+        write to happen: ``simulate`` for a mock distributor, ``execute`` for a real one
+        (whose spend is the ledger entry under the same capability and key).
+        """
+        if result.decisions:
+            return [{"capability": d.capability, "idempotency_key": d.idempotency_key,
+                     "decision": d.decision.value, "reason": d.reason}
+                    for d in result.decisions]
+        mock = self.provider_mode is ProviderMode.MOCK
+        return [{
+            "capability": CAPABILITY_SUBMIT,
+            "idempotency_key": self.submit_key(result.release.submission_fingerprint),
+            "decision": (WriteDecision.SIMULATE if mock else WriteDecision.EXECUTE).value,
+            "reason": "performed_earlier",
+        }]
+
+    @staticmethod
+    def submit_key(submission_fingerprint: str) -> str:
+        """The idempotency key the guard decides a submission under."""
+        return f"{submission_fingerprint}:submit"
 
     def _require_write(
         self, capability: str, idempotency_key: str, *, now: datetime
@@ -156,7 +188,7 @@ class DistributionEngine:
 
         # 3. External-write gate: nothing is persisted for a write that will not happen.
         decision = self._require_write(
-            CAPABILITY_SUBMIT, f"{package.submission_fingerprint}:submit", now=now
+            CAPABILITY_SUBMIT, self.submit_key(package.submission_fingerprint), now=now
         )
 
         # 4. Persist Tracks
@@ -225,7 +257,9 @@ class DistributionEngine:
             media_package_id=media_package_id,
         )
 
-        return DistributionEngineResult(release=release, payload=c7_payload, is_duplicate=False)
+        return DistributionEngineResult(
+            release=release, payload=c7_payload, is_duplicate=False, decisions=[decision]
+        )
 
     def reconcile_status(
         self,

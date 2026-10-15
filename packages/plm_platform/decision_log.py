@@ -156,25 +156,29 @@ def _comparable(record: DecisionRecord) -> tuple[Any, ...]:
     )
 
 
-def record_result(session: Session, decision_key: str, *, window: str,
+def record_result(session: Session, decision_key: str, *, window: str, unit_id: str,
                   result: Mapping[str, Any], recorded_at: datetime) -> DecisionRecord:
-    """Attach the realized outcome measured over ``window`` to a decision, once per window.
+    """Attach the realized outcome of one unit (a video, a release) measured over
+    ``window`` to a decision, once per (window, unit).
 
-    The measuring phase (P9) knows the lineage back to the decision but not which window
-    the allocator learns from, so every matured window is kept; the allocator's declared
-    horizon (ADR-0031) picks the one that counts when the decision is assessed.
+    One allocation produces several units: an experiment has treatments, each its own
+    content. The measuring phase (P9) knows the lineage back to the decision but not
+    which window the allocator learns from, so every matured window is kept per unit;
+    the allocator's declared horizon (ADR-0031) picks the one that counts.
     """
     existing = load_decision(session, decision_key)
     if existing is None:
         raise DecisionNotFoundError(f"no decision {decision_key!r} to attach a result to")
-    results = dict(existing.result or {})
-    if window in results:
-        if dict(results[window]) != dict(result):
+    results: dict[str, Any] = {w: dict(units) for w, units in (existing.result or {}).items()}
+    per_unit = results.setdefault(window, {})
+    if unit_id in per_unit:
+        if dict(per_unit[unit_id]) != dict(result):
             raise DecisionConflictError(
-                f"decision {decision_key!r} already has a different {window} result"
+                f"decision {decision_key!r} already has a different {window} result "
+                f"for {unit_id!r}"
             )
         return existing
-    results[window] = dict(result)
+    per_unit[unit_id] = dict(result)
     session.execute(
         sa.update(decision_log)
         .where(decision_log.c.decision_key == decision_key)

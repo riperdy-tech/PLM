@@ -17,6 +17,8 @@ from typing import Any, Final
 
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
+from plm_platform.service_urls import service_url
+from plm_platform.temporal import Phase
 from sqlalchemy.orm import Session
 
 from .config import ARSettings, load_ar_settings
@@ -150,12 +152,18 @@ def simulate(scenario: str = "clear_winner", cycles: int = 80, seed: int = 1) ->
 
 
 def serve(host: str = "127.0.0.1", port: int = 8082) -> None:
-    """Serve the `/ar` API (§71) with uvicorn over the platform database."""
+    """Serve the `/ar` API (§71) with uvicorn over the platform database.
+
+    P1 is reached at its service URL (``PLM_SERVICE_URL__MARKET``, else the compose
+    service name ``api-market``): the API runs in compose, where the loopback default of
+    ``ARSettings.market_base_url`` (meant for host tools) is the container itself.
+    """
     import uvicorn
 
     from .api.app import create_app
 
-    settings = load_ar_settings(platform=load_settings())
+    settings = load_ar_settings(platform=load_settings(),
+                                market_base_url=service_url(Phase.MARKET))
     app = create_app(session_factory=platform_session_factory(), settings=settings)
     uvicorn.run(app, host=host, port=port)
 

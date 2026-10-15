@@ -14,9 +14,6 @@ from datetime import datetime
 from typing import Any
 
 __all__ = [
-    "BudgetDecision",
-    "BudgetRequest",
-    "BudgetSettlementRequest",
     "CancelSignal",
     "ExternalResolutionRequest",
     "ExternalResolutionSignal",
@@ -31,11 +28,12 @@ __all__ = [
     "ResumeRequest",
     "ResumeSignal",
     "ResumeVerdict",
-    "SettledCost",
     "StepRequest",
     "StepResult",
     "TransitionAck",
     "TransitionRecord",
+    "WriteCost",
+    "WriteCostsRequest",
 ]
 
 
@@ -57,6 +55,13 @@ class PipelineOptions:
     step_maximum_attempts: int = 5
     platform_start_to_close_seconds: float = 30.0
     platform_maximum_attempts: int = 10
+    max_topup_rounds: int = 2
+    """How many times a playlist short of its declared minimum duration may generate
+    more recordings before the run holds with ``PLAYLIST_SUPPLY_SHORT`` (owner decision
+    2026-10-15: never publish short). A resume of that hold allows this many again."""
+    topup_spare_tracks: int = 1
+    """Recordings asked for beyond ``ceil(missing seconds / shortest track)``, so one P5
+    rejection does not cost a whole round."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +95,9 @@ class StepResult:
     outputs: dict[str, Any]
     provider_ids: dict[str, str] = field(default_factory=dict)
     cost: MoneyAmount | None = None
+    cost_basis: str | None = None
+    """How the phase knows ``cost``: ``provider_reported`` or ``reserved_estimate`` (the
+    ledger entry its write guard committed). ``None`` with a cost means provider-reported."""
     attempt: int = 1
     """The Temporal attempt that produced this result (stamped by the activity adapter)."""
 
@@ -133,42 +141,34 @@ class TransitionAck:
 
 
 @dataclass(frozen=True, slots=True)
-class BudgetRequest:
-    capability: str
-    idempotency_key: str
+class WriteCostsRequest:
+    """The external writes a run's phases reported (their write guards' receipts):
+    ``capability``, ``idempotency_key``, ``decision`` and ``reason``, plus the unit the
+    write belongs to (``p3_package_id`` or ``media_package_id``)."""
+
+    receipts: tuple[dict[str, Any], ...]
     requested_at: datetime
-    estimate: MoneyAmount | None = None
-    """``None``: the caller cannot price the write, so the ledger's rate card prices it."""
 
 
 @dataclass(frozen=True, slots=True)
-class BudgetDecision:
-    allowed: bool
-    reason: str
-    """The ledger's reason code (``reserved``, ``budget_exhausted``, ...)."""
-    reserved: MoneyAmount | None = None
-    remaining: MoneyAmount | None = None
-    replayed: bool = False
+class WriteCost:
+    """What one external write cost, from the ledger (ADR-0033).
 
+    ``status``: ``committed`` (``actual`` is the spend, ``basis`` how it is known),
+    ``simulated`` (a mock provider: nothing left the process, ``actual`` is zero in the
+    ledger currency with basis ``simulated_no_spend``), ``not_performed`` (the guard
+    denied it or recorded intent only), or ``reserved`` / ``released`` / ``missing`` /
+    ``unreported``, for which the cost is not known and ``actual`` is ``None``.
+    """
 
-@dataclass(frozen=True, slots=True)
-class BudgetSettlementRequest:
     capability: str
     idempotency_key: str
-    settled_at: datetime
-    actual: MoneyAmount | None = None
-    """For a commit: the provider-reported cost; ``None`` records the reserved estimate."""
-    reason: str = ""
-    """For a release: why the write did not happen."""
-
-
-@dataclass(frozen=True, slots=True)
-class SettledCost:
+    decision: str
     status: str
-    """``committed`` or ``released`` (ledger entry status)."""
     actual: MoneyAmount | None
     basis: str | None
-    """``provider_reported`` or ``reserved_estimate`` for a commit; ``None`` for a release."""
+    settled_at: datetime | None
+    context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

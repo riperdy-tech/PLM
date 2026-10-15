@@ -1,13 +1,14 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v4",
+  "policy_version": "hold-classes-v5",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
     "REVIEWABLE_QUARANTINE: resumes only for an actor holding reviewer_role and only with every required_evidence item. No entry has empty required_evidence, so there is no bare approve anywhere.",
     "A reason code missing from reason_codes is classified by 'unmapped' (HARD_STOP) and flagged on the case.",
     "Citations: AGENTS.md:43; docs/P0_master_integration_implementation_plan.md:66 (human hard-stops); docs/architecture.md:906-921 (P29); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:183-187 (R3 exception queue); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (P5 section 49 quarantine semantics).",
-    "v4 (R4, ADR-0034): P5 rights detectors and P28 provenance. New codes INCOMPLETE_P28_PROVENANCE, REFERENCE_AUDIO_MATCH, INTERNAL_CATALOG_AUDIO_MATCH, AUDIO_FINGERPRINT_UNKNOWN, LYRIC_SIMILARITY_UNKNOWN; the P29 codes now name their P5 emitter. services/quality_gate/detectors/reason_codes.py lists every code P5 emits as a hold and the P29 category each reports."
+    "v4 (R4, ADR-0034): P5 rights detectors and P28 provenance. New codes INCOMPLETE_P28_PROVENANCE, REFERENCE_AUDIO_MATCH, INTERNAL_CATALOG_AUDIO_MATCH, AUDIO_FINGERPRINT_UNKNOWN, LYRIC_SIMILARITY_UNKNOWN; the P29 codes now name their P5 emitter. services/quality_gate/detectors/reason_codes.py lists every code P5 emits as a hold and the P29 category each reports.",
+    "v5 (R5): the pipeline no longer reserves budget; a phase's external-write guard is the single reservation and its refusal (409) holds the run. BUDGET_RESERVATION_REFUSED is now raised for a guard's budget reason; new EXTERNAL_WRITE_NOT_AUTHORIZED for a guard's authorization or policy reason; new PLAYLIST_SUPPLY_SHORT when a playlist's cleared supply stays short of its declared minimum after the bounded top-up rounds. A guard reason nobody declared is raised as EXTERNAL_WRITE_REFUSED, deliberately unmapped (hard stop, fail closed)."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -177,8 +178,8 @@
       "required_evidence": ["budget_change_ref", "budget_approval_ref"],
       "reviewer_role": "budget_owner",
       "category": "budget_ceiling",
-      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:184-186 (cost ledger and ceiling: fail closed when the ceiling is exhausted); docs/adr/0033-platform-ops-schema.md (one program ceiling in ops); raised by plm_platform.pipeline.workflow before a paid step",
-      "description": "The ledger refused to fund a paid step (generation, upload, distribution submission): ceiling exhausted, no covering ceiling, no rate for an unpriced write, a currency without an FX rate, or no ledger configured. The paid call is never made. Reviewable, not a hard stop: the ceiling is PLM's own operator control, not an external dispute, KYC, account-security or payment-method event, and it is cleared by an operator act inside PLM. The budget owner resumes only with the reference of the ceiling or rate-card change that funds the write and the approval behind it; the workflow then reserves again against the new headroom, so a resume never bypasses the ledger."
+      "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:184-186 (cost ledger and ceiling: fail closed when the ceiling is exhausted); docs/adr/0033-platform-ops-schema.md (one program ceiling in ops); raised by plm_platform.pipeline.workflow when a phase's external-write guard (P4 music.generate, P7 youtube.upload, P8 distribution.submit) refuses a write for a budget reason (R5: the guard is the single reservation)",
+      "description": "A phase's write guard could not fund a paid write (generation, upload, distribution submission): ceiling exhausted, no covering ceiling, no rate for an unpriced write, a currency without an FX rate, or no ledger configured. The write is never made. Reviewable, not a hard stop: the ceiling is PLM's own operator control, not an external dispute, KYC, account-security or payment-method event, and it is cleared by an operator act inside PLM. The budget owner resumes only with the reference of the ceiling or rate-card change that funds the write and the approval behind it; the workflow then retries the step and the guard reserves again against the new headroom, so a resume never bypasses the ledger."
     },
     "SEVERE_CLIPPING_DETECTED": {
       "hold_class": "REVIEWABLE_QUARANTINE",
@@ -249,6 +250,26 @@
       "category": "detector_unknown",
       "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md R4 (UNKNOWN routes to quarantine, never clearance); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (section 49); emitted by services/quality_gate/evaluators/lyrics.py",
       "description": "The lyric similarity check could not conclude: corpus not configured, unreadable or empty, a corpus-version mismatch, lyrics too short to judge, or a vocal track whose lyric text P5 was not given. Never clearance. Resumes only with a similarity review and the corpus it was checked against."
+    },
+    "EXTERNAL_WRITE_NOT_AUTHORIZED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["write_authorization_ref", "execution_policy_ref"],
+      "reviewer_role": "platform_owner",
+      "category": "external_write_authorization",
+      "source": "packages/plm_platform/execution.py (ExternalWriteGuard: a live write needs a LIVE execution policy and an explicit operator authorization record, never inferred from configuration or ProviderMode.REAL); AGENTS.md section 3 ('External side effects go through the guard'); raised by plm_platform.pipeline.workflow when a phase's guard refuses for no_authorization, authorization_expired, policy_read_only, policy_dry_run, policy_shadow or missing_idempotency_key (R5)",
+      "description": "A phase's write guard did not permit a real write because the capability has no valid operator authorization or its execution policy is not live; nothing was written. Reviewable, not a hard stop: granting a write authorization and setting the policy are operator acts inside PLM, not one of the P0 human hard stops (copyright or platform dispute, KYC, account security, payment change, P29). The platform owner resumes only with the authorization record and the policy change; the workflow then retries the step and the guard decides again, so a resume never bypasses the guard."
+    },
+    "PLAYLIST_SUPPLY_SHORT": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "MEDIUM",
+      "override_permitted": true,
+      "required_evidence": ["supply_review_ref", "generation_authorization_ref"],
+      "reviewer_role": "production_owner",
+      "category": "playlist_supply",
+      "source": "docs/STATUS.md 'Playlist duration feasibility' (owner decision 2026-10-15: the playlist length is a declared range, 45-75 min for 45_75m, and a short supply holds and generates more rather than publishing short); AGENTS.md section 3 ('A missing required fact can never become a passing decision'); raised by plm_platform.pipeline.workflow after PipelineOptions.max_topup_rounds top-ups, or when P3 refuses to extend a package past its declared max_extension_track_count (R5)",
+      "description": "The recordings P5 cleared for a playlist still do not reach the minimum of its declared duration range after the bounded top-up rounds (or P3's extension bound was reached). Nothing is published short. Reviewable, not a hard stop: it is PLM's own production capacity, not an external dispute, KYC, account-security, payment or P29 event, and an operator decision inside PLM resolves it. The production owner resumes only with the supply review (why the candidates were rejected or short) and the authorization to spend on more generation; the workflow then runs the same bounded number of top-up rounds again, each through the generation write guard."
     }
   }
 }

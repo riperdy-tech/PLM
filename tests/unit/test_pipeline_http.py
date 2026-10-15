@@ -1,9 +1,10 @@
 """HTTP phase steps against an in-process ``httpx.MockTransport``.
 
-Proves the request shapes (service token and ``Idempotency-Key`` on every call, the
-paths and bodies of P2/P3/P4), the answer classification, and that every step today's
-APIs cannot carry raises ``CapabilityUnavailable`` naming its owning stage. It proves
-nothing about the real phase services; their own tests and Gate R5 do.
+Proves the request shapes (service token and ``Idempotency-Key`` on every call, one key
+per write inside a step, the paths and bodies of P2/P3/P4) and the answer
+classification, including a write guard's 409 becoming :class:`ExternalWriteRefused`
+with the hold its reason calls for. It proves nothing about the real phase services;
+their own tests and Gate R5 do. The R5 steps are in ``test_pipeline_http_r5.py``.
 """
 
 from __future__ import annotations
@@ -17,16 +18,17 @@ from typing import Any
 import httpx
 import pytest
 from plm_platform.pipeline.http import (
-    UNAVAILABLE_STEPS,
+    ExternalWriteRefused,
     HttpPhaseSteps,
     PhaseClient,
     PhaseRequestFailed,
     PhaseRequestRefused,
 )
+from plm_platform.pipeline.phase_client import request_key
 from plm_platform.pipeline.states import Step
 from plm_platform.pipeline.types import StepRequest
 from plm_platform.service_urls import service_url, service_urls
-from plm_platform.temporal import CapabilityUnavailable, CreativeRejection, Phase, PolicyRejection
+from plm_platform.temporal import CreativeRejection, Phase, PolicyRejection
 
 TOKEN = "unit-token"
 KEY = "pipeline.dir-1:research"
@@ -84,6 +86,49 @@ def test_a_connection_failure_is_retryable_and_no_token_is_refused() -> None:
     with pytest.raises(PhaseRequestRefused) as raised:
         _client(Phase.MUSIC, broken, token=None).get("/x", idempotency_key=KEY)
     assert raised.value.code == "blocked_pending_credentials"
+
+
+@pytest.mark.parametrize(("reason", "hold"), [
+    ("budget_exhausted", "BUDGET_RESERVATION_REFUSED"),
+    ("capability_budget_exhausted", "BUDGET_RESERVATION_REFUSED"),
+    ("budget_ledger_unavailable", "BUDGET_RESERVATION_REFUSED"),
+    ("no_authorization", "EXTERNAL_WRITE_NOT_AUTHORIZED"),
+    ("policy_dry_run", "EXTERNAL_WRITE_NOT_AUTHORIZED"),
+    ("something_new", "EXTERNAL_WRITE_REFUSED"),
+])
+def test_a_write_guard_refusal_names_the_hold_its_reason_calls_for(reason: str,
+                                                                    hold: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": {
+            "code": "external_write_deny", "field_paths": [],
+            "message": f"distribution.submit not performed: {reason}"}})
+
+    with pytest.raises(ExternalWriteRefused) as raised:
+        _client(Phase.DISTRIBUTION, handler).post("/distribution/releases",
+                                                  idempotency_key=KEY)
+    refusal = raised.value
+    assert refusal.no_effect and refusal.capability == "distribution.submit"
+    assert (refusal.guard_decision, refusal.guard_reason) == ("deny", reason)
+    assert refusal.details["hold_reason_code"] == hold
+    assert ("ledger_reason" in refusal.details) is (hold == "BUDGET_RESERVATION_REFUSED")
+
+
+def test_a_409_that_is_not_a_guard_refusal_stays_an_ordinary_refusal() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"detail": {"code": "channel_not_configured",
+                                                    "field_paths": [], "message": "m"}})
+
+    with pytest.raises(PhaseRequestRefused) as raised:
+        _client(Phase.YOUTUBE, handler).post("/youtube/publish", idempotency_key=KEY)
+    assert not isinstance(raised.value, ExternalWriteRefused)
+
+
+def test_each_write_inside_a_step_has_its_own_key() -> None:
+    assert request_key(KEY, "plan", "ts-1") == f"{KEY}/plan/ts-1"
+    assert request_key(KEY, "dispatch") == f"{KEY}/dispatch"
+    assert request_key(KEY, "plan", "ts-1") != request_key(KEY, "plan", "ts-2")
+    with pytest.raises(ValueError):
+        request_key(KEY, " ")
 
 
 DIRECTIVE = {"directive_id": "dir-1", "decision_id": "dec-1", "arm_id": "arm-1",
@@ -153,13 +198,18 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
         return httpx.Response(200, json={"package_id": "pkg-1", "track_specs": [spec]})
 
     p4_paths: list[str] = []
+    p4_keys: list[str] = []
+    receipt = {"capability": "music.generate", "idempotency_key": "k", "decision": "simulate",
+               "reason": "mock_provider"}
 
     def p4(request: httpx.Request) -> httpx.Response:
         p4_paths.append(request.url.path)
+        p4_keys.append(request.headers["Idempotency-Key"])
         if request.url.path == "/music/plans":
             return httpx.Response(200, json={"plan_id": "plan-1"})
         if request.url.path.endswith("/execute"):
-            return httpx.Response(200, json={"candidates": [{"candidate_id": "c-1"}]})
+            return httpx.Response(200, json={"candidates": [{"candidate_id": "c-1"}],
+                                             "external_writes": [receipt]})
         return httpx.Response(200, json={"candidate": {}, "event": {}})
 
     steps = HttpPhaseSteps({Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
@@ -168,8 +218,29 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
     result = asyncio.run(steps.generate(_request(Step.GENERATE, inputs)))
     assert p4_paths == ["/music/plans", "/music/plans/plan-1/execute",
                         "/music/candidates/c-1/export-to-p5"]
-    assert result.outputs == {"plan_ids": ["plan-1"], "candidate_ids": ["c-1"]}
+    step_key = "pipeline.dir-1:generate"
+    assert p4_keys == [f"{step_key}/plan/ts-1", f"{step_key}/execute/plan-1",
+                       f"{step_key}/export/c-1"]
+    assert result.outputs["plan_ids"] == ["plan-1"]
+    assert result.outputs["candidate_ids"] == ["c-1"]
+    assert result.outputs["candidates_by_package"] == {"pkg-1": ["c-1"]}
+    assert result.outputs["external_writes"] == [{**receipt, "p3_package_id": "pkg-1"}]
     assert result.cost is None  # P4 reports credits, never money: no invented amount
+
+    # A top-up generates only the specs it is given; P4 without a guard receipt is
+    # recorded as an unreported write (its cost then stays unknown).
+    p4_paths.clear()
+    bare = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, lambda r: httpx.Response(
+            200, json={"track_specs": [spec, {"track_spec_id": "ts-2"}]})),
+        Phase.MUSIC: _client(Phase.MUSIC, lambda r: httpx.Response(
+            200, json={"plan_id": "plan-2", "candidates": [{"candidate_id": "c-2"}]})),
+    })
+    topped = asyncio.run(bare.generate(_request(Step.GENERATE, {
+        **inputs, "track_spec_ids": ["ts-2"]})))
+    assert topped.outputs["candidate_ids"] == ["c-2"]
+    (unreported,) = topped.outputs["external_writes"]
+    assert unreported["decision"] == "unreported" and unreported["p3_package_id"] == "pkg-1"
 
     empty = HttpPhaseSteps({
         Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
@@ -178,18 +249,6 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
     })
     with pytest.raises(CreativeRejection):
         asyncio.run(empty.generate(_request(Step.GENERATE, inputs)))
-
-
-@pytest.mark.parametrize("step", sorted(UNAVAILABLE_STEPS, key=lambda s: s.value))
-def test_steps_todays_apis_cannot_carry_are_unavailable_with_their_stage(step: Step) -> None:
-    def never(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("an unavailable step must not call any API")
-
-    steps = HttpPhaseSteps({phase: _client(phase, never) for phase in Phase})
-    with pytest.raises(CapabilityUnavailable) as raised:
-        asyncio.run(getattr(steps, step.value)(_request(step)))
-    assert raised.value.owning_stage == UNAVAILABLE_STEPS[step][0]
-    assert raised.value.owning_stage in {"R4", "R5"}
 
 
 def test_service_urls_default_to_compose_names_or_loopback_and_accept_overrides(

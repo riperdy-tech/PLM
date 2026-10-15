@@ -43,6 +43,7 @@ def attach_outcome_to_decision(
         session,
         allocation_decision_key(lineage.production_directive_id),
         window=outcome.observation_window.value,
+        unit_id=outcome.unit_id,
         result={
             "outcome_id": outcome.id,
             "unit_id": outcome.unit_id,

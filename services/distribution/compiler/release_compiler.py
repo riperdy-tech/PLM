@@ -88,10 +88,13 @@ def compile_canonical_release_package(
             ["media_package.tracklist", "track_manifests"],
         )
 
-    # 3. Release identity: explicit title, else the package's first metadata candidate.
+    # 3. Release identity: one release per media package (and version). The title is
+    # display metadata: two packages may share one (P6 titles from the playlist
+    # concept), so it never decides identity.
     title = release_title or media_package.metadata_candidates[0].title
-    slug = title.lower().replace(" ", "_").strip()
-    release_id = build_release_id(media_package.brand_id, slug)
+    release_id = build_release_id(
+        media_package.brand_id, f"{media_package.media_package_id}|v{release_version}"
+    )
 
     tracks: list[DistributionTrack] = []
     for entry in sorted(media_package.tracklist, key=lambda t: t.position):

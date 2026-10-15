@@ -30,8 +30,14 @@ class YouTubeClientProtocol(Protocol):
         snippet: dict[str, Any],
         status: dict[str, Any],
         content_length: int,
+        upload_key: str | None = None,
     ) -> str:
-        """Initiate resumable upload session. Returns session upload URI."""
+        """Initiate resumable upload session. Returns session upload URI.
+
+        ``upload_key`` is PLM's idempotency key of the publish (one per channel, package
+        and video checksum). A real client may ignore it; the mock derives its session
+        and video ids from it, so they are unique and stable across process restarts.
+        """
         ...
 
     def upload_video_chunk(

@@ -47,6 +47,44 @@ class ReleaseResponse(BaseModel):
     deliveries: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str
     updated_at: str
+    isrcs: list[str] = Field(default_factory=list)
+    distribution_record: dict[str, Any] | None = None
+    """The Seam C7 leg-1 record (ADR-0030), on a submission's answer."""
+    external_writes: list[dict[str, str]] = Field(default_factory=list)
+    """The submission write's receipt: ``capability``, ``idempotency_key``, the guard's
+    ``decision`` and ``reason`` (R5)."""
+
+
+class StatementOut(BaseModel):
+    """One monthly statement in P9's ingest shape (``rows``, ``raw_content``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    period: str
+    period_start: str
+    period_end: str
+    currency: str
+    rows: list[dict[str, Any]]
+    raw_content: str
+    source_reference: str
+
+
+class StatementsResponse(BaseModel):
+    """A release's distributor statements up to ``as_of`` (R5), one per calendar month.
+
+    ``provider_mode`` says where they come from: ``mock`` lines are a simulation
+    (:mod:`plm_platform.testing.mock_outcomes`), never real streams or revenue.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    release_id: str
+    provider: str
+    provider_mode: str
+    model_version: str | None = None
+    accrual_start: str
+    as_of: str
+    statements: list[StatementOut]
 
 
 class ReportIngestRequest(BaseModel):

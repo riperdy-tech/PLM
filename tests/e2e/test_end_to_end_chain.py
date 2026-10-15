@@ -18,6 +18,7 @@ from plm_contracts import AllocationType, GateDisposition
 # P9
 from plm_contracts.money import FxTable, Money
 from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clock import FixedClock
@@ -95,6 +96,12 @@ from tests.support.media_backend import SourceReadingStore, StandInToolchain
 from tests.support.music_db import music_db_session
 from tests.support.rights_detectors import configured_detectors
 from tests.support.youtube_db import youtube_db_session
+
+
+def _range_around(seconds: float) -> DurationRangeSeconds:
+    """A declared playlist range only this exact timeline lands in (±5 %)."""
+    return DurationRangeSeconds(min_seconds=int(seconds * 0.95),
+                                max_seconds=int(seconds * 1.05) + 1)
 
 
 def test_autonomous_music_engine_end_to_end_loop_closure(
@@ -256,7 +263,11 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         created_at=now,
         **design_facts("exp_lofi_001", budget_limit=directive.budget_limit),
     )
-    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=3, created_at=now)
+    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, created_at=now)
+    # P3 plans the full supply for the genome's playlist range (R5); this in-process chain
+    # carries three of its specs through P4-P6, enough for a three-chapter video. The
+    # supply plan and P6's range are proven by their own tests.
+    assert len(package.track_specs) == package.playlist_spec.track_count_target >= 3
     track_spec = package.track_specs[0]
     assert track_spec.track_spec_id.startswith("trk_")
     assert track_spec.requested_duration == 150
@@ -264,11 +275,11 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 4: P4 Music Factory — Audio Generation & Candidate Ready (Seam C4)
     # =========================================================================
-    # A playlist video needs at least three chapters (YouTube's rule, P6 R4), so P3 asks
-    # for three tracks and each goes through P4 and P5.
+    # A playlist video needs at least three chapters (YouTube's rule, P6 R4), so three
+    # tracks go through P4 and P5.
     storage = InMemoryArtifactStorage()
     ready_events = []
-    for spec in package.track_specs:
+    for spec in package.track_specs[:3]:
         adapted_spec = adapt_track_spec(spec.to_wire())
         assert adapted_spec.genre == "lofi"
 
@@ -320,8 +331,8 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     assembled = assemble_media_package(
         track_manifests=track_manifests,
         brand_profile=brand_profile,
-        required_duration_seconds=sum(m.measured_duration_seconds for m in track_manifests)
-        - 2 * 2.0,
+        duration_range=_range_around(
+            sum(m.measured_duration_seconds for m in track_manifests) - 2 * 2.0),
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Lofi Study Session",
         store=SourceReadingStore(storage.get_artifact),

@@ -18,6 +18,15 @@ x-plm-app: &plm-app
     - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
     - PLM_SERVICE_TOKEN=${PLM_SERVICE_TOKEN:-}
+    # R5 development configuration (files in the bind-mounted repo; override on the host).
+    # The ledger currency lets the pipeline read the run's write costs and the phases'
+    # guards fund live writes; mock providers are simulated and never reserve.
+    - PLM_BUDGET_LEDGER_CURRENCY=${PLM_BUDGET_LEDGER_CURRENCY:-USD}
+    # Channel, release metadata, FX rates and the learning cycle for the pipeline worker.
+    - PLM_PIPELINE_CONFIG_FILE=${PLM_PIPELINE_CONFIG_FILE:-/app/config/dev/pipeline.json}
+    # The deterministic mock outcome model behind P7's mock YouTube Analytics source and
+    # P8's mock distributor statements (labelled mock; never a real audience).
+    - PLM_MOCK_OUTCOMES_FILE=${PLM_MOCK_OUTCOMES_FILE:-/app/config/dev/mock_outcomes.json}
   volumes:
     - .:/app
   depends_on:
@@ -163,13 +172,15 @@ services:
       retries: 5
       start_period: 20s
 
-  # R3: the PART XIV pipeline workflow (one run per P2 directive) on the `pipeline` task
-  # queue. Phase steps call the phase APIs over HTTP (base URLs default to the api-*
-  # service names; override with PLM_SERVICE_URL__<PHASE>) with PLM_SERVICE_TOKEN; steps
-  # today's APIs cannot carry hold the run with CAPABILITY_UNAVAILABLE. Paid steps reserve
-  # in the ledger named by PLM_BUDGET_LEDGER_CURRENCY (read from the mounted .env); unset,
-  # every reservation is refused and the run holds. Reviewers come from
-  # PLM_PIPELINE_REVIEWERS_FILE (unset: nobody can resume a reviewable hold).
+  # R3-R5: the PART XIV pipeline workflow (one run per P2 directive) on the `pipeline`
+  # task queue. Every step calls the phase APIs over HTTP (base URLs default to the api-*
+  # service names; override with PLM_SERVICE_URL__<PHASE>) with PLM_SERVICE_TOKEN. The
+  # pipeline reserves no budget: each phase's write guard is the one reservation, and a
+  # guard refusal holds the run. The run's costs are read from the ledger named by
+  # PLM_BUDGET_LEDGER_CURRENCY; channel, release metadata, FX rates and the learning
+  # cycle come from PLM_PIPELINE_CONFIG_FILE (a missing section makes its step refuse).
+  # Reviewers come from PLM_PIPELINE_REVIEWERS_FILE (unset: nobody can resume a
+  # reviewable hold).
   pipeline-worker:
     <<: *plm-app
     command: ["python", "-m", "plm_platform.worker", "--task-queue", "pipeline",

@@ -16,6 +16,7 @@ import pytest
 from plm_contracts import GateDisposition
 from plm_contracts.money import Money
 from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
@@ -82,7 +83,8 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
     # 2. P6 playlist assembly hard-blocks the unapproved candidate (Rulings R7, R8)
     with pytest.raises(PlaylistAssemblyError, match="not passed by P5"):
         assemble_playlist(manifests=[track], features={}, brand_id="brand_neon",
-                          required_duration_seconds=120.0, now=NOW)
+                          duration_range=DurationRangeSeconds(min_seconds=110, max_seconds=130),
+                          now=NOW)
 
     # 3. P6 top-level media package assembler also refuses it
     store, toolchain = InMemoryArtifactStore(), StandInToolchain()
@@ -90,7 +92,7 @@ def test_p5_rejected_candidate_cannot_be_assembled_into_media_package() -> None:
         assemble_media_package(
             track_manifests=[track],
             brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
-            required_duration_seconds=120.0,
+            duration_range=DurationRangeSeconds(min_seconds=110, max_seconds=130),
             visual_profile="brand_neon_rain_v1",
             playlist_concept="Never Published",
             store=store,

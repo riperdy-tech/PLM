@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,13 +10,15 @@ from plm_contracts import ErrorShape
 from plm_platform.clearance import ClearanceVerifier
 from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, ExternalWriteRefusedError
+from pydantic import AwareDatetime
 
 from ..client.mock import MockDistributorClient
 from ..domain.models import DistributionRelease
 from ..engine import DistributionEngine
 from ..preflight.validators import DistributionPreflightError
 from ..reports.ingest import get_report_reference, ingest_provider_report
-from ..storage.repositories import get_release_by_id
+from ..statements import StatementSource
+from ..storage.repositories import get_release_by_id, get_release_identity, get_tracks_by_release_id
 from ..submission import ReleaseMetadata, SubmissionRefusedError, submit_release_from_seams
 from .schemas import (
     HealthResponse,
@@ -23,6 +26,8 @@ from .schemas import (
     ReleaseSubmitRequest,
     ReportIngestRequest,
     ReportReferenceResponse,
+    StatementOut,
+    StatementsResponse,
 )
 
 
@@ -68,8 +73,13 @@ def build_distribution_router(
     clock: Clock,
     clearance: ClearanceVerifier,
     write_guard: ExternalWriteGuard | None = None,
+    statements: StatementSource | None = None,
 ) -> APIRouter:
-    """Build the distribution router configured with auth and dependencies."""
+    """Build the distribution router configured with auth and dependencies.
+
+    ``statements`` is the distributor statement source (only a mock before R6); ``None``
+    makes the statement route refuse with ``statement_source_not_configured``.
+    """
     router = APIRouter(prefix="/distribution", tags=["distribution"])
     dist_engine = engine or DistributionEngine(
         MockDistributorClient(clock=clock), write_guard=write_guard
@@ -114,7 +124,12 @@ def build_distribution_router(
                     now=clock.now(),
                 )
                 session.commit()
-                return _to_release_response(result.release)
+                response = _to_release_response(result.release)
+                if result.payload is not None:
+                    response.isrcs = list(result.payload.isrcs)
+                    response.distribution_record = result.payload.to_wire()
+                response.external_writes = dist_engine.submit_receipts(result)
+                return response
             except SubmissionRefusedError as exc:
                 session.rollback()
                 raise HTTPException(status_code=422, detail=exc.error.model_dump()) from exc
@@ -140,6 +155,56 @@ def build_distribution_router(
             if not rel:
                 raise HTTPException(status_code=404, detail=f"Release not found: {release_id}")
             return _to_release_response(rel)
+
+    @router.get(
+        "/releases/{release_id}/statements",
+        response_model=StatementsResponse,
+        dependencies=[Depends(auth_dependency)],
+    )
+    def get_release_statements(release_id: str, as_of: AwareDatetime) -> StatementsResponse:
+        """The release's statements from its submission until ``as_of``, one per month.
+
+        From the configured statement source, keyed by the release's stored arm and ISRCs.
+        ``as_of`` is the caller's instant (the pipeline's ``workflow.now()``); one before
+        the submission is 422.
+        """
+        if statements is None:
+            raise HTTPException(status_code=409, detail=ErrorShape(
+                code="statement_source_not_configured", field_paths=[],
+                message="no distributor statement source: the mock needs "
+                        "PLM_MOCK_OUTCOMES_FILE and real statement parsing is R6",
+            ).model_dump())
+        with session_factory() as session:
+            release = get_release_by_id(session, release_id)
+            if release is None:
+                raise HTTPException(status_code=404, detail=ErrorShape(
+                    code="release_not_found", field_paths=["release_id"],
+                    message=f"Release not found: {release_id}",
+                ).model_dump())
+            lineage, _ = get_release_identity(session, release_id)
+            isrcs = [t.isrc for t in get_tracks_by_release_id(session, release_id)]
+        accrual_start = release.created_at
+        if accrual_start.tzinfo is None:  # SQLite round-trips timezone=True columns naive
+            accrual_start = accrual_start.replace(tzinfo=UTC)
+        if as_of < accrual_start:
+            raise HTTPException(status_code=422, detail=ErrorShape(
+                code="statement_precedes_release", field_paths=["as_of"],
+                message="a statement cannot cover time before the release was submitted",
+            ).model_dump())
+        produced = statements.statements(
+            release_id=release_id, isrcs=isrcs, arm_id=lineage.content_arm_id,
+            accrual_start=accrual_start, as_of=as_of)
+        return StatementsResponse(
+            release_id=release_id, provider=statements.provider_name,
+            provider_mode=statements.provider_mode.value,
+            model_version=statements.model_version,
+            accrual_start=accrual_start.isoformat(), as_of=as_of.isoformat(),
+            statements=[StatementOut(
+                period=s.period, period_start=s.period_start.isoformat(),
+                period_end=s.period_end.isoformat(), currency=s.currency, rows=s.rows,
+                raw_content=s.raw_content, source_reference=s.source_reference)
+                for s in produced],
+        )
 
     @router.post(
         "/releases/{release_id}/reconcile",

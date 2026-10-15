@@ -2,7 +2,9 @@
 
 Controlled mock phase steps (:class:`~plm_platform.pipeline.mock.MockPhaseSteps`) run in
 an in-process worker; everything else is real: the Temporal server, the workflow, the
-platform activities, the cost ledger, the exception queue and the ``ops`` tables. These
+platform activities, the cost ledger, the exception queue and the ``ops`` tables. Since
+R5 the paid mock steps fund their writes through a real ``ExternalWriteGuard`` over the
+ledger, standing in for the phase's guard (the pipeline itself reserves nothing). These
 tests prove the runtime (durability, persistence, budget, holds), not the phases: a
 mock step is never evidence that a phase works (AGENTS.md).
 """
@@ -36,6 +38,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from tests.integration.pipeline.support import (
     Budget,
+    guarded_steps,
     new_run,
     running,
     signal_and_wait,
@@ -51,11 +54,11 @@ RESULT_TIMEOUT = 120.0
 HAPPY_PATH = [
     "IDEA", "RESEARCHED", "POLICY_CHECKED", "GENERATING", "GENERATED", "QA", "PASSED",
     "ASSEMBLING", "PACKAGED", "UPLOADING", "UPLOADING", "PROCESSING", "PUBLISHED",
-    "ANALYZING", "LEARNING", "LEARNING", "LEARNING",
+    "ANALYZING", "LEARNING", "LEARNING", "LEARNING", "LEARNING",
 ]
 SIDE_EFFECT_STEPS = (Step.RESEARCH, Step.POLICY_CHECK, Step.GENERATE, Step.QA, Step.ASSEMBLE,
                      Step.UPLOAD, Step.SUBMIT_DISTRIBUTION, Step.AWAIT_PROCESSING,
-                     Step.EVALUATE_OUTCOME, Step.DISPATCH_REWARD)
+                     Step.EVALUATE_OUTCOME, Step.DISPATCH_REWARD, Step.LEARN)
 MATURES_AFTER = timedelta(seconds=3)
 
 
@@ -88,11 +91,12 @@ async def test_happy_path_reaches_learning_and_persists_every_transition(
 ) -> None:
     """Proves: one run walks IDEA -> ... -> LEARNING on Temporal; every transition is in
     ``ops`` in order with its step, attempt, timestamps, provider ids, and the paid steps'
-    costs as Money with a basis (provider-reported vs the reserved estimate); the ledger
-    holds one committed entry per paid step; LEARNING starts only after the declared
+    costs as Money with a basis (provider-reported vs the reserved estimate) as the
+    phase's guard committed them; the ledger holds one committed entry per paid step
+    (one reservation each, by the guard); LEARNING starts only after the declared
     outcome horizon elapsed after publication (durable timer); a second run for the same
     directive is refused at start."""
-    steps = MockPhaseSteps(_scripts())
+    steps = guarded_steps(factory, _scripts())
     directive_id, workflow_id = new_run()
     async with running(worker_for(client, steps, platform)):
         handle = await start_run(client, directive_id, workflow_id)
@@ -105,7 +109,7 @@ async def test_happy_path_reaches_learning_and_persists_every_transition(
     rows = transitions(factory, workflow_id)
     assert [t.to_state.value for t in rows] == HAPPY_PATH
     _assert_contiguous(factory, workflow_id)
-    assert rows[-1].final and rows[-1].step == Step.DISPATCH_REWARD.value
+    assert rows[-1].final and rows[-1].step == Step.LEARN.value
 
     by_step = {t.step: t for t in rows if t.step is not None and t.attempt > 0}
     for step in SIDE_EFFECT_STEPS:
@@ -157,7 +161,7 @@ async def test_worker_killed_mid_activity_recovers_with_each_effect_exactly_once
     picks it up, the activity is retried with the same idempotency key, and every
     side-effecting step's effect happened exactly once; the ledger holds one entry per
     paid step and no transition is duplicated by the replay on the new worker."""
-    steps = MockPhaseSteps(_scripts(
+    steps = guarded_steps(factory, _scripts(
         generate=ScriptedStep(**{**default_scripts()[Step.GENERATE].__dict__,
                                  "block_after_effect_on_first_attempt": True})))
     directive_id, workflow_id = new_run()
@@ -195,28 +199,29 @@ async def test_worker_killed_mid_activity_recovers_with_each_effect_exactly_once
 async def test_exhausted_budget_holds_the_run_and_never_calls_the_paid_activity(
     client: Client, factory: sessionmaker[Session], budget: Budget, platform: PlatformOperations,
 ) -> None:
-    """Proves: with the generation ceiling exhausted the reservation is refused, a
-    BUDGET_RESERVATION_REFUSED hold (reviewable, budget owner) is raised, the run is
-    HELD from POLICY_CHECKED, the paid generation activity is never called and no ledger
-    entry exists for it. After the operator raises the ceiling and the budget owner
-    resumes with the evidence, the run reserves again and completes."""
+    """Proves: with the generation ceiling exhausted the phase's guard refuses the write,
+    a BUDGET_RESERVATION_REFUSED hold (reviewable, budget owner, raised for P4) is
+    raised, the run is HELD from GENERATING, no generation happened and no ledger entry
+    exists for it. After the operator raises the ceiling and the budget owner resumes
+    with the evidence, the step is retried, the guard reserves again and the run
+    completes with exactly one generation."""
     ceiling_id = budget.set_capability_ceiling("music.generate", "0")
-    steps = MockPhaseSteps(_scripts())
+    steps = guarded_steps(factory, _scripts())
     directive_id, workflow_id = new_run()
     async with running(worker_for(client, steps, platform)):
         handle = await start_run(client, directive_id, workflow_id)
         held = await wait_until(handle, lambda s: s.state == "HELD", "the budget hold")
-        assert held.held_from == PipelineState.POLICY_CHECKED.value
+        assert held.held_from == PipelineState.GENERATING.value
         assert held.last_error_code == "capability_budget_exhausted"
-        await asyncio.sleep(1.0)  # give a wrongly-called paid activity time to show up
-        assert steps.calls_for(Step.GENERATE) == []
+        await asyncio.sleep(1.0)  # give a wrongly-applied paid effect time to show up
+        assert steps.effects_for(Step.GENERATE) == 0
         assert [e for e in _entries(factory, workflow_id) if e.capability == "music.generate"] == []
 
         with factory() as session:
             case = ExceptionQueue().require(session, held.open_case_ids[0])
         assert case.reason_code == "BUDGET_RESERVATION_REFUSED"
         assert case.hold_class.value == "REVIEWABLE_QUARANTINE"
-        assert case.reviewer_role == "budget_owner" and case.origin_phase == "platform"
+        assert case.reviewer_role == "budget_owner" and case.origin_phase == "P4"
         assert case.details["ledger_reason"] == "capability_budget_exhausted"
         rows = transitions(factory, workflow_id)
         assert rows[-1].to_state is PipelineState.HELD and rows[-1].hold_case_ids == (case.id,)
@@ -228,10 +233,12 @@ async def test_exhausted_budget_holds_the_run_and_never_calls_the_paid_activity(
         outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), RESULT_TIMEOUT)
 
     assert outcome.completed
-    assert len(steps.calls_for(Step.GENERATE)) == 1
+    assert steps.effects_for(Step.GENERATE) == 1
+    generated = [e for e in _entries(factory, workflow_id) if e.capability == "music.generate"]
+    assert len(generated) == 1 and generated[0].status == EntryStatus.COMMITTED.value
     states = [t.to_state.value for t in transitions(factory, workflow_id)]
-    assert states[:6] == ["IDEA", "RESEARCHED", "POLICY_CHECKED", "HELD", "POLICY_CHECKED",
-                          "GENERATING"]
+    assert states[:7] == ["IDEA", "RESEARCHED", "POLICY_CHECKED", "GENERATING", "HELD",
+                          "GENERATING", "GENERATED"]
 
 
 QUARANTINE = ScriptedStep(outputs={"disposition": "QUARANTINED", "holds": [

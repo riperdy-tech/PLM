@@ -14,9 +14,9 @@ import json
 from typing import Any
 
 import httpx
+import plm_platform.pipeline.http as http_steps
 import pytest
 from plm_platform.pipeline.http import (
-    UNAVAILABLE_STEPS,
     HttpPhaseSteps,
     PhaseRequestFailed,
     PhaseRequestRefused,
@@ -78,9 +78,11 @@ def _run(answers: dict[str, httpx.Response], candidates: list[str] | None = None
     return result, seen, bodies
 
 
-def test_qa_is_no_longer_an_unavailable_step() -> None:
-    """Proves: the R4 CapabilityUnavailable for ``qa`` is gone."""
-    assert Step.QA not in UNAVAILABLE_STEPS
+def test_no_step_is_unavailable_any_more() -> None:
+    """Proves: the R4/R5 CapabilityUnavailable placeholders are gone; every step has an
+    HTTP implementation."""
+    assert not hasattr(http_steps, "UNAVAILABLE_STEPS")
+    assert all(callable(getattr(HttpPhaseSteps, step.value, None)) for step in Step)
 
 
 def test_qa_exports_each_candidate_and_p5_evaluates_the_event_alone() -> None:

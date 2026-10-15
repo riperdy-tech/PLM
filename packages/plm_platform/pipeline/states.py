@@ -21,7 +21,8 @@ plus three runtime states:
 
 A self-transition (``X -> X``) records a step that completed without moving the run
 (for example the YouTube upload inside ``UPLOADING`` before the distribution
-submission), or a refused resume inside ``HELD``. ``REJECTED``, ``FAILED`` and
+submission, or a playlist top-up round inside ``ASSEMBLING``: extend, generate, QA and
+assemble again), or a refused resume inside ``HELD``. ``REJECTED``, ``FAILED`` and
 ``CANCELLED`` are terminal. ``LEARNING`` is the last lifecycle state; a run is complete
 when its final ``LEARNING`` step is recorded with ``final=True``.
 """
@@ -172,6 +173,10 @@ class Step(StrEnum):
     AWAIT_PROCESSING = "await_processing"
     EVALUATE_OUTCOME = "evaluate_outcome"
     DISPATCH_REWARD = "dispatch_reward"
+    EXTEND = "extend"
+    """A playlist top-up: P3 adds track specs to a package whose cleared supply is short."""
+    LEARN = "learn"
+    """P2 applies the reward to its posterior, then runs the next allocation cycle."""
 
 
 STEP_ORIGIN_PHASE: Final = MappingProxyType(
@@ -186,6 +191,8 @@ STEP_ORIGIN_PHASE: Final = MappingProxyType(
         Step.AWAIT_PROCESSING: "P7",
         Step.EVALUATE_OUTCOME: "P9",
         Step.DISPATCH_REWARD: "P9",
+        Step.EXTEND: "P3",
+        Step.LEARN: "P2",
     }
 )
 """The phase that owns each step: the ``origin_phase`` of a hold the step raises."""
@@ -197,10 +204,12 @@ PAID_STEP_CAPABILITIES: Final = MappingProxyType(
         Step.SUBMIT_DISTRIBUTION: "distribution.submit",
     }
 )
-"""Steps that spend money, and the ledger capability each reserves before it runs. The
-P7/P8 names match their external-write guards (``youtube.upload``,
-``distribution.submit``), so a guard reserving under the pipeline's idempotency key
-replays the same ledger entry instead of charging twice."""
+"""Steps that spend money, and the capability the phase's external-write guard funds.
+
+The pipeline does not reserve budget itself (R5): the service's guard is the single
+reservation at the write boundary (P4 ``music.generate``, P7 ``youtube.upload``, P8
+``distribution.submit``). A guard refusal comes back as a 409 the workflow turns into a
+reviewable hold; a resume retries the step and the guard reserves again."""
 
 
 def step_activity_name(step: Step) -> str:
@@ -212,9 +221,7 @@ class PlatformActivity(StrEnum):
     """Temporal activity names of the platform operations the workflow calls."""
 
     RECORD_TRANSITION = "pipeline.record_transition"
-    RESERVE_BUDGET = "pipeline.reserve_budget"
-    COMMIT_BUDGET = "pipeline.commit_budget"
-    RELEASE_BUDGET = "pipeline.release_budget"
+    WRITE_COSTS = "pipeline.write_costs"
     RAISE_HOLD = "pipeline.raise_hold"
     AUTHORIZE_RESUME = "pipeline.authorize_resume"
     RECORD_EXTERNAL_RESOLUTION = "pipeline.record_external_resolution"

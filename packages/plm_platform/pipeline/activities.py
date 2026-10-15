@@ -6,10 +6,10 @@ halves, implemented separately:
 * :class:`PhaseSteps`: one coroutine per :class:`~plm_platform.pipeline.states.Step`.
   :class:`~plm_platform.pipeline.mock.MockPhaseSteps` is the controllable test
   implementation; :class:`~plm_platform.pipeline.http.HttpPhaseSteps` calls the phase
-  APIs and raises :class:`~plm_platform.temporal.CapabilityUnavailable` where today's
-  APIs cannot carry the step.
-* :class:`PlatformActivities`: record a transition, reserve / commit / release budget,
-  raise a hold, authorize a resume, record an external resolution.
+  APIs.
+* :class:`PlatformActivities`: record a transition, read what the run's external writes
+  cost from the ledger, raise a hold, authorize a resume, record an external resolution.
+  (The pipeline reserves no budget itself since R5: each phase's write guard does.)
   :class:`PlatformOperations` implements them over ``ops`` with the platform modules
   (:class:`~plm_platform.ledger.BudgetLedger`,
   :class:`~plm_platform.exceptions.ExceptionQueue`, :class:`.store.PipelineStore`).
@@ -22,9 +22,10 @@ halves, implemented separately:
 * turn every :class:`~plm_platform.temporal.NonRetryableError` subclass into a
   non-retryable ``ApplicationError`` (Temporal matches non-retryable types by exact
   name; this way no subclass is ever retried by accident), with the attempt, the owning
-  stage for :class:`~plm_platform.temporal.CapabilityUnavailable`, and ``no_effect``
-  (true only when the failure proves nothing was written: a ``CapabilityUnavailable``,
-  or an exception carrying ``no_effect = True``; only then is a reservation released).
+  stage for :class:`~plm_platform.temporal.CapabilityUnavailable`, ``no_effect`` (true
+  only when the failure proves nothing was written: a ``CapabilityUnavailable``, or an
+  exception carrying ``no_effect = True``), and any ``details`` mapping the exception
+  carries (a guard refusal's hold, a short playlist's missing seconds).
 
 Nothing here reads the clock: every instant arrives on the request (``workflow.now()``).
 """
@@ -52,29 +53,28 @@ from ..exceptions import (
     ResumeDecision,
     ReviewDecision,
 )
-from ..ledger import BudgetLedger, LedgerEntry
+from ..ledger import BudgetLedger, EntryStatus
 from ..temporal import CapabilityUnavailable, NonRetryableError, ValidationFailure
 from .states import PlatformActivity, Step, step_activity_name
 from .store import PipelineStore
 from .types import (
-    BudgetDecision,
-    BudgetRequest,
-    BudgetSettlementRequest,
     ExternalResolutionRequest,
     HoldInfo,
     HoldRequest,
     MoneyAmount,
     ResumeRequest,
     ResumeVerdict,
-    SettledCost,
     StepRequest,
     StepResult,
     TransitionAck,
     TransitionRecord,
+    WriteCost,
+    WriteCostsRequest,
 )
 
 __all__ = [
     "BUDGET_LEDGER_NOT_CONFIGURED",
+    "SIMULATED_NO_SPEND",
     "PhaseSteps",
     "PipelineActivities",
     "PlatformActivities",
@@ -87,8 +87,12 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 BUDGET_LEDGER_NOT_CONFIGURED = "budget_ledger_not_configured"
-"""Reservation refusal when the worker has no ledger currency: no ledger is never
-read as unlimited budget (mirrors :class:`~plm_platform.execution.NoBudgetLedger`)."""
+"""Refusal when the worker has no ledger currency: no ledger is never read as unlimited
+budget or as free spend (mirrors :class:`~plm_platform.execution.NoBudgetLedger`)."""
+
+SIMULATED_NO_SPEND = "simulated_no_spend"
+"""Cost basis of a write a mock provider simulated (guard decision ``simulate``): no
+external call was made, so no money was spent. A recorded zero, never an unknown."""
 
 class PhaseSteps(Protocol):
     """One coroutine per phase step. Each takes the step's idempotency key on the request
@@ -104,15 +108,15 @@ class PhaseSteps(Protocol):
     async def await_processing(self, request: StepRequest) -> StepResult: ...
     async def evaluate_outcome(self, request: StepRequest) -> StepResult: ...
     async def dispatch_reward(self, request: StepRequest) -> StepResult: ...
+    async def extend(self, request: StepRequest) -> StepResult: ...
+    async def learn(self, request: StepRequest) -> StepResult: ...
 
 
 class PlatformActivities(Protocol):
     """The platform operations, each idempotent under a retried call."""
 
     async def record_transition(self, record: TransitionRecord) -> TransitionAck: ...
-    async def reserve_budget(self, request: BudgetRequest) -> BudgetDecision: ...
-    async def commit_budget(self, request: BudgetSettlementRequest) -> SettledCost: ...
-    async def release_budget(self, request: BudgetSettlementRequest) -> SettledCost: ...
+    async def write_costs(self, request: WriteCostsRequest) -> list[WriteCost]: ...
     async def raise_hold(self, request: HoldRequest) -> HoldInfo: ...
     async def authorize_resume(self, request: ResumeRequest) -> list[ResumeVerdict]: ...
     async def record_external_resolution(
@@ -150,16 +154,12 @@ def _verdict(decision: ResumeDecision, status: CaseStatus) -> ResumeVerdict:
     )
 
 
-def _settled(entry: LedgerEntry) -> SettledCost:
-    return SettledCost(status=entry.status.value, actual=money_amount(entry.actual),
-                       basis=entry.actual_basis)
-
-
 class PlatformOperations:
     """:class:`PlatformActivities` over the ``ops`` schema (one transaction per call).
 
-    ``ledger=None`` (no ``PLM_BUDGET_LEDGER_CURRENCY``) refuses every reservation with
-    :data:`BUDGET_LEDGER_NOT_CONFIGURED`. The exception queue's reviewer directory is
+    ``ledger=None`` (no ``PLM_BUDGET_LEDGER_CURRENCY``): the costs of executed writes
+    cannot be read and a simulated write's zero has no currency, so
+    :meth:`write_costs` refuses with :data:`BUDGET_LEDGER_NOT_CONFIGURED`. The exception queue's reviewer directory is
     injected on ``queue``; its default grants nobody a role.
     """
 
@@ -185,42 +185,67 @@ class PlatformOperations:
             session.commit()
             return ack
 
-    async def reserve_budget(self, request: BudgetRequest) -> BudgetDecision:
-        return await asyncio.to_thread(self._reserve, request)
+    async def write_costs(self, request: WriteCostsRequest) -> list[WriteCost]:
+        return await asyncio.to_thread(self._write_costs, request)
 
-    def _reserve(self, request: BudgetRequest) -> BudgetDecision:
+    def _write_costs(self, request: WriteCostsRequest) -> list[WriteCost]:
+        """Each receipt's cost from the ledger.
+
+        ``execute``: the ledger entry under (capability, key), as the guard settled it.
+        ``simulate``: zero in the ledger currency (no provider was called). ``deny`` and
+        ``record_intent`` performed no write. Anything else (``unreported``: the phase
+        gave no guard receipt) has an unknown cost. Nothing here invents an amount: an
+        executed write whose entry is still reserved, released or absent has an unknown
+        cost too.
+        """
         if self._ledger is None:
-            return BudgetDecision(allowed=False, reason=BUDGET_LEDGER_NOT_CONFIGURED)
-        result = self._ledger.reserve(
-            request.capability, request.idempotency_key,
-            cost=to_money(request.estimate), now=request.requested_at,
-        )
-        return BudgetDecision(
-            allowed=result.allowed, reason=result.reason.value,
-            reserved=None if result.entry is None else money_amount(result.entry.reserved),
-            remaining=money_amount(result.remaining), replayed=result.replayed,
-        )
-
-    async def commit_budget(self, request: BudgetSettlementRequest) -> SettledCost:
-        return await asyncio.to_thread(self._commit, request)
-
-    def _commit(self, request: BudgetSettlementRequest) -> SettledCost:
-        if self._ledger is None:
-            raise ValidationFailure("cannot commit a write without a budget ledger")
-        entry = self._ledger.commit(request.capability, request.idempotency_key,
-                                    actual=to_money(request.actual), now=request.settled_at)
-        return _settled(entry)
-
-    async def release_budget(self, request: BudgetSettlementRequest) -> SettledCost:
-        return await asyncio.to_thread(self._release, request)
-
-    def _release(self, request: BudgetSettlementRequest) -> SettledCost:
-        if self._ledger is None:
-            raise ValidationFailure("cannot release a write without a budget ledger")
-        entry = self._ledger.release(request.capability, request.idempotency_key,
-                                     reason=request.reason or "write_not_performed",
-                                     now=request.settled_at)
-        return _settled(entry)
+            raise ValidationFailure(
+                f"{BUDGET_LEDGER_NOT_CONFIGURED}: the write costs of a run are read from the "
+                "budget ledger; set PLM_BUDGET_LEDGER_CURRENCY for the pipeline worker")
+        costs: list[WriteCost] = []
+        for receipt in request.receipts:
+            capability = str(receipt.get("capability") or "")
+            key = str(receipt.get("idempotency_key") or "")
+            decision = str(receipt.get("decision") or "")
+            if not capability or not key or not decision:
+                raise ValidationFailure(f"write receipt {receipt!r} lacks capability, key or "
+                                        "decision")
+            context = {k: str(v) for k, v in receipt.items()
+                       if k in ("p3_package_id", "media_package_id") and v}
+            if decision == "simulate":
+                costs.append(WriteCost(
+                    capability=capability, idempotency_key=key, decision=decision,
+                    status="simulated", basis=SIMULATED_NO_SPEND, settled_at=None,
+                    actual=MoneyAmount(amount="0", currency=self._ledger.currency),
+                    context=context))
+                continue
+            if decision in ("deny", "record_intent"):
+                costs.append(WriteCost(capability=capability, idempotency_key=key,
+                                       decision=decision, status="not_performed",
+                                       actual=None, basis=None, settled_at=None,
+                                       context=context))
+                continue
+            if decision != "execute":
+                # No guard decision was reported (or one nobody declared): unknown spend.
+                costs.append(WriteCost(capability=capability, idempotency_key=key,
+                                       decision=decision, status="unreported",
+                                       actual=None, basis=None, settled_at=None,
+                                       context=context))
+                continue
+            entry = self._ledger.entry(capability, key)
+            if entry is None:
+                costs.append(WriteCost(capability=capability, idempotency_key=key,
+                                       decision=decision, status="missing", actual=None,
+                                       basis=None, settled_at=None, context=context))
+                continue
+            committed = entry.status is EntryStatus.COMMITTED
+            costs.append(WriteCost(
+                capability=capability, idempotency_key=key, decision=decision,
+                status=entry.status.value,
+                actual=money_amount(entry.actual) if committed else None,
+                basis=entry.actual_basis if committed else None,
+                settled_at=entry.settled_at if committed else None, context=context))
+        return costs
 
     async def raise_hold(self, request: HoldRequest) -> HoldInfo:
         return await asyncio.to_thread(self._raise_hold, request)
@@ -320,6 +345,9 @@ def _failure_details(exc: BaseException, attempt: int) -> dict[str, Any]:
     if isinstance(exc, CapabilityUnavailable):
         details.update(capability=exc.capability, owning_stage=exc.owning_stage,
                        reason=exc.reason)
+    extra = getattr(exc, "details", None)
+    if isinstance(extra, Mapping):
+        details.update({str(k): v for k, v in extra.items() if k not in details})
     code = getattr(exc, "code", None)
     if isinstance(code, str):
         details["code"] = code
@@ -397,9 +425,7 @@ def _platform_activity(
 
 _PLATFORM_METHODS: Mapping[PlatformActivity, tuple[str, Any, Any]] = {
     PlatformActivity.RECORD_TRANSITION: ("record_transition", TransitionRecord, TransitionAck),
-    PlatformActivity.RESERVE_BUDGET: ("reserve_budget", BudgetRequest, BudgetDecision),
-    PlatformActivity.COMMIT_BUDGET: ("commit_budget", BudgetSettlementRequest, SettledCost),
-    PlatformActivity.RELEASE_BUDGET: ("release_budget", BudgetSettlementRequest, SettledCost),
+    PlatformActivity.WRITE_COSTS: ("write_costs", WriteCostsRequest, list[WriteCost]),
     PlatformActivity.RAISE_HOLD: ("raise_hold", HoldRequest, HoldInfo),
     PlatformActivity.AUTHORIZE_RESUME: ("authorize_resume", ResumeRequest, list[ResumeVerdict]),
     PlatformActivity.RECORD_EXTERNAL_RESOLUTION: (

@@ -58,9 +58,15 @@ class MockYouTubeClient:
         snippet: dict[str, Any],
         status: dict[str, Any],
         content_length: int,
+        upload_key: str | None = None,
     ) -> str:
         self._check_fault_injection("insert_resumable_session")
-        session_id = f"mock_session_{len(self.sessions) + 1}_{hashlib.md5(snippet.get('title', '').encode()).hexdigest()[:8]}"
+        if upload_key:
+            # Derived from the publish's identity, not from this process's call count:
+            # a restarted service never re-issues a video id another upload already has.
+            session_id = f"mock_session_{hashlib.sha256(upload_key.encode()).hexdigest()[:24]}"
+        else:
+            session_id = f"mock_session_{len(self.sessions) + 1}_{hashlib.md5(snippet.get('title', '').encode()).hexdigest()[:8]}"
         session_uri = f"https://mock.upload.youtube.com/upload/youtube/v3/videos?upload_id={session_id}"
         self.sessions[session_uri] = {
             "snippet": snippet,

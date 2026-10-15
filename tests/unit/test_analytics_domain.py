@@ -52,8 +52,13 @@ def test_deterministic_ids_generation() -> None:
     cost1 = build_cost_id("vid_01", "compute", "2026-09")
     assert cost1.startswith("cost_")
 
-    outc1 = build_outcome_id("exp_01", "arm_01", "7d")
+    outc1 = build_outcome_id("exp_01", "vid_01", "7d", "mature")
     assert outc1.startswith("outc_")
+    assert build_outcome_id("exp_01", "vid_01", "7d", "mature") == outc1
+    # Two units (two treatments' videos) of one experiment are two outcomes, and a
+    # provisional and a mature measurement of one window are two facts.
+    assert build_outcome_id("exp_01", "vid_02", "7d", "mature") != outc1
+    assert build_outcome_id("exp_01", "vid_01", "7d", "provisional") != outc1
 
 
 def test_domain_models_creation() -> None:

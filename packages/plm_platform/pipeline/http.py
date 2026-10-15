@@ -1,170 +1,105 @@
-"""Phase steps over the phase HTTP APIs (R3), and the small client they share.
+"""Phase steps over the phase HTTP APIs (R3–R5).
 
-:class:`PhaseClient` sends every request with the service token
-(``X-PLM-Service-Token``) and the step's ``Idempotency-Key``, and classifies the answer:
+:class:`HttpPhaseSteps` carries every step of the PART XIV pipeline over HTTP, with the
+service token and an ``Idempotency-Key`` per write (:mod:`.phase_client`):
 
-* 2xx: the JSON body.
-* A definite refusal (any other 4xx, with the receiver's ErrorShape ``code``):
-  :class:`PhaseRequestRefused`, non-retryable; the request itself must change.
-* Anything that may clear by itself (connection refused, timeouts, 5xx, and 401 / 403 /
-  408 / 425 / 429 as in :mod:`plm_platform.outbox`): :class:`PhaseRequestFailed`,
-  retried by the Temporal retry policy.
+* ``research``: P2's queued directive -> P3 experiment design.
+* ``policy_check``: P3 preflight validation, then one package per treatment.
+* ``generate``: P4 plan + execute per track spec, each candidate exported to P5. Only
+  the given ``track_spec_ids`` when the step is a playlist top-up.
+* ``qa``: P4's C4 event per candidate, evaluated by P5 from the artifact store.
+* ``assemble``: P6 assembles each P3 package's cleared recordings into a playlist whose
+  length lies in the package's declared ``duration_range_seconds``. A package whose
+  cleared supply is short of the minimum (P6 ``playlist_supply_short``) is reported in
+  one :class:`PlaylistSupplyShort` with the missing seconds, after every other package
+  was assembled; the workflow then tops the short ones up.
+* ``extend``: P3 adds track specs to a short package (``POST .../packages/{id}/extend``).
+* ``upload``, ``submit_distribution``, ``await_processing``: :mod:`.http_release`.
+* ``evaluate_outcome``, ``dispatch_reward``, ``learn``: :mod:`.http_outcome`.
 
-:class:`HttpPhaseSteps` implements a step over HTTP only where today's endpoints exist
-and carry complete facts: P2 -> P3 design (``research``), P3 validate + materialize
-(``policy_check``), P4 plan + execute + export to P5 (``generate``), and P4's C4 event
-evaluated by P5, which reads the audio by URI and checksum (``qa``, R4). Every other step
-raises :class:`~plm_platform.temporal.CapabilityUnavailable` naming the stage that
-delivers it; the workflow turns that into a hold. Nothing is faked.
-
-Known gap, recorded for R5: P3 and P4 do not yet dedupe on ``Idempotency-Key``, so a
-retry after a lost response can be refused as a duplicate (P3) or fail on P4's
-deterministic plan id; the step then fails closed rather than creating a second effect.
+P3 and P4 deduplicate on ``Idempotency-Key`` (R5), so a retried step replays its writes;
+each write inside a step has its own key (:func:`~.phase_client.request_key`).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
+import math
+import re
 from collections.abc import Mapping
 from typing import Any, Final
 
-import httpx
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 
-from ..config import SERVICE_TOKEN_HEADER, SERVICE_TOKEN_VAR
-from ..outbox import IDEMPOTENCY_KEY_HEADER
 from ..temporal import (
-    CapabilityUnavailable,
     CreativeRejection,
     Phase,
     PolicyRejection,
     ValidationFailure,
 )
-from .states import Step
+from .config import PipelineConfig
+from .http_outcome import OutcomeSteps
+from .http_release import ReleaseSteps
+from .phase_client import (
+    ExternalWriteRefused,
+    PhaseClient,
+    PhaseRequestFailed,
+    PhaseRequestRefused,
+    StepNotReady,
+    request_key,
+    require,
+)
 from .types import StepRequest, StepResult
 
 __all__ = [
-    "UNAVAILABLE_STEPS",
+    "PLAYLIST_SUPPLY_SHORT_CODE",
+    "ExternalWriteRefused",
     "HttpPhaseSteps",
     "PhaseClient",
     "PhaseRequestFailed",
     "PhaseRequestRefused",
+    "PlaylistSupplyShort",
+    "StepNotReady",
 ]
 
-_DETAIL_LIMIT: Final[int] = 512
-_RETRYABLE_4XX: Final[frozenset[int]] = frozenset({401, 403, 408, 425, 429})
+PLAYLIST_SUPPLY_SHORT_CODE: Final[str] = "playlist_supply_short"
+"""P6's refusal when every cleared recording together is shorter than the range minimum."""
+
+_MISSING_SECONDS: Final = re.compile(r"(\d+(?:\.\d+)?)\s*s(?:econds)?\s+(?:are\s+)?missing")
 
 
-class PhaseRequestRefused(ValidationFailure):
-    """The phase definitely refused the request (a 4xx with its reason code)."""
+class PlaylistSupplyShort(ValidationFailure):
+    """At least one playlist's cleared recordings do not reach its declared minimum.
 
-    def __init__(self, phase: Phase, path: str, status: int, code: str, message: str) -> None:
-        self.phase = phase
-        self.status = status
-        self.code = code
-        super().__init__(f"{phase.name} {path} refused ({status} {code}): {message}")
+    ``details["short_packages"]``: one ``{p3_package_id, missing_seconds,
+    shortest_track_seconds, track_spec_ids}`` per short package; the packages that were
+    assembled are in ``details["assembled"]``. Nothing was published.
+    """
 
+    code = PLAYLIST_SUPPLY_SHORT_CODE
+    no_effect = True
 
-class PhaseRequestFailed(RuntimeError):
-    """The request may succeed later (transport failure, 5xx, auth or rate limit)."""
-
-    def __init__(self, phase: Phase, path: str, code: str, message: str) -> None:
-        self.phase = phase
-        self.code = code
-        super().__init__(f"{phase.name} {path} failed ({code}): {message}")
-
-
-def _error_shape(response: httpx.Response) -> tuple[str, str]:
-    try:
-        body = response.json()
-    except ValueError:
-        return f"http_{response.status_code}", response.text[:_DETAIL_LIMIT]
-    shape = body.get("detail", body) if isinstance(body, dict) else None
-    if isinstance(shape, dict) and isinstance(shape.get("code"), str):
-        return shape["code"], str(shape.get("message", ""))[:_DETAIL_LIMIT]
-    if isinstance(shape, str):
-        return f"http_{response.status_code}", shape[:_DETAIL_LIMIT]
-    return f"http_{response.status_code}", json.dumps(body)[:_DETAIL_LIMIT]
+    def __init__(self, short: list[dict[str, Any]], assembled: list[dict[str, Any]]) -> None:
+        self.details: dict[str, Any] = {"short_packages": short, "assembled": assembled}
+        listed = ", ".join(f"{s['p3_package_id']} ({s['missing_seconds']}s missing)"
+                           for s in short)
+        super().__init__(f"playlist supply short of the declared minimum: {listed}")
 
 
-class PhaseClient:
-    """A synchronous client for one phase API (``client`` owns base URL and timeout)."""
-
-    def __init__(self, phase: Phase, client: httpx.Client, *, token: str | None) -> None:
-        self.phase = phase
-        self._client = client
-        self._token = token
-
-    def get(self, path: str, *, idempotency_key: str,
-            params: Mapping[str, str] | None = None) -> Any:
-        return self._request("GET", path, idempotency_key=idempotency_key, params=params)
-
-    def post(self, path: str, *, idempotency_key: str, body: Any = None,
-             timeout_seconds: float | None = None) -> Any:
-        """``timeout_seconds`` overrides the client's timeout for a long call (a render)."""
-        return self._request("POST", path, idempotency_key=idempotency_key, body=body,
-                             timeout_seconds=timeout_seconds)
-
-    def _request(self, method: str, path: str, *, idempotency_key: str,
-                 params: Mapping[str, str] | None = None, body: Any = None,
-                 timeout_seconds: float | None = None) -> Any:
-        if not self._token:
-            raise PhaseRequestRefused(
-                self.phase, path, 503, "blocked_pending_credentials",
-                f"no service token: set {SERVICE_TOKEN_VAR} for the pipeline worker",
-            )
-        if not idempotency_key.strip():
-            raise ValueError("every phase request carries an idempotency key")
-        headers = {SERVICE_TOKEN_HEADER: self._token, IDEMPOTENCY_KEY_HEADER: idempotency_key}
-        try:
-            response = self._client.request(
-                method, path, headers=headers,
-                params=None if params is None else dict(params),
-                json=body if method == "POST" else None,
-                timeout=(httpx.USE_CLIENT_DEFAULT if timeout_seconds is None
-                         else httpx.Timeout(timeout_seconds)),
-            )
-        except httpx.HTTPError as exc:
-            raise PhaseRequestFailed(self.phase, path, type(exc).__name__, str(exc)) from exc
-        status = response.status_code
-        if 200 <= status < 300:
-            try:
-                return response.json()
-            except ValueError as exc:
-                raise PhaseRequestFailed(self.phase, path, "unreadable_body",
-                                         response.text[:_DETAIL_LIMIT]) from exc
-        code, message = _error_shape(response)
-        if status >= 500 or status in _RETRYABLE_4XX:
-            raise PhaseRequestFailed(self.phase, path, code, message)
-        raise PhaseRequestRefused(self.phase, path, status, code, message)
-
-
-UNAVAILABLE_STEPS: Final[Mapping[Step, tuple[str, str]]] = {
-    Step.UPLOAD: ("R5", (
-        "P7 /youtube/publish needs a rendered C6 media package from P6, and its write "
-        "guard must reserve under the pipeline's idempotency key")),
-    Step.SUBMIT_DISTRIBUTION: ("R5", (
-        "P8 needs the released audio and artwork from P6, and its write guard must "
-        "reserve under the pipeline's idempotency key")),
-    Step.AWAIT_PROCESSING: ("R5", (
-        "no rendered upload exists to wait on until P6 and P7 are wired end to end")),
-    Step.EVALUATE_OUTCOME: ("R5", (
-        "P9 /analytics/evaluation/feedback needs measured views, watch time, net "
-        "contribution and attribution for the published unit; no HTTP source provides "
-        "them for a run yet")),
-    Step.DISPATCH_REWARD: ("R5", (
-        "P9 exposes no HTTP surface to dispatch or read its reward outbox; "
-        "`plm analytics dispatch` runs the dispatcher")),
-}
-"""Steps today's phase APIs cannot carry, with the owning stage and the reason."""
-
-
-def _require(mapping: Any, key: str, where: str) -> Any:
-    if not isinstance(mapping, dict) or key not in mapping or mapping[key] in (None, ""):
-        raise ValidationFailure(f"{where}: required fact {key!r} is missing")
-    return mapping[key]
+def _missing_seconds(refusal: PhaseRequestRefused) -> int:
+    """P6's ``detail.facts.missing_seconds`` (R5), never guessed."""
+    facts = refusal.body.get("facts")
+    for source in (facts if isinstance(facts, dict) else {}, refusal.body):
+        value = source.get("missing_seconds")
+        if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+            return math.ceil(value)
+    match = _MISSING_SECONDS.search(refusal.message)
+    if match:
+        return math.ceil(float(match.group(1)))
+    raise ValidationFailure(
+        f"P6 refused {PLAYLIST_SUPPLY_SHORT_CODE} without the missing seconds; the top-up "
+        f"cannot be sized: {refusal}")
 
 
 _QA_PASSING: Final[frozenset[str]] = frozenset({"PASSED", "PASSED_WITH_WARNINGS"})
@@ -174,12 +109,12 @@ _QA_DISPOSITIONS: Final[frozenset[str]] = _QA_PASSING | {"REJECTED", "QUARANTINE
 def _qa_evaluation(candidate_id: str, evaluated: Any) -> dict[str, Any]:
     """One P5 answer, checked: a disposition without the facts it implies is no answer."""
     where = f"P5 evaluation of {candidate_id}"
-    disposition = str(_require(evaluated, "disposition", where))
+    disposition = str(require(evaluated, "disposition", where))
     if disposition not in _QA_DISPOSITIONS:
         raise ValidationFailure(f"{where}: unknown disposition {disposition!r}")
     record: dict[str, Any] = {
         "candidate_id": candidate_id,
-        "evaluation_id": str(_require(evaluated, "evaluation_id", where)),
+        "evaluation_id": str(require(evaluated, "evaluation_id", where)),
         "disposition": disposition,
         "release_manifest_id": None,
         "quarantine_case_id": None,
@@ -187,10 +122,10 @@ def _qa_evaluation(candidate_id: str, evaluated: Any) -> dict[str, Any]:
     }
     if disposition in _QA_PASSING:
         # A pass P5 issued no release manifest for is not a pass.
-        record["release_manifest_id"] = str(_require(evaluated, "release_manifest_id", where))
+        record["release_manifest_id"] = str(require(evaluated, "release_manifest_id", where))
     elif disposition == "QUARANTINED":
-        record["quarantine_case_id"] = str(_require(evaluated, "quarantine_case_id", where))
-        codes = _require(evaluated, "quarantine_reason_codes", where)
+        record["quarantine_case_id"] = str(require(evaluated, "quarantine_case_id", where))
+        codes = require(evaluated, "quarantine_reason_codes", where)
         if not isinstance(codes, list) or not codes or not all(
                 isinstance(c, str) and c for c in codes):
             raise ValidationFailure(f"{where}: quarantine reason codes {codes!r} are invalid")
@@ -228,22 +163,12 @@ def _qa_result(evaluations: list[dict[str, Any]]) -> StepResult:
     )
 
 
-class HttpPhaseSteps:
+class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
     """:class:`~plm_platform.pipeline.activities.PhaseSteps` over the phase APIs."""
 
-    def __init__(self, clients: Mapping[Phase, PhaseClient]) -> None:
-        self._clients = dict(clients)
-
-    def _client(self, phase: Phase) -> PhaseClient:
-        client = self._clients.get(phase)
-        if client is None:
-            raise ValidationFailure(f"no client configured for {phase.name}")
-        return client
-
-    @staticmethod
-    def _unavailable(step: Step) -> CapabilityUnavailable:
-        stage, reason = UNAVAILABLE_STEPS[step]
-        return CapabilityUnavailable(f"pipeline.{step.value}", owning_stage=stage, reason=reason)
+    def __init__(self, clients: Mapping[Phase, PhaseClient], *,
+                 config: PipelineConfig | None = None) -> None:
+        super().__init__(clients, config=config)
 
     # -- research: P2 directive -> P3 experiment design -------------------------------------
 
@@ -263,20 +188,21 @@ class HttpPhaseSteps:
                 f"directive {request.directive_id!r} is not queued for brand "
                 f"{request.brand_id!r} at P2 (expired, consumed or unknown)"
             )
-        horizon = _require(directive, "outcome_horizon", "P2 directive")
+        horizon = require(directive, "outcome_horizon", "P2 directive")
         created = self._client(Phase.EXPERIMENTS).post(
-            "/experiments/v1/experiments", idempotency_key=key, body={"directive": directive})
-        experiment = _require(created, "experiment", "P3 create experiment")
-        experiment_id = str(_require(experiment, "experiment_id", "P3 experiment"))
-        treatments = [str(_require(t, "treatment_id", "P3 treatment"))
+            "/experiments/v1/experiments", idempotency_key=request_key(key, "design"),
+            body={"directive": directive})
+        experiment = require(created, "experiment", "P3 create experiment")
+        experiment_id = str(require(experiment, "experiment_id", "P3 experiment"))
+        treatments = [str(require(t, "treatment_id", "P3 treatment"))
                       for t in experiment.get("treatments") or []]
         if not treatments:
             raise ValidationFailure(f"P3 experiment {experiment_id} has no treatments")
         return StepResult(
             outputs={"experiment_id": experiment_id, "treatment_ids": treatments,
                      "outcome_horizon": str(horizon),
-                     "arm_id": str(_require(directive, "arm_id", "P2 directive")),
-                     "decision_id": str(_require(directive, "decision_id", "P2 directive"))},
+                     "arm_id": str(require(directive, "arm_id", "P2 directive")),
+                     "decision_id": str(require(directive, "decision_id", "P2 directive"))},
             provider_ids={"experiment_id": experiment_id},
         )
 
@@ -287,22 +213,23 @@ class HttpPhaseSteps:
 
     def _policy_check(self, request: StepRequest) -> StepResult:
         key = request.idempotency_key
-        research = _require(request.inputs, "research", "policy_check inputs")
-        experiment_id = str(_require(research, "experiment_id", "research outputs"))
-        treatments = _require(research, "treatment_ids", "research outputs")
+        research = require(request.inputs, "research", "policy_check inputs")
+        experiment_id = str(require(research, "experiment_id", "research outputs"))
+        treatments = require(research, "treatment_ids", "research outputs")
         p3 = self._client(Phase.EXPERIMENTS)
         validated = p3.post(f"/experiments/v1/experiments/{experiment_id}/validate",
-                            idempotency_key=key)
-        report = _require(validated, "report", "P3 validate")
+                            idempotency_key=request_key(key, "validate"))
+        report = require(validated, "report", "P3 validate")
         if report.get("passed") is not True:
             raise PolicyRejection(f"P3 preflight did not pass for {experiment_id}: {report}")
         packages: list[str] = []
         for treatment_id in treatments:
             materialized = p3.post(
-                f"/experiments/v1/experiments/{experiment_id}/materialize", idempotency_key=key,
+                f"/experiments/v1/experiments/{experiment_id}/materialize",
+                idempotency_key=request_key(key, "materialize", str(treatment_id)),
                 body={"treatment_id": treatment_id, "brand_id": request.brand_id})
-            package = _require(materialized, "package", "P3 materialize")
-            packages.append(str(_require(package, "package_id", "P3 package")))
+            package = require(materialized, "package", "P3 materialize")
+            packages.append(str(require(package, "package_id", "P3 package")))
         return StepResult(
             outputs={"experiment_id": experiment_id, "validated": True,
                      "package_ids": packages},
@@ -315,25 +242,52 @@ class HttpPhaseSteps:
         return await asyncio.to_thread(self._generate, request)
 
     def _generate(self, request: StepRequest) -> StepResult:
+        """Generate every track spec of the packages, or only ``track_spec_ids`` (a top-up).
+
+        P4's guard decides each generation (``music.generate``); its receipts come back
+        on the execute answer as ``external_writes`` and are tagged with the P3 package.
+        An execute answer without them is recorded as an ``unreported`` write, whose
+        cost is then unknown (never zero).
+        """
         key = request.idempotency_key
-        policy = _require(request.inputs, "policy_check", "generate inputs")
-        package_ids = _require(policy, "package_ids", "policy_check outputs")
+        policy = require(request.inputs, "policy_check", "generate inputs")
+        package_ids = require(policy, "package_ids", "policy_check outputs")
+        only = request.inputs.get("track_spec_ids")
+        wanted = None if only is None else {str(s) for s in only}
         p3, p4 = self._client(Phase.EXPERIMENTS), self._client(Phase.MUSIC)
         provider_ids: dict[str, str] = {}
         candidates: list[str] = []
         plans: list[str] = []
+        receipts: list[dict[str, Any]] = []
+        by_package: dict[str, list[str]] = {}
         for package_id in package_ids:
             package = p3.get(f"/experiments/v1/packages/{package_id}", idempotency_key=key)
-            for spec in _require(package, "track_specs", f"P3 package {package_id}"):
-                plan = p4.post("/music/plans", idempotency_key=key, body=spec)
-                plan_id = str(_require(plan, "plan_id", "P4 plan"))
+            for spec in require(package, "track_specs", f"P3 package {package_id}"):
+                spec_id = str(require(spec, "track_spec_id", f"P3 package {package_id}"))
+                if wanted is not None and spec_id not in wanted:
+                    continue
+                plan = p4.post("/music/plans", idempotency_key=request_key(key, "plan", spec_id),
+                               body=spec)
+                plan_id = str(require(plan, "plan_id", "P4 plan"))
                 plans.append(plan_id)
-                run = p4.post(f"/music/plans/{plan_id}/execute", idempotency_key=key, body=spec)
+                execute_key = request_key(key, "execute", plan_id)
+                run = p4.post(f"/music/plans/{plan_id}/execute", idempotency_key=execute_key,
+                              body=spec)
+                writes = run.get("external_writes")
+                if isinstance(writes, list):
+                    receipts.extend({**w, "p3_package_id": str(package_id)}
+                                    for w in writes if isinstance(w, dict))
+                else:
+                    receipts.append({"capability": "music.generate",
+                                     "idempotency_key": execute_key, "decision": "unreported",
+                                     "reason": "p4_reported_no_guard_receipt",
+                                     "p3_package_id": str(package_id)})
                 for candidate in run.get("candidates") or []:
-                    candidate_id = str(_require(candidate, "candidate_id", "P4 candidate"))
+                    candidate_id = str(require(candidate, "candidate_id", "P4 candidate"))
                     p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
-                            idempotency_key=key)
+                            idempotency_key=request_key(key, "export", candidate_id))
                     candidates.append(candidate_id)
+                    by_package.setdefault(str(package_id), []).append(candidate_id)
         for n, plan_id in enumerate(plans):
             provider_ids[f"plan.{n}"] = plan_id
         for n, candidate_id in enumerate(candidates):
@@ -342,9 +296,10 @@ class HttpPhaseSteps:
             # Provider calls were made and may have spent credits: not a no-effect failure.
             raise CreativeRejection(f"P4 produced no candidates for plans {plans}")
         return StepResult(
-            outputs={"plan_ids": plans, "candidate_ids": candidates},
+            outputs={"plan_ids": plans, "candidate_ids": candidates,
+                     "candidates_by_package": by_package, "external_writes": receipts},
             provider_ids=provider_ids,
-            cost=None,  # P4 reports provider credits, not money; the ledger books the estimate
+            cost=None,  # P4 reports provider credits, not money; the ledger holds the spend
         )
 
     # -- qa: P4's C4 event per candidate, evaluated by P5 from the artifact store (R4) -----
@@ -364,24 +319,23 @@ class HttpPhaseSteps:
         ``REJECTED``. Quarantine cases of candidates not carried forward stay open in P5.
         """
         key = request.idempotency_key
-        generated = _require(request.inputs, "generate", "qa inputs")
-        candidate_ids = _require(generated, "candidate_ids", "generate outputs")
+        generated = require(request.inputs, "generate", "qa inputs")
+        candidate_ids = require(generated, "candidate_ids", "generate outputs")
         if not isinstance(candidate_ids, list):
             raise ValidationFailure("generate outputs: 'candidate_ids' is not a list")
         p4, p5 = self._client(Phase.MUSIC), self._client(Phase.QA)
         evaluations: list[dict[str, Any]] = []
         for candidate_id in candidate_ids:
             exported = p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
-                               idempotency_key=key)
-            event = _require(exported, "event", f"P4 export of {candidate_id}")
-            evaluated = p5.post("/qa/evaluations", idempotency_key=key,
+                               idempotency_key=request_key(key, "export", str(candidate_id)))
+            event = require(exported, "event", f"P4 export of {candidate_id}")
+            evaluated = p5.post("/qa/evaluations",
+                                idempotency_key=request_key(key, "evaluate", str(candidate_id)),
                                 body={"candidate_event": event})
             evaluations.append(_qa_evaluation(str(candidate_id), evaluated))
         return _qa_result(evaluations)
 
-    # -- steps today's APIs cannot carry ---------------------------------------------------
-
-    # -- assemble: P6 assembles and renders each P3 package's cleared recordings (R4) -----
+    # -- assemble: P6 assembles and renders each P3 package's cleared recordings -----------
 
     ASSEMBLE_TIMEOUT_SECONDS: Final[float] = 570.0
     """P6 renders inside the request; this stays under the step's start-to-close."""
@@ -393,41 +347,50 @@ class HttpPhaseSteps:
     def _playlist_facts(package: Any, package_id: str) -> dict[str, Any]:
         """P3's playlist, visual and title facts for P6, never defaulted.
 
-        ``required_duration_seconds`` is the playlist spec's total duration;
-        ``visual_profile`` the visual spec's visual world; ``playlist_concept`` the title
-        spec's formatting pattern filled with the first track spec's genre, mood and use
-        case (P3's declared title rule over P3's own facts).
+        ``duration_range_seconds`` is the playlist spec's declared range (owner decision
+        2026-10-15: a 45–75 min playlist is a range, not a length); ``visual_profile`` the
+        visual spec's visual world; ``playlist_concept`` the title spec's formatting
+        pattern filled with the first track spec's genre, mood and use case (P3's declared
+        title rule over P3's own facts). ``shortest_track_seconds`` is the smallest
+        declared track minimum, which sizes a top-up without overestimating a track.
         """
         where = f"P3 package {package_id}"
-        playlist = _require(package, "playlist_spec", where)
-        visual = _require(package, "visual_spec", where)
-        title = _require(package, "title_spec", where)
-        specs = _require(package, "track_specs", where)
+        playlist = require(package, "playlist_spec", where)
+        visual = require(package, "visual_spec", where)
+        title = require(package, "title_spec", where)
+        specs = require(package, "track_specs", where)
         if not isinstance(specs, list) or not specs:
             raise ValidationFailure(f"{where}: no track specs")
         first = specs[0]
-        preferences = _require(first, "bounded_preferences", f"{where} track spec")
-        constraints = _require(first, "hard_constraints", f"{where} track spec")
-        moods = _require(preferences, "mood", f"{where} preferences")
-        uses = _require(preferences, "use_case", f"{where} preferences")
+        preferences = require(first, "bounded_preferences", f"{where} track spec")
+        constraints = require(first, "hard_constraints", f"{where} track spec")
+        moods = require(preferences, "mood", f"{where} preferences")
+        uses = require(preferences, "use_case", f"{where} preferences")
         if not isinstance(moods, list) or not moods or not isinstance(uses, list) or not uses:
             raise ValidationFailure(f"{where}: mood and use case are needed for the concept")
-        pattern = str(_require(title, "formatting_pattern", f"{where} title spec"))
+        pattern = str(require(title, "formatting_pattern", f"{where} title spec"))
         try:
             concept = pattern.format_map({
                 "mood": moods[0], "use_case": uses[0],
-                "genre": _require(constraints, "genre", f"{where} constraints")})
+                "genre": require(constraints, "genre", f"{where} constraints")})
         except (KeyError, IndexError, ValueError) as exc:
             raise ValidationFailure(
                 f"{where}: title pattern {pattern!r} needs a fact P3 does not give: {exc}"
             ) from exc
-        minutes = _require(playlist, "total_duration_minutes", f"{where} playlist spec")
+        duration = require(playlist, "duration_range_seconds", f"{where} playlist spec")
+        minimum = require(duration, "min_seconds", f"{where} duration range")
+        maximum = require(duration, "max_seconds", f"{where} duration range")
+        track_minimums = [require(require(s, "duration_range", f"{where} track spec"),
+                                  "min_seconds", f"{where} track duration range")
+                          for s in specs]
         return {
-            "brand_id": str(_require(package, "brand_id", where)),
-            "required_duration_seconds": float(minutes) * 60.0,
-            "visual_profile": str(_require(visual, "visual_world", f"{where} visual spec")),
+            "brand_id": str(require(package, "brand_id", where)),
+            "duration_range_seconds": {"min_seconds": int(minimum),
+                                       "max_seconds": int(maximum)},
+            "visual_profile": str(require(visual, "visual_world", f"{where} visual spec")),
             "playlist_concept": concept,
-            "track_spec_ids": {str(_require(s, "track_spec_id", where)) for s in specs},
+            "track_spec_ids": {str(require(s, "track_spec_id", where)) for s in specs},
+            "shortest_track_seconds": int(min(track_minimums)),
         }
 
     def _cleared_track_specs(self, candidate_ids: list[Any], key: str) -> dict[str, str]:
@@ -456,42 +419,59 @@ class HttpPhaseSteps:
         return cleared
 
     def _assemble(self, request: StepRequest) -> StepResult:
-        """One media package per P3 package that has cleared recordings.
+        """One media package per P3 package, from its cleared recordings.
 
-        Inputs: ``policy_check.package_ids`` (P3 packages) and ``generate.candidate_ids``.
-        Each package's cleared candidates (by track spec) go to
-        ``POST /media/packages/assemble`` by id with the package's playlist facts; P6
-        fetches the manifests from P5 itself. A package P6 assembled but whose render
-        post-render QA blocked fails the step with P6's reason codes; a P6 refusal fails
-        it with P6's code. No package with a cleared recording fails it too.
+        Inputs: ``policy_check.package_ids`` (P3 packages) and ``generate.candidate_ids``
+        (every candidate so far, top-ups included). Each package's cleared candidates go
+        to ``POST /media/packages/assemble`` by id with the package's playlist facts; P6
+        fetches the manifests from P5 itself. A package with no cleared recording, or one
+        P6 refuses as ``playlist_supply_short``, is short by its missing seconds: the
+        step assembles the others, then raises :class:`PlaylistSupplyShort` so the
+        workflow can top the short ones up. A package whose render post-render QA
+        blocked fails the step with P6's reason codes; any other P6 refusal fails it
+        with P6's code.
         """
         key = request.idempotency_key
-        policy = _require(request.inputs, "policy_check", "assemble inputs")
-        package_ids = _require(policy, "package_ids", "policy_check outputs")
-        generated = _require(request.inputs, "generate", "assemble inputs")
-        candidate_ids = _require(generated, "candidate_ids", "generate outputs")
+        policy = require(request.inputs, "policy_check", "assemble inputs")
+        package_ids = require(policy, "package_ids", "policy_check outputs")
+        generated = require(request.inputs, "generate", "assemble inputs")
+        candidate_ids = require(generated, "candidate_ids", "generate outputs")
         if not isinstance(package_ids, list) or not isinstance(candidate_ids, list):
             raise ValidationFailure("assemble inputs: package and candidate ids must be lists")
         cleared = self._cleared_track_specs(candidate_ids, key)
         p3, p6 = self._client(Phase.EXPERIMENTS), self._client(Phase.MEDIA)
         packages: list[dict[str, Any]] = []
+        short: list[dict[str, Any]] = []
         for raw_package_id in package_ids:
             package_id = str(raw_package_id)
             facts = self._playlist_facts(
                 p3.get(f"/experiments/v1/packages/{package_id}", idempotency_key=key),
                 package_id)
+            shortage = {"p3_package_id": package_id,
+                        "shortest_track_seconds": facts["shortest_track_seconds"],
+                        "track_spec_ids": sorted(facts["track_spec_ids"])}
             members = [cid for cid, spec in cleared.items() if spec in facts["track_spec_ids"]]
             if not members:
+                short.append({**shortage, "cleared_count": 0, "missing_seconds":
+                              facts["duration_range_seconds"]["min_seconds"]})
                 continue
-            assembled = p6.post(
-                "/media/packages/assemble", idempotency_key=key,
-                timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS,
-                body={"candidate_ids": members, "brand_id": facts["brand_id"],
-                      "required_duration_seconds": facts["required_duration_seconds"],
-                      "visual_profile": facts["visual_profile"],
-                      "playlist_concept": facts["playlist_concept"]})
-            media_package_id = str(_require(assembled, "media_package_id", "P6 package"))
-            package_status = str(_require(assembled, "status", "P6 package"))
+            try:
+                assembled = p6.post(
+                    "/media/packages/assemble",
+                    idempotency_key=request_key(key, "assemble", package_id),
+                    timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS,
+                    body={"candidate_ids": members, "brand_id": facts["brand_id"],
+                          "duration_range_seconds": facts["duration_range_seconds"],
+                          "visual_profile": facts["visual_profile"],
+                          "playlist_concept": facts["playlist_concept"]})
+            except PhaseRequestRefused as exc:
+                if exc.code != PLAYLIST_SUPPLY_SHORT_CODE:
+                    raise
+                short.append({**shortage, "cleared_count": len(members),
+                              "missing_seconds": _missing_seconds(exc)})
+                continue
+            media_package_id = str(require(assembled, "media_package_id", "P6 package"))
+            package_status = str(require(assembled, "status", "P6 package"))
             if package_status != "ready_for_publish":
                 codes = assembled.get("blocking_reason_codes") or []
                 raise ValidationFailure(
@@ -499,11 +479,12 @@ class HttpPhaseSteps:
                     f"blocked it ({', '.join(map(str, codes)) or 'no reason codes'})")
             packages.append({"media_package_id": media_package_id, "p3_package_id": package_id,
                              "candidate_ids": members,
-                             "video_checksum": _require(assembled, "video_checksum",
-                                                        "P6 package")})
+                             "video_checksum": require(assembled, "video_checksum",
+                                                       "P6 package")})
+        if short:
+            raise PlaylistSupplyShort(short, packages)
         if not packages:
-            raise ValidationFailure(
-                f"assemble: none of the P3 packages {package_ids} has a recording P5 cleared")
+            raise ValidationFailure(f"assemble: no P3 package in {package_ids}")
         return StepResult(
             outputs={"media_package_ids": [p["media_package_id"] for p in packages],
                      "packages": packages},
@@ -511,17 +492,35 @@ class HttpPhaseSteps:
                           for n, p in enumerate(packages)},
         )
 
-    async def upload(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.UPLOAD)
+    # -- extend: P3 tops a short package up with more track specs --------------------------
 
-    async def submit_distribution(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.SUBMIT_DISTRIBUTION)
+    async def extend(self, request: StepRequest) -> StepResult:
+        return await asyncio.to_thread(self._extend, request)
 
-    async def await_processing(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.AWAIT_PROCESSING)
+    def _extend(self, request: StepRequest) -> StepResult:
+        """``POST /experiments/v1/packages/{id}/extend {count, idempotency_key}``.
 
-    async def evaluate_outcome(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.EVALUATE_OUTCOME)
-
-    async def dispatch_reward(self, request: StepRequest) -> StepResult:
-        raise self._unavailable(Step.DISPATCH_REWARD)
+        The body's key is the step's key, so a replay returns the same specs. P3's 409
+        ``package_extension_limit_exceeded`` (its declared top-up bound) is a refusal the
+        workflow turns into the ``PLAYLIST_SUPPLY_SHORT`` hold.
+        """
+        package_id = str(require(request.inputs, "p3_package_id", "extend inputs"))
+        count = require(request.inputs, "count", "extend inputs")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise ValidationFailure(f"extend inputs: count {count!r} must be a positive integer")
+        answer = self._client(Phase.EXPERIMENTS).post(
+            f"/experiments/v1/packages/{package_id}/extend",
+            idempotency_key=request.idempotency_key,
+            body={"count": count, "idempotency_key": request.idempotency_key})
+        specs = require(answer, "track_specs", "P3 extend")
+        spec_ids = [str(require(s, "track_spec_id", "P3 extended spec")) for s in specs]
+        if not spec_ids:
+            raise ValidationFailure(f"P3 extended {package_id} with no track spec")
+        return StepResult(
+            outputs={"p3_package_id": package_id, "count": count,
+                     "track_spec_ids": spec_ids,
+                     "extension_id": answer.get("extension_id"),
+                     "remaining_extension_track_count":
+                         answer.get("remaining_extension_track_count")},
+            provider_ids={"extension_id": str(answer.get("extension_id") or package_id)},
+        )

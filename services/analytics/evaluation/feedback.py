@@ -141,7 +141,7 @@ def evaluate_experiment_outcome(
         net_contribution, views, watch_time_minutes, contribution_scale=scale
     )
 
-    outc_id = build_outcome_id(lineage.experiment_id, lineage.content_arm_id, window.value)
+    outc_id = build_outcome_id(lineage.experiment_id, unit_id, window.value, maturity.value)
     outc = ExperimentOutcomeRecord(
         id=outc_id,
         experiment_id=lineage.experiment_id,

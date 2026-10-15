@@ -2,8 +2,9 @@
 
 Proves: the Temporal adapters classify failures (every ``NonRetryableError`` subclass is
 non-retryable, ``CapabilityUnavailable`` carries its owning stage and ``no_effect``) and
-stamp the attempt; the platform operations fail closed on budget, and resume only
-through the exception queue's policy. Uses Temporal's ``ActivityEnvironment``, not a
+stamp the attempt, and carry an exception's ``details`` (a guard refusal's hold); the
+platform operations read a run's write costs from the ledger without inventing an
+amount, and resume only through the exception queue's policy. Uses Temporal's ``ActivityEnvironment``, not a
 server; the Gate R3 integration tests prove the same against Temporal and PostgreSQL.
 """
 
@@ -27,20 +28,22 @@ from plm_platform.exceptions import (
 from plm_platform.ledger import LEDGER_METADATA, BudgetLedger
 from plm_platform.pipeline.activities import (
     BUDGET_LEDGER_NOT_CONFIGURED,
+    SIMULATED_NO_SPEND,
     PlatformOperations,
     build_activities,
 )
 from plm_platform.pipeline.mock import MockPhaseSteps, ScriptedStep, default_scripts
+from plm_platform.pipeline.phase_client import ExternalWriteRefused
 from plm_platform.pipeline.states import PlatformActivity, Step, step_activity_name
 from plm_platform.pipeline.store import PIPELINE_METADATA
 from plm_platform.pipeline.types import (
-    BudgetRequest,
     ExternalResolutionRequest,
     HoldRequest,
     ResumeRequest,
     StepRequest,
+    WriteCostsRequest,
 )
-from plm_platform.temporal import CapabilityUnavailable, PolicyRejection
+from plm_platform.temporal import CapabilityUnavailable, Phase, PolicyRejection, ValidationFailure
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
@@ -129,32 +132,80 @@ def test_a_retried_step_applies_its_effect_once_and_stamps_the_attempt(
     assert steps.effect_counts["pipeline.d:generate"] == 1
 
 
-def test_no_ledger_refuses_every_reservation(factory: sessionmaker[Session]) -> None:
+def test_a_guard_refusal_travels_with_its_hold_and_no_effect(
+    factory: sessionmaker[Session],
+) -> None:
+    refusal = ExternalWriteRefused(Phase.YOUTUBE, "/youtube/publish", 409,
+                                   "external_write_deny",
+                                   "youtube.upload not performed: budget_exhausted")
+    steps = MockPhaseSteps({**default_scripts(), Step.UPLOAD: ScriptedStep(raises=refusal)})
+    activities = _named(build_activities(steps, _platform(factory)))
+    with pytest.raises(ApplicationError) as raised:
+        asyncio.run(ActivityEnvironment().run(activities[step_activity_name(Step.UPLOAD)],
+                                              _step_request(Step.UPLOAD)))
+    assert raised.value.type == "ExternalWriteRefused" and raised.value.non_retryable
+    details = raised.value.details[0]
+    assert details["no_effect"] is True
+    assert details["hold_reason_code"] == "BUDGET_RESERVATION_REFUSED"
+    assert (details["capability"], details["guard_reason"]) == ("youtube.upload",
+                                                                 "budget_exhausted")
+
+
+def test_write_costs_need_a_ledger(factory: sessionmaker[Session]) -> None:
     platform = _platform(factory, ledger=False)
-    decision = asyncio.run(platform.reserve_budget(
-        BudgetRequest(capability="music.generate", idempotency_key="k", requested_at=NOW)))
-    assert not decision.allowed and decision.reason == BUDGET_LEDGER_NOT_CONFIGURED
+    with pytest.raises(ValidationFailure, match=BUDGET_LEDGER_NOT_CONFIGURED):
+        asyncio.run(platform.write_costs(WriteCostsRequest(receipts=(), requested_at=NOW)))
 
 
-def test_reservation_follows_the_ledger_and_fails_closed(factory: sessionmaker[Session]) -> None:
-    platform = _platform(factory)
-    request = BudgetRequest(capability="music.generate", idempotency_key="k",
-                            requested_at=NOW)
-    # No rate for an unpriced write: the cost is unknown, never zero.
-    assert asyncio.run(platform.reserve_budget(request)).reason == "cost_estimate_unknown"
+def test_write_costs_come_from_the_ledger_and_never_invent_an_amount(
+    factory: sessionmaker[Session],
+) -> None:
+    """Proves: an executed write costs what the guard committed (with its basis); a
+    simulated write is a recorded zero; a denied write performed nothing; an executed
+    write still reserved, never reserved, or a write with no guard receipt is unknown."""
     ledger = BudgetLedger(factory, currency="USD")
-    ledger.set_rate(capability="music.generate", cost=Money(amount=Decimal(2), currency="USD"),
-                    effective_from=NOW - timedelta(days=1), set_by="ops", now=NOW)
-    assert asyncio.run(platform.reserve_budget(request)).reason == "no_budget_ceiling"
     start, end = NOW - timedelta(days=1), NOW + timedelta(days=1)
-    ledger.set_ceiling(limit=Money(amount=Decimal(1), currency="USD"), period_start=start,
+    ledger.set_ceiling(limit=Money(amount=Decimal(10), currency="USD"), period_start=start,
                        period_end=end, set_by="ops", now=NOW)
-    assert asyncio.run(platform.reserve_budget(request)).reason == "budget_exhausted"
-    ledger.set_ceiling(limit=Money(amount=Decimal(5), currency="USD"), period_start=start,
-                       period_end=end, set_by="ops", now=NOW)
-    granted = asyncio.run(platform.reserve_budget(request))
-    assert granted.allowed and granted.reserved is not None
-    assert (Decimal(granted.reserved.amount), granted.reserved.currency) == (Decimal(2), "USD")
+    for key in ("k-committed", "k-reserved"):
+        assert ledger.reserve("youtube.upload", key,
+                              cost=Money(amount=Decimal(2), currency="USD"), now=NOW).allowed
+    ledger.commit("youtube.upload", "k-committed",
+                  actual=Money(amount=Decimal("1.25"), currency="USD"), now=NOW)
+    receipts = (
+        {"capability": "youtube.upload", "idempotency_key": "k-committed",
+         "decision": "execute", "reason": "authorized", "media_package_id": "m1"},
+        {"capability": "youtube.upload", "idempotency_key": "k-reserved",
+         "decision": "execute", "reason": "authorized"},
+        {"capability": "youtube.upload", "idempotency_key": "k-absent",
+         "decision": "execute", "reason": "authorized"},
+        {"capability": "music.generate", "idempotency_key": "k-sim",
+         "decision": "simulate", "reason": "mock_provider", "p3_package_id": "p1"},
+        {"capability": "distribution.submit", "idempotency_key": "k-deny",
+         "decision": "deny", "reason": "no_authorization"},
+        {"capability": "music.generate", "idempotency_key": "k-unreported",
+         "decision": "unreported", "reason": "p4_reported_no_guard_receipt"},
+    )
+    costs = asyncio.run(_platform(factory).write_costs(
+        WriteCostsRequest(receipts=receipts, requested_at=NOW)))
+    by_key = {c.idempotency_key: c for c in costs}
+    committed = by_key["k-committed"]
+    assert committed.status == "committed" and committed.basis == "provider_reported"
+    assert committed.actual is not None
+    assert (Decimal(committed.actual.amount), committed.actual.currency) == (Decimal("1.25"),
+                                                                             "USD")
+    assert committed.context == {"media_package_id": "m1"}
+    simulated = by_key["k-sim"]
+    assert simulated.status == "simulated" and simulated.basis == SIMULATED_NO_SPEND
+    assert simulated.actual is not None and Decimal(simulated.actual.amount) == 0
+    assert simulated.context == {"p3_package_id": "p1"}
+    assert (by_key["k-deny"].status, by_key["k-deny"].actual) == ("not_performed", None)
+    for key, status in (("k-reserved", "reserved"), ("k-absent", "missing"),
+                        ("k-unreported", "unreported")):
+        assert (by_key[key].status, by_key[key].actual) == (status, None)
+    with pytest.raises(ValidationFailure, match="lacks capability"):
+        asyncio.run(_platform(factory).write_costs(WriteCostsRequest(
+            receipts=({"capability": "youtube.upload"},), requested_at=NOW)))
 
 
 def test_resume_is_decided_by_the_queue_policy_and_recorded(

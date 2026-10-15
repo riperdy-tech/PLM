@@ -604,13 +604,11 @@ def experiments_materialize(
     treatment_id: str,
     brand_id: str = "neon_seoul",
     budget_envelope: float | None = None,
-    track_count: int = 5,
-    total_duration_minutes: int = 60,
 ) -> None:
     """Materialize an experiment treatment into a ContentPackage (P3).
 
     Without ``--budget-envelope`` the directive's budget limit is used; a larger one is
-    refused.
+    refused. The track count is planned from the genome's declared playlist range.
     """
     from experiments.cli import materialize_treatment_cli
 
@@ -620,8 +618,6 @@ def experiments_materialize(
             treatment_id,
             brand_id=brand_id,
             budget_envelope=budget_envelope,
-            track_count=track_count,
-            total_duration_minutes=total_duration_minutes,
         )
     )
 
@@ -984,28 +980,69 @@ def analytics_smoke() -> None:
 
 
 dashboard_app = typer.Typer(
-    help="Visual dashboard (demo data; not yet connected to the pipeline).",
+    help=(
+        "Operator dashboard: the six PART XVII views over the live database and phase "
+        "APIs, and the Exceptions actions. Fixed demo data only with --demo."
+    ),
     no_args_is_help=False,
 )
 
+_DEMO_OPTION_HELP = "Serve the fixed demo data and scripted playback instead of live data"
+_REVIEWERS_OPTION_HELP = (
+    "JSON reviewer directory {actor: [roles]} authorizing exception actions "
+    "(default: PLM_DASHBOARD_REVIEWERS_FILE). Without one every action is refused."
+)
 
-def _serve_dashboard(host: str, port: int, reload: bool) -> None:
+
+def _reviewers_file(option: str | None) -> Path | None:
+    """The reviewer directory: the option, else the variable (process env, then .env)."""
+    import os
+
+    from .dashboard.actions import REVIEWERS_FILE_VAR
+    from .dotenv import load_env_file
+
+    if option is not None and option.strip():
+        return Path(option)
+    raw = os.environ.get(REVIEWERS_FILE_VAR) or load_env_file(Path(".env")).get(
+        REVIEWERS_FILE_VAR)
+    return Path(raw) if raw and raw.strip() else None
+
+
+def _serve_dashboard(host: str, port: int, reload: bool, *, demo: bool,
+                     reviewers_file: str | None) -> None:
     import uvicorn
 
     from .config import SERVICE_TOKEN_VAR, SettingsError, load_settings
+    from .dashboard.actions import REVIEWERS_FILE_VAR
     from .dashboard.app import create_app
 
     try:
         platform = load_settings()
     except SettingsError as exc:
-        typer.echo(f"settings unavailable ({exc}); mutating dashboard routes stay closed", err=True)
+        typer.echo(f"settings unavailable ({exc}); live panels report unavailable and "
+                   "mutating routes stay closed", err=True)
         platform = None
     if platform is None or platform.service_token is None:
         typer.echo(
-            f"{SERVICE_TOKEN_VAR} is not set: run/resolve actions will answer 503 (R15)", err=True
+            f"{SERVICE_TOKEN_VAR} is not set: mutating routes answer 503 and the phase APIs "
+            "refuse the dashboard's reads (R15)", err=True
         )
-    typer.echo(f"Starting PLM Control Deck (DEMO DATA) on http://{host}:{port} ...")
-    uvicorn.run(create_app(platform=platform), host=host, port=port, reload=reload)
+    if demo:
+        typer.echo(f"Starting PLM Control Deck (DEMO DATA) on http://{host}:{port} ...")
+        uvicorn.run(create_app(demo=True, platform=platform), host=host, port=port,
+                    reload=reload)
+        return
+    directory = _reviewers_file(reviewers_file)
+    if directory is None:
+        typer.echo(f"{REVIEWERS_FILE_VAR} is not set: every exception action is refused",
+                   err=True)
+    try:
+        application = create_app(platform=platform, reviewers_file=directory)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"dashboard: reviewer directory {directory} is unusable: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"Starting PLM Control Deck (LIVE DATA) on http://{host}:{port} ...")
+    uvicorn.run(application, host=host, port=port, reload=reload)
 
 
 @dashboard_app.callback(invoke_without_command=True)
@@ -1014,10 +1051,13 @@ def dashboard_main(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind"),
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
     reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
+    demo: bool = typer.Option(False, "--demo", help=_DEMO_OPTION_HELP),
+    reviewers_file: str | None = typer.Option(
+        None, "--reviewers-file", help=_REVIEWERS_OPTION_HELP),
 ) -> None:
-    """Launch the PLM dashboard (serves demo data until wired to the pipeline)."""
+    """Launch the PLM dashboard (live data; --demo for the fixed sample)."""
     if ctx.invoked_subcommand is None:
-        _serve_dashboard(host, port, reload)
+        _serve_dashboard(host, port, reload, demo=demo, reviewers_file=reviewers_file)
 
 
 @dashboard_app.command(name="serve")
@@ -1025,9 +1065,12 @@ def dashboard_serve(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind"),
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
     reload: bool = typer.Option(False, "--reload", help="Enable live auto-reloading"),
+    demo: bool = typer.Option(False, "--demo", help=_DEMO_OPTION_HELP),
+    reviewers_file: str | None = typer.Option(
+        None, "--reviewers-file", help=_REVIEWERS_OPTION_HELP),
 ) -> None:
-    """Serve the PLM dashboard (demo data)."""
-    _serve_dashboard(host, port, reload)
+    """Serve the PLM dashboard (live data; --demo for the fixed sample)."""
+    _serve_dashboard(host, port, reload, demo=demo, reviewers_file=reviewers_file)
 
 
 # ---------------------------------------------------------------------------

@@ -52,24 +52,29 @@ def test_a_decision_is_recorded_once_and_a_different_replay_is_refused(session: 
     assert stored.decided_at == T0
 
 
-def test_results_attach_once_per_window(session: Session) -> None:
+def test_results_attach_once_per_window_and_unit(session: Session) -> None:
     record_decision(session, _record())
     seven = {"maturity": "mature", "normalized_reward": "0.72",
              "net_contribution": {"amount": "95.000000", "currency": "KRW"}}
-    record_result(session, "allocation:dir-1", window="7d", result=seven, recorded_at=T0)
-    record_result(session, "allocation:dir-1", window="7d", result=seven, recorded_at=T0)
-    record_result(session, "allocation:dir-1", window="28d",
+    record_result(session, "allocation:dir-1", window="7d", unit_id="vid_1", result=seven, recorded_at=T0)
+    record_result(session, "allocation:dir-1", window="7d", unit_id="vid_1", result=seven, recorded_at=T0)
+    record_result(session, "allocation:dir-1", window="28d", unit_id="vid_1",
                   result={**seven, "normalized_reward": "0.70"}, recorded_at=T0)
+    # A second unit of the same decision (another treatment's video) is its own result.
+    record_result(session, "allocation:dir-1", window="28d", unit_id="vid_2",
+                  result={**seven, "normalized_reward": "0.40"}, recorded_at=T0)
     with pytest.raises(DecisionConflictError):
-        record_result(session, "allocation:dir-1", window="7d",
+        record_result(session, "allocation:dir-1", window="7d", unit_id="vid_1",
                       result={**seven, "normalized_reward": "0.10"}, recorded_at=T0)
     stored = load_decision(session, "allocation:dir-1")
     assert stored is not None and set(stored.result or {}) == {"7d", "28d"}
+    assert set((stored.result or {})["28d"]) == {"vid_1", "vid_2"}
 
 
 def test_a_result_for_an_unknown_decision_is_refused(session: Session) -> None:
     with pytest.raises(DecisionNotFoundError):
-        record_result(session, "allocation:missing", window="28d", result={}, recorded_at=T0)
+        record_result(session, "allocation:missing", window="28d", unit_id="vid_1", result={},
+                      recorded_at=T0)
 
 
 def test_a_naive_decision_time_is_refused(session: Session) -> None:

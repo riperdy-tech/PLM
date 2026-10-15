@@ -19,7 +19,9 @@ from plm_platform.execution import (
 )
 from plm_platform.health import health_router
 from plm_platform.ledger import budget_gate_for
+from plm_platform.testing.mock_outcomes import mock_outcome_model_from_env
 
+from ..analytics import MockYouTubeAnalytics, YouTubeAnalyticsSource
 from .routes import create_youtube_router
 from .service_token import require_service_token
 
@@ -32,6 +34,8 @@ def create_app(
     execution: ExecutionSettings | None = None,
     clock: Clock | None = None,
     clearance: ClearanceVerifier | None = None,
+    analytics: YouTubeAnalyticsSource | None = None,
+    analytics_from_env: bool = True,
 ) -> FastAPI:
     """Create a configured FastAPI application instance for the `/youtube` service.
 
@@ -41,6 +45,11 @@ def create_app(
     only when none is injected. The write guard's budget gate is the persisted ledger
     when ``PLM_BUDGET_LEDGER_CURRENCY`` is configured, else ``NoBudgetLedger`` (every live
     write refused).
+
+    The YouTube Analytics source is ``analytics`` when injected. Otherwise, for a mock
+    YouTube provider and ``analytics_from_env``, it is the mock source over the outcome
+    model named by ``PLM_MOCK_OUTCOMES_FILE``; unset (or a real provider, before R6),
+    there is none and the analytics route refuses.
     """
     service_clock = SystemClock() if clock is None else clock
     platform_settings = load_settings() if settings is None else settings
@@ -51,6 +60,9 @@ def create_app(
         execution_settings,
     )
     auth_dep = require_service_token(platform_settings)
+    if analytics is None and analytics_from_env and ProviderMode.MOCK in implemented:
+        model = mock_outcome_model_from_env()
+        analytics = None if model is None else MockYouTubeAnalytics(model)
 
     app = FastAPI(
         title="PLM YouTube Publishing Engine",
@@ -79,6 +91,7 @@ def create_app(
             execution_settings,
             budget=budget_gate_for(execution_settings, session_factory, clock=service_clock),
         ),
+        analytics=analytics,
     )
     app.include_router(router)
     app.include_router(health_router("youtube", session_factory))

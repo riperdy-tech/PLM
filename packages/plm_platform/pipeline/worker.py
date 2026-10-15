@@ -6,13 +6,15 @@ plm_platform.pipeline.worker:REGISTRATIONS`` (compose service ``pipeline-worker`
 ``REGISTRATIONS`` is built on first access, from configuration:
 
 * phase steps over HTTP (:class:`~plm_platform.pipeline.http.HttpPhaseSteps`), with base
-  URLs from ``PLM_SERVICE_URL__<PHASE>`` (compose service names by default) and the
-  service token ``PLM_SERVICE_TOKEN``;
-* platform operations over ``ops``: the budget ledger in ``PLM_BUDGET_LEDGER_CURRENCY``
-  (unset: every reservation is refused and the run holds, never unlimited), and the
-  exception queue with the reviewer directory from ``PLM_PIPELINE_REVIEWERS_FILE`` (a
-  JSON ``{"actor": ["role", ...]}``; unset: nobody holds a role, so no reviewable hold
-  can resume).
+  URLs from ``PLM_SERVICE_URL__<PHASE>`` (compose service names by default), the
+  service token ``PLM_SERVICE_TOKEN`` and the publishing / release / FX / learning
+  configuration from ``PLM_PIPELINE_CONFIG_FILE`` (:mod:`.config`; a missing section
+  makes the step that needs it refuse);
+* platform operations over ``ops``: the budget ledger in ``PLM_BUDGET_LEDGER_CURRENCY``,
+  read for the run's write costs (unset: the outcome step refuses, never free spend; the
+  phases' guards reserve, not the pipeline), and the exception queue with the reviewer
+  directory from ``PLM_PIPELINE_REVIEWERS_FILE`` (a JSON ``{"actor": ["role", ...]}``;
+  unset: nobody holds a role, so no reviewable hold can resume).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from ..ledger import BudgetLedger
 from ..service_urls import service_urls
 from ..temporal import TaskQueue, WorkerSet
 from .activities import PlatformOperations, build_activities
+from .config import load_pipeline_config
 from .http import HttpPhaseSteps, PhaseClient
 from .workflow import PipelineWorkflow
 
@@ -59,7 +62,8 @@ def build_registrations() -> tuple[WorkerSet, ...]:
         WorkerSet(
             task_queue=TaskQueue.PIPELINE,
             workflows=(PipelineWorkflow,),
-            activities=tuple(build_activities(HttpPhaseSteps(clients), platform)),
+            activities=tuple(build_activities(
+                HttpPhaseSteps(clients, config=load_pipeline_config()), platform)),
         ),
     )
 

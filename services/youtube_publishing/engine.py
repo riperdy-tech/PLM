@@ -86,6 +86,10 @@ class YouTubePublishingEngine:
 
     Every timestamp the engine records comes from the injected ``clock``, so a run
     replays to identical attempt and publication records under a ``FixedClock``.
+
+    ``decisions`` keeps every guard decision this engine asked for, in order;
+    :meth:`write_receipts` turns a finished publication into the receipt of each write
+    it comprises, for callers that account for the spend (the pipeline, R5).
     """
 
     def __init__(
@@ -105,18 +109,62 @@ class YouTubePublishingEngine:
         self.max_processing_polls = max_processing_polls
         self.write_guard = write_guard or ExternalWriteGuard()
         self.provider_mode = provider_mode_of(client)
+        self.decisions: list[GuardDecision] = []
+
+    @staticmethod
+    def write_key(manifest: PublishManifest, capability: str) -> str:
+        """The idempotency key the guard decides a write of ``manifest`` under."""
+        return f"{manifest.idempotency_key}:{capability}"
+
+    def write_receipts(
+        self, manifest: PublishManifest, result: PublishingEngineResult
+    ) -> list[dict[str, str]]:
+        """One receipt per write a publication comprises (upload, thumbnail, playlist).
+
+        A write decided in this call reports its decision. A write performed by an
+        earlier call (a resumed attempt, a replayed publication) reports what must have
+        been decided for it to happen: ``simulate`` for a mock client (the guard
+        simulates every mock write), ``execute`` for a real one. The spend of an executed
+        write is the ledger entry under (capability, key). A publication that did not
+        complete reports only this call's decisions (e.g. a recorded intent).
+        """
+        decided = {d.capability: d for d in self.decisions}
+        receipts: list[dict[str, str]] = [
+            {"capability": d.capability, "idempotency_key": d.idempotency_key,
+             "decision": d.decision.value, "reason": d.reason}
+            for d in self.decisions
+        ]
+        record = result.publication_record
+        if record is None:
+            return receipts
+        performed = [CAPABILITY_UPLOAD, CAPABILITY_THUMBNAIL]
+        if record.playlist_id:
+            performed.append(CAPABILITY_PLAYLIST)
+        mock = self.provider_mode is ProviderMode.MOCK
+        for capability in performed:
+            if capability in decided:
+                continue
+            receipts.append({
+                "capability": capability,
+                "idempotency_key": self.write_key(manifest, capability),
+                "decision": (WriteDecision.SIMULATE if mock else WriteDecision.EXECUTE).value,
+                "reason": "performed_earlier",
+            })
+        return receipts
 
     def _authorize(
         self, capability: str, manifest: PublishManifest, operating_mode: OperatingMode
     ) -> GuardDecision:
         ceiling = ExecutionPolicy.DRY_RUN if operating_mode is OperatingMode.DRY_RUN else None
-        return self.write_guard.authorize_external_write(
+        decision = self.write_guard.authorize_external_write(
             capability,
             provider_mode=self.provider_mode,
-            idempotency_key=f"{manifest.idempotency_key}:{capability}",
+            idempotency_key=self.write_key(manifest, capability),
             policy_ceiling=ceiling,
             now=self._clock.now(),
         )
+        self.decisions.append(decision)
+        return decision
 
     def _media_bytes(self, supplied: bytes | None, placeholder_attr: str) -> bytes | None:
         """The bytes to upload: the supplied media, or a mock client's own placeholder.
@@ -307,6 +355,7 @@ class YouTubePublishingEngine:
                         snippet=snippet,
                         status=status,
                         content_length=total_bytes,
+                        upload_key=manifest.idempotency_key,
                     )
                     update_publish_attempt(
                         session,

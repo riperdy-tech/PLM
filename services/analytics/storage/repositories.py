@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from plm_contracts import QualityStatus
 from plm_contracts.measurement import ObservationKind
@@ -164,9 +165,18 @@ def insert_track_metric(session: Session, obs: TrackMetricObservation) -> None:
 
 
 def get_track_metrics(session: Session, track_id: str) -> list[TrackMetricObservation]:
+    return _track_metrics(session, TrackMetricRow.track_id == track_id)
+
+
+def get_track_metrics_by_isrc(session: Session, isrc: str) -> list[TrackMetricObservation]:
+    """Every stored line of one recording (statement lines name the ISRC, not a track)."""
+    return _track_metrics(session, TrackMetricRow.isrc == isrc)
+
+
+def _track_metrics(session: Session, condition: Any) -> list[TrackMetricObservation]:
     rows = session.execute(
         select(TrackMetricRow)
-        .where(TrackMetricRow.track_id == track_id)
+        .where(condition)
         .order_by(TrackMetricRow.observed_at.desc(), TrackMetricRow.id)
     ).scalars().all()
     return [

@@ -35,6 +35,11 @@ class PublishResponse(BaseModel):
     error: str | None = None
     publication_event: dict[str, Any] | None = None
     """The C6 hop-2 ``youtube_video_published`` wire once published (ADR-0029)."""
+    published_at: datetime | None = None
+    external_writes: list[dict[str, str]] = Field(default_factory=list)
+    """One receipt per external write the publication comprises: ``capability``,
+    ``idempotency_key``, the guard's ``decision`` and ``reason`` (R5). The spend of an
+    executed write is the ledger entry under (capability, key)."""
 
 
 class AttemptStatusResponse(BaseModel):
@@ -55,6 +60,30 @@ class AttemptStatusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    published_at: datetime | None = None
+    """From the publication record, once the attempt has published."""
+    publication_event: dict[str, Any] | None = None
+
+
+class VideoAnalyticsResponse(BaseModel):
+    """One cumulative snapshot of a published video for one window (R5).
+
+    ``provider_mode`` says where the numbers come from; ``mock`` numbers are a simulation
+    (:mod:`plm_platform.testing.mock_outcomes`), never a real audience.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    video_id: str
+    channel_id: str
+    content_arm_id: str
+    window: str
+    published_at: datetime
+    observed_at: datetime
+    provider_mode: str
+    source: str
+    model_version: str | None = None
+    metrics: dict[str, Any]
 
 
 class ReconcileResponse(BaseModel):
