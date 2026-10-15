@@ -129,8 +129,6 @@ def materialize_treatment_cli(
     *,
     brand_id: str = DEFAULT_BRAND_ID,
     budget_envelope: float | None = None,
-    track_count: int = 5,
-    total_duration_minutes: int = 60,
     session_factory: SessionFactory | None = None,
 ) -> str:
     """Materialize a specific treatment of an experiment into a ContentPackage."""
@@ -155,8 +153,6 @@ def materialize_treatment_cli(
             created_at=now,
             brand_id=brand_id,
             budget_envelope=budget_envelope,
-            track_count=track_count,
-            total_duration_minutes=total_duration_minutes,
         )
 
         repositories.insert_content_package(session, package)
@@ -173,7 +169,15 @@ def materialize_treatment_cli(
         f"  brand: {package.brand_id}",
         f"  status: {package.status.value}",
         f"  tracks: {len(package.track_specs)}",
-        f"  playlist tracks: {package.playlist_spec.track_count_target}",
+        (
+            f"  playlist tracks: {package.playlist_spec.track_count_target} "
+            f"({package.playlist_spec.base_track_count} + "
+            f"{package.playlist_spec.spare_track_count} spare)"
+        ),
+        (
+            f"  playlist range: {package.playlist_spec.duration_range_seconds.min_seconds}-"
+            f"{package.playlist_spec.duration_range_seconds.max_seconds}s"
+        ),
         f"  visual world: {package.visual_spec.visual_world}",
         f"  thumbnail: {package.thumbnail_spec.composition_archetype}",
         f"  title archetype: {package.title_spec.title_archetype}",

@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 from plm_contracts import GateDisposition
 from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
 from plm_platform.exceptions import ExceptionQueue, StaticReviewerDirectory
@@ -123,7 +124,7 @@ def test_real_manifests_assemble_into_a_package_with_their_lineage(tmp: Path) ->
     result = assemble_media_package(
         track_manifests=manifests,
         brand_profile=BRAND,
-        required_duration_seconds=32.0,
+        duration_range=DurationRangeSeconds(min_seconds=30, max_seconds=34),
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Contract Session",
         store=store,
@@ -189,12 +190,13 @@ def test_audited_override_keeps_the_automated_disposition(tmp: Path) -> None:
     features = {"cand_c5_quar": measure_features("cand_c5_quar", path.read_bytes())}
     assert assemble_playlist(
         manifests=[parsed], features=features, brand_id="brand_neon",
-        required_duration_seconds=2.0, now=FIXED_NOW,
+        duration_range=DurationRangeSeconds(min_seconds=2, max_seconds=2), now=FIXED_NOW,
     ).tracks
     stripped = parse_seam(ReleaseManifestPayload, with_value(wire, "override", None))
     with pytest.raises(PlaylistAssemblyError):
         assemble_playlist(manifests=[stripped], features=features, brand_id="brand_neon",
-                          required_duration_seconds=2.0, now=FIXED_NOW)
+                          duration_range=DurationRangeSeconds(min_seconds=2, max_seconds=2),
+                          now=FIXED_NOW)
 
 
 @pytest.mark.parametrize(
@@ -254,5 +256,6 @@ def test_p6_refuses_tracks_from_two_arms(tmp: Path, passed: dict[str, Any]) -> N
     manifests = [parse_seam(ReleaseManifestPayload, m) for m in (passed, other)]
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=manifests, features={}, brand_id="brand_neon",
-                          required_duration_seconds=4.0, now=FIXED_NOW)
+                          duration_range=DurationRangeSeconds(min_seconds=4, max_seconds=4),
+                          now=FIXED_NOW)
     assert exc.value.error.code == "mixed_lineage"

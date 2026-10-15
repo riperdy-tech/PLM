@@ -112,9 +112,11 @@ def build_router(
     ) -> MediaPackageResponse:
         """Assemble, render and package the recordings P5 cleared (R7, ADR-0028, R4).
 
-        422: P6 refused the request (reason code). 503: an authority, the artifact
-        store or the toolchain is unavailable. 200 with ``status: failed`` and
-        ``blocking_reason_codes``: the render ran and post-render QA blocked it. A
+        422: P6 refused the request (reason code). ``playlist_supply_short`` carries
+        ``detail.facts.missing_seconds`` (how far the cleared supply is below the range
+        minimum), so the caller tops the P3 package up and retries. 503: an authority,
+        the artifact store or the toolchain is unavailable. 200 with ``status: failed``
+        and ``blocking_reason_codes``: the render ran and post-render QA blocked it. A
         request that resolves to an existing package returns it without rendering.
         """
         if backend is None:
@@ -131,7 +133,7 @@ def build_router(
         except MediaAssemblyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=exc.error.model_dump(),
+                detail=exc.detail(),
             ) from exc
         except MediaInfrastructureError as exc:
             raise HTTPException(

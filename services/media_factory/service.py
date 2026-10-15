@@ -42,7 +42,7 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
         result = assemble_media_package(
             track_manifests=manifests,
             brand_profile=brand,
-            required_duration_seconds=request.required_duration_seconds,
+            duration_range=request.duration_range_seconds,
             visual_profile=request.visual_profile,
             playlist_concept=request.playlist_concept,
             store=backend.store,

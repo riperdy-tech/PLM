@@ -121,7 +121,9 @@ def _stage(settings: Settings, p5: Session, run: str, *,
 
 def _request(staged: list[dict[str, Any]]) -> dict[str, Any]:
     return {"candidate_ids": [s["candidate_id"] for s in staged], "brand_id": "neon_seoul",
-            "required_duration_seconds": sum(t[0] for t in TRACKS) - 4.0,
+            # Only all tracks together land in this declared range.
+            "duration_range_seconds": {"min_seconds": int(sum(t[0] for t in TRACKS) - 4.0),
+                                       "max_seconds": int(sum(t[0] for t in TRACKS) - 4.0) + 1},
             "visual_profile": "it_waveform", "playlist_concept": "Integration Focus",
             "render_profile": "preview_360p_v1"}
 

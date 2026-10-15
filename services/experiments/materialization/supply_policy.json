@@ -1,0 +1,5 @@
+{
+  "supply_policy_version": "p3-supply-v1",
+  "spare_ratio": "0.25",
+  "max_extension_ratio": "0.5"
+}

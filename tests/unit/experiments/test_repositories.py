@@ -40,7 +40,7 @@ from services.experiments.domain.package import (
 )
 from services.experiments.storage import repositories
 from tests.support.experiments_db import create_experiments_engine, experiments_session
-from tests.support.experiments_factories import design_facts
+from tests.support.experiments_factories import design_facts, playlist_spec_fields
 from tests.support.seams import lineage_fields, track_spec_fields
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
@@ -166,14 +166,10 @@ def test_content_package_persistence_and_retrieval() -> None:
         track = TrackSpec(
             **track_spec_fields(lineage=lineage_fields(experiment_id="exp_test_02"))
         )
-        ply = PlaylistSpec(
-            playlist_spec_id="ply_01",
-            experiment_id="exp_test_02",
-            brand_id="brand_lofi",
-            track_count_target=8,
-            total_duration_minutes=45,
+        ply = PlaylistSpec(**playlist_spec_fields(
+            experiment_id="exp_test_02", base_track_count=6, spare_track_count=2,
             sequencing_profile="progressive",
-        )
+        ))
         vis = VisualSpec(
             visual_spec_id="vis_01",
             experiment_id="exp_test_02",
@@ -221,6 +217,7 @@ def test_content_package_persistence_and_retrieval() -> None:
         assert len(loaded_pkg.track_specs) == 1
         assert loaded_pkg.track_specs[0].track_role == TrackRole.FOCUS
         assert loaded_pkg.playlist_spec.track_count_target == 8
+        assert loaded_pkg.playlist_spec == ply  # the declared range round-trips
         assert loaded_pkg.visual_spec.visual_world == "neon_seoul"
 
 

@@ -5,6 +5,13 @@ Templates are versioned configuration, not code (§67): they live in
 A genre without a template is refused with ``unknown_genre``; it never borrows another
 genre's template. Each template also carries the genre's ontology for experimentable
 categorical dimensions (``alternatives``), which the treatment generator draws from.
+
+The same file declares ``playlist_duration_buckets``: the playlist-length range each P2
+``duration_bucket`` stands for (owner decision 2026-10-15: a playlist's length is a
+declared range, ``45_75m`` is 45–75 minutes, and its target is only the planning
+midpoint). A brief that names a bucket gets that range as its genome's
+``playlist_duration``; a bucket the table does not declare is refused
+(``playlist_duration_bucket_unknown``), never mapped to a nearby one.
 """
 
 from __future__ import annotations
@@ -21,13 +28,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..domain.enums import VocalGender, VocalMode
 from ..domain.errors import GenomeBuildError
-from ..domain.genome import CANONICAL_DIMENSIONS, ContentGenome
+from ..domain.genome import CANONICAL_DIMENSIONS, ContentGenome, DurationRange
 
 if TYPE_CHECKING:
     from ..ingestion.p2_adapter import AdaptedDirective
 
 __all__ = [
     "ALTERNATIVE_DIMENSIONS",
+    "PLAYLIST_DURATION_BUCKET_UNKNOWN",
     "TEMPLATES_PATH",
     "CreativeLatitudeEnvelope",
     "GenomeEngine",
@@ -68,6 +76,8 @@ ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
 """Categorical dimensions a template may give an ontology of alternatives for."""
 
 _TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset({"parent", "alternatives"})
+
+PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
 
 
 def normalize_dimension_value(dimension: str, value: str) -> str:
@@ -129,6 +139,7 @@ class TemplateLibrary:
             raise TemplateLibraryError(f"template library is missing a section: {exc}") from exc
         if not self.version:
             raise TemplateLibraryError("templates_version must be non-empty")
+        self._buckets = self._parse_buckets(raw.get("playlist_duration_buckets", {}))
         self._resolved: dict[str, GenreTemplate] = {}
         for name in sorted(self._templates):
             self._resolved[name] = self._build(name)
@@ -151,6 +162,43 @@ class TemplateLibrary:
     @property
     def genres(self) -> tuple[str, ...]:
         return tuple(sorted(self._genres))
+
+    @property
+    def playlist_duration_buckets(self) -> tuple[str, ...]:
+        return tuple(sorted(self._buckets))
+
+    def playlist_duration_for_bucket(self, bucket: str) -> DurationRange:
+        """The declared playlist range of a P2 ``duration_bucket``; unknown is refused."""
+        found = self._buckets.get(bucket)
+        if found is None:
+            raise GenomeBuildError(
+                PLAYLIST_DURATION_BUCKET_UNKNOWN,
+                f"duration_bucket {bucket!r} declares no playlist range; declared buckets: "
+                f"{', '.join(sorted(self._buckets)) or 'none'}",
+                field_paths=["brief.duration_bucket"],
+            )
+        return found
+
+    @staticmethod
+    def _parse_buckets(raw: Any) -> dict[str, DurationRange]:
+        if not isinstance(raw, Mapping):
+            raise TemplateLibraryError("playlist_duration_buckets must be an object")
+        buckets: dict[str, DurationRange] = {}
+        for name, value in sorted(raw.items()):
+            try:
+                declared = DurationRange.model_validate(value)
+            except ValidationError as exc:
+                raise TemplateLibraryError(
+                    f"playlist duration bucket {name!r} is not a valid range: {exc}"
+                ) from exc
+            midpoint = round((declared.min_seconds + declared.max_seconds) / 2)
+            if declared.target_seconds != midpoint:
+                raise TemplateLibraryError(
+                    f"playlist duration bucket {name!r} must declare its midpoint "
+                    f"{midpoint} as target_seconds (the target is only a planning midpoint)"
+                )
+            buckets[str(name)] = declared
+        return buckets
 
     def resolve(self, name: str, _chain: tuple[str, ...] = ()) -> dict[str, Any]:
         """Merge a template over its parents; a child wins only where it sets a value (§68)."""
@@ -313,7 +361,8 @@ def build_genome_from_directive(
 
     The genre must be named in the brief and have a template; otherwise the directive is
     refused (``genre_unspecified`` / ``unknown_genre``). Brief dimensions that are unset
-    are open, so the template's default applies.
+    are open, so the template's default applies. A named ``duration_bucket`` sets the
+    genome's ``playlist_duration`` to the bucket's declared range.
     """
     lib = library or default_template_library()
     brief = directive.brief
@@ -352,6 +401,9 @@ def build_genome_from_directive(
         updates["vocal_mode"] = vocal_mode
         if vocal_mode is VocalMode.INSTRUMENTAL:
             updates["vocal_gender"] = VocalGender.NONE
+    if _present(brief.get("duration_bucket")):
+        bucket = normalize_dimension_value("duration_bucket", str(brief["duration_bucket"]))
+        updates["playlist_duration"] = lib.playlist_duration_for_bucket(bucket)
 
     dumped = base.model_dump()
     dumped.update(updates)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from plm_contracts import ProviderMode
 from plm_contracts.seams.c4 import ProviderLicenseTerms
 
 from ..domain.enums import AttemptStatus
@@ -28,7 +29,9 @@ class MockAdapter(MockMusicProvider):
 
 
 class SunoAdapter:
-    """Adapter for Suno AI music generation service."""
+    """Adapter for Suno AI music generation service (a paid external call: REAL)."""
+
+    provider_mode = ProviderMode.REAL
 
     def __init__(
         self,
@@ -83,7 +86,9 @@ class SunoAdapter:
 
 
 class ElevenLabsAdapter:
-    """Adapter for ElevenLabs music generation service."""
+    """Adapter for ElevenLabs music generation service (a paid external call: REAL)."""
+
+    provider_mode = ProviderMode.REAL
 
     def __init__(
         self,

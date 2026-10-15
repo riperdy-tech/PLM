@@ -79,7 +79,7 @@ def _experiment(*, target_bpm: int | None = 80) -> tuple[Experiment, Treatment, 
 def _wire(**genome_kw: Any) -> dict[str, Any]:
     exp, trt, genome = _experiment(**genome_kw)
     package = materialize_package(
-        exp, trt, genome, track_count=2, created_at=datetime(2026, 9, 25, tzinfo=UTC)
+        exp, trt, genome, created_at=datetime(2026, 9, 25, tzinfo=UTC)
     )
     return json.loads(json.dumps(package.track_specs[0].to_wire()))
 

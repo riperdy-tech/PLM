@@ -35,7 +35,7 @@ from services.experiments.domain.package import (
     TrackSpec,
     VisualSpec,
 )
-from tests.support.experiments_factories import design_facts
+from tests.support.experiments_factories import design_facts, playlist_spec_fields
 from tests.support.seams import lineage_fields, track_spec_fields
 
 
@@ -154,14 +154,7 @@ def test_package_hash_and_model() -> None:
     track = TrackSpec(
         **track_spec_fields(lineage=lineage_fields(experiment_id="exp_01"))
     )
-    ply = PlaylistSpec(
-        playlist_spec_id="ply_01",
-        experiment_id="exp_01",
-        brand_id="brand_lofi",
-        track_count_target=10,
-        total_duration_minutes=60,
-        sequencing_profile="progressive_arc",
-    )
+    ply = PlaylistSpec(**playlist_spec_fields(experiment_id="exp_01"))
     vis = VisualSpec(
         visual_spec_id="vis_01",
         experiment_id="exp_01",

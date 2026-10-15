@@ -16,6 +16,7 @@ from media_factory.errors import MediaAssemblyError
 from media_factory.metadata.chapters import chapter_violations, require_valid_chapters
 from media_factory.rendering.assembler import assemble_media_package
 from media_factory.visuals.planner import BrandProfile
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_platform.clock import FixedClock
 
 from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain, stored_manifest
@@ -60,7 +61,7 @@ def test_a_playlist_that_breaks_the_chapter_rules_is_blocked_before_rendering() 
         assemble_media_package(
             track_manifests=manifests,
             brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon"),
-            required_duration_seconds=178.0, visual_profile="v", playlist_concept="Focus",
+            duration_range=DurationRangeSeconds(min_seconds=172, max_seconds=184), visual_profile="v", playlist_concept="Focus",
             store=store, toolchain=toolchain, clock=FixedClock(NOW),
         )
     assert raised.value.code == "chapters_too_few"

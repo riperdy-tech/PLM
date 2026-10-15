@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 
 from ..audio.features import TrackFeatures
@@ -130,7 +131,7 @@ def assemble_playlist(
     manifests: Sequence[ReleaseManifestPayload],
     features: Mapping[str, TrackFeatures],
     brand_id: str,
-    required_duration_seconds: float,
+    duration_range: DurationRangeSeconds,
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     policy: SequencingPolicy = DEFAULT_SEQUENCING_POLICY,
@@ -140,6 +141,8 @@ def assemble_playlist(
 
     ``features`` holds the measured features of every manifest's track (by candidate
     id); a track without a features record is refused rather than scored as anything.
+    ``duration_range`` is P3's declared playlist range; the session records its midpoint
+    as the requested duration (R5).
     """
     lineage = check_clearance(manifests)
     missing = [m.candidate_id for m in manifests if m.candidate_id not in features]
@@ -153,7 +156,7 @@ def assemble_playlist(
                       duration_seconds=m.measured_duration_seconds,
                       features=features[m.candidate_id])
          for m in manifests],
-        required_duration_seconds=required_duration_seconds,
+        duration_range=duration_range,
         transition_offset_seconds=offset,
         policy=policy,
     )
@@ -176,7 +179,7 @@ def assemble_playlist(
         experiment_id=lineage.experiment_id,
         content_arm_id=lineage.content_arm_id,
         brand_id=brand_id,
-        requested_duration_seconds=required_duration_seconds,
+        requested_duration_seconds=sequence.target_seconds,
         sequence_version=policy.version,
         now=now,
     )

@@ -33,6 +33,7 @@ from media_factory.rendering.ffmpeg import FFmpegToolchain
 from media_factory.rendering.profiles import RENDER_PROFILES, RenderProfile
 from media_factory.rendering.qa import post_render_qa
 from media_factory.visuals.planner import BrandProfile
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_platform.clock import FixedClock
 
 from tests.support.media_backend import InMemoryArtifactStore, stored_manifest, synth_specs
@@ -60,7 +61,8 @@ def rendered() -> tuple[InMemoryArtifactStore, AssemblyPipelineResult]:
     result = assemble_media_package(
         track_manifests=manifests,
         brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Records"),
-        required_duration_seconds=sum(SECONDS) - 2 * 2.0,
+        duration_range=DurationRangeSeconds(min_seconds=int(sum(SECONDS) - 2 * 2.0),
+                                            max_seconds=int(sum(SECONDS) - 2 * 2.0) + 1),
         visual_profile="neon_waveform", playlist_concept="Late Night Focus",
         store=store, toolchain=FFmpegToolchain(), render_profile_name=TINY,
         clock=FixedClock(NOW),

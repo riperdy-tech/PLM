@@ -29,8 +29,8 @@ def cli_assemble(
         "--request",
         "-r",
         help="Path to an assembly request JSON: candidate_ids, brand_id, "
-        "required_duration_seconds, visual_profile, playlist_concept (render_profile and "
-        "transition optional)",
+        "duration_range_seconds {min_seconds, max_seconds}, visual_profile, "
+        "playlist_concept (render_profile and transition optional)",
     ),
 ) -> None:
     """Assemble and render a media package from recordings P5 cleared (ADR-0028, R4).

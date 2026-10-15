@@ -14,6 +14,7 @@ import pytest
 from media_factory.audio.features import TrackFeatures
 from media_factory.domain.enums import PlaylistStatus, TransitionType
 from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 
 from tests.support.seams import lineage_fields, release_manifest
@@ -54,12 +55,14 @@ def test_assemble_playlist_success() -> None:
 
     res = assemble_playlist(
         manifests=manifests, features=_features(manifests), brand_id="brand_lofi",
-        required_duration_seconds=446.0, transition_type=TransitionType.SHORT_CROSSFADE,
+        duration_range=DurationRangeSeconds(min_seconds=430, max_seconds=460), transition_type=TransitionType.SHORT_CROSSFADE,
         transition_duration_seconds=2.0, now=NOW,
     )
 
     assert res.session.status == PlaylistStatus.ASSEMBLED
-    assert res.session.sequence_version == "seq-beam-v1"
+    assert res.session.sequence_version == "seq-beam-v2"
+    # The session records the planning midpoint of the declared range.
+    assert res.session.requested_duration_seconds == 445.0
     assert len(res.tracks) == 3
     assert res.session.sequence_checksum != ""
     assert res.lineage == manifests[0].lineage
@@ -85,7 +88,8 @@ def test_the_timeline_follows_the_declared_transition(
     manifests = [_manifest(f"cand_{n}", measured_duration_seconds=60.0) for n in range(3)]
     res = assemble_playlist(
         manifests=manifests, features=_features(manifests), brand_id="b",
-        required_duration_seconds=180.0 + 2 * gap, transition_type=transition,
+        duration_range=DurationRangeSeconds(min_seconds=int(175 + 2 * gap), max_seconds=int(185 + 2 * gap)),
+        transition_type=transition,
         transition_duration_seconds=seconds, now=NOW,
     )
     starts = [t.start_offset_seconds for t in res.tracks]
@@ -97,7 +101,8 @@ def test_uncleared_track_without_override_is_refused(disposition: str) -> None:
     manifests = [_manifest("cand_01"), _manifest("cand_blocked", disposition=disposition)]
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=manifests, features=_features(manifests),
-                          brand_id="brand_lofi", required_duration_seconds=240.0, now=NOW)
+                          brand_id="brand_lofi",
+                          duration_range=DurationRangeSeconds(min_seconds=230, max_seconds=250), now=NOW)
     assert exc.value.error.code == "track_not_cleared"
     assert "cand_blocked" in exc.value.error.message
 
@@ -109,14 +114,15 @@ def test_tracks_from_different_arms_are_refused() -> None:
     ]
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=manifests, features=_features(manifests),
-                          brand_id="brand_lofi", required_duration_seconds=240.0, now=NOW)
+                          brand_id="brand_lofi",
+                          duration_range=DurationRangeSeconds(min_seconds=230, max_seconds=250), now=NOW)
     assert exc.value.error.code == "mixed_lineage"
 
 
 def test_empty_playlist_is_refused() -> None:
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=[], features={}, brand_id="brand_lofi",
-                          required_duration_seconds=60.0, now=NOW)
+                          duration_range=DurationRangeSeconds(min_seconds=55, max_seconds=65), now=NOW)
     assert exc.value.error.code == "empty_playlist"
 
 
@@ -125,7 +131,7 @@ def test_a_track_without_measured_features_is_refused() -> None:
     features = _features(manifests[:1])
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=manifests, features=features, brand_id="b",
-                          required_duration_seconds=298.0, now=NOW)
+                          duration_range=DurationRangeSeconds(min_seconds=290, max_seconds=310), now=NOW)
     assert exc.value.error.code == "features_not_measured"
 
 
@@ -133,11 +139,12 @@ def test_a_crossfade_longer_than_half_a_selected_track_is_refused() -> None:
     manifests = [_manifest(f"cand_{n}", measured_duration_seconds=3.0) for n in range(3)]
     with pytest.raises(PlaylistAssemblyError) as exc:
         assemble_playlist(manifests=manifests, features=_features(manifests), brand_id="b",
-                          required_duration_seconds=5.0, transition_duration_seconds=2.0,
+                          duration_range=DurationRangeSeconds(min_seconds=5, max_seconds=5),
+                          transition_duration_seconds=2.0,
                           now=NOW)
     assert exc.value.error.code == "transition_longer_than_track"
     # A single track has no transition to fit.
     alone = assemble_playlist(manifests=manifests[:1], features=_features(manifests[:1]),
-                              brand_id="b", required_duration_seconds=3.0,
+                              brand_id="b", duration_range=DurationRangeSeconds(min_seconds=3, max_seconds=3),
                               transition_duration_seconds=2.0, now=NOW)
     assert len(alone.tracks) == 1

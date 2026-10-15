@@ -66,19 +66,20 @@ def test_materialize_package_creates_all_specs() -> None:
         genome,
         brand_id="brand_lofi",
         budget_envelope=150.0,
-        track_count=3,
-        total_duration_minutes=45,
         created_at=FIXED_NOW,
     )
 
     assert pkg.status == PackageStatus.MATERIALIZED
     assert pkg.brand_id == "brand_lofi"
     assert pkg.budget_envelope == 150.0
-    assert len(pkg.track_specs) == 3
+    # 2700 s minimum / 190 s planned = 15 base, + ceil(15 * 0.25) = 4 spares.
+    assert len(pkg.track_specs) == 19
     assert pkg.track_specs[0].track_role == TrackRole.FOCUS
     assert pkg.track_specs[1].track_role == TrackRole.SECONDARY
-    assert pkg.track_specs[0].budget_limit == 50.0
-    assert pkg.playlist_spec.total_duration_minutes == 45
+    # The budget covers every spec the package may ever hold: 19 + 10 extension slots.
+    assert pkg.track_specs[0].budget_limit == round(150.0 / 29, 2)
+    assert pkg.playlist_spec.duration_range_seconds.min_seconds == 2700
+    assert pkg.playlist_spec.duration_range_seconds.max_seconds == 3600
     assert pkg.visual_spec.visual_world == "rainy_asian_city"
     assert pkg.thumbnail_spec.thumbnail_family == "illustrated_lofi"
     assert pkg.title_spec.title_archetype == "evocative_phrase"
@@ -101,9 +102,9 @@ def test_request_above_the_directive_budget_limit_is_refused() -> None:
 
 def test_omitted_budget_uses_the_directive_limit_not_a_default() -> None:
     exp, trt, genome = _sample_experiment()
-    pkg = materialize_package(exp, trt, genome, track_count=4, created_at=FIXED_NOW)
+    pkg = materialize_package(exp, trt, genome, created_at=FIXED_NOW)
     assert pkg.budget_envelope == exp.budget_limit == 200.0
-    assert pkg.track_specs[0].budget_limit == 50.0
+    assert pkg.track_specs[0].budget_limit == round(200.0 / 29, 2)
 
 
 def test_unvalidated_experiment_is_not_materialized() -> None:

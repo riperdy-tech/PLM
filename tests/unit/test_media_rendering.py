@@ -24,6 +24,7 @@ from media_factory.rendering.qa import post_render_qa
 from media_factory.rendering.toolchain import LoudnessMeasurement, ProbeReport, StreamInfo
 from media_factory.visuals.planner import BrandProfile
 from plm_contracts.seams import parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clock import FixedClock
 from plm_platform.config import load_settings
@@ -47,7 +48,7 @@ def _assemble(store: InMemoryArtifactStore, toolchain: StandInToolchain,
                  for n, s in enumerate(synth_specs())]
     kwargs: dict[str, object] = {
         "track_manifests": manifests, "brand_profile": BRAND,
-        "required_duration_seconds": 176.0, "visual_profile": "neon_waveform",
+        "duration_range": DurationRangeSeconds(min_seconds=170, max_seconds=180), "visual_profile": "neon_waveform",
         "playlist_concept": "Late Night Focus", "store": store, "toolchain": toolchain,
         "render_profile_name": "preview_360p_v1", "clock": FixedClock(NOW),
     }
@@ -77,7 +78,7 @@ def test_every_checksum_is_the_sha256_of_the_stored_bytes() -> None:
     assert wire.audio.checksum == pkg.audio_checksum
     assert [t.checksum for t in wire.thumbnails] == [t["checksum"] for t in pkg.thumbnails]
     assert len(wire.chapters) == 3
-    assert pkg.render_report["sequencing"]["policy"]["version"] == "seq-beam-v1"
+    assert pkg.render_report["sequencing"]["policy"]["version"] == "seq-beam-v2"
 
 
 def test_a_tampered_source_track_fails_closed_before_rendering() -> None:

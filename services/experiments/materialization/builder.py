@@ -20,13 +20,15 @@ from ..domain.fingerprint import compute_package_hash
 from ..domain.genome import BpmRange, ContentGenome, DurationRange
 from ..domain.package import (
     ContentPackage,
+    PackageExtension,
     PlaylistSpec,
     ThumbnailSpec,
     TitleSpec,
     TrackSpec,
     VisualSpec,
 )
-from ..storage.ids import package_id, spec_id
+from ..storage.ids import deterministic_id, package_id, spec_id
+from .supply import SupplyPolicy, default_supply_policy, plan_supply
 
 if TYPE_CHECKING:
     from ..domain.experiment import Experiment, Treatment
@@ -34,6 +36,10 @@ if TYPE_CHECKING:
 
 class BudgetEnvelopeExceededError(Exception):
     """Raised when a package's budget allocation is invalid or exceeds ceilings."""
+
+
+class PackageExtensionError(ExperimentStateError):
+    """A top-up was refused: over the declared bound, or a key reused for another count."""
 
 
 MATERIALIZABLE_STATUSES = frozenset({ExperimentStatus.VALIDATED, ExperimentStatus.MATERIALIZED})
@@ -102,14 +108,16 @@ def materialize_package(
     *,
     brand_id: str = "neon_seoul",
     budget_envelope: float | None = None,
-    track_count: int = 5,
-    total_duration_minutes: int = 60,
+    supply_policy: SupplyPolicy | None = None,
     created_at: datetime,
 ) -> ContentPackage:
     """Compile a validated experiment's treatment into an immutable ContentPackage.
 
     ``budget_envelope`` may lower the directive's ``budget_limit`` but never raise it;
-    ``None`` means the ceiling itself.
+    ``None`` means the ceiling itself. The track count is not a parameter: it is planned
+    from the genome's declared playlist range and the planned track length
+    (:func:`.supply.plan_supply`), and the budget is split over every spec the package
+    may ever hold, extensions included.
     """
     if experiment.status not in MATERIALIZABLE_STATUSES:
         raise ExperimentStateError(
@@ -125,11 +133,14 @@ def materialize_package(
             field_paths=["treatment_id"],
         )
     budget = effective_budget(experiment, budget_envelope)
-    if track_count < 1:
-        raise ValueError(f"track_count must be at least 1; got {track_count}")
 
     now = created_at
     effective_genome = _apply_genome_delta(base_genome, treatment.genome_delta)
+    duration = derived_duration_seconds(effective_genome.track_duration)
+    supply = plan_supply(
+        effective_genome.playlist_duration, duration, supply_policy or default_supply_policy()
+    )
+    track_count = supply.track_count
 
     pkg_id = package_id(experiment.experiment_id, treatment.treatment_id)
     ply_id = spec_id("ply", pkg_id)
@@ -144,7 +155,7 @@ def materialize_package(
         content_genome_id=content_genome_id(effective_genome),
         production_directive_id=experiment.production_directive_id,
     )
-    track_budget = round(budget / track_count, 2)
+    track_budget = round(budget / supply.budget_slots, 2)
     track_specs: list[TrackSpec] = []
     track_spec_ids: list[str] = []
 
@@ -184,8 +195,6 @@ def materialize_package(
             allowed_providers=("elevenlabs", "suno", "stable_audio"),
         )
 
-        duration = derived_duration_seconds(effective_genome.track_duration)
-
         track_specs.append(
             TrackSpec(
                 track_spec_id=trk_id,
@@ -213,8 +222,15 @@ def materialize_package(
         playlist_spec_id=ply_id,
         experiment_id=experiment.experiment_id,
         brand_id=brand_id,
-        track_count_target=track_count,
-        total_duration_minutes=total_duration_minutes,
+        duration_range_seconds=supply.duration_range_seconds,
+        target_duration_seconds=supply.target_duration_seconds,
+        planned_track_duration_seconds=supply.planned_track_duration_seconds,
+        base_track_count=supply.base_track_count,
+        spare_track_count=supply.spare_track_count,
+        track_count_target=supply.track_count,
+        max_extension_track_count=supply.max_extension_track_count,
+        spare_ratio=supply.spare_ratio,
+        supply_policy_version=supply.supply_policy_version,
         sequencing_profile="progressive_arc",
     )
 
@@ -260,3 +276,61 @@ def materialize_package(
         budget_envelope=budget,
         created_at=now,
     )
+
+
+def extension_id(package_id_: str, idempotency_key: str) -> str:
+    """Identity of one top-up: the package and the caller's idempotency key."""
+    return deterministic_id("ext", package_id_, idempotency_key)
+
+
+def extend_package(
+    package: ContentPackage,
+    *,
+    count: int,
+    idempotency_key: str,
+    created_at: datetime,
+) -> tuple[PackageExtension, tuple[TrackSpec, ...]]:
+    """Add ``count`` more distinct track specs to ``package``, deterministically.
+
+    Each new spec is the package's own spec (same lineage, constraints, duration range,
+    budget slot) under a new id derived from the package, the key and its position in
+    the extension, as a ``secondary`` track. The caller looks the key up first: a stored
+    extension for the key is the answer, and the same key with another count is refused
+    (``idempotency_key_reused``). The total added over the package's life is bounded by
+    ``playlist_spec.max_extension_track_count`` (``package_extension_limit_exceeded``).
+    """
+    if count < 1:
+        raise ValueError(f"count must be at least 1; got {count}")
+    bound = package.playlist_spec.max_extension_track_count
+    used = package.extension_track_count
+    if used + count > bound:
+        raise PackageExtensionError(
+            "package_extension_limit_exceeded",
+            f"package {package.package_id} may add at most {bound} extension specs; "
+            f"{used} are already added and {count} more were requested",
+            field_paths=["count"],
+        )
+    if not package.track_specs:
+        raise PackageExtensionError(
+            "package_has_no_track_specs",
+            f"package {package.package_id} has no track spec to extend from",
+            field_paths=["package_id"],
+        )
+    template = package.track_specs[0]
+    ext_id = extension_id(package.package_id, idempotency_key)
+    specs = tuple(
+        template.model_copy(update={
+            "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),
+            "track_role": TrackRole.SECONDARY,
+        })
+        for j in range(count)
+    )
+    extension = PackageExtension(
+        extension_id=ext_id,
+        package_id=package.package_id,
+        idempotency_key=idempotency_key,
+        track_count=count,
+        track_spec_ids=tuple(spec.track_spec_id for spec in specs),
+        created_at=created_at,
+    )
+    return extension, specs

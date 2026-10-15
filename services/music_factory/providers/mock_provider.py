@@ -9,7 +9,7 @@ import struct
 import wave
 from typing import Any
 
-from plm_contracts import CommercialUseEligibility
+from plm_contracts import CommercialUseEligibility, ProviderMode
 from plm_contracts.seams.c4 import ProviderLicenseTerms
 from plm_platform.clock import stable_seed
 
@@ -86,7 +86,13 @@ def synthesize_mock_wav(
 
 
 class MockMusicProvider:
-    """Mock music provider implementing deterministic synthesis and error simulation."""
+    """Mock music provider implementing deterministic synthesis and error simulation.
+
+    It synthesises in-process and calls nothing outside PLM, so it declares
+    ``ProviderMode.MOCK``: the write guard answers ``SIMULATE`` and no budget is needed.
+    """
+
+    provider_mode = ProviderMode.MOCK
 
     def __init__(self, *, provider_id: str = "mock", model_id: str = "mock-v1") -> None:
         self.provider_id = provider_id

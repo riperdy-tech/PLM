@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from plm_contracts.seams.c3 import TrackSpecPayload
-from pydantic import BaseModel, ConfigDict, Field
+from plm_contracts.seams.c3 import DurationRangeSeconds, TrackSpecPayload
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import PackageStatus
 
@@ -22,16 +23,51 @@ class TrackSpec(TrackSpecPayload):
 
 
 class PlaylistSpec(BaseModel):
-    """Playlist-level sequencing and duration specification for P6 (§19)."""
+    """Playlist-level sequencing and duration specification for P6 (§19, R5).
+
+    The playlist's length is the declared range ``duration_range_seconds`` (owner
+    decision 2026-10-15), which P6 enforces; ``target_duration_seconds`` is only its
+    midpoint, for planning. ``track_count_target`` is the supply P3 planned for it:
+    ``base_track_count`` to reach the range minimum plus ``spare_track_count`` for P5
+    rejections (:mod:`..materialization.supply`).
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     playlist_spec_id: str
     experiment_id: str
     brand_id: str
+    duration_range_seconds: DurationRangeSeconds
+    target_duration_seconds: int = Field(ge=1)
+    planned_track_duration_seconds: int = Field(ge=1)
+    base_track_count: int = Field(ge=1)
+    spare_track_count: int = Field(ge=0)
     track_count_target: int = Field(ge=1)
-    total_duration_minutes: int = Field(ge=1)
+    max_extension_track_count: int = Field(ge=0)
+    spare_ratio: Decimal = Field(ge=0)
+    supply_policy_version: str = Field(min_length=1)
     sequencing_profile: str = "progressive_arc"
+
+    @model_validator(mode="after")
+    def _consistent(self) -> PlaylistSpec:
+        if self.track_count_target != self.base_track_count + self.spare_track_count:
+            raise ValueError("track_count_target must equal base_track_count + spare_track_count")
+        if not self.duration_range_seconds.contains(self.target_duration_seconds):
+            raise ValueError("target_duration_seconds must lie inside duration_range_seconds")
+        return self
+
+
+class PackageExtension(BaseModel):
+    """One top-up of a package's track specs (``POST .../packages/{id}/extend``)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    extension_id: str
+    package_id: str
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    track_count: int = Field(ge=1)
+    track_spec_ids: tuple[str, ...]
+    created_at: datetime
 
 
 class VisualSpec(BaseModel):
@@ -89,3 +125,9 @@ class ContentPackage(BaseModel):
     package_hash: str
     budget_envelope: float = Field(ge=0.0)
     created_at: datetime
+    extensions: tuple[PackageExtension, ...] = ()
+    """Top-ups added after materialization; their specs are in ``track_specs`` too."""
+
+    @property
+    def extension_track_count(self) -> int:
+        return sum(e.track_count for e in self.extensions)

@@ -7,7 +7,7 @@ refusing with a reason code rather than guessing:
 2. the source audio of every track, fetched by ``artifact_uri`` and verified against
    ``artifact_sha256`` (a mismatch fails closed);
 3. sequencing features measured from those bytes (:mod:`..audio.features`);
-4. selection and order by beam search, enforcing the required duration
+4. selection and order by beam search, landing inside the declared playlist range
    (:mod:`..playlist.sequencer`);
 5. chapters compiled from the final timeline and validated against YouTube's rules;
 6. the render: audio master, procedural video master, both stored, then post-render
@@ -25,6 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import Clock
 
@@ -79,7 +80,7 @@ def assemble_media_package(
     *,
     track_manifests: Sequence[ReleaseManifestPayload],
     brand_profile: BrandProfile,
-    required_duration_seconds: float,
+    duration_range: DurationRangeSeconds,
     visual_profile: str,
     playlist_concept: str,
     store: ArtifactStore,
@@ -94,8 +95,9 @@ def assemble_media_package(
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
 
-    ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
-    P3's playlist, visual and title specs; they have no defaults here. ``existing`` looks
+    ``duration_range`` (P3's declared playlist range), ``visual_profile`` and
+    ``playlist_concept`` come from P3's playlist, visual and title specs; they have no
+    defaults here. ``existing`` looks
     a package id up: when the request resolves to a package already assembled,
     :class:`PackageAlreadyAssembled` is raised before anything is rendered.
     """
@@ -114,7 +116,7 @@ def assemble_media_package(
         manifests=track_manifests,
         features=features,
         brand_id=brand_id,
-        required_duration_seconds=required_duration_seconds,
+        duration_range=duration_range,
         transition_type=transition_type,
         transition_duration_seconds=transition_duration_seconds,
         policy=sequencing_policy,

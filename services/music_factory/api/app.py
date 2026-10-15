@@ -7,8 +7,11 @@ from collections.abc import Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
+from plm_platform.clock import Clock, SystemClock
 from plm_platform.correlation import CorrelationIdMiddleware
+from plm_platform.execution import ExecutionSettings, ExternalWriteGuard, load_execution_settings
 from plm_platform.health import health_router
+from plm_platform.ledger import budget_gate_for
 from sqlalchemy.orm import Session
 
 from ..config import MusicFactorySettings
@@ -23,13 +26,29 @@ def create_app(
     session_factory: Callable[[], Session] | None,
     settings: MusicFactorySettings,
     storage: ArtifactStorageProtocol | None = None,
+    execution: ExecutionSettings | None = None,
+    write_guard: ExternalWriteGuard | None = None,
+    clock: Clock | None = None,
 ) -> FastAPI:
     """Create FastAPI application for Music Generation Factory service.
 
     The artifact store is ``storage`` when given (tests inject one), otherwise MinIO
     from the platform settings (R4). With neither, generation answers 503
     ``artifact_store_not_configured``; there is no in-memory fallback.
+
+    Paid generation goes through ``write_guard`` (R5). Unless one is injected, the guard
+    uses the configured execution policies (``PLM_EXECUTION_POLICY__MUSIC_GENERATE``) and
+    the persisted budget ledger when ``PLM_BUDGET_LEDGER_CURRENCY`` is set, else
+    ``NoBudgetLedger`` (every live call refused). A mock provider needs neither.
     """
+    service_clock = SystemClock() if clock is None else clock
+    if write_guard is None:
+        execution_settings = load_execution_settings() if execution is None else execution
+        write_guard = ExternalWriteGuard(
+            execution_settings,
+            budget=(budget_gate_for(execution_settings, session_factory, clock=service_clock)
+                    if session_factory is not None else None),
+        )
     if storage is None and settings.platform is not None:
         storage = MinioArtifactStorage(settings.platform)
     app = FastAPI(title="plm-music-factory", version="p4")
@@ -39,7 +58,9 @@ def create_app(
         build_router(
             session_factory=session_factory,
             settings=settings,
+            clock=service_clock,
             storage=storage,
+            write_guard=write_guard,
         )
     )
 

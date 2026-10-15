@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain.enums import TransitionType
@@ -24,17 +25,19 @@ class AssemblePackageRequest(BaseModel):
     """Assemble a media package from recordings P5 cleared (R7, ADR-0028, R4).
 
     P6 fetches each candidate's C5 manifest from P5 itself; a caller cannot hand it a
-    manifest body. ``required_duration_seconds``, ``visual_profile`` and
-    ``playlist_concept`` come from P3's playlist, visual and title specs and have no
-    defaults. The brand's name and palette come from P6's brand registry. Render
-    profile and transition are P6's own presentation settings.
+    manifest body. ``duration_range_seconds`` (P3's ``playlist_spec.duration_range_seconds``,
+    e.g. 2700–4500 s for ``45_75m``), ``visual_profile`` and ``playlist_concept`` come
+    from P3's playlist, visual and title specs and have no defaults; P6 lands the
+    timeline inside the range, preferring its midpoint, with no tolerance of its own
+    (R5). The brand's name and palette come from P6's brand registry. Render profile and
+    transition are P6's own presentation settings.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     candidate_ids: list[str] = Field(min_length=1)
     brand_id: str = Field(min_length=1)
-    required_duration_seconds: float = Field(gt=0.0)
+    duration_range_seconds: DurationRangeSeconds
     visual_profile: str = Field(min_length=1)
     playlist_concept: str = Field(min_length=1)
     render_profile: str = "yt_longform_1080p_v1"

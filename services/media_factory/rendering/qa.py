@@ -20,7 +20,7 @@ Reason codes:
 ``duration_unmeasured``, ``render_duration_mismatch``
     the container duration against the timeline, within the profile's tolerance;
 ``duration_outside_required_window``
-    the container duration against the required duration window;
+    the container duration against the declared playlist range;
 ``loudness_unmeasurable``, ``loudness_out_of_tolerance``, ``true_peak_exceeded``
     the measured integrated loudness against the profile's target and tolerance, and
     the measured true peak against its ceiling plus tolerance.

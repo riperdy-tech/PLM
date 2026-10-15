@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain.enums import ExperimentStatus, ExperimentType, FactorDesign
 from ..domain.experiment import Experiment
-from ..domain.package import ContentPackage
+from ..domain.package import ContentPackage, TrackSpec
 from ..validation.engine import ValidationReport
 
 
@@ -54,9 +54,11 @@ class MaterializePackageRequest(BaseModel):
     treatment_id: str
     brand_id: str = "neon_seoul"
     budget_envelope: float | None = Field(default=None, gt=0.0)
-    """May lower the directive's ``budget_limit``, never raise it; omitted means the limit."""
-    track_count: int = Field(default=5, ge=1)
-    total_duration_minutes: int = Field(default=60, ge=1)
+    """May lower the directive's ``budget_limit``, never raise it; omitted means the limit.
+
+    There is no track count or duration here: the playlist range is the genome's declared
+    ``playlist_duration`` (the directive's ``duration_bucket``), and the track count is
+    planned from it (R5)."""
 
 
 class MaterializePackageResponse(BaseModel):
@@ -65,6 +67,34 @@ class MaterializePackageResponse(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     package: ContentPackage
+
+
+class ExtendPackageRequest(BaseModel):
+    """Add ``count`` more track specs to a package (a top-up after ``playlist_supply_short``).
+
+    ``idempotency_key`` names this top-up: replaying it returns the same specs, and the
+    same key with another ``count`` is refused (``idempotency_key_reused``).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    count: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+
+
+class ExtendPackageResponse(BaseModel):
+    """The specs this top-up added, and the package's extension headroom now."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    package_id: str
+    extension_id: str
+    idempotency_key: str
+    track_specs: tuple[TrackSpec, ...]
+    extension_track_count: int
+    """Specs added by every top-up of this package so far."""
+    max_extension_track_count: int
+    remaining_extension_track_count: int
 
 
 class ListExperimentsResponse(BaseModel):

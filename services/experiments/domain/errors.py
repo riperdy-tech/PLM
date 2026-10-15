@@ -15,6 +15,7 @@ __all__ = [
     "ExperimentStateError",
     "GenomeBuildError",
     "LegacyExperimentError",
+    "LegacyPackageError",
     "P3RefusalError",
 ]
 
@@ -45,3 +46,7 @@ class ExperimentStateError(P3RefusalError):
 
 class LegacyExperimentError(P3RefusalError):
     """A stored experiment predates the measurement plan / budget record and is refused."""
+
+
+class LegacyPackageError(P3RefusalError):
+    """A stored package predates the declared playlist range (0034) and is refused."""

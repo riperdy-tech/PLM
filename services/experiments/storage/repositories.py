@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -16,7 +18,7 @@ from ..domain.enums import (
     PackageStatus,
     VariableClass,
 )
-from ..domain.errors import LegacyExperimentError
+from ..domain.errors import LegacyExperimentError, LegacyPackageError
 from ..domain.experiment import (
     Experiment,
     ExperimentVariable,
@@ -28,6 +30,7 @@ from ..domain.genome import ConstraintEnvelope, ContentGenome
 from ..domain.measurement import MeasurementPlan
 from ..domain.package import (
     ContentPackage,
+    PackageExtension,
     PlaylistSpec,
     ThumbnailSpec,
     TitleSpec,
@@ -43,6 +46,7 @@ from .models import (
     experiment_variables_table,
     experiment_versions_table,
     experiments_table,
+    package_extensions_table,
     playlist_specs_table,
     thumbnail_specs_table,
     title_specs_table,
@@ -323,35 +327,28 @@ def insert_content_package(session: Session, package: ContentPackage) -> None:
     )
 
     # Track specs
-    for trk in package.track_specs:
-        spec_content = trk.to_wire()
-        session.execute(
-            sa.insert(track_specs_table).values(
-                track_spec_id=trk.track_spec_id,
-                package_id=package.package_id,
-                playlist_spec_id=trk.playlist_spec_id,
-                experiment_id=trk.lineage.experiment_id,
-                content_arm_id=trk.lineage.content_arm_id,
-                brand_profile_id=trk.brand_profile_id,
-                track_role=trk.track_role.value,
-                requested_duration=trk.requested_duration,
-                candidate_target=trk.candidate_target,
-                priority=trk.priority,
-                budget_limit=trk.budget_limit,
-                spec_json=json.dumps(spec_content, sort_keys=True),
-            )
-        )
+    _insert_track_specs(session, package.package_id, package.track_specs, first_index=0,
+                        extension_id=None)
 
     # Playlist spec
+    ply = package.playlist_spec
     session.execute(
         sa.insert(playlist_specs_table).values(
-            playlist_spec_id=package.playlist_spec.playlist_spec_id,
+            playlist_spec_id=ply.playlist_spec_id,
             package_id=package.package_id,
-            experiment_id=package.playlist_spec.experiment_id,
-            brand_id=package.playlist_spec.brand_id,
-            track_count_target=package.playlist_spec.track_count_target,
-            total_duration_minutes=package.playlist_spec.total_duration_minutes,
-            sequencing_profile=package.playlist_spec.sequencing_profile,
+            experiment_id=ply.experiment_id,
+            brand_id=ply.brand_id,
+            track_count_target=ply.track_count_target,
+            sequencing_profile=ply.sequencing_profile,
+            duration_min_seconds=ply.duration_range_seconds.min_seconds,
+            duration_max_seconds=ply.duration_range_seconds.max_seconds,
+            target_duration_seconds=ply.target_duration_seconds,
+            planned_track_duration_seconds=ply.planned_track_duration_seconds,
+            base_track_count=ply.base_track_count,
+            spare_track_count=ply.spare_track_count,
+            max_extension_track_count=ply.max_extension_track_count,
+            spare_ratio=str(ply.spare_ratio),
+            supply_policy_version=ply.supply_policy_version,
         )
     )
 
@@ -393,33 +390,157 @@ def insert_content_package(session: Session, package: ContentPackage) -> None:
     )
 
 
+def _insert_track_specs(
+    session: Session,
+    package_id: str,
+    specs: tuple[TrackSpec, ...],
+    *,
+    first_index: int,
+    extension_id: str | None,
+) -> None:
+    for offset, trk in enumerate(specs):
+        session.execute(
+            sa.insert(track_specs_table).values(
+                track_spec_id=trk.track_spec_id,
+                package_id=package_id,
+                playlist_spec_id=trk.playlist_spec_id,
+                experiment_id=trk.lineage.experiment_id,
+                content_arm_id=trk.lineage.content_arm_id,
+                brand_profile_id=trk.brand_profile_id,
+                track_role=trk.track_role.value,
+                requested_duration=trk.requested_duration,
+                candidate_target=trk.candidate_target,
+                priority=trk.priority,
+                budget_limit=trk.budget_limit,
+                spec_json=json.dumps(trk.to_wire(), sort_keys=True),
+                spec_index=first_index + offset,
+                extension_id=extension_id,
+            )
+        )
+
+
+_PLAYLIST_RANGE_COLUMNS: tuple[str, ...] = (
+    "duration_min_seconds", "duration_max_seconds", "target_duration_seconds",
+    "planned_track_duration_seconds", "base_track_count", "spare_track_count",
+    "max_extension_track_count", "spare_ratio", "supply_policy_version",
+)
+
+
+def _playlist_spec(row: Any, package_id: str) -> PlaylistSpec:
+    missing = [c for c in _PLAYLIST_RANGE_COLUMNS if row[c] is None]
+    if missing:
+        raise LegacyPackageError(
+            "legacy_package_without_duration_range",
+            f"package {package_id} predates the declared playlist range (migration 0034); "
+            "re-materialize it",
+            field_paths=[f"playlist_spec.{c}" for c in missing],
+        )
+    return PlaylistSpec(
+        playlist_spec_id=row["playlist_spec_id"],
+        experiment_id=row["experiment_id"],
+        brand_id=row["brand_id"],
+        duration_range_seconds=DurationRangeSeconds(
+            min_seconds=row["duration_min_seconds"], max_seconds=row["duration_max_seconds"]
+        ),
+        target_duration_seconds=row["target_duration_seconds"],
+        planned_track_duration_seconds=row["planned_track_duration_seconds"],
+        base_track_count=row["base_track_count"],
+        spare_track_count=row["spare_track_count"],
+        track_count_target=row["track_count_target"],
+        max_extension_track_count=row["max_extension_track_count"],
+        spare_ratio=Decimal(row["spare_ratio"]),
+        supply_policy_version=row["supply_policy_version"],
+        sequencing_profile=row["sequencing_profile"],
+    )
+
+
+def _extension(row: Any) -> PackageExtension:
+    return PackageExtension(
+        extension_id=row["extension_id"],
+        package_id=row["package_id"],
+        idempotency_key=row["idempotency_key"],
+        track_count=row["track_count"],
+        track_spec_ids=tuple(json.loads(row["track_spec_ids_json"])),
+        created_at=row["created_at"],
+    )
+
+
+def lock_content_package(session: Session, package_id: str) -> None:
+    """Row-lock a package for the rest of the transaction (top-ups count against a bound)."""
+    session.execute(
+        sa.select(content_packages_table.c.package_id)
+        .where(content_packages_table.c.package_id == package_id)
+        .with_for_update()
+    )
+
+
+def get_package_extension(
+    session: Session, package_id: str, idempotency_key: str
+) -> PackageExtension | None:
+    """The top-up a package recorded under ``idempotency_key``, if any."""
+    row = session.execute(
+        sa.select(package_extensions_table).where(
+            package_extensions_table.c.package_id == package_id,
+            package_extensions_table.c.idempotency_key == idempotency_key,
+        )
+    ).mappings().one_or_none()
+    return None if row is None else _extension(row)
+
+
+def insert_package_extension(
+    session: Session,
+    extension: PackageExtension,
+    specs: tuple[TrackSpec, ...],
+    *,
+    first_index: int,
+) -> None:
+    """Record a top-up and its specs (package positions from ``first_index``)."""
+    session.execute(
+        sa.insert(package_extensions_table).values(
+            extension_id=extension.extension_id,
+            package_id=extension.package_id,
+            idempotency_key=extension.idempotency_key,
+            track_count=extension.track_count,
+            track_spec_ids_json=json.dumps(list(extension.track_spec_ids)),
+            created_at=extension.created_at,
+        )
+    )
+    _insert_track_specs(session, extension.package_id, specs, first_index=first_index,
+                        extension_id=extension.extension_id)
+
+
 def get_content_package(session: Session, package_id: str) -> ContentPackage | None:
-    """Load a ContentPackage and its full component specs from database."""
+    """Load a ContentPackage and its full component specs from database.
+
+    Track specs come in package order (planned specs, then each top-up). A package
+    stored before the declared playlist range is refused (``LegacyPackageError``).
+    """
     pkg_row = session.execute(
         sa.select(content_packages_table).where(content_packages_table.c.package_id == package_id)
     ).mappings().one_or_none()
     if pkg_row is None:
         return None
 
-    # Track specs
-    trk_rows = session.execute(
-        sa.select(track_specs_table).where(track_specs_table.c.package_id == package_id)
-    ).mappings().all()
-    # spec_json holds the full C3 wire the producer emitted; read it back verbatim.
-    track_specs = tuple(TrackSpec.model_validate(json.loads(t["spec_json"])) for t in trk_rows)
-
     # Playlist spec
     ply_row = session.execute(
         sa.select(playlist_specs_table).where(playlist_specs_table.c.package_id == package_id)
     ).mappings().one()
-    ply = PlaylistSpec(
-        playlist_spec_id=ply_row["playlist_spec_id"],
-        experiment_id=ply_row["experiment_id"],
-        brand_id=ply_row["brand_id"],
-        track_count_target=ply_row["track_count_target"],
-        total_duration_minutes=ply_row["total_duration_minutes"],
-        sequencing_profile=ply_row["sequencing_profile"],
-    )
+    ply = _playlist_spec(ply_row, package_id)
+
+    # Track specs
+    trk_rows = session.execute(
+        sa.select(track_specs_table)
+        .where(track_specs_table.c.package_id == package_id)
+        .order_by(track_specs_table.c.spec_index, track_specs_table.c.track_spec_id)
+    ).mappings().all()
+    # spec_json holds the full C3 wire the producer emitted; read it back verbatim.
+    track_specs = tuple(TrackSpec.model_validate(json.loads(t["spec_json"])) for t in trk_rows)
+
+    ext_rows = session.execute(
+        sa.select(package_extensions_table)
+        .where(package_extensions_table.c.package_id == package_id)
+        .order_by(package_extensions_table.c.created_at, package_extensions_table.c.extension_id)
+    ).mappings().all()
 
     # Visual spec
     vis_row = session.execute(
@@ -472,6 +593,7 @@ def get_content_package(session: Session, package_id: str) -> ContentPackage | N
         package_hash=pkg_row["package_hash"],
         budget_envelope=pkg_row["budget_envelope"],
         created_at=pkg_row["created_at"],
+        extensions=tuple(_extension(row) for row in ext_rows),
     )
 
 

@@ -444,7 +444,8 @@ P5 §138's minimum P6 view: `candidate_id`, `artifact_id`, `track_spec_id`,
 `release_manifest_id`, `experiment_id`, `content_arm_id`, `brand_id`,
 `tracks[]` (`song_id`, `artifact_id`, `title`, `duration_seconds`, `audio_uri`,
 `audio_checksum`, `provenance_status`, `release_constraints`),
-`required_duration_minutes`, `presentation_profile`, `visual_profile`,
+`duration_range_seconds` (ADR-0036; was `required_duration_minutes`),
+`presentation_profile`, `visual_profile`,
 `thumbnail_profile`, `metadata_profile`,
 `policy_flags` (`ai_disclosure_required`).
 
@@ -458,7 +459,11 @@ assembling the playlist-level manifest; vocabulary drifted (`cleared` vs `PASSED
 - P5 stays per-candidate and gains a stable `p5_manifest_id` (R7).
 - **P6 assembles** the playlist-level manifest: it reads P3's `playlist_spec`
   and `brand_profiles` (P3 §19/§26 — P3 references the brand as
-  `brand_profile_id`); `required_duration_minutes` comes from the playlist spec.
+  `brand_profile_id`); the playlist length is the playlist spec's declared
+  `duration_range_seconds {min_seconds, max_seconds}` (ADR-0036, owner decision
+  2026-10-15: a range, not an exact length), which P6 enforces with no tolerance of its
+  own; too little cleared supply is refused as `playlist_supply_short` with
+  `missing_seconds`.
 - The four `*_profile` versions come from P3's brand/spec tables, **not** from
   P5. P6 §4 is amended accordingly.
 - Dispositions: P6 accepts only `PASSED` / `PASSED_WITH_WARNINGS`; it rejects

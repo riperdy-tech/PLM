@@ -87,8 +87,6 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
             created_at=now,
             brand_id=brand,
             budget_envelope=50.0,
-            track_count=3,
-            total_duration_minutes=45,
         )
         repositories.insert_content_package(session, pkg)
         repositories.update_experiment_status(

@@ -18,6 +18,7 @@ import wave
 import numpy as np
 from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
@@ -123,7 +124,9 @@ def run_smoke_test(*, store: ArtifactStore | None = None,
         res = assemble_media_package(
             track_manifests=track_manifests,
             brand_profile=BrandProfile(brand_id="brand_smoke", brand_name="PLM Smoke"),
-            required_duration_seconds=3 * _TRACK_SECONDS - 4.0,
+            # Three 12 s tracks with two 2 s crossfades give 32 s: a range that only all
+            # three together reach.
+            duration_range=DurationRangeSeconds(min_seconds=30, max_seconds=34),
             visual_profile="smoke_waveform_v1",
             playlist_concept="Smoke Test Session",
             store=active_store,

@@ -1,4 +1,21 @@
-"""Durable music generation engine coordinating attempts, variants, and candidates (§4.4, §65, §111)."""
+"""Durable music generation engine coordinating attempts, variants, and candidates (§4.4, §65, §111).
+
+**Paid calls go through the write guard (R5).** Every provider ``generate`` call is an
+external write: before it, :meth:`ExternalWriteGuard.authorize_external_write` decides it
+under capability ``music.generate`` with the attempt id as the idempotency key and no
+caller price (the ledger's rate card prices it, or refuses it as unpriced). Only
+``SIMULATE`` (a ``ProviderMode.MOCK`` provider, no budget needed) and ``EXECUTE`` (live,
+authorized, budget reserved) call the provider. Anything else stops the plan before the
+call, with the guard's reason code in :attr:`GenerationEngineResult.stopped_reason`. After
+an ``EXECUTE`` call the reservation is settled: committed at the reserved estimate when
+the provider accepted a job (it reports credits, not money), released when it refused
+before creating one. A call that raises is left reserved: its outcome is unknown, so the
+headroom stays held until an operator reconciles it.
+
+**Re-execution is resumable.** Running a plan again never pays twice for a variant that
+already succeeded: its stored candidate is reused, attempt numbering continues after the
+stored attempts, and the plan's attempt budget counts them.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +25,7 @@ from typing import Any
 
 from plm_platform.clock import Clock, stable_seed
 from plm_platform.exceptions import ExceptionQueue
+from plm_platform.execution import ExternalWriteGuard, GuardDecision, provider_mode_of
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -45,11 +63,16 @@ from ..storage.repositories import (
     insert_generation_attempt,
     insert_generation_plan,
     insert_rights_snapshot,
+    list_candidates_by_track,
+    list_generation_attempts,
     update_plan_status,
 )
 from .prompts import ProtectedArtistPromptRefused, build_generation_prompt
 
-__all__ = ["GenerationEngine", "GenerationEngineResult"]
+__all__ = ["GENERATE_CAPABILITY", "GenerationEngine", "GenerationEngineResult"]
+
+GENERATE_CAPABILITY = "music.generate"
+"""The write-guard capability of one paid provider generation call."""
 
 
 @dataclass
@@ -63,6 +86,11 @@ class GenerationEngineResult:
     artifacts: list[AudioArtifact] = field(default_factory=list)
     rights_snapshots: list[RightsSnapshot] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    stopped_reason: str | None = None
+    """The write guard's reason code when it stopped the plan before a provider call."""
+    stopped_decision: GuardDecision | None = None
+    write_decisions: list[GuardDecision] = field(default_factory=list)
+    """Every write-guard decision this run made, one per provider call considered."""
 
 
 class GenerationEngine:
@@ -74,12 +102,16 @@ class GenerationEngine:
         clock: Clock,
         storage: ArtifactStorageProtocol,
         default_provider_id: str = "mock",
+        write_guard: ExternalWriteGuard | None = None,
     ) -> None:
         # ``storage`` is required (R4): an engine never invents a default store, so a
         # configured service cannot silently keep artifacts in memory.
         self.clock = clock
         self.storage = storage
         self.default_provider_id = default_provider_id
+        # Without a configured guard every capability is DRY_RUN with no budget: a mock
+        # provider simulates; a real one is never called.
+        self.write_guard = write_guard or ExternalWriteGuard()
 
     def _refused(
         self,
@@ -142,13 +174,33 @@ class GenerationEngine:
         artifacts: list[AudioArtifact] = []
         rights_snapshots: list[RightsSnapshot] = []
         errors: list[str] = []
+        stopped: GuardDecision | None = None
+        decisions: list[GuardDecision] = []
 
-        total_attempts = 0
+        # Resume: what a previous run of this plan already did is kept, never redone.
+        stored_attempts = list_generation_attempts(session, plan.plan_id)
+        stored_candidates = {
+            c.source_attempt_id: c
+            for c in list_candidates_by_track(session, plan.track_spec_id)
+            if c.generation_plan_id == plan.plan_id
+        }
+        total_attempts = len(stored_attempts)
         candidate_count = 0
 
         for var_idx, variant in enumerate(variants):
-            if candidate_count >= plan.candidate_target:
+            if candidate_count >= plan.candidate_target or stopped is not None:
                 break
+            earlier = sorted(
+                (a for a in stored_attempts if a.creative_variant_id == variant.variant_id),
+                key=lambda a: (a.started_at, a.attempt_id),
+            )
+            done = next((stored_candidates[a.attempt_id] for a in earlier
+                         if a.status == AttemptStatus.SUCCEEDED
+                         and a.attempt_id in stored_candidates), None)
+            if done is not None:
+                candidates.append(done)
+                candidate_count += 1
+                continue
 
             try:
                 prompt_obj = build_generation_prompt(spec, variant_delta=variant.prompt_delta)
@@ -156,8 +208,8 @@ class GenerationEngine:
                 return self._refused(session, plan, refusal, attempts=attempts,
                                      candidates=candidates, artifacts=artifacts,
                                      rights_snapshots=rights_snapshots, errors=errors)
-            retry_count = 0
-            transport_parent: str | None = None
+            retry_count = len(earlier)
+            transport_parent: str | None = earlier[-1].attempt_id if earlier else None
             base_seed = stable_seed("p4.generation", spec.track_spec_id, variant.variant_code)
 
             while retry_count <= max_retries_per_variant and total_attempts < plan.max_attempts:
@@ -205,7 +257,28 @@ class GenerationEngine:
                     model_id=adapter.model_id,
                 )
 
+                decision = self.write_guard.authorize_external_write(
+                    GENERATE_CAPABILITY,
+                    provider_mode=provider_mode_of(adapter),
+                    idempotency_key=att_id,
+                    cost_estimate=None,  # credits are not money: the ledger's rate card prices it
+                    now=self.clock.now(),
+                )
+                decisions.append(decision)
+                if not decision.decision.may_call_provider:
+                    stopped = decision
+                    errors.append(
+                        f"{GENERATE_CAPABILITY} not performed for {att_id}: "
+                        f"{decision.decision.value} ({decision.reason})"
+                    )
+                    break
+                # A raise here leaves an EXECUTE reservation held (outcome unknown).
                 gen_res = adapter.generate(gen_req)
+                accepted = gen_res.status == AttemptStatus.SUCCEEDED or bool(gen_res.provider_job_id)
+                self.write_guard.settle_external_write(
+                    decision, performed=accepted, actual_cost=None,
+                    reason="provider_refused_before_job",
+                )
 
                 if gen_res.status == AttemptStatus.SUCCEEDED and gen_res.audio_data:
                     # Mark succeeded attempt
@@ -335,11 +408,11 @@ class GenerationEngine:
                     transport_parent = attempt.attempt_id
                     retry_count += 1
 
-        final_status = (
-            PlanStatus.COMPLETED
-            if candidate_count >= plan.candidate_target
-            else (PlanStatus.COMPLETED if candidate_count > 0 else PlanStatus.FAILED)
-        )
+        if stopped is not None:
+            # The guard stopped the plan before a provider call: it did not complete.
+            final_status = PlanStatus.FAILED
+        else:
+            final_status = PlanStatus.COMPLETED if candidate_count > 0 else PlanStatus.FAILED
         update_plan_status(session, plan.plan_id, final_status, finished_at=self.clock.now())
         session.flush()
 
@@ -351,4 +424,7 @@ class GenerationEngine:
             artifacts=artifacts,
             rights_snapshots=rights_snapshots,
             errors=errors,
+            stopped_reason=None if stopped is None else stopped.reason,
+            stopped_decision=stopped,
+            write_decisions=decisions,
         )

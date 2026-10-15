@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
+from plm_platform.idempotency import idempotency_table
 
 MUSIC_METADATA = sa.MetaData(schema="music")
 
@@ -171,3 +172,6 @@ provider_cost_records_table = sa.Table(
     sa.Column("pricing_version", sa.String(64), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
+
+# HTTP Idempotency-Key records for plan / execute / export (R5, plm_platform.idempotency)
+idempotency_records_table = idempotency_table(MUSIC_METADATA, "music")

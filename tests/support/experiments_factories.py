@@ -7,14 +7,16 @@ inputs, not defaults the runtime would ever fill in.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from plm_contracts import ObservationWindow
+from plm_contracts.seams.c3 import DurationRangeSeconds
 
 from services.experiments.domain.experiment import RandomizationRecord
 from services.experiments.domain.measurement import build_default_measurement_plan
 
-__all__ = ["design_facts"]
+__all__ = ["design_facts", "playlist_spec_fields"]
 
 
 def design_facts(
@@ -30,4 +32,37 @@ def design_facts(
         ),
         "budget_limit": budget_limit,
         "randomization": RandomizationRecord(seed=0, algorithm="test-fixture", version="test"),
+    }
+
+
+def playlist_spec_fields(
+    *,
+    playlist_spec_id: str = "ply_01",
+    experiment_id: str = "exp_01",
+    brand_id: str = "brand_lofi",
+    min_seconds: int = 2700,
+    max_seconds: int = 4500,
+    planned_track_duration_seconds: int = 180,
+    base_track_count: int = 15,
+    spare_track_count: int = 4,
+    max_extension_track_count: int = 10,
+    sequencing_profile: str = "progressive_arc",
+) -> dict[str, Any]:
+    """Explicit playlist-spec facts for hand-built packages (45–75 min, 3-min tracks)."""
+    return {
+        "playlist_spec_id": playlist_spec_id,
+        "experiment_id": experiment_id,
+        "brand_id": brand_id,
+        "duration_range_seconds": DurationRangeSeconds(
+            min_seconds=min_seconds, max_seconds=max_seconds
+        ),
+        "target_duration_seconds": round((min_seconds + max_seconds) / 2),
+        "planned_track_duration_seconds": planned_track_duration_seconds,
+        "base_track_count": base_track_count,
+        "spare_track_count": spare_track_count,
+        "track_count_target": base_track_count + spare_track_count,
+        "max_extension_track_count": max_extension_track_count,
+        "spare_ratio": Decimal("0.25"),
+        "supply_policy_version": "test-supply",
+        "sequencing_profile": sequencing_profile,
     }

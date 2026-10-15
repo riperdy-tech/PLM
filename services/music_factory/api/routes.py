@@ -1,14 +1,30 @@
 """API endpoints for Music Generation Factory service (§4.5, §67, §68, R6).
 
 No future annotations here so FastAPI can eagerly evaluate closure dependencies.
+
+Mutating routes (plan, execute, export) honour the ``Idempotency-Key`` header
+(:mod:`plm_platform.idempotency`): the same key and request replays the stored answer;
+the same key with a different request is a 409 ``idempotency_key_reused``. Execute calls
+paid providers only through the write guard (R5): a guard refusal answers 409 in the
+platform convention, ``external_write_<decision>`` / ``"music.generate not performed:
+<reason>"``, with the guard's ``reason`` and the receipts.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
+from plm_platform.execution import ExternalWriteGuard
+from plm_platform.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    IdempotencyKeyInvalidError,
+    IdempotencyKeyReusedError,
+    IdempotencyStore,
+    jsonable,
+)
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -22,12 +38,13 @@ from ..candidates.bank import (
 )
 from ..config import MusicFactorySettings
 from ..domain.enums import CandidateStatus
-from ..generation.engine import GenerationEngine
+from ..generation.engine import GENERATE_CAPABILITY, GenerationEngine
 from ..generation.planner import plan_generation
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
 from ..providers.registry import list_providers
 from ..storage.artifacts import ArtifactStorageProtocol, ArtifactStorageUnavailable
+from ..storage.models import idempotency_records_table
 from ..storage.repositories import (
     get_candidate,
     get_generation_plan,
@@ -41,6 +58,10 @@ from .service_token import require_service_token
 
 __all__ = ["build_router"]
 
+IdempotencyKeyHeader = Annotated[str | None, Header(alias=IDEMPOTENCY_KEY_HEADER)]
+
+_IDEMPOTENCY = IdempotencyStore(idempotency_records_table)
+
 
 class RejectCandidateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -53,23 +74,61 @@ def build_router(
     settings: MusicFactorySettings,
     clock: Clock | None = None,
     storage: ArtifactStorageProtocol | None = None,
+    write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     """Build the Music Factory router with fail-closed dependencies.
 
     ``storage`` is where generated audio is written; ``None`` means no store is
     configured and generation answers 503 rather than keeping audio anywhere else.
+    ``write_guard`` decides every paid provider call; without one, every capability is
+    dry-run with no budget, so only a mock provider is ever called.
     """
     router = APIRouter(prefix="/music", tags=["music"])
     service_clock: Clock = clock or SystemClock()
+    guard = write_guard or ExternalWriteGuard()
     auth_dep = require_service_token(settings.platform)
 
-    def _require_session() -> Session:
+    def _require_session() -> Iterator[Session]:
         if session_factory is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Database session factory not configured for music factory",
             )
-        return session_factory()
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    def _idempotent(
+        session: Session,
+        request: Request,
+        key: str | None,
+        body: Any,
+        operation: Callable[[], tuple[int, Any]],
+    ) -> JSONResponse:
+        try:
+            stored = _IDEMPOTENCY.run(
+                session, key, method=request.method, path=request.url.path, body=body,
+                now=service_clock.now, operation=operation,
+            )
+        except IdempotencyKeyReusedError as err:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(code=err.code, field_paths=[IDEMPOTENCY_KEY_HEADER],
+                                  message=str(err)).model_dump(),
+            ) from err
+        except IdempotencyKeyInvalidError as err:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ErrorShape(code=err.code, field_paths=[IDEMPOTENCY_KEY_HEADER],
+                                  message=str(err)).model_dump(),
+            ) from err
+        except Exception:
+            session.rollback()
+            raise
+        return JSONResponse(status_code=stored.status_code, content=stored.body)
 
     # Public health check
     @router.get("/health")
@@ -92,44 +151,58 @@ def build_router(
     @router.post("/plans", dependencies=[Depends(auth_dep)])
     def create_plan_endpoint(
         payload: dict[str, Any],
+        request: Request,
         session: Annotated[Session, Depends(_require_session)],
-    ) -> dict[str, Any]:
+        idempotency_key: IdempotencyKeyHeader = None,
+    ) -> JSONResponse:
         """Create a generation plan from an adapted P3 TrackSpec."""
-        try:
-            spec = adapt_track_spec(payload)
-        except TrackSpecValidationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=exc.error.model_dump(),
-            ) from exc
 
-        plan, variants = plan_generation(spec, created_at=service_clock.now())
-        from ..storage.repositories import insert_creative_variant, insert_generation_plan
+        def operation() -> tuple[int, Any]:
+            try:
+                spec = adapt_track_spec(payload)
+            except TrackSpecValidationError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=exc.error.model_dump(),
+                ) from exc
 
-        try:
+            plan, variants = plan_generation(spec, created_at=service_clock.now())
+            from ..storage.repositories import insert_creative_variant, insert_generation_plan
+
             insert_generation_plan(session, plan)
             for v in variants:
                 insert_creative_variant(session, v)
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
+            return 200, jsonable({
+                "plan_id": plan.plan_id,
+                "status": plan.status.value,
+                "candidate_target": plan.candidate_target,
+                "max_attempts": plan.max_attempts,
+                "variants": [v.model_dump(mode="json") for v in variants],
+            })
 
-        return {
-            "plan_id": plan.plan_id,
-            "status": plan.status.value,
-            "candidate_target": plan.candidate_target,
-            "max_attempts": plan.max_attempts,
-            "variants": [v.model_dump(mode="json") for v in variants],
-        }
+        return _idempotent(session, request, idempotency_key, payload, operation)
 
     @router.post("/plans/{plan_id}/execute", dependencies=[Depends(auth_dep)])
     def execute_plan_endpoint(
         plan_id: str,
         spec_payload: dict[str, Any],
+        request: Request,
         session: Annotated[Session, Depends(_require_session)],
-    ) -> dict[str, Any]:
-        """Execute a planned generation run."""
+        idempotency_key: IdempotencyKeyHeader = None,
+    ) -> JSONResponse:
+        """Execute a planned generation run.
+
+        Every provider call is authorized by the write guard (``music.generate``, key =
+        attempt id, budget from the ledger). A refusal stops the plan before the call:
+        409 ``external_write_<decision>`` with ``detail.reason`` (the guard's code,
+        e.g. ``budget_ledger_unavailable``, ``no_authorization``, ``policy_dry_run``,
+        ``exhausted``); work done before the stop is kept, and re-executing resumes.
+        """
+        return _idempotent(session, request, idempotency_key, spec_payload,
+                           lambda: _execute(plan_id, spec_payload, session))
+
+    def _execute(plan_id: str, spec_payload: dict[str, Any],
+                 session: Session) -> tuple[int, Any]:
         plan = get_generation_plan(session, plan_id)
         if plan is None:
             raise HTTPException(
@@ -156,7 +229,8 @@ def build_router(
             )
         variants = list_creative_variants(session, plan_id)
         engine = GenerationEngine(
-            clock=service_clock, storage=storage, default_provider_id=settings.default_provider
+            clock=service_clock, storage=storage, default_provider_id=settings.default_provider,
+            write_guard=guard,
         )
 
         try:
@@ -183,15 +257,40 @@ def build_router(
                 credits=attempt.actual_credits,
             )
 
-        session.commit()
+        external_writes = [
+            {"capability": d.capability, "idempotency_key": d.idempotency_key,
+             "decision": d.decision.value, "reason": d.reason,
+             "provider_mode": d.provider_mode.value, "policy": d.policy.value}
+            for d in result.write_decisions
+        ]
+        if result.stopped_decision is not None:
+            decision = result.stopped_decision
+            # Returned, not raised: provider calls made before the stop are kept.
+            return status.HTTP_409_CONFLICT, jsonable({"detail": {
+                # The platform's external-write refusal convention, shared with P7 and
+                # P8: code external_write_<decision>, message "<capability> not
+                # performed: <reason>" (the pipeline maps the reason to its hold).
+                **ErrorShape(
+                    code=f"external_write_{decision.decision.value}",
+                    field_paths=[GENERATE_CAPABILITY],
+                    message=f"{GENERATE_CAPABILITY} not performed: {decision.reason}",
+                ).model_dump(),
+                "reason": decision.reason,
+                "decision": decision.decision.value,
+                "plan_id": plan_id,
+                "attempt_id": decision.idempotency_key,
+                "candidates": [c.candidate_id for c in result.candidates],
+                "external_writes": external_writes,
+            }})
 
-        return {
+        return 200, jsonable({
             "plan_id": result.plan_id,
             "status": result.status.value,
             "candidates": [c.model_dump(mode="json") for c in result.candidates],
             "attempts_count": len(result.attempts),
             "errors": result.errors,
-        }
+            "external_writes": external_writes,
+        })
 
     @router.get("/plans/{plan_id}", dependencies=[Depends(auth_dep)])
     def get_plan_endpoint(
@@ -346,8 +445,14 @@ def build_router(
     @router.post("/candidates/{candidate_id}/export-to-p5", dependencies=[Depends(auth_dep)])
     def export_candidate_endpoint(
         candidate_id: str,
+        request: Request,
         session: Annotated[Session, Depends(_require_session)],
-    ) -> dict[str, Any]:
+        idempotency_key: IdempotencyKeyHeader = None,
+    ) -> JSONResponse:
+        return _idempotent(session, request, idempotency_key, None,
+                           lambda: _export(candidate_id, session))
+
+    def _export(candidate_id: str, session: Session) -> tuple[int, Any]:
         """Export a candidate to the P5 gate as a Seam C4 event (ADR-0027).
 
         The event is built from stored facts first; a candidate with any missing fact is
@@ -367,13 +472,13 @@ def build_router(
             raise HTTPException(status_code=code, detail=exc.error.model_dump()) from exc
         current = get_candidate(session, candidate_id)
         if current is not None and current.status == CandidateStatus.EXPORTED_TO_P5:
-            return {"candidate": current.model_dump(mode="json"), "event": event.to_wire()}
+            return 200, jsonable(
+                {"candidate": current.model_dump(mode="json"), "event": event.to_wire()})
         try:
             cand = mark_candidate_exported_to_p5(session, candidate_id, now=service_clock.now())
         except InvalidCandidateTransitionError as exc:
             session.rollback()
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        session.commit()
-        return {"candidate": cand.model_dump(mode="json"), "event": event.to_wire()}
+        return 200, jsonable({"candidate": cand.model_dump(mode="json"), "event": event.to_wire()})
 
     return router

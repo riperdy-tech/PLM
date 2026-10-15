@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from plm_platform.idempotency import idempotency_table
 from sqlalchemy import (
     Column,
     DateTime,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 
 SCHEMA = "experiments"
@@ -166,6 +168,10 @@ track_specs_table = Table(
     Column("priority", Integer, nullable=False),
     Column("budget_limit", Float, nullable=False),
     Column("spec_json", Text, nullable=False),
+    # 0034 (R5): position in the package, and the top-up that added the spec (NULL for a
+    # spec planned at materialization). NULL spec_index only on rows that predate 0034.
+    Column("spec_index", Integer, nullable=True),
+    Column("extension_id", String(64), nullable=True, index=True),
 )
 
 # 9. Playlist Specs Table (§59)
@@ -183,8 +189,38 @@ playlist_specs_table = Table(
     Column("experiment_id", String(64), nullable=False),
     Column("brand_id", String(64), nullable=False),
     Column("track_count_target", Integer, nullable=False),
-    Column("total_duration_minutes", Integer, nullable=False),
     Column("sequencing_profile", String(64), nullable=False),
+    # 0034 (R5, owner decision 2026-10-15): the declared playlist range and the supply
+    # planned for it. Nullable only because rows from before 0034 lack them; such a
+    # package is refused on load, never given a range.
+    Column("duration_min_seconds", Integer, nullable=True),
+    Column("duration_max_seconds", Integer, nullable=True),
+    Column("target_duration_seconds", Integer, nullable=True),
+    Column("planned_track_duration_seconds", Integer, nullable=True),
+    Column("base_track_count", Integer, nullable=True),
+    Column("spare_track_count", Integer, nullable=True),
+    Column("max_extension_track_count", Integer, nullable=True),
+    Column("spare_ratio", String(16), nullable=True),
+    Column("supply_policy_version", String(64), nullable=True),
+)
+
+# 9b. Package extensions (R5): top-ups added by POST /packages/{id}/extend
+package_extensions_table = Table(
+    "package_extensions",
+    EXPERIMENTS_METADATA,
+    Column("extension_id", String(64), primary_key=True),
+    Column(
+        "package_id",
+        String(64),
+        ForeignKey("experiments.content_packages.package_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("idempotency_key", String(255), nullable=False),
+    Column("track_count", Integer, nullable=False),
+    Column("track_spec_ids_json", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("package_id", "idempotency_key", name="uq_package_extensions_key"),
 )
 
 # 10. Visual Specs Table (§60)
@@ -253,6 +289,9 @@ experiment_events_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# HTTP Idempotency-Key records (R5, plm_platform.idempotency)
+idempotency_records_table = idempotency_table(EXPERIMENTS_METADATA, SCHEMA)
+
 EXPERIMENTS_TABLES = (
     experiments_table,
     experiment_versions_table,
@@ -263,8 +302,10 @@ EXPERIMENTS_TABLES = (
     content_packages_table,
     track_specs_table,
     playlist_specs_table,
+    package_extensions_table,
     visual_specs_table,
     thumbnail_specs_table,
     title_specs_table,
     experiment_events_table,
+    idempotency_records_table,
 )

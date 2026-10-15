@@ -63,7 +63,8 @@ def _client(backend: MediaBackend | None) -> TestClient:
 def _request(*candidate_ids: str, **overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "candidate_ids": list(candidate_ids), "brand_id": "brand_neon",
-        "required_duration_seconds": 176.0, "visual_profile": "brand_neon_rain_v1",
+        "duration_range_seconds": {"min_seconds": 170, "max_seconds": 180},
+        "visual_profile": "brand_neon_rain_v1",
         "playlist_concept": "Deep Focus", "render_profile": "preview_360p_v1",
     }
     body.update(overrides)
@@ -207,9 +208,10 @@ def test_unavailable_authorities_and_backend_are_503(cleared: Any) -> None:
 @pytest.mark.parametrize(("override", "code"), [
     ({"brand_id": "brand_unknown"}, "brand_profile_unknown"),
     ({"render_profile": "yt_8k_v9"}, "unknown_render_profile"),
-    ({"required_duration_seconds": 900.0}, "required_duration_unreachable"),
+    ({"duration_range_seconds": {"min_seconds": 900, "max_seconds": 1000}},
+     "playlist_supply_short"),
 ])
-def test_unknown_brand_profile_or_unreachable_duration_is_refused(
+def test_unknown_brand_profile_or_short_supply_is_refused(
         cleared: Any, override: dict[str, Any], code: str) -> None:
     store, manifests = cleared
     resp = _client(backend_for(store, manifests)).post(
@@ -228,3 +230,37 @@ def test_a_package_blocked_by_post_render_qa_is_reported(cleared: Any) -> None:
     assert resp.status_code == 200
     assert resp.json()["status"] == "failed"
     assert resp.json()["blocking_reason_codes"] == ["loudness_out_of_tolerance"]
+
+
+def test_short_supply_reports_the_missing_seconds_for_a_top_up(cleared: Any) -> None:
+    """Proves the API refusal carries ``detail.facts.missing_seconds``: three cleared
+    60 s tracks with 2 s crossfades give 176 s; a 45-75 min range is 2524 s short."""
+    store, manifests = cleared
+    resp = _client(backend_for(store, manifests)).post(
+        "/media/packages/assemble",
+        json=_request(*[m.candidate_id for m in manifests],
+                      duration_range_seconds={"min_seconds": 2700, "max_seconds": 4500}),
+        headers=HEADERS)
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail["code"] == "playlist_supply_short"
+    assert detail["facts"]["missing_seconds"] == 2700 - 176
+    assert detail["facts"]["available_seconds"] == 176.0
+
+
+@pytest.mark.parametrize("body_change", [
+    {"duration_range_seconds": None},
+    {"duration_range_seconds": {"min_seconds": 200, "max_seconds": 100}},
+    {"required_duration_seconds": 176.0},
+])
+def test_a_missing_or_invalid_range_is_refused(cleared: Any,
+                                               body_change: dict[str, Any]) -> None:
+    """Proves P6 has no duration of its own: no range (or the old exact duration, or an
+    inverted range) is refused before anything is fetched or rendered."""
+    store, manifests = cleared
+    body = _request(*[m.candidate_id for m in manifests])
+    del body["duration_range_seconds"]
+    body.update({k: v for k, v in body_change.items() if v is not None})
+    resp = _client(backend_for(store, manifests)).post(
+        "/media/packages/assemble", json=body, headers=HEADERS)
+    assert resp.status_code == 422
