@@ -1,5 +1,10 @@
+# Serves the PLM dashboard. Live data (database + phase APIs) by default; -Demo serves the
+# fixed demo sample instead. -ReviewersFile (or PLM_DASHBOARD_REVIEWERS_FILE) names the
+# JSON reviewer directory that authorizes exception actions; without it they are refused.
 param(
-    [int]$Port = 0
+    [int]$Port = 0,
+    [switch]$Demo,
+    [string]$ReviewersFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,9 +33,20 @@ if ($Port -eq 0) {
     }
 }
 
+$DashboardArgs = @("-m", "plm_platform.cli", "dashboard", "--port", "$Port")
+if ($Demo) {
+    $Banner = "  PLM Control Deck - DEMO DATA (not connected to the pipeline)"
+    $DashboardArgs += "--demo"
+} else {
+    $Banner = "  PLM Control Deck - LIVE DATA (database and phase APIs)"
+    if ($ReviewersFile -ne "") {
+        $DashboardArgs += @("--reviewers-file", $ReviewersFile)
+    }
+}
+
 Write-Host "==========================================================" -ForegroundColor Magenta
-Write-Host "  PLM Control Deck - DEMO DATA (not connected to the pipeline)" -ForegroundColor Cyan
+Write-Host $Banner -ForegroundColor Cyan
 Write-Host "  URL: http://127.0.0.1:$Port" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Magenta
 
-& $VenvPython -m plm_platform.cli dashboard --port $Port
+& $VenvPython @DashboardArgs

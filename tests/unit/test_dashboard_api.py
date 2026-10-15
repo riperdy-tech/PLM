@@ -1,8 +1,9 @@
-"""Unit tests for the dashboard FastAPI application and endpoints.
+"""Unit tests for the demo dashboard (``plm dashboard --demo``).
 
-The dashboard serves demo data, so the tests pin three properties beyond the routes
-answering: every payload and response is labelled ``demo``, mutating routes fail closed
-without the service token (R15), and cross-origin access is loopback-only.
+The demo app serves fixed sample data, so the tests pin three properties beyond the
+routes answering: every payload and response is labelled ``demo``, mutating routes fail
+closed without the service token (R15), and cross-origin access is loopback-only. The
+live dashboard is covered by ``test_dashboard_live.py`` and ``test_dashboard_exceptions.py``.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
-from plm_platform.dashboard import DATA_SOURCE, create_app
+from plm_platform.dashboard import DEMO_DATA_SOURCE as DATA_SOURCE
+from plm_platform.dashboard import create_demo_app
 from plm_platform.dashboard.app import DATA_SOURCE_HEADER
 
 TOKEN = "dashboard-test-token"
@@ -25,7 +27,7 @@ AUTH = {SERVICE_TOKEN_HEADER: TOKEN}
 
 def _client(*, with_token: bool = True) -> TestClient:
     platform = load_settings(env=PLATFORM_ENV, dotenv_path="does-not-exist.env")
-    return TestClient(create_app(platform=platform if with_token else None))
+    return TestClient(create_demo_app(platform=platform if with_token else None))
 
 
 def test_data_source_is_demo() -> None:

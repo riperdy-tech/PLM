@@ -1,9 +1,10 @@
-"""Demo data for the visual dashboard. Nothing here is read from the PLM pipeline.
+"""Demo data for the visual dashboard, served only behind ``--demo``.
 
-Every KPI, arm, candidate and release below is a fixed literal, and the audio is one
-synthesized loop. The API stamps every payload with :data:`DATA_SOURCE` so no consumer
-can mistake it for live data. Wiring the dashboard to the phase repositories is stage
-R5 of the remediation plan (docs/reviews/2026-10-13-system-review-and-remediation-plan.md).
+Nothing here is read from the PLM pipeline. Every KPI, arm, candidate and release below
+is a fixed literal, and the audio is one synthesized loop. The demo app stamps every
+payload with :data:`DEMO_DATA_SOURCE` and the page carries a DEMO DATA banner, so no
+consumer can mistake it for live data. The live dashboard (:mod:`.live`) never falls
+back to anything in this module.
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import struct
 import wave
 from typing import Any, Final
 
-DATA_SOURCE: Final[str] = "demo"
-"""Provenance label carried by every dashboard payload until the dashboard reads real data."""
+DEMO_DATA_SOURCE: Final[str] = "demo"
+"""Provenance label carried by every payload of the demo dashboard (``--demo``)."""
 
 
 class UnknownCaseError(KeyError):

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PLM Control Deck</title>
+  <link rel="stylesheet" href="/static/live.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div>
+        <h1 class="brand">PLM <span>CONTROL DECK</span></h1>
+        <p class="subtitle">Live data from the PLM database and phase APIs. Unknown values are shown as unknown; an unreachable source is shown as unavailable, never as zero.</p>
+      </div>
+      <div class="header-side">
+        <span class="pill pill-live" id="data-source-pill">DATA SOURCE: &hellip;</span>
+        <span class="muted" id="generated-at"></span>
+        <button class="btn" id="refresh-btn" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="command-center" type="button">Command Center</button>
+      <button class="tab" data-view="market-map" type="button">Market Map</button>
+      <button class="tab" data-view="production-queue" type="button">Production Queue</button>
+      <button class="tab" data-view="experiment-board" type="button">Experiment Board</button>
+      <button class="tab" data-view="economics" type="button">Economics</button>
+      <button class="tab" data-view="exceptions" type="button">Exceptions <span class="count" id="exceptions-count"></span></button>
+    </nav>
+
+    <main id="view-root" class="view-root" aria-live="polite">
+      <p class="muted">Loading&hellip;</p>
+    </main>
+  </div>
+  <script type="module" src="/static/live.js"></script>
+</body>
+</html>

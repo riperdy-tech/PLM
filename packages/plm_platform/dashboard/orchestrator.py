@@ -14,7 +14,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from .service import DATA_SOURCE
+from .service import DEMO_DATA_SOURCE
 
 
 class DemoOrchestrator:
@@ -32,7 +32,7 @@ class DemoOrchestrator:
             "is_running": self._is_running,
             "last_run_id": self._last_run_id,
             "subscriber_count": len(self._subscribers),
-            "data_source": DATA_SOURCE,
+            "data_source": DEMO_DATA_SOURCE,
         }
 
     async def subscribe(self) -> AsyncGenerator[dict[str, Any], None]:
@@ -49,7 +49,7 @@ class DemoOrchestrator:
     async def broadcast(self, event: dict[str, Any]) -> None:
         """Push an event to all active subscriber queues."""
         event["timestamp"] = time.time()
-        event["data_source"] = DATA_SOURCE
+        event["data_source"] = DEMO_DATA_SOURCE
         for q in list(self._subscribers):
             await q.put(event)
 

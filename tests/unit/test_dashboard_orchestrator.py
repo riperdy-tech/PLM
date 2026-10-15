@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from plm_platform.dashboard import DATA_SOURCE
+from plm_platform.dashboard import DEMO_DATA_SOURCE as DATA_SOURCE
 from plm_platform.dashboard.orchestrator import DemoOrchestrator
 
 

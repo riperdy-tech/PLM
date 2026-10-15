@@ -1,9 +1,24 @@
-"""PLM visual dashboard. Serves fixed demo data until R5 wires it to the pipeline."""
+"""PLM dashboard: the six PART XVII views over live data; demo data only behind ``--demo``."""
 
 from __future__ import annotations
 
-from .app import create_app
+from .actions import ExceptionActions, ReviewerConfig, TemporalSignaller
+from .app import create_app, create_demo_app, create_live_app
+from .live import LiveDashboard
 from .orchestrator import DemoOrchestrator
-from .service import DATA_SOURCE, DashboardService
+from .service import DEMO_DATA_SOURCE, DashboardService
+from .sources import LIVE_DATA_SOURCE
 
-__all__ = ["DATA_SOURCE", "DashboardService", "DemoOrchestrator", "create_app"]
+__all__ = [
+    "DEMO_DATA_SOURCE",
+    "LIVE_DATA_SOURCE",
+    "DashboardService",
+    "DemoOrchestrator",
+    "ExceptionActions",
+    "LiveDashboard",
+    "ReviewerConfig",
+    "TemporalSignaller",
+    "create_app",
+    "create_demo_app",
+    "create_live_app",
+]
