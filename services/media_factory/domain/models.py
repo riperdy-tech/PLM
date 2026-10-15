@@ -70,7 +70,7 @@ class PlaylistTrack:
         end_offset_seconds: float,
         transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
         transition_duration_seconds: float = 2.0,
-        sequence_reason: str = "optimal_energy_flow",
+        sequence_reason: str = "unsequenced",
         title: str = "",
         audio_uri: str = "",
         audio_checksum: str = "",
@@ -426,7 +426,7 @@ class MediaPackage:
         *,
         now: datetime,
     ) -> MediaPackage:
-        mpid = media_package_id(release_manifest_id, brand_id, package_version)
+        mpid = cls.derive_id(release_manifest_id, brand_id, package_version, render_profile)
         content = json.dumps(
             {
                 "media_package_id": mpid,
@@ -470,6 +470,14 @@ class MediaPackage:
             created_at=now,
             updated_at=now,
         )
+
+    @staticmethod
+    def derive_id(release_manifest_id: str, brand_id: str, package_version: str,
+                  render_profile: str) -> str:
+        """The package id: one per playlist, brand, sequencing version and render profile
+        (a preview and a full render of one playlist are two packages)."""
+        return media_package_id(release_manifest_id, brand_id,
+                                f"{package_version}|{render_profile}")
 
     def to_c6_payload(self) -> dict[str, Any]:
         """The Seam C6 hop-1 wire, through the shared model (P6 §5, R9, ADR-0029).

@@ -12,6 +12,7 @@ from plm_platform.health import health_router
 from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
+from ..ingestion.artifact_fetch import ArtifactFetcher, MinioArtifactFetcher
 from .routes import build_router
 
 __all__ = ["create_app"]
@@ -21,14 +22,24 @@ def create_app(
     *,
     session_factory: Callable[[], Session] | None,
     settings: QualityGateSettings,
+    artifact_fetcher: ArtifactFetcher | None = None,
 ) -> FastAPI:
-    """Create FastAPI application for Quality, Rights & Release Gate service."""
+    """Create FastAPI application for Quality, Rights & Release Gate service.
+
+    Audio is read by ``artifact_fetcher`` when given (tests inject one), otherwise from
+    MinIO per the platform settings (R4). With neither, evaluations answer 503
+    ``artifact_store_not_configured``.
+    """
+    if artifact_fetcher is None and settings.platform is not None:
+        artifact_fetcher = MinioArtifactFetcher(settings.platform)
     app = FastAPI(title="plm-quality-gate", version="p5")
+    app.state.artifact_fetcher = artifact_fetcher  # which store P5 reads from, for probes
     app.add_middleware(CorrelationIdMiddleware)
     app.include_router(
         build_router(
             session_factory=session_factory,
             settings=settings,
+            artifact_fetcher=artifact_fetcher,
         )
     )
 

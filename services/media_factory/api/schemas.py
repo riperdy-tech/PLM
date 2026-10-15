@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..domain.enums import TransitionType
+
 __all__ = [
     "AssemblePackageRequest",
     "HealthResponse",
@@ -19,23 +21,25 @@ __all__ = [
 
 
 class AssemblePackageRequest(BaseModel):
-    """Assemble a media package from P5's per-track C5 manifests (R7, ADR-0028).
+    """Assemble a media package from recordings P5 cleared (R7, ADR-0028, R4).
 
-    ``required_duration_seconds``, ``visual_profile`` and ``playlist_concept`` come from
-    P3's playlist, visual and title specs and have no defaults. Render profile and
-    sequence version are P6's own settings.
+    P6 fetches each candidate's C5 manifest from P5 itself; a caller cannot hand it a
+    manifest body. ``required_duration_seconds``, ``visual_profile`` and
+    ``playlist_concept`` come from P3's playlist, visual and title specs and have no
+    defaults. The brand's name and palette come from P6's brand registry. Render
+    profile and transition are P6's own presentation settings.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    track_manifests: list[dict[str, Any]] = Field(min_length=1)
+    candidate_ids: list[str] = Field(min_length=1)
     brand_id: str = Field(min_length=1)
-    brand_name: str = Field(min_length=1)
     required_duration_seconds: float = Field(gt=0.0)
     visual_profile: str = Field(min_length=1)
     playlist_concept: str = Field(min_length=1)
     render_profile: str = "yt_longform_1080p_v1"
-    sequence_version: str = "v1"
+    transition_type: TransitionType = TransitionType.SHORT_CROSSFADE
+    transition_duration_seconds: float = Field(default=2.0, ge=0.0)
 
 
 class MediaPackageResponse(BaseModel):
@@ -64,6 +68,8 @@ class MediaPackageResponse(BaseModel):
     render_report: dict[str, Any]
     status: str
     package_version: str
+    blocking_reason_codes: list[str] = Field(default_factory=list)
+    """Post-render QA codes that block a ``failed`` package; empty when ready."""
 
 
 class PlaylistSessionResponse(BaseModel):

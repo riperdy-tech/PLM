@@ -1,104 +1,96 @@
-"""Unit tests for Visual Planner, Artwork Engine, and Metadata Compiler."""
+"""Visual plan, thumbnails and metadata (P6 §13, §18, §21, R4).
+
+Proves: the visual plan states exactly what the renderer draws and records no asset it
+has not produced; thumbnails A/B/C are real 1280x720 PNGs, deterministic (same inputs,
+same bytes), distinct per variant, stored content-addressed with the sha256 of the
+stored bytes; an invalid brand palette is refused; chapters come from the final
+timeline without being moved.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import io
 from datetime import UTC, datetime
 
-from media_factory.artwork.generator import generate_artwork_and_thumbnails
+import pytest
+from media_factory.artwork.generator import (
+    THUMBNAIL_VARIANTS,
+    generate_thumbnails,
+    render_thumbnail,
+)
 from media_factory.domain.models import PlaylistTrack
+from media_factory.errors import MediaAssemblyError
 from media_factory.metadata.compiler import compile_metadata_and_chapters
+from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
+from PIL import Image
+
+from tests.support.media_backend import InMemoryArtifactStore
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+BRAND = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats",
+                     palette=["#111111", "#222222", "#33AAFF", "#FF44AA"])
 
-def test_visual_planner() -> None:
-    brand = BrandProfile(
-        brand_id="brand_neon",
-        brand_name="Neon Beats",
-        palette=["#111111", "#222222", "#333333", "#444444"],
-        visual_theme="cyber_lofi",
-    )
 
+def test_visual_plan_states_what_is_rendered_and_records_no_unproduced_asset() -> None:
+    profile = RENDER_PROFILES["yt_longform_1080p_v1"]
     res = plan_visual_session(
-        playlist_session_id_str="ps_test_01",
-        brand_profile=brand,
-        visual_profile="neon_cyber_v1",
-        total_duration_seconds=180.0,
-        scene_length_seconds=60.0,
-        now=NOW,
+        playlist_session_id_str="ps_test_01", brand_profile=BRAND, visual_profile="neon_v1",
+        render_profile=profile, total_duration_seconds=180.0, now=NOW,
     )
-
-    assert res.visual_session.brand_id == "brand_neon"
-    assert res.visual_session.status == "assets_ready"
-    assert len(res.assets) == 3
-    for a in res.assets:
-        assert a.width == 1920
-        assert a.height == 1080
-        assert a.duration_seconds == 60.0
+    plan = res.visual_session.visual_plan_json
+    assert plan["canvas"] == {"width": 1920, "height": 1080, "fps": 30}
+    assert plan["visualizer"]["color"] == "#33AAFF"
+    assert plan["background"]["colors"] == ["#111111", "#222222"]
+    assert res.assets == []
 
 
-def test_artwork_and_thumbnail_generator() -> None:
-    brand = BrandProfile(
-        brand_id="brand_neon",
-        brand_name="Neon Beats",
-    )
-
-    res = generate_artwork_and_thumbnails(
-        media_package_id_str="mp_test_01",
-        brand_profile=brand,
-        playlist_title="Midnight Synth",
-        now=NOW,
-    )
-
-    assert res.cover_art_uri.endswith("_cover.webp")
-    assert res.cover_art_checksum != ""
-    assert len(res.thumbnails) == 3
-    for tv in res.thumbnails:
-        assert tv.width == 1280
-        assert tv.height == 720
-        assert tv.checksum != ""
+def test_thumbnails_are_deterministic_real_images() -> None:
+    concept = "Late Night Synthwave"
+    renders = {v: render_thumbnail(v, BRAND, concept) for v in THUMBNAIL_VARIANTS}
+    for variant, data in renders.items():
+        assert render_thumbnail(variant, BRAND, concept) == data  # same inputs, same bytes
+        image = Image.open(io.BytesIO(data))
+        assert image.format == "PNG"
+        assert image.size == (1280, 720)
+        assert len(data) < 2 * 1024 * 1024
+    assert len(set(renders.values())) == 3
+    assert render_thumbnail("thumb_a_hero", BRAND, "Another Concept") != renders["thumb_a_hero"]
 
 
-def test_metadata_compiler_starts_at_zero() -> None:
+def test_thumbnails_are_stored_with_the_checksum_of_the_stored_bytes() -> None:
+    store = InMemoryArtifactStore()
+    variants = generate_thumbnails(media_package_id_str="mpkg_x", brand_profile=BRAND,
+                                   playlist_concept="Focus", store=store, now=NOW)
+    assert [v.variant_key for v in variants] == list(THUMBNAIL_VARIANTS)
+    for variant in variants:
+        assert hashlib.sha256(store.get(variant.uri)).hexdigest() == variant.checksum
+        assert variant.uri.endswith(variant.checksum)
+
+
+def test_an_invalid_palette_is_refused() -> None:
+    bad = BrandProfile(brand_id="b", brand_name="B", palette=["#111111", "teal", "#000000",
+                                                              "#000000"])
+    with pytest.raises(MediaAssemblyError) as raised:
+        render_thumbnail("thumb_c_minimal", bad, "Focus")
+    assert raised.value.code == "brand_palette_invalid"
+
+
+def test_chapters_come_from_the_final_timeline() -> None:
     tracks = [
-        PlaylistTrack.create(
-            session_id="ps_01",
-            song_id="s1",
-            source_artifact_id="a1",
-            position=0,
-            start_offset_seconds=5.0,  # Even if track starts at offset > 0, YouTube chapter 0 must be 00:00
-            end_offset_seconds=120.0,
-            title="Opening Melody",
-            now=NOW,
-        ),
-        PlaylistTrack.create(
-            session_id="ps_01",
-            song_id="s2",
-            source_artifact_id="a2",
-            position=1,
-            start_offset_seconds=120.0,
-            end_offset_seconds=250.0,
-            title="Night Flight",
-            now=NOW,
-        ),
+        PlaylistTrack.create(session_id="ps_01", song_id=f"s{n}", source_artifact_id=f"a{n}",
+                             position=n, start_offset_seconds=start, end_offset_seconds=end,
+                             title=f"Track {n + 1}", now=NOW)
+        for n, (start, end) in enumerate([(0.0, 120.0), (118.0, 250.0), (248.0, 400.0)])
     ]
-
-    res = compile_metadata_and_chapters(
-        tracks=tracks,
-        brand_name="Neon Beats",
-        playlist_concept="Night Driving",
-        ai_disclosure_required=True,
-    )
-
-    assert len(res.chapters) == 2
-    # YouTube requirement: first chapter starts at 00:00
-    assert res.chapters[0]["start_seconds"] == 0.0
-    assert res.chapters[0]["timestamp_str"] == "00:00"
-    assert res.chapters[1]["start_seconds"] == 120.0
-    assert res.chapters[1]["timestamp_str"] == "02:00"
-
-    assert len(res.tracklist) == 2
-    assert len(res.metadata_candidates) == 2
+    res = compile_metadata_and_chapters(tracks=tracks, brand_name="Neon Beats",
+                                        playlist_concept="Night Driving",
+                                        ai_disclosure_required=True)
+    assert [c["start_seconds"] for c in res.chapters] == [0.0, 118.0, 248.0]
+    assert [c["end_seconds"] for c in res.chapters] == [118.0, 248.0, 400.0]
+    assert [c["timestamp_str"] for c in res.chapters] == ["00:00", "01:58", "04:08"]
+    assert len(res.tracklist) == 3
     for meta in res.metadata_candidates:
         assert meta["contains_synthetic_media"] is True
         assert "Notice: Sound recording" in meta["description"]

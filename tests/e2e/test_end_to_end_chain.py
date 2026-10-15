@@ -61,6 +61,7 @@ from services.distribution.engine import DistributionEngine
 from services.distribution.submission import ReleaseMetadata, submit_release_from_seams
 
 # P3
+from services.experiments.domain.enums import VocalMode
 from services.experiments.domain.experiment import Experiment, Hypothesis, Treatment
 from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
 from services.experiments.ingestion.p2_adapter import adapt_directive
@@ -87,9 +88,12 @@ from services.youtube_publishing.domain.models import ChannelProfile
 from services.youtube_publishing.engine import YouTubePublishingEngine
 from services.youtube_publishing.manifests import build_publish_manifest
 from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.clearance import p5_holding
 from tests.support.distribution_db import distribution_db_session
 from tests.support.experiments_factories import design_facts
+from tests.support.media_backend import SourceReadingStore, StandInToolchain
 from tests.support.music_db import music_db_session
+from tests.support.rights_detectors import configured_detectors
 from tests.support.youtube_db import youtube_db_session
 
 
@@ -226,6 +230,9 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         mood=("nostalgic", "peaceful"),
         use_case=("focus", "study"),
         language="instrumental",
+        # The directive asks for an instrumental; left out, the genome's default (vocal)
+        # made P4 declare a vocal track with no lyric text, which P5 cannot screen (R4).
+        vocal_mode=VocalMode.INSTRUMENTAL,
         bpm=BpmRange(min_bpm=72, max_bpm=82, target_bpm=76),
         track_duration=DurationRange(min_seconds=130, max_seconds=170, target_seconds=150),
         playlist_duration=DurationRange(min_seconds=1800, max_seconds=2400, target_seconds=2100),
@@ -249,7 +256,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         created_at=now,
         **design_facts("exp_lofi_001", budget_limit=directive.budget_limit),
     )
-    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=1, created_at=now)
+    package = materialize_package(experiment, treatment, genome, budget_envelope=directive.budget_limit, track_count=3, created_at=now)
     track_spec = package.track_specs[0]
     assert track_spec.track_spec_id.startswith("trk_")
     assert track_spec.requested_duration == 150
@@ -257,18 +264,24 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 4: P4 Music Factory — Audio Generation & Candidate Ready (Seam C4)
     # =========================================================================
-    adapted_spec = adapt_track_spec(track_spec.to_wire())
-    assert adapted_spec.genre == "lofi"
-
-    # Real P4 path: plan, generate with the mock provider, then build the C4 event
-    # from the stored facts (ADR-0027) instead of hand-writing it.
-    plan, variants = plan_generation(adapted_spec, created_at=now)
+    # A playlist video needs at least three chapters (YouTube's rule, P6 R4), so P3 asks
+    # for three tracks and each goes through P4 and P5.
     storage = InMemoryArtifactStorage()
-    with music_db_session() as music_db:
-        gen = GenerationEngine(clock=FixedClock(now), storage=storage).execute_plan(
-            music_db, plan=plan, variants=variants, spec=adapted_spec
-        )
-        ready_event = build_candidate_ready_event(music_db, gen.candidates[0].candidate_id)
+    ready_events = []
+    for spec in package.track_specs:
+        adapted_spec = adapt_track_spec(spec.to_wire())
+        assert adapted_spec.genre == "lofi"
+
+        # Real P4 path: plan, generate with the mock provider, then build the C4 event
+        # from the stored facts (ADR-0027) instead of hand-writing it.
+        plan, variants = plan_generation(adapted_spec, created_at=now)
+        with music_db_session() as music_db:
+            gen = GenerationEngine(clock=FixedClock(now), storage=storage).execute_plan(
+                music_db, plan=plan, variants=variants, spec=adapted_spec
+            )
+            ready_events.append(
+                build_candidate_ready_event(music_db, gen.candidates[0].candidate_id))
+    ready_event = ready_events[0]
     assert ready_event.event_type == "music_candidate_ready_for_p5"
     assert ready_event.lineage.content_arm_id == directive.arm_id
     candidate_id = ready_event.candidate_id
@@ -279,14 +292,20 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # The real gate (R2 resolved the duration seam, ADR-0032): P5 reads the candidate's
     # own bytes and judges it against the declared range carried on the C4 event.
-    audio = storage.get_artifact(ready_event.artifact_uri)
-    assert audio is not None
-    audio_path = tmp_path / "candidate.wav"
-    audio_path.write_bytes(audio)
-    gate = run_candidate_evaluation(event=ready_event, audio_path=audio_path,
-                                    clock=FixedClock(now))
-    assert gate.release_manifest is not None, gate.decision
-    manifest = gate.release_manifest
+    manifests = []
+    for event in ready_events:
+        audio = storage.get_artifact(event.artifact_uri)
+        assert audio is not None
+        audio_path = tmp_path / f"{event.candidate_id}.wav"
+        audio_path.write_bytes(audio)
+        # R4: the rights detectors run on controlled synthetic references (empty
+        # internal catalog); P4's P28 facts arrive on the C4 event (ADR-0035).
+        gate = run_candidate_evaluation(event=event, audio_path=audio_path,
+                                        clock=FixedClock(now),
+                                        detectors=configured_detectors())
+        assert gate.release_manifest is not None, gate.decision
+        manifests.append(gate.release_manifest)
+    manifest = manifests[0]
     assert (manifest.candidate_id, manifest.canonical_artifact_id) == (candidate_id, artifact_id)
     assert manifest.disposition == GateDisposition.PASSED
     assert manifest.p5_manifest_id.startswith("rel_man_")
@@ -294,21 +313,25 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     # =========================================================================
     # Step 6: P6 Media Factory — Playlist Video & Packaging (Seam C6 Hop 1)
     # =========================================================================
-    track_manifest = parse_seam(ReleaseManifestPayload, manifest.to_wire())
+    # P6 reads each track's audio by the manifest's URI and checksum from P4's store; the
+    # render uses the stand-in toolchain (FFmpeg rendering is proven by the media tests).
+    track_manifests = [parse_seam(ReleaseManifestPayload, m.to_wire()) for m in manifests]
     brand_profile = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats")
     assembled = assemble_media_package(
-        track_manifests=[track_manifest],
+        track_manifests=track_manifests,
         brand_profile=brand_profile,
-        required_duration_seconds=track_manifest.measured_duration_seconds,
+        required_duration_seconds=sum(m.measured_duration_seconds for m in track_manifests)
+        - 2 * 2.0,
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Lofi Study Session",
-        render_profile="yt_longform_1080p_v1",
+        store=SourceReadingStore(storage.get_artifact),
+        toolchain=StandInToolchain(),
         clock=FixedClock(now),
     )
     media_pkg = assembled.media_package
     c6_hop1 = media_pkg.to_c6_payload()
     assert c6_hop1["status"] == "ready_for_publish"
-    assert c6_hop1["video"]["master_uri"].endswith(".mp4")
+    assert len(c6_hop1["chapters"]) == 3
 
     # =========================================================================
     # Step 7: P7 YouTube Publishing — Preflight & Publication Event (Seam C6 Hop 2, R9)
@@ -323,7 +346,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
     with youtube_db_session() as yt_db:
         insert_publish_manifest(yt_db, publish_manifest)
         yt_db.commit()
-        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now)).execute_publish(
+        published = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(now), clearance=p5_holding(*track_manifests)).execute_publish(
             yt_db, publish_manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -339,7 +362,8 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         submitted = submit_release_from_seams(
             dist_db,
             DistributionEngine(MockDistributorClient(clock=FixedClock(now))),
-            track_manifests=[track_manifest.to_wire()],
+            track_manifests=[m.to_wire() for m in track_manifests],
+            clearance=p5_holding(*track_manifests),
             media_package=c6_hop1,
             publication=yt_event.to_wire(),
             metadata=ReleaseMetadata(

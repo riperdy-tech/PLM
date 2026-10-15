@@ -20,9 +20,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
-import math
-import struct
-import wave
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +30,7 @@ import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from fastapi.testclient import TestClient
+from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.exceptions import (
     EXCEPTIONS_METADATA,
@@ -58,11 +56,18 @@ from quality_gate.api.app import create_app
 from quality_gate.config import load_quality_gate_settings
 from quality_gate.domain.enums import QuarantineStatus
 from quality_gate.domain.models import QuarantineCase
+from quality_gate.ingestion.artifact_fetch import MinioArtifactFetcher
 from quality_gate.storage.repositories import insert_quarantine_case
 from sqlalchemy.orm import Session, sessionmaker
 
+from tests.support.fake_minio import FakeMinio, stored_event_fields
 from tests.support.qa_db import create_qa_engine, qa_session
-from tests.support.seams import candidate_event, lineage_fields, rights_fields
+from tests.support.rights_detectors import (
+    register_controlled_references,
+    synthetic_music,
+    write_wav,
+)
+from tests.support.seams import lineage_fields, rights_fields
 
 NOW = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -508,40 +513,42 @@ _HEADERS = {SERVICE_TOKEN_HEADER: _TOKEN}
 
 @pytest.fixture
 def qa_engine() -> sa.Engine:
-    return create_qa_engine(static_pool=True)
+    engine = create_qa_engine(static_pool=True)
+    register_controlled_references(engine, now=datetime(2026, 9, 1, tzinfo=UTC))
+    return engine
 
 
 @pytest.fixture
 def qa_client(qa_engine: sa.Engine) -> TestClient:
-    settings = load_quality_gate_settings(
-        platform=load_settings(env=_ENV), reviewers=REVIEWERS
+    platform = load_settings(env=_ENV)
+    settings = load_quality_gate_settings(platform=platform, reviewers=REVIEWERS)
+    store = FakeMinio()  # P5 reads audio by URI (R4); this stands in for MinIO
+    app = create_app(
+        session_factory=lambda: qa_session(qa_engine),
+        settings=settings,
+        artifact_fetcher=MinioArtifactFetcher(platform, client=store),  # type: ignore[arg-type]
     )
-    return TestClient(create_app(session_factory=lambda: qa_session(qa_engine), settings=settings))
+    app.state.artifact_store = store
+    return TestClient(app)
 
 
 def _wav(tmp_path: Path) -> Path:
-    path = tmp_path / "tone.wav"
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)
-        wf.setframerate(44100)
-        frames = bytearray()
-        for i in range(44100):
-            v = int(14000.0 * math.sin(2.0 * math.pi * 440.0 * i / 44100))
-            frames.extend(struct.pack("<hh", v, v))
-        wf.writeframes(frames)
-    return path
+    # Music-like audio, unrelated to the registered reference: a pure tone has too few
+    # landmarks for the fingerprint detector to judge (it would be UNKNOWN, ADR-0034).
+    return write_wav(tmp_path / "candidate.wav", synthetic_music(seed=17, seconds=1.5))
 
 
 def _quarantined(qa_client: TestClient, tmp_path: Path) -> dict[str, Any]:
-    event = candidate_event(
+    store: FakeMinio = qa_client.app.state.artifact_store  # type: ignore[attr-defined]
+    event = CandidateReadyPayload.build(**stored_event_fields(
+        store, load_settings(env=_ENV), _wav(tmp_path).read_bytes(),
         candidate_id="cand_hold_01",
         lineage=lineage_fields(experiment_id="exp_hold", content_arm_id="arm_hold"),
         rights=rights_fields(commercial_use_status="unknown"),
-    ).to_wire()
+    )).to_wire()
     res = qa_client.post(
         "/qa/evaluations",
-        json={"candidate_event": event, "audio_path": str(_wav(tmp_path))},
+        json={"candidate_event": event},
         headers=_HEADERS,
     )
     assert res.status_code == 201

@@ -64,6 +64,10 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _utc_or_none(value: datetime | None) -> datetime | None:
+    return None if value is None else _utc(value)
+
+
 def insert_generation_plan(session: Session, plan: GenerationPlan) -> None:
     session.execute(
         sa.insert(generation_plans_table).values(
@@ -112,8 +116,8 @@ def get_generation_plan(session: Session, plan_id: str) -> GenerationPlan | None
         policy_version=row["policy_version"],
         status=PlanStatus(row["status"]),
         created_at=_utc(row["created_at"]),
-        started_at=row["started_at"],
-        finished_at=row["finished_at"],
+        started_at=_utc_or_none(row["started_at"]),
+        finished_at=_utc_or_none(row["finished_at"]),
     )
 
 
@@ -170,7 +174,7 @@ def list_creative_variants(session: Session, plan_id: str) -> list[CreativeVaria
             changed_dimensions=json.loads(r["changed_dimensions_json"]),
             change_reason=r["change_reason"],
             prompt_delta=json.loads(r["prompt_delta_json"]),
-            created_at=r["created_at"],
+            created_at=_utc(r["created_at"]),
         )
         for r in rows
     ]
@@ -184,6 +188,8 @@ def insert_generation_attempt(session: Session, attempt: GenerationAttempt) -> N
             creative_variant_id=attempt.creative_variant_id,
             provider_id=attempt.provider_id,
             model_id=attempt.model_id,
+            model_version=attempt.model_version,
+            lyrics_text=attempt.lyrics_text,
             provider_job_id=attempt.provider_job_id,
             attempt_type=attempt.attempt_type.value,
             transport_retry_of=attempt.transport_retry_of,
@@ -218,6 +224,8 @@ def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttem
         creative_variant_id=row["creative_variant_id"],
         provider_id=row["provider_id"],
         model_id=row["model_id"],
+        model_version=row["model_version"],
+        lyrics_text=row["lyrics_text"],
         provider_job_id=row["provider_job_id"],
         attempt_type=AttemptType(row["attempt_type"]),
         transport_retry_of=row["transport_retry_of"],
@@ -225,9 +233,9 @@ def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttem
         request_payload_hash=row["request_payload_hash"],
         status=AttemptStatus(row["status"]),
         failure_code=row["failure_code"],
-        started_at=row["started_at"],
-        submitted_at=row["submitted_at"],
-        completed_at=row["completed_at"],
+        started_at=_utc(row["started_at"]),
+        submitted_at=_utc(row["submitted_at"]),
+        completed_at=_utc_or_none(row["completed_at"]),
         cost_estimate=row["cost_estimate"],
         actual_cost=row["actual_cost"],
         credit_estimate=row["credit_estimate"],
@@ -252,6 +260,8 @@ def list_generation_attempts(session: Session, plan_id: str) -> list[GenerationA
             creative_variant_id=r["creative_variant_id"],
             provider_id=r["provider_id"],
             model_id=r["model_id"],
+            model_version=r["model_version"],
+            lyrics_text=r["lyrics_text"],
             provider_job_id=r["provider_job_id"],
             attempt_type=AttemptType(r["attempt_type"]),
             transport_retry_of=r["transport_retry_of"],
@@ -259,9 +269,9 @@ def list_generation_attempts(session: Session, plan_id: str) -> list[GenerationA
             request_payload_hash=r["request_payload_hash"],
             status=AttemptStatus(r["status"]),
             failure_code=r["failure_code"],
-            started_at=r["started_at"],
-            submitted_at=r["submitted_at"],
-            completed_at=r["completed_at"],
+            started_at=_utc(r["started_at"]),
+            submitted_at=_utc(r["submitted_at"]),
+            completed_at=_utc_or_none(r["completed_at"]),
             cost_estimate=r["cost_estimate"],
             actual_cost=r["actual_cost"],
             credit_estimate=r["credit_estimate"],
@@ -312,7 +322,7 @@ def get_candidate(session: Session, candidate_id: str) -> GeneratedCandidate | N
         provider_id=row["provider_id"],
         model_id=row["model_id"],
         created_at=_utc(row["created_at"]),
-        updated_at=row["updated_at"],
+        updated_at=_utc(row["updated_at"]),
     )
 
 
@@ -337,8 +347,8 @@ def list_candidates_by_track(session: Session, track_spec_id: str) -> list[Gener
             status=CandidateStatus(r["status"]),
             provider_id=r["provider_id"],
             model_id=r["model_id"],
-            created_at=r["created_at"],
-            updated_at=r["updated_at"],
+            created_at=_utc(r["created_at"]),
+            updated_at=_utc(r["updated_at"]),
         )
         for r in rows
     ]
@@ -397,7 +407,7 @@ def get_audio_artifact(session: Session, artifact_id: str) -> AudioArtifact | No
         channels=row["channels"],
         codec=row["codec"],
         probe_version=row["probe_version"],
-        created_at=row["created_at"],
+        created_at=_utc(row["created_at"]),
     )
 
 
@@ -425,7 +435,7 @@ def list_artifacts_for_candidate(session: Session, candidate_id: str) -> list[Au
             channels=r["channels"],
             codec=r["codec"],
             probe_version=r["probe_version"],
-            created_at=r["created_at"],
+            created_at=_utc(r["created_at"]),
         )
         for r in rows
     ]

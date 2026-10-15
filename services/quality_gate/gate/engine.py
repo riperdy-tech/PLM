@@ -1,16 +1,34 @@
-"""Gate policy engine for Phase P5 (P5 §45-§51, §90, R8).
+"""Gate policy engine for Phase P5 (P5 §45-§51, §90, R8; rights detectors R4).
 
 Evaluates hard release gates vs soft signals and renders deterministic
 GateDecision, QuarantineCase, and downstream ReleaseManifest.
+
+Disposition (fail closed):
+
+* any blocking finding: ``REJECTED``;
+* otherwise any hold from the rights, provenance, policy or detector checks (the codes
+  in :data:`~quality_gate.detectors.reason_codes.P5_HOLD_REASON_CODES`), or commercial
+  use not declared eligible: ``QUARANTINED``, with one hold per reason code raised into
+  the platform exception queue on persistence;
+* otherwise ``PASSED_WITH_WARNINGS`` or ``PASSED``.
+
+A detector that is not configured, cannot read its source or cannot read the audio
+returns ``UNKNOWN``, which is a hold: an unrun check never clears a candidate.
 """
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
+from plm_contracts import ProvenanceStatus
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.clock import Clock
 
+from ..detectors.fingerprint import AudioFingerprint
+from ..detectors.outcome import DetectorResult
+from ..detectors.reason_codes import P5_HOLD_REASON_CODES
+from ..detectors.suite import RightsDetectors, detect_audio, detect_lyrics
 from ..domain.enums import (
     CheckSeverity,
     EvaluationStatus,
@@ -23,10 +41,15 @@ from ..domain.models import (
     QuarantineCase,
     ReleaseManifest,
 )
-from ..evaluators.lyrics import evaluate_lyrics
+from ..evaluators.lyrics import evaluate_lyric_similarity, evaluate_lyrics
 from ..evaluators.musical import evaluate_musical_qualities
 from ..evaluators.policy import screen_policy_and_risk
-from ..evaluators.rights import validate_provenance_and_rights
+from ..evaluators.rights import (
+    evaluate_audio_fingerprint,
+    map_p28_provenance,
+    validate_p28_provenance,
+    validate_provenance_and_rights,
+)
 from ..evaluators.technical import validate_technical_audio
 from .manifest import build_release_manifest
 
@@ -43,12 +66,17 @@ class GateEngineResult:
         decision: GateDecision,
         quarantine_case: QuarantineCase | None = None,
         release_manifest: ReleaseManifest | None = None,
+        candidate_fingerprint: AudioFingerprint | None = None,
+        detector_results: tuple[DetectorResult, ...] = (),
     ) -> None:
         self.evaluation = evaluation
         self.snapshot = snapshot
         self.decision = decision
         self.quarantine_case = quarantine_case
         self.release_manifest = release_manifest
+        self.candidate_fingerprint = candidate_fingerprint
+        """Persisted with the evaluation; joins the internal catalog once a manifest exists."""
+        self.detector_results = detector_results
 
     @property
     def disposition(self) -> GateDisposition:
@@ -60,16 +88,24 @@ def run_candidate_evaluation(
     event: CandidateReadyPayload,
     audio_path: str | Path,
     clock: Clock,
+    detectors: RightsDetectors | None = None,
     evaluation_policy_version: str = "p5-v1",
     trigger: str = "candidate_ready",
 ) -> GateEngineResult:
-    """Evaluate one candidate described by its Seam C4 event (ADR-0027).
+    """Evaluate one candidate described by its Seam C4 event (ADR-0027, ADR-0034).
 
     Every candidate fact comes from the event: lineage, declared duration range, vocal mode,
     genre tags, prompt, lyrics and the declared rights. ``evaluation_policy_version`` and
-    ``trigger`` are P5's own settings. ``audio_path`` is where P5 can read the artifact;
-    fetching it from storage by URI and checksum is stage R4. ``clock`` stamps the start
-    instant shared by every record of this evaluation, and the finish instant.
+    ``trigger`` are P5's own settings. ``audio_path`` is where P5 can read the artifact.
+    ``clock`` stamps the start instant shared by every record of this evaluation, and the
+    finish instant.
+
+    ``detectors`` injects the internal catalog, reference audio set, lyric corpus,
+    protected-artist policy and thresholds. ``None`` means none is configured: every
+    detector is ``UNKNOWN`` and the candidate is quarantined, never cleared.
+
+    All twelve P28 provenance facts come from the event (C4 3.0, ADR-0035); a fact P4
+    declares as unknown quarantines with ``INCOMPLETE_P28_PROVENANCE``.
     """
     now = clock.now()
     candidate_id = event.candidate_id
@@ -82,6 +118,18 @@ def run_candidate_evaluation(
     lyrics_text = event.lyrics_text
     prompt_text = event.prompt_text
     genre_tags = list(event.genre_tags)
+    suite = detectors if detectors is not None else RightsDetectors.unconfigured()
+
+    # 0. Rights detectors read their sources first, so the snapshot names what was read.
+    audio_detection = detect_audio(audio_path, candidate_id=candidate_id, detectors=suite)
+    lyric_result = detect_lyrics(lyrics_text, vocal_mode=vocal_mode, detectors=suite)
+    detector_results = (*audio_detection.results, lyric_result)
+    catalog_ref = "det:" + hashlib.sha256(
+        "|".join(
+            f"{r.detector}/{r.source}={r.source_snapshot_ref or 'unread'}"
+            for r in detector_results
+        ).encode("utf-8")
+    ).hexdigest()
 
     # 1. Initialize Aggregate Root
     evaluation = CandidateEvaluation.create(
@@ -105,9 +153,9 @@ def run_candidate_evaluation(
             "vocal_mode": vocal_mode,
             "prompt_text": prompt_text,
             "genre_tags": genre_tags,
+            "generation_provenance": event.generation_provenance.model_dump(mode="json"),
         },
         artifact_snapshot={
-            "audio_path": str(audio_path),
             "artifact_uri": event.artifact_uri,
             "artifact_sha256": event.artifact_sha256,
             "requested_duration_seconds": event.requested_duration_seconds,
@@ -119,6 +167,7 @@ def run_candidate_evaluation(
         p3_snapshot_ref=track_spec_id,
         p4_snapshot_ref=candidate_id,
         policy_snapshot_ref=evaluation_policy_version,
+        catalog_snapshot_ref=catalog_ref,
         now=now,
     )
     evaluation.snapshot = snapshot
@@ -164,6 +213,20 @@ def run_candidate_evaluation(
     evaluation.risk_findings.extend(rights_res.findings)
     evaluation.evidence_items.extend(rights_res.evidence)
 
+    p28_res = validate_p28_provenance(
+        evaluation.id, map_p28_provenance(event), now=now
+    )
+    evaluation.provenance_checks.extend(p28_res.checks)
+    evaluation.risk_findings.extend(p28_res.findings)
+    evaluation.evidence_items.extend(p28_res.evidence)
+
+    audio_res = evaluate_audio_fingerprint(evaluation.id, audio_detection, now=now)
+    lyric_sim_res = evaluate_lyric_similarity(evaluation.id, lyric_result, now=now)
+    for detector_res in (audio_res, lyric_sim_res):
+        evaluation.rights_checks.extend(detector_res.checks)
+        evaluation.risk_findings.extend(detector_res.findings)
+        evaluation.evidence_items.extend(detector_res.evidence)
+
     policy_res = screen_policy_and_risk(
         evaluation_id=evaluation.id,
         prompt_text=prompt_text,
@@ -171,6 +234,8 @@ def run_candidate_evaluation(
         is_ai_generated=True,
         policy_version=evaluation_policy_version,
         now=now,
+        lyrics_text=lyrics_text,
+        protected_artists=suite.protected_artists,
     )
     evaluation.policy_checks.extend(policy_res.checks)
     evaluation.risk_findings.extend(policy_res.findings)
@@ -181,7 +246,13 @@ def run_candidate_evaluation(
     )
     evaluation.technical_status = "FAILED" if has_blocking_tech else "PASSED"
     evaluation.quality_status = "PASSED" if (musical_res.composite_score >= 0.5) else "MARGINAL"
-    evaluation.provenance_status = rights_res.provenance_status.value
+    if rights_res.provenance_status is ProvenanceStatus.MISSING:
+        provenance_status = ProvenanceStatus.MISSING
+    elif p28_res.status is not ProvenanceStatus.COMPLETE:
+        provenance_status = ProvenanceStatus.PARTIAL
+    else:
+        provenance_status = rights_res.provenance_status
+    evaluation.provenance_status = provenance_status.value
     evaluation.rights_status = rights_res.commercial_use_status.value
     evaluation.policy_status = policy_res.policy_status
 
@@ -189,17 +260,27 @@ def run_candidate_evaluation(
     blocking_findings = [f for f in evaluation.risk_findings if f.blocking]
     warning_findings = [f for f in evaluation.risk_findings if not f.blocking and f.severity in (CheckSeverity.LOW, CheckSeverity.MEDIUM, CheckSeverity.HIGH)]
 
-    quarantine_codes = {"UNKNOWN_COMMERCIAL_LICENSE", "INCOMPLETE_R6_PROVENANCE"}
-    quarantine_needed = any(f.finding_code in quarantine_codes for f in evaluation.risk_findings)
+    hold_codes = {
+        f.finding_code
+        for f in evaluation.risk_findings
+        if not f.blocking and f.finding_code in P5_HOLD_REASON_CODES
+    }
 
     quarantine_case: QuarantineCase | None = None
     release_manifest: ReleaseManifest | None = None
 
     if blocking_findings:
         disposition = GateDisposition.REJECTED
-    elif quarantine_needed or rights_res.requires_quarantine:
+    elif hold_codes or rights_res.requires_quarantine:
         disposition = GateDisposition.QUARANTINED
-        reasons = [f.finding_code for f in evaluation.risk_findings if f.finding_code in quarantine_codes or f.severity == CheckSeverity.HIGH]
+        reasons = sorted(
+            hold_codes
+            | {
+                f.finding_code
+                for f in evaluation.risk_findings
+                if not f.blocking and f.severity == CheckSeverity.HIGH
+            }
+        )
         quarantine_case = QuarantineCase.create(
             candidate_id=candidate_id,
             evaluation_id_str=evaluation.id,
@@ -279,4 +360,6 @@ def run_candidate_evaluation(
         decision=decision,
         quarantine_case=quarantine_case,
         release_manifest=release_manifest,
+        candidate_fingerprint=audio_detection.fingerprint,
+        detector_results=detector_results,
     )

@@ -17,6 +17,7 @@ from plm_contracts import ErrorShape
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
+from plm_platform.clearance import ClearanceVerifier, TrackRef
 from sqlalchemy.orm import Session
 
 from .artists.manager import get_or_create_artist
@@ -82,8 +83,14 @@ def submit_release_from_seams(
     publication: Mapping[str, Any] | None,
     metadata: ReleaseMetadata,
     now: datetime,
+    clearance: ClearanceVerifier,
 ) -> DistributionEngineResult:
-    """Parse, compile and submit one release; refuse with a reason code on any gap."""
+    """Parse, compile and submit one release; refuse with a reason code on any gap.
+
+    Before anything is written, ``clearance`` re-asks P5 and the exception queue whether
+    every track in the package is cleared for its exact artifact and free of open holds:
+    the manifests on the request are a claim, not the authority.
+    """
     manifests = [
         _parse(ReleaseManifestPayload, m, f"track_manifests[{i}]")
         for i, m in enumerate(track_manifests)
@@ -104,6 +111,18 @@ def submit_release_from_seams(
                     message="the publication event belongs to a different package or lineage",
                 )
             )
+
+    report = clearance(
+        [TrackRef(t.song_id, t.source_artifact_id) for t in package.tracklist]
+    )
+    if not report.cleared:
+        raise SubmissionRefusedError(
+            ErrorShape(
+                code="release_not_cleared",
+                field_paths=["media_package.tracklist"],
+                message=report.summary(),
+            )
+        )
 
     artist = get_or_create_artist(
         session, metadata.artist_name, brand_id=package.brand_id, now=now

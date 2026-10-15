@@ -1,4 +1,11 @@
-"""Structured canonical prompt builder and provenance hashing (PHASE-P4 §6)."""
+"""Structured canonical prompt builder and provenance hashing (PHASE-P4 §6).
+
+Before a prompt exists it is screened against the protected-artist policy shared with
+P5 (``plm_platform/policy/protected_artists.json``, R4). A prompt or style tag that names
+a protected artist, or asks for a voice clone or impersonation, is refused with
+:class:`ProtectedArtistPromptRefused` carrying the reason code: no prompt is returned, so
+nothing can be sent to a provider.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +14,39 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from plm_platform.protected_artists import (
+    ProtectedArtistPolicy,
+    ScreeningHit,
+    load_protected_artist_policy,
+)
+
 if TYPE_CHECKING:
     from ..ingestion.p3_adapter import AdaptedTrackSpec
 
-__all__ = ["CompiledPrompt", "build_generation_prompt", "compute_prompt_hash"]
+__all__ = [
+    "CompiledPrompt",
+    "ProtectedArtistPromptRefused",
+    "build_generation_prompt",
+    "compute_prompt_hash",
+]
+
+
+class ProtectedArtistPromptRefused(ValueError):
+    """The prompt names a protected artist or requests impersonation (P29, R4).
+
+    ``reason_codes`` are the shared policy's codes (``PROTECTED_ARTIST_REFERENCE_DETECTED``
+    and/or ``AI_POLICY_CONFLICT``); ``hits`` name what matched; ``policy_version`` is the
+    policy that refused it.
+    """
+
+    def __init__(
+        self, reason_codes: tuple[str, ...], hits: tuple[ScreeningHit, ...], policy_version: str
+    ) -> None:
+        terms = ", ".join(f"{h.reason_code}:{h.term_id}" for h in hits)
+        super().__init__(f"prompt refused before generation ({terms}) [{policy_version}]")
+        self.reason_codes = reason_codes
+        self.hits = hits
+        self.policy_version = policy_version
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +78,13 @@ def build_generation_prompt(
     track_spec: AdaptedTrackSpec,
     *,
     variant_delta: dict[str, Any] | None = None,
+    protected_artists: ProtectedArtistPolicy | None = None,
 ) -> CompiledPrompt:
-    """Build a deterministic generation prompt from an adapted C3 track spec."""
+    """Build a deterministic generation prompt from an adapted C3 track spec.
+
+    Raises :class:`ProtectedArtistPromptRefused` when the prompt or a style tag matches
+    the protected-artist policy (the shipped one unless ``protected_artists`` is given).
+    """
     delta = variant_delta or {}
 
     # 1. Core attributes, all from the parsed C3 spec (no fallbacks).
@@ -98,6 +139,15 @@ def build_generation_prompt(
     )
 
     style_tuple = tuple(dict.fromkeys(style_tags_list))
+
+    # 6. Refuse before anything can reach a provider (shared policy with P5).
+    policy = protected_artists or load_protected_artist_policy()
+    screening = policy.screen(full_prompt, *style_tuple)
+    if screening.blocked:
+        raise ProtectedArtistPromptRefused(
+            screening.reason_codes, screening.hits, screening.policy_version
+        )
+
     prompt_hash = compute_prompt_hash(full_prompt, style_tuple, negative_prompt)
 
     return CompiledPrompt(

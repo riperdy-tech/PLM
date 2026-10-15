@@ -4,18 +4,41 @@ from __future__ import annotations
 
 import io
 import math
+import random
 import struct
 import wave
 from typing import Any
 
 from plm_contracts import CommercialUseEligibility
 from plm_contracts.seams.c4 import ProviderLicenseTerms
+from plm_platform.clock import stable_seed
 
 from ..domain.enums import AttemptStatus
 from ..domain.models import GenerationRequest, GenerationResponse
 
 __all__ = ["MockMusicProvider", "synthesize_mock_wav"]
 
+
+
+
+_MOCK_WORDS = (
+    "neon", "rain", "window", "midnight", "signal", "harbor", "static", "lantern", "river",
+    "echo", "velvet", "corridor", "amber", "orbit", "paper", "glass", "drift", "ember",
+    "silver", "station", "hollow", "compass", "meadow", "cinder", "tide", "lattice",
+)
+
+
+def mock_lyrics(seed: int, *, lines: int = 8, words_per_line: int = 6) -> str:
+    """Deterministic placeholder lyrics for a vocal mock track, so P5's lyric screening
+    runs on mock output exactly as it would on a provider's lyrics."""
+    rng = random.Random(stable_seed("p4.mock_lyrics", seed))
+    return "\n".join(
+        " ".join(rng.choice(_MOCK_WORDS) for _ in range(words_per_line)) for _ in range(lines)
+    )
+
+
+MOCK_MODEL_VERSION = "mock-sine-synth-1"
+"""The mock is deterministic code, so its version is its synthesis algorithm's."""
 
 def synthesize_mock_wav(
     *,
@@ -34,7 +57,9 @@ def synthesize_mock_wav(
     """
     total_frames = round(duration_seconds * sample_rate)
     freq = frequency + (seed % 100)
-    amplitude = 16000  # comfortable non-clipping volume for 16-bit (-32768 to 32767)
+    # About -14 LUFS (streaming reference loudness) for the mock's sine, so mock runs
+    # exercise P5's loudness check the way a mastered track would, not as an outlier.
+    amplitude = 7600
 
     block_frames = min(total_frames, sample_rate)
     samples = [
@@ -120,6 +145,10 @@ class MockMusicProvider:
             mime_type="audio/wav",
             actual_duration_seconds=duration,
             cost_credits=1.0,
+            model_version=MOCK_MODEL_VERSION,
+            lyrics_text=(
+                mock_lyrics(request.seed) if request.vocal_mode.lower() != "instrumental" else None
+            ),
         )
 
     def check_health(self) -> bool:

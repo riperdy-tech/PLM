@@ -1,4 +1,18 @@
-"""Audio artifact probe, intake, and storage management (§4.5, §111, R6)."""
+"""Audio artifact probe, intake, and storage (§4.5, §111, R6, R4).
+
+Storage design (R4, P0 §5 C9):
+
+* :class:`MinioArtifactStorage` is the only production store. It writes through
+  :mod:`plm_platform.storage`: the key is ``music/<candidate_id>/<name>/<sha256>``, so
+  the sha256 *is* the content address, and the returned URI is the opaque
+  ``plm://<bucket>/<key>`` built by :func:`plm_platform.storage.to_uri`.
+* A store that cannot be reached, or refuses the write, raises
+  :class:`ArtifactStorageUnavailable`. No URI is returned for bytes that were not
+  stored, and there is no fallback to another store.
+* :class:`InMemoryArtifactStorage` is for tests and the hermetic acceptance smoke only.
+  Its ``memory://`` URIs are refused by every real consumer, so an in-memory artifact
+  can never be mistaken for a stored one.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +20,26 @@ import hashlib
 import io
 import wave
 from datetime import datetime
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
+
+import urllib3
+from minio import Minio
+from minio.error import S3Error
+from plm_platform.config import Settings
+from plm_platform.storage import (
+    MUSIC_PREFIX,
+    ObjectAlreadyExistsError,
+    ObjectNotFoundError,
+    StorageError,
+    build_client,
+    build_key,
+    ensure_bucket,
+    from_uri,
+    get_verified,
+    put_content,
+    sha256_digest,
+    to_uri,
+)
 
 from ..domain.enums import ArtifactType
 from ..domain.ids import artifact_id
@@ -14,8 +47,8 @@ from ..domain.models import AudioArtifact, MeasuredAudio
 
 __all__ = [
     "ArtifactStorageProtocol",
+    "ArtifactStorageUnavailable",
     "InMemoryArtifactStorage",
-    "LocalArtifactStorage",
     "MinioArtifactStorage",
     "create_audio_artifact",
     "probe_audio_bytes",
@@ -88,7 +121,7 @@ def create_audio_artifact(
 
 @runtime_checkable
 class ArtifactStorageProtocol(Protocol):
-    """Protocol for persisting audio artifact bytes to an object store."""
+    """Persists audio artifact bytes and hands back the URI they are stored under."""
 
     def put_artifact(
         self,
@@ -98,19 +131,38 @@ class ArtifactStorageProtocol(Protocol):
         data: bytes,
         mime_type: str = "audio/wav",
     ) -> str:
-        """Store artifact bytes and return a canonical object URI."""
+        """Store the bytes and return their URI, or raise; never a URI for unstored bytes."""
         ...
 
     def get_artifact(self, object_uri: str) -> bytes | None:
-        """Retrieve artifact bytes by URI."""
+        """The verified bytes at ``object_uri``; ``None`` when nothing is stored there."""
         ...
 
 
-class InMemoryArtifactStorage:
-    """In-memory store for testing and hermetic offline operation."""
+class ArtifactStorageUnavailable(RuntimeError):
+    """The artifact store could not be reached or refused the operation (fail closed)."""
 
-    def __init__(self, prefix: str = "s3://plm-artifacts/music") -> None:
-        self.prefix = prefix
+
+_MEMORY_SCHEME: Final[str] = "memory://"
+_TRANSPORT_ERRORS: Final[tuple[type[BaseException], ...]] = (
+    S3Error,
+    urllib3.exceptions.HTTPError,
+    OSError,
+)
+
+
+def _resource_path(candidate_id: str, name: str) -> str:
+    return f"{candidate_id}/{name}"
+
+
+class InMemoryArtifactStorage:
+    """Test-only store: content-addressed like MinIO, but with ``memory://`` URIs.
+
+    Not a fallback: no configured service builds one. Real consumers resolve URIs with
+    :func:`plm_platform.storage.from_uri`, which refuses this scheme.
+    """
+
+    def __init__(self) -> None:
         self.store: dict[str, bytes] = {}
 
     def put_artifact(
@@ -121,7 +173,8 @@ class InMemoryArtifactStorage:
         data: bytes,
         mime_type: str = "audio/wav",
     ) -> str:
-        uri = f"{self.prefix}/{candidate_id}/{name}"
+        key = build_key(MUSIC_PREFIX, _resource_path(candidate_id, name), sha256_digest(data))
+        uri = f"{_MEMORY_SCHEME}{key}"
         self.store[uri] = data
         return uri
 
@@ -129,65 +182,22 @@ class InMemoryArtifactStorage:
         return self.store.get(object_uri)
 
 
-class LocalArtifactStorage:
-    """Filesystem-backed artifact storage."""
-
-    def __init__(self, base_dir: str) -> None:
-        import pathlib
-
-        self.base_path = pathlib.Path(base_dir)
-        self.base_path.mkdir(parents=True, exist_ok=True)
-
-    def put_artifact(
-        self,
-        *,
-        candidate_id: str,
-        name: str,
-        data: bytes,
-        mime_type: str = "audio/wav",
-    ) -> str:
-        dest_dir = self.base_path / "music" / candidate_id
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_file = dest_dir / name
-        dest_file.write_bytes(data)
-        return dest_file.as_uri()
-
-    def get_artifact(self, object_uri: str) -> bytes | None:
-        import pathlib
-        import urllib.parse
-
-        parsed = urllib.parse.urlparse(object_uri)
-        path = pathlib.Path(urllib.parse.unquote(parsed.path))
-        if path.exists():
-            return path.read_bytes()
-        return None
-
-
 class MinioArtifactStorage:
-    """MinIO / S3 backed artifact storage."""
+    """The production P4 artifact store: content-addressed objects on MinIO (C9).
 
-    def __init__(
-        self,
-        *,
-        endpoint: str = "localhost:9000",
-        access_key: str = "minioadmin",
-        secret_key: str = "minioadmin",
-        bucket: str = "plm-artifacts",
-        secure: bool = False,
-    ) -> None:
-        self.bucket = bucket
-        self.client: Any = None
-        try:
-            from minio import Minio
+    ``client`` is injectable for tests; by default it is the platform client built from
+    ``settings``. The bucket is created on first write when missing (idempotent).
+    """
 
-            self.client = Minio(
-                endpoint,
-                access_key=access_key,
-                secret_key=secret_key,
-                secure=secure,
-            )
-        except Exception:  # noqa: BLE001
-            self.client = None
+    def __init__(self, settings: Settings, *, client: Minio | None = None) -> None:
+        self._settings = settings
+        self._client = build_client(settings) if client is None else client
+        self._bucket_ready = False
+
+    def _ensure_bucket(self) -> None:
+        if not self._bucket_ready:
+            ensure_bucket(settings=self._settings, client=self._client)
+            self._bucket_ready = True
 
     def put_artifact(
         self,
@@ -197,27 +207,49 @@ class MinioArtifactStorage:
         data: bytes,
         mime_type: str = "audio/wav",
     ) -> str:
-        key = f"music/{candidate_id}/{name}"
-        if self.client is not None:
-            if not self.client.bucket_exists(self.bucket):
-                self.client.make_bucket(self.bucket)
-            self.client.put_object(
-                self.bucket,
-                key,
-                io.BytesIO(data),
-                len(data),
+        """Store the bytes under their content address and return the ``plm://`` URI.
+
+        Re-storing identical bytes for the same candidate and name finds the same key
+        and returns the same URI (the key pins the digest, so the object is the same
+        content). Raises :class:`ArtifactStorageUnavailable` when the store is
+        unreachable or refuses the write.
+        """
+        resource = _resource_path(candidate_id, name)
+        try:
+            self._ensure_bucket()
+            stored = put_content(
+                MUSIC_PREFIX,
+                resource,
+                data,
                 content_type=mime_type,
+                settings=self._settings,
+                client=self._client,
             )
-        return f"s3://{self.bucket}/{key}"
+            key = stored.key
+        except ObjectAlreadyExistsError:
+            key = build_key(MUSIC_PREFIX, resource, sha256_digest(data))
+        except _TRANSPORT_ERRORS as exc:
+            raise ArtifactStorageUnavailable(
+                f"artifact store unavailable writing {resource!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        return to_uri(key, settings=self._settings)
 
     def get_artifact(self, object_uri: str) -> bytes | None:
-        if not object_uri.startswith(f"s3://{self.bucket}/"):
-            return None
-        key = object_uri[len(f"s3://{self.bucket}/") :]
-        if self.client is None:
-            return None
+        """The bytes at ``object_uri``, re-hashed against the digest the key pins.
+
+        ``None`` when no object is stored there. A URI this store did not build raises
+        :class:`plm_platform.storage.InvalidArtifactUriError`; bytes that no longer match
+        their digest raise :class:`plm_platform.storage.ContentIntegrityError`; an
+        unreachable store raises :class:`ArtifactStorageUnavailable`.
+        """
+        key = from_uri(object_uri, settings=self._settings)
         try:
-            resp = self.client.get_object(self.bucket, key)
-            return cast(bytes, resp.read())
-        except Exception:  # noqa: BLE001
+            return get_verified(key, settings=self._settings, client=self._client)
+        except ObjectNotFoundError:
             return None
+        except StorageError:
+            raise
+        except _TRANSPORT_ERRORS as exc:
+            raise ArtifactStorageUnavailable(
+                f"artifact store unavailable reading {key!r}: {type(exc).__name__}: {exc}"
+            ) from exc

@@ -88,3 +88,4 @@ class FailureReasonCode(str, Enum):
     POLICY_VIOLATION = "policy_violation"
     REMOTE_NOT_FOUND = "remote_not_found"
     EXTERNAL_WRITE_NOT_AUTHORIZED = "external_write_not_authorized"
+    RELEASE_NOT_CLEARED = "release_not_cleared"

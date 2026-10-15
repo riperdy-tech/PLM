@@ -33,9 +33,11 @@ from .lineage import ExperimentLineage
 
 __all__ = [
     "CandidateReadyPayload",
+    "GenerationProvenancePayload",
     "MeasuredAudio",
     "ProviderLicenseTerms",
     "RightsSnapshotPayload",
+    "SourceInputPayload",
 ]
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -74,11 +76,39 @@ class MeasuredAudio(BaseModel):
     channels: int = Field(ge=1, le=8)
 
 
+class SourceInputPayload(BaseModel):
+    """One input the generation used besides the prompt (sample, stem, voice, melody)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: NonEmpty
+    ref: NonEmpty
+    license_ref: NonEmpty | None
+    """The license or authorization covering this input; ``None`` means none on file."""
+
+
+class GenerationProvenancePayload(BaseModel):
+    """The P28 provenance facts of the producing attempt that C4 2.0 did not carry
+    (ADR-0035): model version, generation time, source inputs, human contribution.
+
+    Every field is required and nullable. ``None`` means P4 does not know the fact, and
+    keeps the candidate out of clearance. ``source_inputs=()`` is the declared fact "no
+    inputs besides the prompt", distinct from ``None``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model_version: NonEmpty | None
+    generation_timestamp: AwareDatetime | None
+    source_inputs: tuple[SourceInputPayload, ...] | None
+    human_contribution: NonEmpty | None
+
+
 class CandidateReadyPayload(SeamModel):
     """``music_candidate_ready_for_p5``: one candidate, everything P5 judges it on."""
 
     SEAM: ClassVar[str] = "C4"
-    SCHEMA_VERSION: ClassVar[str] = "2.0"
+    SCHEMA_VERSION: ClassVar[str] = "3.0"
     """2.0 adds the required ``requested_duration_range`` (ADR-0032)."""
 
     event_type: Literal["music_candidate_ready_for_p5"]
@@ -103,6 +133,8 @@ class CandidateReadyPayload(SeamModel):
     """``None`` means the provider returned no lyrics, not that lyrics were checked."""
     rights: RightsSnapshotPayload | None
     """``None`` means the provider declared no terms: commercial use is unknown."""
+    generation_provenance: GenerationProvenancePayload
+    """Schema 3.0 (ADR-0035): the rest of P28, stated fact by fact."""
 
     @model_validator(mode="after")
     def _requested_inside_range(self) -> CandidateReadyPayload:

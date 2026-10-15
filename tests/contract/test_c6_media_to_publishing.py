@@ -10,6 +10,10 @@ What this proves: the lineage P6 received from P5 reaches P7's event and P8's st
 release unchanged; P7 takes title, assets, checksums and the disclosure flag from the
 package rather than defaults; P8 refuses a publication event that belongs to another
 package; every consumer refuses incomplete, placeholder or future payloads.
+
+P6 reads the track audio from an in-memory artifact store and renders with the stand-in
+toolchain (no FFmpeg): the package's URIs and checksums are those of stored bytes, but
+this proves the seam, not the render.
 """
 
 from __future__ import annotations
@@ -39,15 +43,18 @@ from services.youtube_publishing.domain.models import ChannelProfile
 from services.youtube_publishing.engine import YouTubePublishingEngine
 from services.youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
 from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from tests.support.clearance import p5_holding
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.distribution_db import distribution_db_session
-from tests.support.seams import lineage_fields, release_manifest
+from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain, stored_manifest
+from tests.support.seams import lineage_fields
 from tests.support.youtube_db import youtube_db_session
 
 REGISTRY_ENTRY = "C6 · PHASE-P6 → PHASE-P7 → PHASE-P8"
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-SONGS = ("song_01", "song_02")
-MANIFESTS = [release_manifest(candidate_id=s, measured_duration_seconds=180.0) for s in SONGS]
+SONGS = ("song_01", "song_02", "song_03")
+STORE = InMemoryArtifactStore()
+MANIFESTS = [stored_manifest(STORE, s, measured_duration_seconds=180.0) for s in SONGS]
 CHANNEL = ChannelProfile(
     id="prof_UC_contract", channel_id="UC_contract", channel_name="Contract Channel",
     brand_id="brand_neon", oauth_credential_ref="sec_oauth_contract",
@@ -65,9 +72,11 @@ def hop1() -> dict[str, Any]:
     result = assemble_media_package(
         track_manifests=MANIFESTS,
         brand_profile=BrandProfile(brand_id="brand_neon", brand_name="Neon Dreams"),
-        required_duration_seconds=360.0,
+        required_duration_seconds=536.0,
         visual_profile="brand_neon_rain_v1",
         playlist_concept="Late Night Synthwave",
+        store=STORE,
+        toolchain=StandInToolchain(),
         clock=FixedClock(NOW),
     )
     return json.loads(json.dumps(result.media_package.to_c6_payload()))
@@ -80,7 +89,7 @@ def hop2(hop1: dict[str, Any]) -> dict[str, Any]:
     with youtube_db_session() as session:
         insert_publish_manifest(session, manifest)
         session.commit()
-        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(NOW)).execute_publish(
+        result = YouTubePublishingEngine(MockYouTubeClient(), chunk_size=512, clock=FixedClock(NOW), clearance=p5_holding(*MANIFESTS)).execute_publish(
             session, manifest, video_data=b"0" * 1024, thumbnail_data=b"IMG",
             operating_mode=OperatingMode.DRY_RUN,
         )
@@ -121,6 +130,7 @@ def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str
         result = submit_release_from_seams(
             session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            clearance=p5_holding(*MANIFESTS),
             publication=hop2, metadata=METADATA, now=NOW,
         )
         lineage, package_id = get_release_identity(session, result.release.release_id)
@@ -137,6 +147,7 @@ def test_p8_refuses_a_publication_from_another_package(
         submit_release_from_seams(
             session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[m.to_wire() for m in MANIFESTS], media_package=hop1,
+            clearance=p5_holding(*MANIFESTS),
             publication=with_value(hop2, "media_package_id", "mpkg_other"),
             metadata=METADATA, now=NOW,
         )

@@ -153,6 +153,12 @@ def candidate_event_fields(**overrides: Any) -> dict[str, Any]:
         "prompt_text": "ambient synth pad electronic chill",
         "lyrics_text": None,
         "rights": rights_fields(),
+        "generation_provenance": {
+            "model_version": "mock-v1.0.0",
+            "generation_timestamp": "2026-09-25T11:59:00+00:00",
+            "source_inputs": [],
+            "human_contribution": "none: generated from the prompt without human editing",
+        },
     }
     fields.update(overrides)
     return fields

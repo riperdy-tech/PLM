@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from plm_contracts import ProviderMode
+from plm_platform.clearance import ClearanceVerifier, clearance_verifier_for
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import Settings, load_settings
 from plm_platform.execution import (
@@ -31,6 +32,7 @@ def create_app(
     engine: DistributionEngine | None = None,
     execution: ExecutionSettings | None = None,
     clock: Clock | None = None,
+    clearance: ClearanceVerifier | None = None,
 ) -> FastAPI:
     """Create a configured FastAPI application instance for the `/distribution` service.
 
@@ -71,6 +73,10 @@ def create_app(
         auth_dep,
         engine=engine,
         clock=service_clock,
+        clearance=(
+            clearance_verifier_for(platform_settings, session_factory)
+            if clearance is None else clearance
+        ),
         write_guard=ExternalWriteGuard(
             execution_settings,
             budget=budget_gate_for(execution_settings, session_factory, clock=service_clock),

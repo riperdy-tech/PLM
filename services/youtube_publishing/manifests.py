@@ -17,7 +17,7 @@ from datetime import datetime
 from plm_contracts.seams.c6 import MediaPackagePayload
 
 from .domain.ids import build_idempotency_key, build_manifest_id
-from .domain.models import ChannelProfile, PublishManifest
+from .domain.models import ChannelProfile, ManifestTrack, PublishManifest
 
 __all__ = ["PackageNotReadyError", "build_publish_manifest", "preflight_metadata"]
 
@@ -83,5 +83,9 @@ def build_publish_manifest(
         playlist_id=None,
         playlist_title=None,
         metadata_version=meta.variant_id,
+        tracks=tuple(
+            ManifestTrack(candidate_id=t.song_id, artifact_id=t.source_artifact_id)
+            for t in pkg.tracklist
+        ),
         created_at=now,
     )

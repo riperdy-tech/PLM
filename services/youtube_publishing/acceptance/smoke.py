@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
+from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceStatus
+from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_platform.clearance import QueueHoldSource, verify_release_clearance
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
@@ -12,7 +17,7 @@ from sqlalchemy import text
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import OperatingMode, PrivacyStatus
 from ..domain.ids import build_idempotency_key, build_manifest_id
-from ..domain.models import ChannelProfile, PublishManifest
+from ..domain.models import ChannelProfile, ManifestTrack, PublishManifest
 from ..engine import YouTubePublishingEngine
 from ..preflight.gates import evaluate_preflight_all
 from ..storage.repositories import (
@@ -136,6 +141,8 @@ def run_smoke_test(*, clock: Clock | None = None) -> str | None:
                 made_for_kids=False,
                 playlist_id="PL_smoke_official",
                 metadata_version="v1",
+                tracks=(ManifestTrack(candidate_id=f"cand_smoke_{ts}",
+                                      artifact_id=f"art_smoke_{ts}"),),
                 created_at=now,
             )
             insert_publish_manifest(session, manifest)
@@ -143,7 +150,15 @@ def run_smoke_test(*, clock: Clock | None = None) -> str | None:
 
             # 4. Engine publish with mock client
             client = MockYouTubeClient()
-            engine_runner = YouTubePublishingEngine(client, clock=smoke_clock)
+            # P5 is not part of this smoke: the only recording it can clear is the one this
+            # smoke declares. Holds are still read from the real exception queue.
+            own = _smoke_release_manifest(package_payload, ts)
+            engine_runner = YouTubePublishingEngine(
+                client, clock=smoke_clock,
+                clearance=lambda tracks: verify_release_clearance(
+                    tracks, manifests=_OwnManifest(own), holds=QueueHoldSource(factory)
+                ),
+            )
             res = engine_runner.execute_publish(session, manifest)
 
             if not res.is_success:
@@ -159,3 +174,35 @@ def run_smoke_test(*, clock: Clock | None = None) -> str | None:
         return f"smoke test raised exception: {exc}"
 
     return None
+
+
+class _OwnManifest:
+    def __init__(self, manifest: ReleaseManifestPayload) -> None:
+        self._manifest = manifest
+
+    def release_manifest(self, candidate_id: str) -> ReleaseManifestPayload | None:
+        return self._manifest if candidate_id == self._manifest.candidate_id else None
+
+
+def _smoke_release_manifest(payload: dict[str, Any], ts: int) -> ReleaseManifestPayload:
+    candidate = f"cand_smoke_{ts}"
+    return ReleaseManifestPayload.build(
+        p5_manifest_id=f"rel_man_smoke_{ts}", release_manifest_version="1.0",
+        candidate_id=candidate, canonical_artifact_id=f"art_smoke_{ts}",
+        artifact_uri=f"music/smoke/{candidate}.wav",
+        artifact_sha256=hashlib.sha256(f"smoke_{ts}".encode()).hexdigest(),
+        measured_duration_seconds=180.0, track_spec_id=f"trk_smoke_{ts}",
+        lineage=ExperimentLineage(
+            experiment_id=payload["experiment_id"],
+            experiment_family_id=payload["experiment_family_id"],
+            content_arm_id=payload["content_arm_id"],
+            content_genome_id=payload["content_genome_id"],
+            production_directive_id=payload["production_directive_id"],
+        ),
+        disposition=GateDisposition.PASSED, override=None, technical_status="PASSED",
+        commercial_use_status=CommercialUseEligibility.ELIGIBLE,
+        provenance_status=ProvenanceStatus.COMPLETE, ai_disclosure_required=True,
+        rights_risk="LOW", policy_status="COMPLIANT", evaluation_id=f"eval_smoke_{ts}",
+        evaluation_policy_version="p5-v1", warning_codes=(),
+        evidence_bundle_id=f"evi_smoke_{ts}",
+    )

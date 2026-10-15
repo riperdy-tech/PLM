@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
-import math
-import struct
 import tempfile
-import wave
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.exceptions import StaticReviewerDirectory
 from quality_gate.api.app import create_app
 from quality_gate.config import load_quality_gate_settings
+from quality_gate.ingestion.artifact_fetch import MinioArtifactFetcher
 
+from tests.support.fake_minio import FakeMinio, stored_event_fields
 from tests.support.qa_db import create_qa_engine, qa_session
+from tests.support.rights_detectors import (
+    register_controlled_references,
+    synthetic_music,
+    write_wav,
+)
 from tests.support.seams import candidate_event, lineage_fields, rights_fields
 
 _TEST_TOKEN = "test-qa-secret-token"
@@ -33,11 +39,18 @@ ENV_WITH_TOKEN = {
 
 @pytest.fixture
 def qa_engine():
-    return create_qa_engine(static_pool=True)
+    engine = create_qa_engine(static_pool=True)
+    register_controlled_references(engine, now=datetime(2026, 9, 1, tzinfo=UTC))
+    return engine
 
 
 @pytest.fixture
-def qa_client(qa_engine):
+def store() -> FakeMinio:
+    return FakeMinio()
+
+
+@pytest.fixture
+def qa_client(qa_engine, store):
     platform = load_settings(env=ENV_WITH_TOKEN)
     settings = load_quality_gate_settings(
         platform=platform,
@@ -48,26 +61,24 @@ def qa_client(qa_engine):
     app = create_app(
         session_factory=lambda: qa_session(qa_engine),
         settings=settings,
+        artifact_fetcher=MinioArtifactFetcher(platform, client=store),  # type: ignore[arg-type]
     )
     return TestClient(app)
 
 
+def _stored_event(store: FakeMinio, wav_path: Path, **fields: object) -> dict:
+    """The C4 wire for ``fields`` with the WAV stored in ``store`` under its URI."""
+    platform = load_settings(env=ENV_WITH_TOKEN)
+    return CandidateReadyPayload.build(
+        **stored_event_fields(store, platform, wav_path.read_bytes(), **fields)
+    ).to_wire()
+
+
 def _make_temp_wav(duration: float = 1.0) -> Path:
-    temp_dir = tempfile.gettempdir()
-    path = Path(temp_dir) / f"api_test_{int(duration*1000)}.wav"
-    sample_rate = 44100
-    total_frames = int(duration * sample_rate)
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        frames = bytearray()
-        for i in range(total_frames):
-            t = float(i) / sample_rate
-            val = int(14000.0 * math.sin(2.0 * math.pi * 440.0 * t))
-            frames.extend(struct.pack("<hh", val, val))
-        wf.writeframes(frames)
-    return path
+    # Music-like audio, unrelated to the registered reference: a pure tone has too few
+    # landmarks for the fingerprint detector to judge (it would be UNKNOWN, ADR-0034).
+    path = Path(tempfile.gettempdir()) / f"api_test_{int(duration * 1000)}.wav"
+    return write_wav(path, synthetic_music(seed=17, seconds=duration))
 
 
 def test_qa_health_is_public(qa_client) -> None:
@@ -87,19 +98,20 @@ def test_qa_endpoints_require_service_token(qa_client) -> None:
     assert res_bad.json()["detail"]["code"] == "invalid_service_token"
 
 
-def test_evaluate_and_get_manifest_flow(qa_client, qa_engine) -> None:
-    wav_path = _make_temp_wav(duration=1.0)
+def test_evaluate_and_get_manifest_flow(qa_client, qa_engine, store) -> None:
+    wav_path = _make_temp_wav(duration=1.5)
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
         eval_payload = {
-            "candidate_event": candidate_event(
+            "candidate_event": _stored_event(
+                store,
+                wav_path,
                 candidate_id="cand_api_01",
                 artifact_id="art_api_01",
                 track_spec_id="spec_api_01",
                 lineage=lineage_fields(experiment_id="exp_api_01", content_arm_id="arm_api_01"),
                 prompt_text="relaxing lo-fi chill beat",
-            ).to_wire(),
-            "audio_path": str(wav_path),
+            ),
         }
 
         # 1. Post evaluation
@@ -130,20 +142,21 @@ def test_evaluate_and_get_manifest_flow(qa_client, qa_engine) -> None:
             wav_path.unlink()
 
 
-def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
-    wav_path = _make_temp_wav(duration=1.0)
+def test_quarantine_and_resolve_flow(qa_client, qa_engine, store) -> None:
+    wav_path = _make_temp_wav(duration=1.5)
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
         # Declared commercial use unknown -> triggers quarantine
         eval_payload = {
-            "candidate_event": candidate_event(
+            "candidate_event": _stored_event(
+                store,
+                wav_path,
                 candidate_id="cand_quar_api_01",
                 artifact_id="art_api_02",
                 track_spec_id="spec_api_02",
                 lineage=lineage_fields(experiment_id="exp_api_02", content_arm_id="arm_api_02"),
                 rights=rights_fields(commercial_use_status="unknown"),
-            ).to_wire(),
-            "audio_path": str(wav_path),
+            ),
         }
 
         # 1. Post evaluation -> Quarantined
@@ -153,6 +166,7 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine) -> None:
         assert data["disposition"] == "QUARANTINED"
         case_id = data["quarantine_case_id"]
         assert case_id is not None
+        assert data["quarantine_reason_codes"] == ["UNKNOWN_COMMERCIAL_LICENSE"]
 
         # 2. List quarantine cases
         list_res = qa_client.get("/qa/quarantine", headers=headers)
@@ -204,7 +218,7 @@ def test_evaluation_refuses_an_incomplete_candidate_event(qa_client, qa_engine) 
     del event["lineage"]
     res = qa_client.post(
         "/qa/evaluations",
-        json={"candidate_event": event, "audio_path": "unused.wav"},
+        json={"candidate_event": event},
         headers=headers,
     )
     assert res.status_code == 422

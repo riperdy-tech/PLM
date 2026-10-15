@@ -26,6 +26,7 @@ from youtube_publishing.storage.repositories import (
     update_publish_attempt,
 )
 
+from tests.support.clearance import test_track_refs
 from tests.support.youtube_db import youtube_db_session
 
 
@@ -83,6 +84,7 @@ def test_manifest_and_attempt_repositories_roundtrip() -> None:
         made_for_kids=False,
         metadata_version="v1",
         created_at=now,
+        tracks=test_track_refs(),
     )
 
     attempt = PublishAttempt(

@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "rights-detectors-v1",
+  "notes": [
+    "Declared thresholds for P5's rights detectors (R4, ADR-0034). Loaded and validated by quality_gate.detectors.config.load_detector_policy.",
+    "audio_fingerprint: spectral-landmark (peak-pair) hashing in numpy/scipy. Any change to a parameter changes the fingerprint version (algorithm_version plus a hash of the parameters), and stored fingerprints of another version are not compared: the source is then UNKNOWN until it is re-fingerprinted.",
+    "audio decision: MATCH when at least match_min_aligned_hashes candidate hashes agree on one time offset (within offset_tolerance_frames) AND that count divided by the smaller of the two fingerprints' hash counts is at least match_min_score. A candidate with fewer than min_candidate_hashes hashes is inconclusive (UNKNOWN).",
+    "lyric_similarity: word shingles of shingle_size tokens after the shared normalisation (plm_platform.protected_artists.normalise_for_screening), hashed with blake2b-64. score = max(containment of the candidate in the reference, coverage of the reference by the candidate). MATCH when score >= match_min_score OR the shared shingle count >= match_min_shared_shingles. Fewer than min_candidate_shingles candidate shingles is inconclusive (UNKNOWN).",
+    "Calibration: thresholds were set on deterministic synthetic fixtures (tests/unit/test_qa_detectors_*.py), not on a labelled corpus of real music. They are risk signals, not proof of originality (docs/STATUS.md 'Detector limitations')."
+  ],
+  "audio_fingerprint": {
+    "algorithm_version": "p5-landmark-v1",
+    "sample_rate_hz": 11025,
+    "n_fft": 1024,
+    "hop_length": 256,
+    "peak_neighbourhood_frames": 11,
+    "peak_neighbourhood_bins": 21,
+    "peak_floor_db": 40.0,
+    "max_peaks_per_second": 30,
+    "fan_out": 5,
+    "pair_dt_min_frames": 1,
+    "pair_dt_max_frames": 63,
+    "pair_df_max_bins": 127,
+    "offset_tolerance_frames": 1,
+    "min_candidate_hashes": 30,
+    "match_min_aligned_hashes": 20,
+    "match_min_score": 0.05
+  },
+  "lyric_similarity": {
+    "shingle_size": 5,
+    "min_candidate_shingles": 3,
+    "match_min_score": 0.2,
+    "match_min_shared_shingles": 8
+  }
+}

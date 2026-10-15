@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
+from plm_platform.clearance import ClearanceVerifier
 from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, ExternalWriteRefusedError
 
@@ -65,6 +66,7 @@ def build_distribution_router(
     engine: DistributionEngine | None = None,
     *,
     clock: Clock,
+    clearance: ClearanceVerifier,
     write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     """Build the distribution router configured with auth and dependencies."""
@@ -98,6 +100,7 @@ def build_distribution_router(
                     track_manifests=req.track_manifests,
                     media_package=req.media_package,
                     publication=req.publication,
+                    clearance=clearance,
                     metadata=ReleaseMetadata(
                         artist_name=req.artist_name,
                         release_date=req.release_date,

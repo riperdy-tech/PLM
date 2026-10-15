@@ -170,7 +170,7 @@ def test_ac07_durable_attempt_logging_and_retry() -> None:
 def test_ac08_ruling_r6_rights_snapshot() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
     plan, variants = plan_generation(spec, created_at=FIXED_NOW)
-    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage())
 
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
@@ -190,7 +190,7 @@ def test_ac08_ruling_r6_rights_snapshot() -> None:
 def test_ac09_candidate_bank_lifecycle() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
     plan, variants = plan_generation(spec, created_at=FIXED_NOW)
-    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage())
 
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
@@ -209,7 +209,7 @@ def test_ac09_candidate_bank_lifecycle() -> None:
 def test_ac10_seam_c4_event_generation() -> None:
     adapted = adapt_track_spec(SAMPLE_C3_SPEC)
     plan, variants = plan_generation(adapted, created_at=FIXED_NOW)
-    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage())
     with music_db_session() as session:
         result = engine.execute_plan(session, plan=plan, variants=variants, spec=adapted)
         cand = result.candidates[0]
@@ -218,7 +218,7 @@ def test_ac10_seam_c4_event_generation() -> None:
 
     wire = event.to_wire()
     assert wire["event_type"] == "music_candidate_ready_for_p5"
-    assert wire["schema_version"] == "2.0"  # ADR-0032
+    assert wire["schema_version"] == "3.0"  # ADR-0035
     assert wire["lineage"] == SAMPLE_C3_SPEC["lineage"]
     assert wire["requested_duration_seconds"] == SAMPLE_C3_SPEC["requested_duration"]
     assert wire["requested_duration_range"] == SAMPLE_C3_SPEC["duration_range"]

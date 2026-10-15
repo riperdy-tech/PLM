@@ -767,11 +767,11 @@ def media_assemble(
         ...,
         "--request",
         "-r",
-        help="Path to an assembly request JSON (track_manifests, brand, duration, visual "
+        help="Path to an assembly request JSON (candidate_ids, brand_id, duration, visual "
         "profile, playlist concept)",
     ),
 ) -> None:
-    """Assemble and render a media package from P5 track manifests."""
+    """Assemble and render a media package from recordings P5 cleared (by candidate id)."""
     from media_factory.cli import cli_assemble
 
     cli_assemble(request_path=request_path)

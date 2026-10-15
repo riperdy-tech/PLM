@@ -9,28 +9,20 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
-from plm_contracts.seams import SeamRejection, parse_seam
-from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import Clock
 from sqlalchemy.orm import Session
 
+from ..backend import MediaBackend
 from ..config import MediaFactorySettings
-from ..domain.models import LegacyPackageError
-from ..playlist.assembler import PlaylistAssemblyError
-from ..rendering.assembler import assemble_media_package
+from ..domain.enums import PackageStatus
+from ..domain.models import LegacyPackageError, MediaPackage
+from ..errors import MediaAssemblyError, MediaInfrastructureError
+from ..service import assemble_and_persist
 from ..storage.repositories import (
     get_media_package_by_id,
     get_playlist_session,
     get_render_job,
-    insert_media_package,
-    insert_playlist_session,
-    insert_playlist_track,
-    insert_render_job,
-    insert_thumbnail_variant,
-    insert_visual_asset,
-    insert_visual_session,
 )
-from ..visuals.planner import BrandProfile
 from .schemas import (
     AssemblePackageRequest,
     HealthResponse,
@@ -43,11 +35,42 @@ from .service_token import require_service_token
 __all__ = ["build_router"]
 
 
+def _package_response(pkg: MediaPackage) -> MediaPackageResponse:
+    qa = pkg.render_report.get("qa") or {}
+    blocking = [] if pkg.status is PackageStatus.READY_FOR_PUBLISH else list(
+        qa.get("reason_codes") or [])
+    return MediaPackageResponse(
+        media_package_id=pkg.media_package_id,
+        release_manifest_id=pkg.release_manifest_id,
+        experiment_id=pkg.experiment_id,
+        content_arm_id=pkg.content_arm_id,
+        brand_id=pkg.brand_id,
+        playlist_session_id=pkg.playlist_session_id,
+        visual_session_id=pkg.visual_session_id,
+        video_master_uri=pkg.video_master_uri,
+        video_checksum=pkg.video_checksum,
+        video_duration_seconds=pkg.video_duration_seconds,
+        render_profile=pkg.render_profile,
+        audio_master_uri=pkg.audio_master_uri,
+        audio_checksum=pkg.audio_checksum,
+        thumbnails=pkg.thumbnails,
+        tracklist=pkg.tracklist,
+        chapters=pkg.chapters,
+        metadata_candidates=pkg.metadata_candidates,
+        short_source_assets=pkg.short_source_assets,
+        render_report=pkg.render_report,
+        status=pkg.status.value,
+        package_version=pkg.package_version,
+        blocking_reason_codes=blocking,
+    )
+
+
 def build_router(
     *,
     session_factory: Callable[[], Session] | None,
     settings: MediaFactorySettings,
     clock: Clock,
+    backend: MediaBackend | None = None,
 ) -> APIRouter:
     """Build the authenticated router for the media factory."""
     router = APIRouter(prefix="/media", tags=["media_factory"])
@@ -87,81 +110,35 @@ def build_router(
         payload: AssemblePackageRequest,
         session: Annotated[Session, Depends(_require_session)],
     ) -> MediaPackageResponse:
-        """Assemble a complete publish-ready media package from a P5 release manifest."""
-        brand = BrandProfile(
-            brand_id=payload.brand_id,
-            brand_name=payload.brand_name,
-        )
+        """Assemble, render and package the recordings P5 cleared (R7, ADR-0028, R4).
 
-        manifests: list[ReleaseManifestPayload] = []
-        for idx, raw in enumerate(payload.track_manifests):
-            try:
-                manifests.append(parse_seam(ReleaseManifestPayload, raw))
-            except SeamRejection as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=ErrorShape(
-                        code=exc.error.code,
-                        field_paths=[f"track_manifests[{idx}].{p}" for p in exc.field_paths],
-                        message=exc.error.message,
-                    ).model_dump(),
-                ) from exc
-        try:
-            result = assemble_media_package(
-                track_manifests=manifests,
-                brand_profile=brand,
-                required_duration_seconds=payload.required_duration_seconds,
-                visual_profile=payload.visual_profile,
-                playlist_concept=payload.playlist_concept,
-                render_profile=payload.render_profile,
-                sequence_version=payload.sequence_version,
-                clock=clock,
+        422: P6 refused the request (reason code). 503: an authority, the artifact
+        store or the toolchain is unavailable. 200 with ``status: failed`` and
+        ``blocking_reason_codes``: the render ran and post-render QA blocked it. A
+        request that resolves to an existing package returns it without rendering.
+        """
+        if backend is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=ErrorShape(
+                    code="media_backend_unavailable",
+                    field_paths=[],
+                    message="no clearance authority, artifact store or toolchain is configured",
+                ).model_dump(),
             )
-        except PlaylistAssemblyError as exc:
+        try:
+            package = assemble_and_persist(session, backend, payload, clock=clock)
+        except MediaAssemblyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=exc.error.model_dump(),
             ) from exc
-
-        # Persist session, tracks, visual session, assets, thumbnails, render job, and package
-        insert_playlist_session(session, result.playlist_session)
-        for tr in result.playlist_tracks:
-            insert_playlist_track(session, tr)
-
-        insert_visual_session(session, result.visual_session)
-        for va in result.visual_assets:
-            insert_visual_asset(session, va)
-
-        for tv in result.thumbnail_variants:
-            insert_thumbnail_variant(session, tv)
-
-        insert_render_job(session, result.render_job)
-        insert_media_package(session, result.media_package)
-
-        pkg = result.media_package
-        return MediaPackageResponse(
-            media_package_id=pkg.media_package_id,
-            release_manifest_id=pkg.release_manifest_id,
-            experiment_id=pkg.experiment_id,
-            content_arm_id=pkg.content_arm_id,
-            brand_id=pkg.brand_id,
-            playlist_session_id=pkg.playlist_session_id,
-            visual_session_id=pkg.visual_session_id,
-            video_master_uri=pkg.video_master_uri,
-            video_checksum=pkg.video_checksum,
-            video_duration_seconds=pkg.video_duration_seconds,
-            render_profile=pkg.render_profile,
-            audio_master_uri=pkg.audio_master_uri,
-            audio_checksum=pkg.audio_checksum,
-            thumbnails=pkg.thumbnails,
-            tracklist=pkg.tracklist,
-            chapters=pkg.chapters,
-            metadata_candidates=pkg.metadata_candidates,
-            short_source_assets=pkg.short_source_assets,
-            render_report=pkg.render_report,
-            status=pkg.status.value,
-            package_version=pkg.package_version,
-        )
+        except MediaInfrastructureError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=exc.error.model_dump(),
+            ) from exc
+        return _package_response(package)
 
     @router.get(
         "/packages/{package_id}",
@@ -183,29 +160,7 @@ def build_router(
                     message=f"media package {package_id} not found",
                 ).model_dump(),
             )
-        return MediaPackageResponse(
-            media_package_id=pkg.media_package_id,
-            release_manifest_id=pkg.release_manifest_id,
-            experiment_id=pkg.experiment_id,
-            content_arm_id=pkg.content_arm_id,
-            brand_id=pkg.brand_id,
-            playlist_session_id=pkg.playlist_session_id,
-            visual_session_id=pkg.visual_session_id,
-            video_master_uri=pkg.video_master_uri,
-            video_checksum=pkg.video_checksum,
-            video_duration_seconds=pkg.video_duration_seconds,
-            render_profile=pkg.render_profile,
-            audio_master_uri=pkg.audio_master_uri,
-            audio_checksum=pkg.audio_checksum,
-            thumbnails=pkg.thumbnails,
-            tracklist=pkg.tracklist,
-            chapters=pkg.chapters,
-            metadata_candidates=pkg.metadata_candidates,
-            short_source_assets=pkg.short_source_assets,
-            render_report=pkg.render_report,
-            status=pkg.status.value,
-            package_version=pkg.package_version,
-        )
+        return _package_response(pkg)
 
     @router.get(
         "/packages/{package_id}/c6",

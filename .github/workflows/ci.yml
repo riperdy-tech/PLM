@@ -77,6 +77,11 @@ jobs:
       - name: Integration tests
         run: pytest -q -m integration
 
+      # Media tests need the pinned FFmpeg 7 in the dev image, so they run inside it; a
+      # missing tool fails instead of skipping.
+      - name: Media tests (dev image)
+        run: docker compose run --rm --no-deps -e PLM_REQUIRE_MEDIA_TOOLS=1 worker pytest -q -m media
+
       - name: Tear down the compose stack
         if: always()
         run: docker compose down -v --remove-orphans

@@ -43,6 +43,7 @@ from services.distribution.engine import DistributionEngine
 from services.distribution.submission import ReleaseMetadata, submit_release_from_seams
 from tests.support.analytics_db import analytics_db_session
 from tests.support.ar_db import ar_session, create_ar_engine
+from tests.support.clearance import p5_holding
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.distribution_db import distribution_db_session
 from tests.support.seams import lineage_fields, media_package, release_manifest, sample_lineage
@@ -57,6 +58,7 @@ def leg1() -> dict[str, Any]:
         result = submit_release_from_seams(
             session, DistributionEngine(MockDistributorClient(clock=FixedClock(NOW))),
             track_manifests=[release_manifest(candidate_id=c).to_wire() for c in ("c_a", "c_b")],
+            clearance=p5_holding(*(release_manifest(candidate_id=c) for c in ("c_a", "c_b"))),
             media_package=media_package("c_a", "c_b").to_wire(),
             publication=None,
             metadata=ReleaseMetadata(

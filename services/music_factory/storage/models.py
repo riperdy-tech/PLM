@@ -75,6 +75,9 @@ generation_attempts_table = sa.Table(
     sa.Column("creative_variant_id", sa.String(64), nullable=False, index=True),
     sa.Column("provider_id", sa.String(64), nullable=False, index=True),
     sa.Column("model_id", sa.String(64), nullable=False),
+    # What the provider declared for this attempt (P28); NULL means it declared nothing.
+    sa.Column("model_version", sa.String(128), nullable=True),
+    sa.Column("lyrics_text", sa.Text, nullable=True),
     sa.Column("provider_job_id", sa.String(128), nullable=False, index=True),
     sa.Column("attempt_type", sa.String(32), nullable=False),
     sa.Column("transport_retry_of", sa.String(64), nullable=True),

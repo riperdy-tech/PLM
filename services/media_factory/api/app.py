@@ -12,6 +12,7 @@ from plm_platform.correlation import CorrelationIdMiddleware
 from plm_platform.health import health_router
 from sqlalchemy.orm import Session
 
+from ..backend import MediaBackend
 from ..config import MediaFactorySettings
 from .routes import build_router
 
@@ -23,8 +24,13 @@ def create_app(
     session_factory: Callable[[], Session] | None,
     settings: MediaFactorySettings,
     clock: Clock,
+    backend: MediaBackend | None = None,
 ) -> FastAPI:
-    """Create FastAPI application for Playlist, Visual & Video Factory service."""
+    """Create FastAPI application for Playlist, Visual & Video Factory service.
+
+    ``backend`` is what assembly runs on (clearance authorities, artifact store,
+    toolchain, brands); without one the assemble endpoint answers 503.
+    """
     app = FastAPI(title="plm-media-factory", version="p6")
     app.add_middleware(CorrelationIdMiddleware)
     app.include_router(
@@ -32,6 +38,7 @@ def create_app(
             session_factory=session_factory,
             settings=settings,
             clock=clock,
+            backend=backend,
         )
     )
 

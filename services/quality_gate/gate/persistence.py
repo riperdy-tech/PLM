@@ -12,6 +12,7 @@ from __future__ import annotations
 from plm_platform.exceptions import ExceptionQueue
 from sqlalchemy.orm import Session
 
+from ..storage.detector_catalog import insert_candidate_fingerprint
 from ..storage.repositories import (
     insert_candidate_evaluation,
     insert_evaluation_snapshot,
@@ -61,6 +62,16 @@ def persist_gate_result(
     for ev in evaluation.evidence_items:
         insert_evidence_item(session, ev)
     insert_gate_decision(session, result.decision)
+    if result.candidate_fingerprint is not None:
+        # Joins the internal catalog once a manifest exists for this evaluation (R4).
+        insert_candidate_fingerprint(
+            session,
+            evaluation_id=evaluation.id,
+            candidate_id=evaluation.candidate_id,
+            artifact_sha256=str(result.snapshot.artifact_snapshot["artifact_sha256"]),
+            fingerprint=result.candidate_fingerprint,
+            now=evaluation.created_at,
+        )
     if result.quarantine_case:
         insert_quarantine_case(session, result.quarantine_case)
         raise_quarantine_holds(

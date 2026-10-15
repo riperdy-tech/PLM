@@ -8,6 +8,7 @@ from plm_contracts import CommercialUseEligibility, GateDisposition, ProvenanceS
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clearance import QueueHoldSource, verify_release_clearance
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
@@ -129,6 +130,13 @@ def run_smoke_test() -> str | None:
                 track_manifests=[manifest.to_wire()],
                 media_package=package.to_wire(),
                 publication=None,
+                # P5 is not part of this smoke: the only manifest it can clear is the one
+                # this smoke built. Holds are still read from the real exception queue.
+                clearance=lambda tracks: verify_release_clearance(
+                    tracks,
+                    manifests=_OwnManifest(manifest),
+                    holds=QueueHoldSource(factory),
+                ),
                 metadata=ReleaseMetadata(
                     artist_name=f"Smoke Artist {ts}",
                     release_date=now.strftime("%Y-%m-%d"),
@@ -161,3 +169,11 @@ def run_smoke_test() -> str | None:
         return f"Distribution smoke execution failed: {exc}"
 
     return None
+
+
+class _OwnManifest:
+    def __init__(self, manifest: ReleaseManifestPayload) -> None:
+        self._manifest = manifest
+
+    def release_manifest(self, candidate_id: str) -> ReleaseManifestPayload | None:
+        return self._manifest if candidate_id == self._manifest.candidate_id else None

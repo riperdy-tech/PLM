@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from plm_platform.clock import Clock, stable_seed
+from plm_platform.exceptions import ExceptionQueue
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -33,7 +34,6 @@ from ..providers.adapters import get_provider_adapter
 from ..providers.protocol import MusicProviderProtocol
 from ..storage.artifacts import (
     ArtifactStorageProtocol,
-    InMemoryArtifactStorage,
     create_audio_artifact,
     probe_audio_bytes,
 )
@@ -47,7 +47,7 @@ from ..storage.repositories import (
     insert_rights_snapshot,
     update_plan_status,
 )
-from .prompts import build_generation_prompt
+from .prompts import ProtectedArtistPromptRefused, build_generation_prompt
 
 __all__ = ["GenerationEngine", "GenerationEngineResult"]
 
@@ -72,12 +72,46 @@ class GenerationEngine:
         self,
         *,
         clock: Clock,
-        storage: ArtifactStorageProtocol | None = None,
+        storage: ArtifactStorageProtocol,
         default_provider_id: str = "mock",
     ) -> None:
+        # ``storage`` is required (R4): an engine never invents a default store, so a
+        # configured service cannot silently keep artifacts in memory.
         self.clock = clock
-        self.storage = storage or InMemoryArtifactStorage()
+        self.storage = storage
         self.default_provider_id = default_provider_id
+
+    def _refused(
+        self,
+        session: Session,
+        plan: GenerationPlan,
+        refusal: ProtectedArtistPromptRefused,
+        *,
+        attempts: list[GenerationAttempt],
+        candidates: list[GeneratedCandidate],
+        artifacts: list[AudioArtifact],
+        rights_snapshots: list[RightsSnapshot],
+        errors: list[str],
+    ) -> GenerationEngineResult:
+        """P29: a protected-artist or impersonation prompt is a hard stop. Nothing reaches
+        a provider; the plan ends FAILED and each reason opens a hold on the plan, which
+        only the policy's external process can close."""
+        now = self.clock.now()
+        queue = ExceptionQueue()
+        for code in refusal.reason_codes:
+            queue.raise_exception(
+                session, origin_phase="P4", subject_ref=f"music.generation_plan/{plan.plan_id}",
+                reason_code=code, raised_by="music_factory.generation", now=now,
+                details={"hits": [h.term_id for h in refusal.hits],
+                         "policy_version": refusal.policy_version},
+            )
+        update_plan_status(session, plan.plan_id, PlanStatus.FAILED, finished_at=now)
+        session.flush()
+        return GenerationEngineResult(
+            plan_id=plan.plan_id, status=PlanStatus.FAILED, candidates=candidates,
+            attempts=attempts, artifacts=artifacts, rights_snapshots=rights_snapshots,
+            errors=[*errors, str(refusal)],
+        )
 
     def execute_plan(
         self,
@@ -116,7 +150,12 @@ class GenerationEngine:
             if candidate_count >= plan.candidate_target:
                 break
 
-            prompt_obj = build_generation_prompt(spec, variant_delta=variant.prompt_delta)
+            try:
+                prompt_obj = build_generation_prompt(spec, variant_delta=variant.prompt_delta)
+            except ProtectedArtistPromptRefused as refusal:
+                return self._refused(session, plan, refusal, attempts=attempts,
+                                     candidates=candidates, artifacts=artifacts,
+                                     rights_snapshots=rights_snapshots, errors=errors)
             retry_count = 0
             transport_parent: str | None = None
             base_seed = stable_seed("p4.generation", spec.track_spec_id, variant.variant_code)
@@ -177,6 +216,8 @@ class GenerationEngine:
                         provider_id=attempt.provider_id,
                         model_id=attempt.model_id,
                         provider_job_id=gen_res.provider_job_id,
+                        model_version=gen_res.model_version,
+                        lyrics_text=gen_res.lyrics_text,
                         attempt_type=attempt.attempt_type,
                         transport_retry_of=attempt.transport_retry_of,
                         request_hash=attempt.request_hash,

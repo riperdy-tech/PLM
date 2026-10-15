@@ -19,6 +19,7 @@ from services.music_factory.domain.enums import CandidateStatus
 from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
@@ -52,7 +53,7 @@ FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 def test_candidate_bank_transitions_and_queries() -> None:
     spec = adapt_track_spec(SAMPLE_C3_SPEC)
     plan, variants = plan_generation(spec, created_at=FIXED_NOW)
-    engine = GenerationEngine(clock=FixedClock(FIXED_NOW))
+    engine = GenerationEngine(clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage())
 
     with music_db_session() as session:
         res = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)

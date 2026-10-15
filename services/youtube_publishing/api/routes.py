@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from plm_contracts import ErrorShape
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
+from plm_platform.clearance import ClearanceVerifier
 from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard
 
@@ -36,6 +37,7 @@ def create_youtube_router(
     client: Any = None,
     *,
     clock: Clock,
+    clearance: ClearanceVerifier,
     write_guard: ExternalWriteGuard | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/youtube", tags=["youtube"])
@@ -110,7 +112,9 @@ def create_youtube_router(
             session.commit()
 
             # 4. Execute Publishing Engine
-            engine = YouTubePublishingEngine(yt_client, clock=clock, write_guard=guard)
+            engine = YouTubePublishingEngine(
+                yt_client, clock=clock, clearance=clearance, write_guard=guard
+            )
             result = engine.execute_publish(
                 session,
                 manifest,

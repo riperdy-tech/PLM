@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
@@ -20,11 +21,13 @@ from ..candidates.bank import (
     reject_candidate,
 )
 from ..config import MusicFactorySettings
+from ..domain.enums import CandidateStatus
 from ..generation.engine import GenerationEngine
 from ..generation.planner import plan_generation
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
 from ..providers.registry import list_providers
+from ..storage.artifacts import ArtifactStorageProtocol, ArtifactStorageUnavailable
 from ..storage.repositories import (
     get_candidate,
     get_generation_plan,
@@ -49,8 +52,13 @@ def build_router(
     session_factory: Callable[[], Session] | None,
     settings: MusicFactorySettings,
     clock: Clock | None = None,
+    storage: ArtifactStorageProtocol | None = None,
 ) -> APIRouter:
-    """Build the Music Factory router with fail-closed dependencies."""
+    """Build the Music Factory router with fail-closed dependencies.
+
+    ``storage`` is where generated audio is written; ``None`` means no store is
+    configured and generation answers 503 rather than keeping audio anywhere else.
+    """
     router = APIRouter(prefix="/music", tags=["music"])
     service_clock: Clock = clock or SystemClock()
     auth_dep = require_service_token(settings.platform)
@@ -137,15 +145,36 @@ def build_router(
                 detail=exc.error.model_dump(),
             ) from exc
 
+        if storage is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=ErrorShape(
+                    code="artifact_store_not_configured",
+                    field_paths=[],
+                    message="no artifact store is configured for the music factory",
+                ).model_dump(),
+            )
         variants = list_creative_variants(session, plan_id)
-        engine = GenerationEngine(clock=service_clock, default_provider_id=settings.default_provider)
-
-        result = engine.execute_plan(
-            session,
-            plan=plan,
-            variants=variants,
-            spec=spec,
+        engine = GenerationEngine(
+            clock=service_clock, storage=storage, default_provider_id=settings.default_provider
         )
+
+        try:
+            result = engine.execute_plan(
+                session,
+                plan=plan,
+                variants=variants,
+                spec=spec,
+            )
+        except ArtifactStorageUnavailable as exc:
+            # Nothing is recorded for audio that could not be stored (fail closed).
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=ErrorShape(
+                    code="artifact_store_unavailable", field_paths=[], message=str(exc)
+                ).model_dump(),
+            ) from exc
 
         for attempt in result.attempts:
             metrics.record_attempt(
@@ -322,7 +351,9 @@ def build_router(
         """Export a candidate to the P5 gate as a Seam C4 event (ADR-0027).
 
         The event is built from stored facts first; a candidate with any missing fact is
-        refused with 409 and is not marked exported.
+        refused with 409 and is not marked exported. Re-exporting a candidate already
+        exported returns the same event (it is rebuilt from the same stored facts) and
+        changes nothing, so a retried pipeline step reads the event it needs.
         """
         try:
             event = build_candidate_ready_event(session, candidate_id)
@@ -334,6 +365,9 @@ def build_router(
                 else status.HTTP_409_CONFLICT
             )
             raise HTTPException(status_code=code, detail=exc.error.model_dump()) from exc
+        current = get_candidate(session, candidate_id)
+        if current is not None and current.status == CandidateStatus.EXPORTED_TO_P5:
+            return {"candidate": current.model_dump(mode="json"), "event": event.to_wire()}
         try:
             cand = mark_candidate_exported_to_p5(session, candidate_id, now=service_clock.now())
         except InvalidCandidateTransitionError as exc:

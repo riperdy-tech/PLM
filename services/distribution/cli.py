@@ -7,7 +7,9 @@ from pathlib import Path
 
 import typer
 import uvicorn
+from plm_platform.clearance import clearance_verifier_for
 from plm_platform.clock import SystemClock
+from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 
 from .api.app import create_app
@@ -42,6 +44,7 @@ def cli_submit(package_path: str) -> None:
                 track_manifests=req.track_manifests,
                 media_package=req.media_package,
                 publication=req.publication,
+                clearance=clearance_verifier_for(load_settings(), factory),
                 metadata=ReleaseMetadata(
                     artist_name=req.artist_name,
                     release_date=req.release_date,

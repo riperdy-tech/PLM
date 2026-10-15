@@ -1,27 +1,67 @@
-"""Deterministic Media Renderer and QA Engine (P6 §8.7, §28, §29, §30, §31).
+"""Render orchestration and post-render QA (P6 §8.7, §28, §30, R4).
 
-Simulates or executes audio muxing, visual timeline composition, container validation,
-preflight checks, and post-render QA adhering to deterministic rendering rules.
+:class:`MediaRenderer` turns a sequenced playlist and its verified source audio into
+stored masters:
+
+1. **Preflight.** Every track has its source bytes and they hash to the track's
+   checksum; the visual plan names a background and an accent colour. A failure is a
+   refusal (``render_preflight_failed``), nothing is rendered.
+2. **Background.** The brand gradient at the profile's size (Pillow), stored and
+   recorded as the session's background :class:`~..domain.models.VisualAsset`.
+3. **Audio master.** The toolchain joins the tracks with the declared transition and
+   normalises loudness to the profile's target (two-pass ``loudnorm``); the WAV is
+   stored.
+4. **Video master.** The procedural visualiser over the background with the audio
+   master, encoded to the profile; the MP4 is stored.
+5. **Post-render QA** (:mod:`.qa`) on the produced MP4 via ffprobe and an independent
+   loudness meter. A failed check marks the job ``failed`` with the reason codes, and
+   the package built from it is blocked.
+
+Every URI and checksum in the result is the URI and sha256 the artifact store returned
+for the bytes it stored. A toolchain failure is a refusal with the tool's reason code,
+except a timeout, which may clear on retry (:class:`~..errors.MediaInfrastructureError`).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from plm_platform.clock import Clock
 
-from ..domain.enums import RenderJobStatus
-from ..domain.models import PlaylistSession, RenderJob, VisualSession
+from ..artifacts import ArtifactStore, StoredArtifact
+from ..artwork.generator import render_background
+from ..domain.enums import RenderJobStatus, VisualAssetType
+from ..domain.ids import render_job_id
+from ..domain.models import PlaylistSession, RenderJob, VisualAsset, VisualSession
+from ..errors import MediaAssemblyError, MediaInfrastructureError
+from ..visuals.planner import BrandProfile
+from .profiles import RenderProfile
+from .qa import PostRenderCheckResult, post_render_qa
+from .toolchain import (
+    AudioMasterSpec,
+    AudioSegment,
+    LoudnessMeasurement,
+    MediaToolchain,
+    MediaToolError,
+    ProbeReport,
+    VisualizerSpec,
+)
 
 __all__ = [
-    "DeterministicRenderer",
+    "RENDER_VERSION",
+    "MediaRenderer",
     "PostRenderCheckResult",
     "PreflightCheckResult",
     "RenderExecutionResult",
 ]
+
+RENDER_VERSION = "p6-render-v1"
 
 
 @dataclass(frozen=True)
@@ -34,17 +74,8 @@ class PreflightCheckResult:
 
 
 @dataclass(frozen=True)
-class PostRenderCheckResult:
-    """Outcome of post-render container and QA validation."""
-
-    passed: bool
-    reasons: list[str] = field(default_factory=list)
-    metrics: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class RenderExecutionResult:
-    """Complete output of a render job run."""
+    """What a render produced, stored and measured."""
 
     render_job: RenderJob
     preflight: PreflightCheckResult
@@ -55,98 +86,55 @@ class RenderExecutionResult:
     audio_checksum: str
     duration_seconds: float
     render_report: dict[str, Any]
+    visual_assets: list[VisualAsset]
+
+    @property
+    def passed(self) -> bool:
+        return self.render_job.job_status is RenderJobStatus.COMPLETED
 
 
-class DeterministicRenderer:
-    """Deterministic media timeline renderer and validator."""
+class MediaRenderer:
+    """Renders through a :class:`~.toolchain.MediaToolchain` into an artifact store."""
 
-    def __init__(self, render_profile: str = "yt_longform_1080p_v1") -> None:
-        self.render_profile = render_profile
+    def __init__(self, *, toolchain: MediaToolchain, store: ArtifactStore,
+                 profile: RenderProfile) -> None:
+        self.toolchain = toolchain
+        self.store = store
+        self.profile = profile
 
-    def run_preflight(
-        self,
-        playlist: PlaylistSession,
-        visual_session: VisualSession,
-    ) -> PreflightCheckResult:
-        """Validate inputs before starting render (P6 §28, §29)."""
+    def run_preflight(self, playlist: PlaylistSession, visual_session: VisualSession,
+                      sources: Mapping[str, bytes]) -> PreflightCheckResult:
+        """Validate inputs before rendering (P6 §28, §29)."""
         reasons: list[str] = []
-
         if not playlist.tracks:
-            reasons.append("Playlist has zero tracks.")
-
-        # Check all tracks have valid identifiers and audio URIs
-        for idx, track in enumerate(playlist.tracks):
-            if not track.song_id:
-                reasons.append(f"Track at position {idx} has missing song_id.")
-            if not track.audio_uri:
-                reasons.append(f"Track {track.song_id} at position {idx} missing audio_uri.")
-
-        # Check visual session scenes cover the duration
-        scenes = visual_session.visual_plan_json.get("scenes", [])
-        if not scenes and not visual_session.assets:
-            reasons.append("Visual session has no scenes or visual assets configured.")
-
-        # Compute deterministic input manifest hash
-        manifest_data = {
+            reasons.append("the playlist has no tracks")
+        for track in playlist.tracks:
+            data = sources.get(track.song_id)
+            if data is None:
+                reasons.append(f"no verified source audio for {track.song_id}")
+            elif hashlib.sha256(data).hexdigest() != track.audio_checksum:
+                reasons.append(f"source audio of {track.song_id} does not hash to its checksum")
+        plan = visual_session.visual_plan_json
+        if not (plan.get("visualizer") or {}).get("color"):
+            reasons.append("the visual plan names no visualiser colour")
+        if len((plan.get("background") or {}).get("colors") or []) < 2:
+            reasons.append("the visual plan names no background colours")
+        manifest = {
             "playlist_id": playlist.id,
             "sequence_checksum": playlist.sequence_checksum,
-            "tracks": [t.id for t in playlist.tracks],
+            "tracks": [[t.id, t.audio_checksum] for t in playlist.tracks],
             "visual_session_id": visual_session.id,
-            "render_profile": self.render_profile,
+            "visual_plan": plan,
+            "render_profile": self.profile.to_dict(),
+            "render_version": RENDER_VERSION,
         }
         manifest_hash = hashlib.sha256(
-            json.dumps(manifest_data, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+            json.dumps(manifest, sort_keys=True).encode("utf-8")).hexdigest()
+        return PreflightCheckResult(passed=not reasons, reasons=reasons,
+                                    input_manifest_hash=manifest_hash)
 
-        return PreflightCheckResult(
-            passed=len(reasons) == 0,
-            reasons=reasons,
-            input_manifest_hash=manifest_hash,
-        )
-
-    def run_post_render_qa(
-        self,
-        *,
-        video_uri: str,
-        video_checksum: str,
-        audio_uri: str,
-        audio_checksum: str,
-        expected_duration_seconds: float,
-        actual_duration_seconds: float,
-    ) -> PostRenderCheckResult:
-        """Validate rendered artifacts against container & quality specs (P6 §30)."""
-        reasons: list[str] = []
-
-        if not video_uri or not video_checksum:
-            reasons.append("Video master URI or checksum is missing.")
-        if not audio_uri or not audio_checksum:
-            reasons.append("Audio master URI or checksum is missing.")
-
-        # Duration tolerance check (±2.0 seconds)
-        duration_diff = abs(expected_duration_seconds - actual_duration_seconds)
-        if duration_diff > 2.0:
-            reasons.append(
-                f"Rendered duration {actual_duration_seconds:.2f}s deviates from expected "
-                f"{expected_duration_seconds:.2f}s by {duration_diff:.2f}s (> 2.0s tolerance)."
-            )
-
-        metrics = {
-            "container": "mp4",
-            "resolution": "1920x1080",
-            "fps": 30.0,
-            "video_codec": "h264",
-            "audio_codec": "aac",
-            "audio_sample_rate_hz": 48000,
-            "audio_channels": 2,
-            "black_frame_ratio": 0.0,
-            "freeze_frame_ratio": 0.0,
-        }
-
-        return PostRenderCheckResult(
-            passed=len(reasons) == 0,
-            reasons=reasons,
-            metrics=metrics,
-        )
+    def _store(self, path: str, data: bytes, content_type: str) -> StoredArtifact:
+        return self.store.put(path, data, content_type=content_type)
 
     def render(
         self,
@@ -154,113 +142,144 @@ class DeterministicRenderer:
         media_package_id_str: str,
         playlist: PlaylistSession,
         visual_session: VisualSession,
+        brand: BrandProfile,
+        sources: Mapping[str, bytes],
+        required_window_seconds: tuple[float, float],
         attempt: int = 1,
         clock: Clock,
     ) -> RenderExecutionResult:
-        """Execute full deterministic render workflow (P6 §28).
-
-        ``clock`` stamps the job's start and finish; it is injected so a replay with a
-        fixed clock reproduces the job record exactly.
-        """
+        """Render, store and QA the masters; ``clock`` stamps the job."""
         started_at = clock.now()
-        # 1. Preflight
-        preflight = self.run_preflight(playlist, visual_session)
+        preflight = self.run_preflight(playlist, visual_session, sources)
         if not preflight.passed:
-            failed_at = clock.now()
-            failed_job = RenderJob(
-                id=f"rjob_{media_package_id_str}_{self.render_profile}_att{attempt}",
-                media_package_id=media_package_id_str,
-                render_profile=self.render_profile,
-                render_version="v1",
-                job_status=RenderJobStatus.FAILED,
-                priority="NORMAL",
-                attempt_count=attempt,
-                input_manifest_hash=preflight.input_manifest_hash,
-                error_code="PREFLIGHT_FAILED",
-                error_detail="; ".join(preflight.reasons),
-                finished_at=failed_at,
-                created_at=started_at,
-            )
-            return RenderExecutionResult(
-                render_job=failed_job,
-                preflight=preflight,
-                post_render=PostRenderCheckResult(passed=False, reasons=["Preflight failed"]),
-                video_master_uri="",
-                video_checksum="",
-                audio_master_uri="",
-                audio_checksum="",
-                duration_seconds=0.0,
-                render_report={"error": "PREFLIGHT_FAILED", "reasons": preflight.reasons},
-            )
+            raise MediaAssemblyError("render_preflight_failed", "; ".join(preflight.reasons))
+        profile = self.profile
+        root = f"renders/{playlist.brand_id}/{media_package_id_str}"
+        transition = playlist.tracks[0].transition_type
+        transition_seconds = playlist.tracks[0].transition_duration_seconds
 
-        # 2. Deterministic Master Artifact Generation
-        duration = playlist.actual_duration_seconds or playlist.requested_duration_seconds
+        with tempfile.TemporaryDirectory(prefix="plm-render-") as workdir:
+            work = Path(workdir)
+            segments = []
+            for track in playlist.tracks:
+                path = work / f"source_{track.position:03d}"
+                path.write_bytes(sources[track.song_id])
+                segments.append(AudioSegment(
+                    path=path,
+                    duration_seconds=track.end_offset_seconds - track.start_offset_seconds))
 
-        # Video master URI & checksum
-        video_seed = f"video:{media_package_id_str}:{preflight.input_manifest_hash}:{duration:.2f}"
-        video_checksum = hashlib.sha256(video_seed.encode("utf-8")).hexdigest()
-        video_uri = f"media/renders/{playlist.brand_id}/{media_package_id_str}_1080p.mp4"
+            background_png = render_background(brand, profile.width, profile.height)
+            (work / "background.png").write_bytes(background_png)
+            background = self._store(f"{root}/background.png", background_png, "image/png")
 
-        # Audio master URI & checksum
-        audio_seed = f"audio:{media_package_id_str}:{playlist.sequence_checksum}:{duration:.2f}"
-        audio_checksum = hashlib.sha256(audio_seed.encode("utf-8")).hexdigest()
-        audio_uri = f"media/renders/{playlist.brand_id}/{media_package_id_str}_master.wav"
+            try:
+                normaliser = self.toolchain.render_audio_master(
+                    AudioMasterSpec(segments=tuple(segments), transition=transition,
+                                    transition_seconds=transition_seconds),
+                    profile, work / "audio_master.wav")
+                audio_bytes = (work / "audio_master.wav").read_bytes()
+                audio = self._store(f"{root}/audio_master.wav", audio_bytes, "audio/wav")
+                self.toolchain.render_video_master(
+                    work / "audio_master.wav",
+                    VisualizerSpec(background_png=work / "background.png",
+                                   wave_color=str(visual_session.visual_plan_json
+                                                  ["visualizer"]["color"])),
+                    profile, work / "video_master.mp4")
+            except MediaToolError as exc:
+                if exc.code == "render_timeout":
+                    raise MediaInfrastructureError(exc.code, str(exc)) from exc
+                raise MediaAssemblyError(exc.code, str(exc)) from exc
+            video_bytes = (work / "video_master.mp4").read_bytes()
+            video = self._store(f"{root}/video_master.{profile.container}", video_bytes,
+                                "video/mp4")
 
-        # 3. Post-Render QA
-        post_qa = self.run_post_render_qa(
-            video_uri=video_uri,
-            video_checksum=video_checksum,
-            audio_uri=audio_uri,
-            audio_checksum=audio_checksum,
-            expected_duration_seconds=duration,
-            actual_duration_seconds=duration,
+            probe: ProbeReport | None
+            try:
+                probe = self.toolchain.probe(work / "video_master.mp4")
+            except MediaToolError:
+                probe = None
+            loudness: LoudnessMeasurement | None
+            try:
+                loudness = self.toolchain.measure_loudness(work / "video_master.mp4")
+            except MediaToolError:
+                loudness = None
+
+        post = post_render_qa(
+            probe=probe, loudness=loudness, profile=profile,
+            expected_duration_seconds=playlist.actual_duration_seconds,
+            required_window_seconds=required_window_seconds, size_bytes=video.size,
         )
-
         finished_at = clock.now()
-
-        job_status = RenderJobStatus.COMPLETED if post_qa.passed else RenderJobStatus.FAILED
-        render_job = RenderJob(
-            id=f"rjob_{media_package_id_str}_{self.render_profile}_att{attempt}",
+        duration = (probe.duration_seconds if probe is not None and probe.duration_seconds
+                    else playlist.actual_duration_seconds)
+        job = RenderJob(
+            id=render_job_id(media_package_id_str, profile.name, attempt),
             media_package_id=media_package_id_str,
-            render_profile=self.render_profile,
-            render_version="v1",
-            job_status=job_status,
+            render_profile=profile.name,
+            render_version=RENDER_VERSION,
+            job_status=RenderJobStatus.COMPLETED if post.passed else RenderJobStatus.FAILED,
             priority="NORMAL",
             attempt_count=attempt,
-            worker_id="worker_local_sim_01",
+            worker_id=None,
             started_at=started_at,
             finished_at=finished_at,
             input_manifest_hash=preflight.input_manifest_hash,
-            output_checksum=video_checksum,
-            error_code=None if post_qa.passed else "POST_RENDER_QA_FAILED",
-            error_detail=None if post_qa.passed else "; ".join(post_qa.reasons),
+            output_checksum=video.sha256,
+            error_code=None if post.passed else "post_render_qa_failed",
+            error_detail=None if post.passed else "; ".join(post.reasons),
             created_at=started_at,
         )
-
-        render_report = {
-            "render_job_id": render_job.id,
-            "render_profile": self.render_profile,
-            "duration_seconds": round(duration, 2),
-            "video_master": {"uri": video_uri, "checksum": video_checksum},
-            "audio_master": {"uri": audio_uri, "checksum": audio_checksum},
-            "qa_metrics": post_qa.metrics,
-            "resource_usage": {
-                "cpu_seconds": 12.4,
-                "gpu_seconds": 4.8,
-                "wall_clock_seconds": 1.2,
-                "storage_bytes": 104857600,
-            },
-            "status": "passed" if post_qa.passed else "failed",
-        }
-
-        return RenderExecutionResult(
-            render_job=render_job,
-            preflight=preflight,
-            post_render=post_qa,
-            video_master_uri=video_uri,
-            video_checksum=video_checksum,
-            audio_master_uri=audio_uri,
-            audio_checksum=audio_checksum,
+        background_asset = VisualAsset.create(
+            session_id=visual_session.id,
+            asset_type=VisualAssetType.BACKGROUND,
+            uri=background.uri,
+            checksum=background.sha256,
+            width=profile.width,
+            height=profile.height,
             duration_seconds=duration,
-            render_report=render_report,
+            fps=float(profile.fps),
+            source_type="procedural_gradient",
+            provider="media_factory",
+            provider_asset_id=f"background:{brand.brand_id}:{brand.version}",
+            license_status="internal",
+            provenance_id=f"render:{job.id}",
+            now=started_at,
+        )
+        report = {
+            "render_job_id": job.id,
+            "render_version": RENDER_VERSION,
+            "render_profile": profile.to_dict(),
+            "toolchain": self.toolchain.version,
+            "audio_pipeline": {
+                "transition": transition.value,
+                "transition_seconds": transition_seconds,
+                "normaliser": normaliser,
+            },
+            "video_pipeline": {
+                "visualizer": visual_session.visual_plan_json.get("visualizer"),
+                "background": {"uri": background.uri, "checksum": background.sha256},
+            },
+            "audio_master": {"uri": audio.uri, "checksum": audio.sha256, "bytes": audio.size},
+            "video_master": {"uri": video.uri, "checksum": video.sha256, "bytes": video.size},
+            "duration_seconds": round(duration, 3),
+            "timeline_seconds": round(playlist.actual_duration_seconds, 3),
+            "qa": {
+                "passed": post.passed,
+                "reason_codes": post.reason_codes,
+                "reasons": post.reasons,
+                "metrics": post.metrics,
+            },
+            "status": "passed" if post.passed else "failed",
+        }
+        return RenderExecutionResult(
+            render_job=job,
+            preflight=preflight,
+            post_render=post,
+            video_master_uri=video.uri,
+            video_checksum=video.sha256,
+            audio_master_uri=audio.uri,
+            audio_checksum=audio.sha256,
+            duration_seconds=duration,
+            render_report=report,
+            visual_assets=[background_asset],
         )
