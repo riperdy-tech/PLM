@@ -8,6 +8,7 @@ measure accuracy on real music.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -22,6 +23,7 @@ from quality_gate.detectors import (
     match_fingerprint,
     parse_detector_policy,
 )
+from quality_gate.detectors.fingerprint import best_alignment
 
 from tests.support.rights_detectors import SAMPLE_RATE, synthetic_music, write_wav
 
@@ -138,3 +140,30 @@ def test_unreadable_file_raises_audio_unreadable(tmp_path: Path) -> None:
         fingerprint_file(tmp_path / "missing.wav", PARAMS)
     good = write_wav(tmp_path / "good.wav", synthetic_music(11))
     assert fingerprint_file(good, PARAMS).hash_count >= PARAMS.min_candidate_hashes
+
+
+def _best_alignment_by_loop(refs: Any, offsets: Any, tolerance: int) -> tuple[int, int, int]:
+    """The per-pair loop ``match_fingerprint`` used before R5, as the reference."""
+    tally: dict[tuple[int, int], int] = {}
+    for r, o in zip(refs.tolist(), offsets.tolist(), strict=True):
+        tally[(r, o)] = tally.get((r, o), 0) + 1
+    best = (0, -1, 0)
+    for (r, o) in sorted(tally):
+        aligned = sum(tally.get((r, o + d), 0) for d in range(-tolerance, tolerance + 1))
+        if aligned > best[0]:
+            best = (aligned, r, o)
+    return best
+
+
+@pytest.mark.parametrize("seed", range(12))
+@pytest.mark.parametrize("tolerance", [0, 1, 3])
+def test_the_vectorised_alignment_equals_the_per_pair_loop(seed: int, tolerance: int) -> None:
+    """R5: the per-pair Python loop made each evaluation scale with the hits against the
+    whole internal catalog (about 11 s per candidate at 700 released recordings). The
+    vectorised tally must pick exactly what the loop picked, ties included."""
+    rng = np.random.default_rng(seed)
+    size = int(rng.integers(0, 400))
+    refs = rng.integers(0, 6, size=size).astype(np.int64)
+    offsets = rng.integers(-40, 40, size=size).astype(np.int64)
+    assert best_alignment(refs, offsets, tolerance) == _best_alignment_by_loop(
+        refs, offsets, tolerance)

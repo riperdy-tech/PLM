@@ -264,3 +264,119 @@ def test_a_missing_or_invalid_range_is_refused(cleared: Any,
     resp = _client(backend_for(store, manifests)).post(
         "/media/packages/assemble", json=body, headers=HEADERS)
     assert resp.status_code == 422
+
+
+def test_a_request_naming_no_render_profile_uses_the_deployments(cleared: Any) -> None:
+    """R5: the request schema hard-coded ``yt_longform_1080p_v1`` and P6's own
+    ``default_render_profile`` setting was never read, so a deployment could not choose
+    the profile for callers that name none (the pipeline names none). Proves: no profile
+    in the request renders with the configured one; a named profile still wins, and its
+    package reuses the stored sequence and visual plan (they used to collide on the
+    playlist session's key, a 500)."""
+    store, manifests = cleared
+    ids = [m.candidate_id for m in manifests]
+    platform = load_settings(env={**MINIMAL_ENV, "PLM_SERVICE_TOKEN": TOKEN})
+    engine = create_media_engine(static_pool=True)
+    app = create_app(session_factory=lambda: media_session(engine),
+                     settings=MediaFactorySettings(platform=platform,
+                                                   default_render_profile="preview_360p_v1"),
+                     clock=FixedClock(NOW),
+                     backend=backend_for(store, manifests, toolchain=StandInToolchain()))
+    client = TestClient(app)
+    body = _request(*ids)
+    del body["render_profile"]
+    resp = client.post("/media/packages/assemble", json=body, headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["render_profile"] == "preview_360p_v1"
+    named = client.post("/media/packages/assemble", headers=HEADERS,
+                        json=_request(*ids, render_profile="yt_longform_1080p_v1"))
+    assert named.status_code == 200, named.text
+    assert named.json()["render_profile"] == "yt_longform_1080p_v1"
+
+
+def test_the_render_profile_setting_is_read_and_checked_at_boot() -> None:
+    from media_factory.config import load_media_factory_settings
+    from plm_platform.config import SettingsError
+
+    assert load_media_factory_settings(env={}).default_render_profile == \
+        "yt_longform_1080p_v1"
+    assert load_media_factory_settings(
+        env={"PLM_MEDIA_RENDER_PROFILE": "preview_360p_v1"}).default_render_profile == \
+        "preview_360p_v1"
+    with pytest.raises(SettingsError, match="not declared"):
+        load_media_factory_settings(env={"PLM_MEDIA_RENDER_PROFILE": "yt_8k_v9"})
+
+
+def test_a_retry_while_the_render_runs_waits_and_replays_instead_of_rendering_again(
+        cleared: Any) -> None:
+    """R5: P6 renders inside the request, so a caller whose read timed out retried while
+    the first render still ran, and the same package was rendered twice side by side (in
+    the full chain, concurrent hour-long renders were OOM-killed). Proves: a second
+    request for the same package during the render waits for it and replays the stored
+    package; the video is rendered once."""
+    import threading
+    import time
+
+    class SlowToolchain(StandInToolchain):
+        def render_video_master(self, *args: Any, **kwargs: Any) -> None:
+            time.sleep(0.5)
+            super().render_video_master(*args, **kwargs)
+
+    store, manifests = cleared
+    toolchain = SlowToolchain()
+    client = _client(backend_for(store, manifests, toolchain=toolchain))
+    ids = [m.candidate_id for m in manifests]
+    answers: list[Any] = []
+
+    def post() -> None:
+        answers.append(client.post("/media/packages/assemble", json=_request(*ids),
+                                   headers=HEADERS))
+
+    threads = [threading.Thread(target=post) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+        time.sleep(0.1)
+    for thread in threads:
+        thread.join(timeout=30)
+    assert [a.status_code for a in answers] == [200, 200], [a.text for a in answers]
+    assert answers[0].json()["media_package_id"] == answers[1].json()["media_package_id"]
+    assert toolchain.calls.count("video") == 1
+
+
+def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendered(
+        cleared: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R5: P6 held every offered recording in memory while it measured them, so memory
+    grew with the supply (about 60 cleared tracks for one long playlist) and the render
+    was OOM-killed. Proves: each recording is fetched and measured before the next is
+    fetched, and the render fetches again (on each read, never keeping them) only the
+    recordings the sequence selected."""
+    import media_factory.rendering.assembler as assembler
+
+    store, manifests = cleared
+    events: list[str] = []
+
+    class RecordingStore(type(store)):  # type: ignore[misc]
+        def fetch_verified(self, uri: str, sha256: str) -> bytes:
+            events.append("fetch")
+            return super().fetch_verified(uri, sha256)
+
+    recording = RecordingStore()
+    recording.objects = store.objects
+    real_measure = assembler.measure_features
+
+    def measure(candidate_id: str, audio: bytes, policy: Any = None) -> Any:
+        events.append("measure")
+        return real_measure(candidate_id, audio) if policy is None else real_measure(
+            candidate_id, audio, policy)
+
+    monkeypatch.setattr(assembler, "measure_features", measure)
+    client = _client(backend_for(recording, manifests, toolchain=StandInToolchain()))
+    resp = client.post("/media/packages/assemble", headers=HEADERS,
+                       json=_request(*[m.candidate_id for m in manifests]))
+    assert resp.status_code == 200, resp.text
+    offered = len(manifests)
+    assert events[:2 * offered] == ["fetch", "measure"] * offered
+    selected = len(resp.json()["tracklist"])
+    # The render reads each selected recording when it needs it (verify, then write to
+    # its work directory) instead of keeping them all.
+    assert events[2 * offered:] == ["fetch"] * (2 * selected)

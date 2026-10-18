@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import io
-import math
 import random
-import struct
 import wave
-from typing import Any
+from typing import Any, Final
 
+import numpy as np
 from plm_contracts import CommercialUseEligibility, ProviderMode
 from plm_contracts.seams.c4 import ProviderLicenseTerms
 from plm_platform.clock import stable_seed
@@ -37,44 +36,58 @@ def mock_lyrics(seed: int, *, lines: int = 8, words_per_line: int = 6) -> str:
     )
 
 
-MOCK_MODEL_VERSION = "mock-sine-synth-1"
-"""The mock is deterministic code, so its version is its synthesis algorithm's."""
+MOCK_MODEL_VERSION = "mock-chord-synth-2"
+"""The mock is deterministic code, so its version is its synthesis algorithm's.
+
+``mock-sine-synth-1`` was one sustained sine at ``440 + seed % 100`` Hz. P5's landmark
+fingerprint (about 11 Hz per bin) sees only about ten distinct recordings in that space,
+so once a few mock tracks were released every later mock candidate matched the internal
+catalog (``INTERNAL_CATALOG_AUDIO_MATCH``) and a mock pipeline run could never clear
+supply. Version 2 synthesises a seeded sequence of chords instead (R5)."""
+
+_NOTE_SECONDS: Final[float] = 0.25
+_LOOP_SECONDS: Final[int] = 8
+_PEAK: Final[float] = 0.5
+"""Peak of the loop: about -14.6 LUFS integrated (streaming reference loudness) for the
+chord loop, so mock runs exercise P5's loudness check the way a mastered track would."""
+
 
 def synthesize_mock_wav(
     *,
     duration_seconds: float = 5.0,
     sample_rate: int = 44100,
     channels: int = 2,
-    frequency: float = 440.0,
     seed: int = 0,
 ) -> bytes:
     """Generate deterministic, valid PCM 16-bit WAV bytes of exactly ``duration_seconds``.
 
-    One second of a seed-dependent sine is synthesised and its bytes are repeated to the
-    full length, so a three-minute track costs one second of arithmetic. With the default
-    integer frequency a second holds a whole number of cycles, so the repeat is seamless.
-    Samples are packed little-endian explicitly, so the bytes do not depend on the host.
+    A loop of up to eight seconds is synthesised from the seed: every 250 ms a decaying
+    three-note chord whose pitches (36 semitones above 110 Hz) and phases are drawn from
+    a generator seeded with ``stable_seed("p4.mock_audio", seed)``. The loop is repeated
+    to the full length, so a three-minute track costs eight seconds of arithmetic.
+    Different seeds give different note sequences, which P5's fingerprint tells apart;
+    the same seed gives the same bytes. Samples are packed little-endian explicitly.
     """
     total_frames = round(duration_seconds * sample_rate)
-    freq = frequency + (seed % 100)
-    # About -14 LUFS (streaming reference loudness) for the mock's sine, so mock runs
-    # exercise P5's loudness check the way a mastered track would, not as an outlier.
-    amplitude = 7600
-
-    block_frames = min(total_frames, sample_rate)
-    samples = [
-        int(amplitude * math.sin(2.0 * math.pi * freq * i / sample_rate))
-        for i in range(block_frames)
-    ]
-    interleaved = [sample for sample in samples for _ in range(channels)]
-    block = struct.pack(f"<{len(interleaved)}h", *interleaved)
-
-    frame_bytes = 2 * channels
-    if block_frames:
-        whole, rest = divmod(total_frames, block_frames)
-        frames = block * whole + block[: rest * frame_bytes]
-    else:
-        frames = b""
+    rng = np.random.default_rng(stable_seed("p4.mock_audio", seed))
+    loop_frames = min(total_frames, _LOOP_SECONDS * sample_rate)
+    note_frames = max(1, round(_NOTE_SECONDS * sample_rate))
+    t = np.arange(note_frames) / sample_rate
+    envelope = np.exp(-3.0 * t)
+    loop = np.zeros(loop_frames)
+    for start in range(0, loop_frames, note_frames):
+        length = min(note_frames, loop_frames - start)
+        chord = np.zeros(length)
+        for semitone in rng.integers(0, 36, size=3):
+            frequency = 110.0 * 2.0 ** (float(semitone) / 12.0)
+            chord += np.sin(2.0 * np.pi * frequency * t[:length] + rng.uniform(0.0, 2.0 * np.pi))
+        loop[start:start + length] = envelope[:length] * chord
+    peak = float(np.max(np.abs(loop))) if loop_frames else 0.0
+    if peak > 0.0:
+        loop = loop / peak * _PEAK
+    mono = np.tile(loop, total_frames // loop_frames + 1)[:total_frames] if loop_frames         else np.zeros(0)
+    pcm = np.round(mono * 32767.0).astype("<i2")
+    frames = np.repeat(pcm, channels).tobytes() if channels > 1 else pcm.tobytes()
 
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:

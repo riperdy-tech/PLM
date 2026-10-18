@@ -4,6 +4,7 @@ Notice: do NOT import annotations from __future__ here, as FastAPI depends on
 runtime types for dependency injection with closures.
 """
 
+import threading
 from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
@@ -75,6 +76,7 @@ def build_router(
     """Build the authenticated router for the media factory."""
     router = APIRouter(prefix="/media", tags=["media_factory"])
     auth_dep = require_service_token(settings.platform)
+    render_lock = threading.Lock()
 
     def _require_session() -> Iterator[Session]:
         if session_factory is None:
@@ -129,7 +131,16 @@ def build_router(
                 ).model_dump(),
             )
         try:
-            package = assemble_and_persist(session, backend, payload, clock=clock)
+            # One render at a time per process, held until the package is committed: a
+            # caller's retry after its read timeout (the render outlived the request)
+            # then waits and replays the stored package instead of rendering it a second
+            # time beside the first; concurrent long renders exhausted the container's
+            # memory (R5). A durable render job is later work.
+            with render_lock:
+                package = assemble_and_persist(
+                    session, backend, payload, clock=clock,
+                    default_render_profile=settings.default_render_profile)
+                session.commit()
         except MediaAssemblyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

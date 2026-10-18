@@ -177,8 +177,9 @@ class MediaRenderer:
                     AudioMasterSpec(segments=tuple(segments), transition=transition,
                                     transition_seconds=transition_seconds),
                     profile, work / "audio_master.wav")
-                audio_bytes = (work / "audio_master.wav").read_bytes()
-                audio = self._store(f"{root}/audio_master.wav", audio_bytes, "audio/wav")
+                # Not kept past the upload: an hour of 24-bit stereo is over a gigabyte.
+                audio = self._store(f"{root}/audio_master.wav",
+                                    (work / "audio_master.wav").read_bytes(), "audio/wav")
                 self.toolchain.render_video_master(
                     work / "audio_master.wav",
                     VisualizerSpec(background_png=work / "background.png",

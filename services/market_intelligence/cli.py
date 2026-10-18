@@ -351,7 +351,13 @@ def _production_connector(settings: MarketSettings, quota_units: int) -> YouTube
 
 def _mock_connector(settings: MarketSettings, quota_units: int, *,
                     platform: Any) -> YouTubeDataAPIConnector:
-    """CI only: the fixture-backed transport, so the pipeline runs with no credentials."""
+    """CI only: the fixture-backed transport, so the pipeline runs with no credentials.
+
+    The corpus is the multi-profile one (six videos over two taxonomy profiles): §16's
+    arm support floor is two videos per profile, so the two-video corpus could form no
+    arm and an ``ENV=ci`` run scored nothing (R5: P2 then had no opportunity to
+    allocate).
+    """
     from plm_platform.config import Env, Secret
 
     if platform.env is not Env.CI:
@@ -364,8 +370,8 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     from .collection.seeds import load_bootstrap_seeds
 
     fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "market" / "youtube"
-    search = json.loads((fixtures / "search_lofi_p1.json").read_text(encoding="utf-8"))
-    videos = json.loads((fixtures / "videos_lofi_batch.json").read_text(encoding="utf-8"))
+    search = json.loads((fixtures / "search_multi_p1.json").read_text(encoding="utf-8"))
+    videos = json.loads((fixtures / "videos_multi_batch.json").read_text(encoding="utf-8"))
     channels = json.loads((fixtures / "channels_lofi_batch.json").read_text(encoding="utf-8"))
     mock = MockHTTP(repeat_last=True)
     for _ in load_bootstrap_seeds():  # search + videos.list + channels.list per query

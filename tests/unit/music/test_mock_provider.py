@@ -100,3 +100,38 @@ def test_mock_provider_error_simulation_hooks() -> None:
     )
     assert resp_quota.status == AttemptStatus.FAILED
     assert "quota exceeded" in (resp_quota.error_message or "")
+
+
+def test_mock_recordings_of_different_seeds_are_different_recordings_to_p5() -> None:
+    """R5: the v1 mock was one sine of ``440 + seed % 100`` Hz, about ten recordings to
+    P5's landmark fingerprint, so after a few releases every mock candidate matched the
+    internal catalog and a mock run could never clear supply. Distinct seeds must not
+    match each other; the same seed must (it is the same recording)."""
+    import numpy as np
+    import soundfile as sf
+    from quality_gate.detectors import (
+        ReferenceFingerprint,
+        fingerprint_samples,
+        load_detector_policy,
+    )
+    from quality_gate.detectors.fingerprint import match_fingerprint
+
+    params = load_detector_policy().audio_fingerprint
+
+    def fingerprint(seed: int):  # type: ignore[no-untyped-def]
+        samples, rate = sf.read(io.BytesIO(synthesize_mock_wav(duration_seconds=30.0,
+                                                               seed=seed)))
+        return fingerprint_samples(np.asarray(samples), rate, params)
+
+    prints = {seed: fingerprint(seed) for seed in (1, 2, 3, 101)}
+
+    def outcome(candidate, *others):  # type: ignore[no-untyped-def]
+        refs = [ReferenceFingerprint(ref_id=f"r{n}", fingerprint=f, candidate_id=f"c{n}",
+                                     label=f"c{n}") for n, f in enumerate(others)]
+        return match_fingerprint(candidate, refs, params, source="internal_catalog",
+                                 thresholds_version="t", snapshot_ref="s",
+                                 empty_source_is_unknown=False).outcome.value
+
+    assert outcome(prints[1], prints[2], prints[3], prints[101]) == "NO_MATCH"
+    assert outcome(prints[101], prints[1], prints[2], prints[3]) == "NO_MATCH"
+    assert outcome(fingerprint(2), prints[2]) == "MATCH"

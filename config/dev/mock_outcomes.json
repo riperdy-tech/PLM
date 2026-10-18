@@ -1,5 +1,5 @@
 {
-  "_comment": "The deterministic mock outcome model (plm_platform.testing.mock_outcomes) behind P7's mock YouTube Analytics source and P8's mock distributor statements. A simulation for the local stack, labelled mock everywhere; never evidence about a real audience. arm_effects pins an arm's true effect; any other arm gets a seeded effect inside effect_range.",
+  "_comment": "The deterministic mock outcome model (plm_platform.testing.mock_outcomes) behind P7's mock YouTube Analytics source and P8's mock distributor statements. A simulation for the local stack, labelled mock everywhere; never evidence about a real audience. arm_effects pins an arm's true effect; any other arm gets a seeded effect inside effect_range. The two pinned arms are the ones P1's ENV=ci fixture corpus forms (lofi_study_focus, rnb): the Gate R5 full chain (tests/integration/test_r5_full_chain.py) needs one clearly stronger arm, and the stronger one is the arm P1 scores lower, so learning has to overturn the prior.",
   "model_version": "mock-outcomes-v1",
   "currency": "USD",
   "views_per_day": "120",
@@ -11,6 +11,6 @@
   "streams_per_track_per_day": "40",
   "revenue_per_stream": "0.0035",
   "noise": "0.05",
-  "arm_effects": {},
+  "arm_effects": {"lofi_study_focus": "1.4", "rnb": "0.25"},
   "effect_range": ["0.5", "1.5"]
 }

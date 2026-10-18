@@ -7,11 +7,19 @@ genre's template. Each template also carries the genre's ontology for experiment
 categorical dimensions (``alternatives``), which the treatment generator draws from.
 
 The same file declares ``playlist_duration_buckets``: the playlist-length range each P2
-``duration_bucket`` stands for (owner decision 2026-10-15: a playlist's length is a
-declared range, ``45_75m`` is 45–75 minutes, and its target is only the planning
-midpoint). A brief that names a bucket gets that range as its genome's
-``playlist_duration``; a bucket the table does not declare is refused
-(``playlist_duration_bucket_unknown``), never mapped to a nearby one.
+``duration_bucket`` stands for, and ``playlist_duration_policy``: the owner's playlist
+length (decision 2026-10-15, ADR-0036: 45–75 minutes, the ``45_75m`` bucket; the target
+is only the planning midpoint). The policy is the single source of a playlist range:
+
+* a brief that names a bucket gets that bucket's range, which must lie inside the
+  policy (``playlist_duration_outside_policy`` otherwise, never clamped);
+* a brief that names none gets the policy range itself (P1's arms carry no duration
+  bucket unless a title names one, so P2's directives often name none);
+* a bucket the table does not declare is refused (``playlist_duration_bucket_unknown``),
+  never mapped to a nearby one;
+* every genre template's ``playlist_duration`` must lie inside the policy, or the
+  library refuses to load (R5: lofi and jazz templates declared 60–120 min, ambient
+  60–180, and an open brief inherited them).
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ALTERNATIVE_DIMENSIONS",
     "PLAYLIST_DURATION_BUCKET_UNKNOWN",
+    "PLAYLIST_DURATION_OUTSIDE_POLICY",
     "TEMPLATES_PATH",
     "CreativeLatitudeEnvelope",
     "GenomeEngine",
@@ -78,6 +87,7 @@ ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
 _TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset({"parent", "alternatives"})
 
 PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
+PLAYLIST_DURATION_OUTSIDE_POLICY: Final[str] = "playlist_duration_outside_policy"
 
 
 def normalize_dimension_value(dimension: str, value: str) -> str:
@@ -140,9 +150,17 @@ class TemplateLibrary:
         if not self.version:
             raise TemplateLibraryError("templates_version must be non-empty")
         self._buckets = self._parse_buckets(raw.get("playlist_duration_buckets", {}))
+        self._policy = self._parse_policy(raw.get("playlist_duration_policy"))
         self._resolved: dict[str, GenreTemplate] = {}
         for name in sorted(self._templates):
             self._resolved[name] = self._build(name)
+            declared = self._resolved[name].genome.playlist_duration
+            if not self._inside_policy(declared):
+                raise TemplateLibraryError(
+                    f"{PLAYLIST_DURATION_OUTSIDE_POLICY}: template {name!r} declares a "
+                    f"{declared.min_seconds}-{declared.max_seconds} s playlist, outside the "
+                    f"policy range {self._policy.min_seconds}-{self._policy.max_seconds} s"
+                )
         for genre, name in sorted(self._genres.items()):
             if normalize_dimension_value("genre", genre) != genre:
                 raise TemplateLibraryError(f"genre key {genre!r} is not a normalized token")
@@ -167,8 +185,14 @@ class TemplateLibrary:
     def playlist_duration_buckets(self) -> tuple[str, ...]:
         return tuple(sorted(self._buckets))
 
+    @property
+    def playlist_duration_policy(self) -> DurationRange:
+        """The owner's playlist range (ADR-0036): what an open brief gets."""
+        return self._policy
+
     def playlist_duration_for_bucket(self, bucket: str) -> DurationRange:
-        """The declared playlist range of a P2 ``duration_bucket``; unknown is refused."""
+        """The declared playlist range of a P2 ``duration_bucket``; an unknown bucket or
+        one outside the policy range is refused, never mapped or clamped."""
         found = self._buckets.get(bucket)
         if found is None:
             raise GenomeBuildError(
@@ -177,7 +201,30 @@ class TemplateLibrary:
                 f"{', '.join(sorted(self._buckets)) or 'none'}",
                 field_paths=["brief.duration_bucket"],
             )
+        if not self._inside_policy(found):
+            raise GenomeBuildError(
+                PLAYLIST_DURATION_OUTSIDE_POLICY,
+                f"duration_bucket {bucket!r} ({found.min_seconds}-{found.max_seconds} s) lies "
+                f"outside the playlist policy {self._policy.min_seconds}-"
+                f"{self._policy.max_seconds} s (ADR-0036)",
+                field_paths=["brief.duration_bucket"],
+            )
         return found
+
+    def _inside_policy(self, declared: DurationRange) -> bool:
+        return (self._policy.min_seconds <= declared.min_seconds
+                and declared.max_seconds <= self._policy.max_seconds)
+
+    def _parse_policy(self, raw: Any) -> DurationRange:
+        if not isinstance(raw, Mapping) or not isinstance(raw.get("default_bucket"), str):
+            raise TemplateLibraryError(
+                "playlist_duration_policy with a default_bucket is required (ADR-0036); "
+                "nothing defaults a playlist length")
+        bucket = str(raw["default_bucket"])
+        if bucket not in self._buckets:
+            raise TemplateLibraryError(
+                f"playlist_duration_policy names undeclared bucket {bucket!r}")
+        return self._buckets[bucket]
 
     @staticmethod
     def _parse_buckets(raw: Any) -> dict[str, DurationRange]:
@@ -361,8 +408,9 @@ def build_genome_from_directive(
 
     The genre must be named in the brief and have a template; otherwise the directive is
     refused (``genre_unspecified`` / ``unknown_genre``). Brief dimensions that are unset
-    are open, so the template's default applies. A named ``duration_bucket`` sets the
-    genome's ``playlist_duration`` to the bucket's declared range.
+    are open, so the template's default applies, except the playlist range: a named
+    ``duration_bucket`` sets it to the bucket's declared range (inside the policy), and
+    an open one to the policy range (ADR-0036).
     """
     lib = library or default_template_library()
     brief = directive.brief
@@ -404,6 +452,8 @@ def build_genome_from_directive(
     if _present(brief.get("duration_bucket")):
         bucket = normalize_dimension_value("duration_bucket", str(brief["duration_bucket"]))
         updates["playlist_duration"] = lib.playlist_duration_for_bucket(bucket)
+    else:
+        updates["playlist_duration"] = lib.playlist_duration_policy
 
     dumped = base.model_dump()
     dumped.update(updates)

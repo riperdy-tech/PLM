@@ -76,5 +76,6 @@ testpaths = ["tests", "services"]
 timeout = 120
 markers = [
     "integration: needs docker compose services (postgres, minio); skips cleanly when unreachable",
+    "full_chain: the Gate R5 full chain on the compose stack (also integration); runs only when selected with -m full_chain (about 40 min)",
     "media: needs ffmpeg/ffprobe (the dev image pins FFmpeg 7); skipped on a host without them unless PLM_REQUIRE_MEDIA_TOOLS=1, which turns a missing tool into a failure",
 ]

@@ -228,36 +228,53 @@ def _current_or_stale(
     return chosen
 
 
+_RELEASED_FINGERPRINTS: dict[tuple[str, str], ReferenceFingerprint] = {}
+"""Process cache of released fingerprints, keyed by (evaluation id, fingerprint sha256).
+A stored fingerprint never changes; the key's digest makes a changed row a new entry."""
+
+
 class SqlInternalCatalog:
-    """P5's released candidates: fingerprints whose evaluation issued a manifest."""
+    """P5's released candidates: fingerprints whose evaluation issued a manifest.
+
+    Each evaluation reads which fingerprints are released (light columns) and loads only
+    the blobs it has not seen in this process (R5: reloading every released fingerprint
+    for every evaluation grew with the catalog, seconds per candidate at a few hundred).
+    """
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
     def load_fingerprints(self, *, exclude_candidate_id: str | None) -> FingerprintSet:
         fp = candidate_audio_fingerprints_table
+        released = sa.exists().where(release_manifests_table.c.evaluation_id == fp.c.evaluation_id)
         stmt = (
-            sa.select(fp)
-            .where(
-                sa.exists().where(release_manifests_table.c.evaluation_id == fp.c.evaluation_id)
-            )
+            sa.select(fp.c.evaluation_id, fp.c.candidate_id, fp.c.fingerprint_sha256)
+            .where(released)
             .order_by(fp.c.evaluation_id)
         )
         if exclude_candidate_id is not None:
             stmt = stmt.where(fp.c.candidate_id != exclude_candidate_id)
-        rows = self._session.execute(stmt).mappings().all()
-        return FingerprintSet.of(
-            [
-                ReferenceFingerprint(
-                    ref_id=row["evaluation_id"],
-                    fingerprint=AudioFingerprint.from_bytes(
-                        row["fingerprint_version"], row["fingerprint"], row["duration_seconds"]
-                    ),
-                    candidate_id=row["candidate_id"],
-                    label=row["candidate_id"],
+        rows = self._session.execute(stmt).all()
+        missing = [row.evaluation_id for row in rows
+                   if (row.evaluation_id, row.fingerprint_sha256) not in _RELEASED_FINGERPRINTS]
+        for start in range(0, len(missing), 500):
+            for row in self._session.execute(
+                sa.select(fp).where(fp.c.evaluation_id.in_(missing[start:start + 500]))
+            ).mappings():
+                _RELEASED_FINGERPRINTS[(row["evaluation_id"], row["fingerprint_sha256"])] = (
+                    ReferenceFingerprint(
+                        ref_id=row["evaluation_id"],
+                        fingerprint=AudioFingerprint.from_bytes(
+                            row["fingerprint_version"], row["fingerprint"],
+                            row["duration_seconds"]
+                        ),
+                        candidate_id=row["candidate_id"],
+                        label=row["candidate_id"],
+                    )
                 )
-                for row in rows
-            ]
+        return FingerprintSet.of(
+            [_RELEASED_FINGERPRINTS[(row.evaluation_id, row.fingerprint_sha256)]
+             for row in rows]
         )
 
 

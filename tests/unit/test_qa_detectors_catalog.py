@@ -248,3 +248,34 @@ def test_registration_refuses_a_reference_without_its_origin(
     with pytest.raises(ValueError):
         register_reference_lyrics(session, ref_id="x" * 65, text=UNRELATED_REFERENCE_LYRIC,
                                   source_note="s", params=POLICY.lyric_similarity, now=NOW)
+
+
+def test_released_fingerprints_are_read_once_per_process(session: Session,
+                                                         tmp_path: Path) -> None:
+    """R5: every evaluation reloaded and deserialised every released fingerprint, so P5's
+    time per candidate grew with the catalog. Proves: a second read of the catalog loads
+    no fingerprint blob it already holds (only the light list of released ids), and the
+    entries are the same."""
+    _register_unrelated_reference(session, tmp_path)
+    first = _evaluate(session, write_wav(tmp_path / "a.wav", synthetic_music(58)),
+                      "cand_cached", vocal_mode="instrumental", lyrics_text=None)
+    assert first.release_manifest is not None
+    persist_gate_result(session, first)
+    session.commit()
+    catalog = SqlInternalCatalog(session)
+    loaded = catalog.load_fingerprints(exclude_candidate_id=None)
+    assert [e.candidate_id for e in loaded.entries] == ["cand_cached"]
+
+    statements: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    bind = session.get_bind()
+    sa.event.listen(bind, "before_cursor_execute", record)
+    try:
+        again = catalog.load_fingerprints(exclude_candidate_id=None)
+    finally:
+        sa.event.remove(bind, "before_cursor_execute", record)
+    assert again == loaded
+    assert statements and not any("hash_count" in s for s in statements), statements

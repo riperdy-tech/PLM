@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.exceptions import DecisionCode, ExceptionCase, ExceptionQueue
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import QualityGateSettings
@@ -264,10 +265,28 @@ def build_router(
                 trigger=req.trigger,
             )
 
-        # Persist aggregate to database
-        persist_gate_result(session, result)
-
-        session.commit()
+        # Persist aggregate to database. A concurrent request for the same evaluation id
+        # (a caller's retry while this one ran) may have committed first: its stored
+        # evaluation is the fact and is replayed, never a 500 (R5).
+        try:
+            persist_gate_result(session, result)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            winner = get_candidate_evaluation(session, result.evaluation.id)
+            if winner is None:
+                raise
+            if winner.artifact_id != event.artifact_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=ErrorShape(
+                        code="evaluation_conflict",
+                        field_paths=["candidate_event.artifact_id"],
+                        message=(f"evaluation {winner.id} judged artifact "
+                                 f"{winner.artifact_id}, not {event.artifact_id}"),
+                    ).model_dump(),
+                ) from None
+            return _stored_response(session, winner)
 
         return EvaluationResponse(
             evaluation_id=result.evaluation.id,

@@ -55,7 +55,10 @@ def cli_assemble(
         raise typer.Exit(code=3)
     with factory() as session:
         try:
-            pkg = assemble_and_persist(session, backend, req, clock=SystemClock())
+            pkg = assemble_and_persist(
+                session, backend, req, clock=SystemClock(),
+                default_render_profile=load_media_factory_settings(
+                    platform=platform).default_render_profile)
         except MediaAssemblyError as exc:
             typer.echo(f"Error: assembly refused: {exc}", err=True)
             raise typer.Exit(code=2) from exc

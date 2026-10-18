@@ -115,18 +115,58 @@ def test_spare_ratio_is_versioned_data_not_a_constant() -> None:
 
 def test_directive_bucket_sets_the_playlist_range() -> None:
     """Proves ``duration_bucket: 45_75m`` makes the genome's playlist range 2700–4500 s
-    (overriding the rnb template's 2700–3600 s), with the midpoint as target."""
+    (the policy range), with the midpoint as target."""
     genome = build_genome_from_directive(adapt_directive(SAMPLE_DIRECTIVE))
     assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds,
             genome.playlist_duration.target_seconds) == (2700, 4500, 3600)
 
 
-def test_without_a_bucket_the_genome_template_range_applies() -> None:
-    """Proves an open bucket falls to the genre template's declared playlist range."""
-    directive = _directive(duration_bucket=None)
-    genome = build_genome_from_directive(adapt_directive(directive))
-    assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds) == (
-        2700, 3600)
+def test_without_a_bucket_the_policy_range_applies() -> None:
+    """Proves an open bucket gets the owner's policy range (45-75 min, ADR-0036), not
+    the genre template's. R5: the lofi, jazz and ambient templates declared 60-120 and
+    60-180 min, so a directive naming no bucket (P1's CI arms name none) planned a
+    playlist outside the owner's decision."""
+    for genre in ("rnb", "lofi", "jazz", "ambient"):
+        directive = _directive(duration_bucket=None, genre=genre)
+        genome = build_genome_from_directive(adapt_directive(directive))
+        assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds,
+                genome.playlist_duration.target_seconds) == (2700, 4500, 3600), genre
+
+
+def test_a_bucket_outside_the_policy_is_refused_not_clamped() -> None:
+    """Proves a declared bucket whose range lies outside the policy (``10_45m``) is
+    refused with ``playlist_duration_outside_policy``, through the engine and over HTTP."""
+    with pytest.raises(GenomeBuildError) as raised:
+        build_genome_from_directive(adapt_directive(_directive(duration_bucket="10_45m")))
+    assert raised.value.code == "playlist_duration_outside_policy"
+
+    response = _client().post("/experiments/v1/experiments", headers=HEADERS,
+                              json={"directive": _directive(duration_bucket="10_45m")})
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "playlist_duration_outside_policy"
+
+
+def test_a_template_range_outside_the_policy_is_refused_at_load() -> None:
+    """Proves a genre template may not declare a playlist range outside the policy; the
+    library refuses to load (fail closed) instead of clamping it."""
+    raw = _raw_library()
+    raw["templates"]["lofi_chill"]["playlist_duration"] = {
+        "min_seconds": 3600, "max_seconds": 7200, "target_seconds": 5400}
+    with pytest.raises(TemplateLibraryError, match="playlist_duration_outside_policy"):
+        TemplateLibrary(raw)
+
+
+def test_the_policy_must_be_declared() -> None:
+    """Proves a library without ``playlist_duration_policy`` (or naming an undeclared
+    bucket) is refused at load; nothing defaults the playlist length."""
+    raw = _raw_library()
+    del raw["playlist_duration_policy"]
+    with pytest.raises(TemplateLibraryError, match="playlist_duration_policy"):
+        TemplateLibrary(raw)
+    raw = _raw_library()
+    raw["playlist_duration_policy"]["default_bucket"] = "gt_75m"
+    with pytest.raises(TemplateLibraryError, match="undeclared bucket"):
+        TemplateLibrary(raw)
 
 
 def test_undeclared_bucket_is_refused_not_mapped() -> None:

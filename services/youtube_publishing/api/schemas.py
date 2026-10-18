@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from ..domain.enums import OperatingMode, PrivacyStatus
+
 
 class PublishRequest(BaseModel):
     """Request to publish a P6 media package to YouTube."""
@@ -84,6 +86,55 @@ class VideoAnalyticsResponse(BaseModel):
     source: str
     model_version: str | None = None
     metrics: dict[str, Any]
+
+
+class ChannelProfileRequest(BaseModel):
+    """An operator's channel configuration (``PUT /youtube/channels/{channel_id}``, P0 §10).
+
+    ``oauth_credential_ref`` names where the credential lives; it is never the secret.
+    ``default_made_for_kids`` is an audience declaration the operator must make (no
+    default); the remaining fields default to the profile's conservative values (private,
+    ``dry_run``, synthetic media disclosed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel_name: str = Field(min_length=1, max_length=255)
+    brand_id: str = Field(min_length=1, max_length=64)
+    oauth_credential_ref: str = Field(min_length=1, max_length=128)
+    default_made_for_kids: bool
+    default_language: str = Field(default="en", min_length=1, max_length=16)
+    default_country: str = Field(default="US", min_length=1, max_length=8)
+    default_category_id: str = Field(default="10", min_length=1, max_length=16)
+    default_privacy_mode: PrivacyStatus = PrivacyStatus.PRIVATE
+    default_contains_synthetic_media: bool = True
+    default_publish_timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    active: bool = True
+    operating_mode: OperatingMode = OperatingMode.DRY_RUN
+
+
+class ChannelProfileResponse(BaseModel):
+    """The stored profile after the ``PUT``; ``created`` is true on the first write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str
+    channel_id: str
+    channel_name: str
+    brand_id: str
+    oauth_credential_ref: str
+    default_made_for_kids: bool
+    default_language: str
+    default_country: str
+    default_category_id: str
+    default_privacy_mode: str
+    default_contains_synthetic_media: bool
+    default_publish_timezone: str
+    active: bool
+    operating_mode: str
+    created_at: datetime
+    updated_at: datetime
+    created: bool
 
 
 class ReconcileResponse(BaseModel):

@@ -75,6 +75,30 @@ def insert_channel_profile(session: Session, profile: ChannelProfile) -> None:
     session.add(row)
 
 
+def replace_channel_profile(session: Session, profile: ChannelProfile) -> None:
+    """Overwrite the operator-set facts of an existing profile (``PUT``); the row's id,
+    channel and creation instant are kept."""
+    session.execute(
+        update(ChannelProfileRow)
+        .where(ChannelProfileRow.channel_id == profile.channel_id)
+        .values(
+            channel_name=profile.channel_name,
+            brand_id=profile.brand_id,
+            oauth_credential_ref=profile.oauth_credential_ref,
+            default_language=profile.default_language,
+            default_country=profile.default_country,
+            default_category_id=profile.default_category_id,
+            default_privacy_mode=profile.default_privacy_mode.value,
+            default_made_for_kids=profile.default_made_for_kids,
+            default_contains_synthetic_media=profile.default_contains_synthetic_media,
+            default_publish_timezone=profile.default_publish_timezone,
+            active=profile.active,
+            operating_mode=profile.operating_mode.value,
+            updated_at=profile.updated_at,
+        )
+    )
+
+
 def get_channel_profile_by_id(session: Session, profile_id: str) -> ChannelProfile | None:
     row = session.execute(
         select(ChannelProfileRow).where(ChannelProfileRow.id == profile_id)

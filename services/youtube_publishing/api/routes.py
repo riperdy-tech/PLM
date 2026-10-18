@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from plm_contracts import ErrorShape, ObservationWindow
 from plm_contracts.seams import ExperimentLineage, SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
@@ -24,6 +24,7 @@ from ..analytics import YouTubeAnalyticsSource
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import FailureReasonCode, OperatingMode
 from ..domain.models import (
+    ChannelProfile,
     PublishManifest,
     YouTubePublicationRecord,
     YouTubeVideoPublishedEvent,
@@ -37,10 +38,14 @@ from ..storage.repositories import (
     get_publication_record_by_video_id,
     get_publish_attempt_by_id,
     get_publish_manifest_by_id,
+    insert_channel_profile,
     insert_publish_manifest,
+    replace_channel_profile,
 )
 from .schemas import (
     AttemptStatusResponse,
+    ChannelProfileRequest,
+    ChannelProfileResponse,
     HealthResponse,
     PublishRequest,
     PublishResponse,
@@ -82,6 +87,22 @@ def _refused(status: int, code: str, message: str,
     )
 
 
+def _channel_response(profile: ChannelProfile, *, created: bool) -> ChannelProfileResponse:
+    return ChannelProfileResponse(
+        profile_id=profile.id, channel_id=profile.channel_id,
+        channel_name=profile.channel_name, brand_id=profile.brand_id,
+        oauth_credential_ref=profile.oauth_credential_ref,
+        default_made_for_kids=profile.default_made_for_kids,
+        default_language=profile.default_language, default_country=profile.default_country,
+        default_category_id=profile.default_category_id,
+        default_privacy_mode=profile.default_privacy_mode.value,
+        default_contains_synthetic_media=profile.default_contains_synthetic_media,
+        default_publish_timezone=profile.default_publish_timezone, active=profile.active,
+        operating_mode=profile.operating_mode.value, created_at=profile.created_at,
+        updated_at=profile.updated_at, created=created,
+    )
+
+
 def create_youtube_router(
     session_factory: Any,
     auth_dependency: Any,
@@ -105,6 +126,34 @@ def create_youtube_router(
             version="v1",
             timestamp=clock.now(),
         )
+
+    @router.put("/channels/{channel_id}", response_model=ChannelProfileResponse,
+                dependencies=[Depends(auth_dependency)])
+    def configure_channel(channel_id: str, req: ChannelProfileRequest,
+                          response: Response) -> ChannelProfileResponse:
+        """Create (201) or replace (200) the channel's profile. A replay of the same facts
+        changes nothing, not even ``updated_at``."""
+        if not channel_id.strip() or len(channel_id) > 64:
+            raise _refused(422, "invalid_channel_id",
+                           "channel_id must be 1-64 characters", ["channel_id"])
+        now = clock.now()
+        facts = req.model_dump()
+        with session_factory() as session:
+            stored = get_channel_profile_by_channel_id(session, channel_id)
+            if stored is None:
+                profile = ChannelProfile(id=f"prof_{channel_id}", channel_id=channel_id,
+                                         created_at=now, updated_at=now, **facts)
+                insert_channel_profile(session, profile)
+                session.commit()
+                response.status_code = 201
+                return _channel_response(profile, created=True)
+            if stored.model_dump(include=set(facts)) == facts:
+                return _channel_response(stored, created=False)
+            profile = ChannelProfile(id=stored.id, channel_id=channel_id,
+                                     created_at=stored.created_at, updated_at=now, **facts)
+            replace_channel_profile(session, profile)
+            session.commit()
+            return _channel_response(profile, created=False)
 
     @router.post("/publish", response_model=PublishResponse, dependencies=[Depends(auth_dependency)])
     def publish_package(req: PublishRequest) -> PublishResponse:

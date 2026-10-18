@@ -85,3 +85,47 @@ jobs:
       - name: Tear down the compose stack
         if: always()
         run: docker compose down -v --remove-orphans
+
+  # Gate R5: the full chain from a P1 observation to LEARNING on the compose stack, with
+  # Temporal's time-skipping test server for the 28-day horizon. Production content
+  # scale (45-75 min playlists, about 170 P5 evaluations, previews rendered by FFmpeg)
+  # takes about 40 min, so it has its own job; `-m integration` skips it.
+  full-chain:
+    name: Gate R5 full chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install project (editable, dev extras)
+        run: pip install -c constraints.txt -e ".[dev]"
+
+      - name: Provide .env for compose and tests
+        run: cp .env.example .env
+
+      - name: Start the compose stack and wait for health
+        run: docker compose up -d --wait --wait-timeout 420
+
+      - name: Apply migrations
+        run: plm migrate
+
+      - name: Full chain (Gate R5)
+        run: pytest -q -m full_chain
+
+      - name: Tear down the compose stack
+        if: always()
+        run: docker compose down -v --remove-orphans

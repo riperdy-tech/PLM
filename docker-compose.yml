@@ -27,6 +27,11 @@ x-plm-app: &plm-app
     # The deterministic mock outcome model behind P7's mock YouTube Analytics source and
     # P8's mock distributor statements (labelled mock; never a real audience).
     - PLM_MOCK_OUTCOMES_FILE=${PLM_MOCK_OUTCOMES_FILE:-/app/config/dev/mock_outcomes.json}
+    # P6's render profile for an assemble request that names none (the pipeline names
+    # none). The local stack renders previews (640x360, 15 fps): a 45-75 min playlist at
+    # 1080p takes about 20 min per video on a dev machine. Production sets
+    # yt_longform_1080p_v1 (P6's default when unset).
+    - PLM_MEDIA_RENDER_PROFILE=${PLM_MEDIA_RENDER_PROFILE:-preview_360p_v1}
   volumes:
     - .:/app
   depends_on:

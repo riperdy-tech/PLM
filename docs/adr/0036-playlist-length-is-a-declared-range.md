@@ -25,10 +25,19 @@ the planning midpoint.
 - **The range is a genome fact.** `genome_templates.json` declares
   `playlist_duration_buckets` (`45_75m` = 2700–4500 s, `10_45m` = 600–2700 s, target =
   midpoint). A directive whose brief names a bucket gets that range as the genome's
-  `playlist_duration`; without a bucket the genre template's declared range applies. A
-  bucket the table does not declare (`gt_75m`, which has no maximum) is refused
-  (`playlist_duration_bucket_unknown`); a template without a playlist range fails to load.
-  Nothing defaults.
+  `playlist_duration`. A bucket the table does not declare (`gt_75m`, which has no
+  maximum) is refused (`playlist_duration_bucket_unknown`); a template without a playlist
+  range fails to load. Nothing defaults.
+- **Amended in R5 (2026-10-15): the owner's range is the single policy source.**
+  `genome_templates.json` declares `playlist_duration_policy.default_bucket = 45_75m`; its
+  range (2700–4500 s) is the policy. A brief that names no bucket gets the policy range
+  (it used to get the genre template's, and the lofi and jazz templates declared 60–120
+  min, ambient 60–180). A declared bucket outside the policy (`10_45m`) is refused with
+  `playlist_duration_outside_policy`, and a template whose range lies outside it makes
+  the library refuse to load; nothing is clamped. Every template now declares the policy
+  range (`p3-genome-templates-v3`). P2 copies a directive's `duration_bucket` from P1's
+  arm taxonomy, and P1 sets that dimension only from title text, never from the measured
+  video duration, so most directives name none (recorded in `docs/STATUS.md`).
 - **P3's playlist spec declares it** (`duration_range_seconds {min_seconds, max_seconds}`,
   shared model `DurationRangeSeconds`), with `target_duration_seconds` (midpoint) and the
   supply planned for it: `base_track_count = ceil(min_seconds / planned_track_seconds)`

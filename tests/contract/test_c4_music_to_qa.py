@@ -104,7 +104,7 @@ def test_real_event_reaches_the_p5_gate_intact(produced: tuple[dict[str, Any], b
         if c.check_type == "p28_provenance_completeness"
     )
     assert p28.details["missing_fields"] == []
-    assert snapshot["generation_provenance"]["model_version"] == "mock-sine-synth-1"
+    assert snapshot["generation_provenance"]["model_version"] == "mock-chord-synth-2"
     assert snapshot["generation_provenance"]["source_inputs"] == []
     assert result.snapshot.license_snapshot["attempt_id"] == wire["rights"]["attempt_id"]
 

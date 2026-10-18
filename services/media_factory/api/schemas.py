@@ -40,7 +40,8 @@ class AssemblePackageRequest(BaseModel):
     duration_range_seconds: DurationRangeSeconds
     visual_profile: str = Field(min_length=1)
     playlist_concept: str = Field(min_length=1)
-    render_profile: str = "yt_longform_1080p_v1"
+    render_profile: str | None = Field(default=None, min_length=1)
+    """``None``: the deployment's configured profile (``PLM_MEDIA_RENDER_PROFILE``)."""
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE
     transition_duration_seconds: float = Field(default=2.0, ge=0.0)
 

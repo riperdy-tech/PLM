@@ -22,7 +22,7 @@ produced and stored.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from plm_contracts.seams.c3 import DurationRangeSeconds
@@ -31,7 +31,12 @@ from plm_platform.clock import Clock
 
 from ..artifacts import ArtifactStore
 from ..artwork.generator import generate_thumbnails
-from ..audio.features import DEFAULT_FEATURE_POLICY, FeatureExtractionPolicy, measure_features
+from ..audio.features import (
+    DEFAULT_FEATURE_POLICY,
+    FeatureExtractionPolicy,
+    TrackFeatures,
+    measure_features,
+)
 from ..domain.enums import PackageStatus, TransitionType
 from ..domain.models import (
     MediaPackage,
@@ -76,6 +81,25 @@ class AssemblyPipelineResult:
     render_result: RenderExecutionResult
 
 
+class _FetchOnRead(Mapping[str, bytes]):
+    """Recording bytes by candidate id, fetched and verified on every read, never kept."""
+
+    def __init__(self, store: ArtifactStore,
+                 manifests: Mapping[str, ReleaseManifestPayload]) -> None:
+        self._store = store
+        self._manifests = dict(manifests)
+
+    def __getitem__(self, candidate_id: str) -> bytes:
+        manifest = self._manifests[candidate_id]
+        return self._store.fetch_verified(manifest.artifact_uri, manifest.artifact_sha256)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._manifests)
+
+    def __len__(self) -> int:
+        return len(self._manifests)
+
+
 def assemble_media_package(
     *,
     track_manifests: Sequence[ReleaseManifestPayload],
@@ -108,10 +132,15 @@ def assemble_media_package(
 
     # 1-2. Clearance first, so nothing uncleared is even fetched; then verified bytes.
     check_clearance(track_manifests)
-    sources = {m.candidate_id: store.fetch_verified(m.artifact_uri, m.artifact_sha256)
-               for m in track_manifests}
-    # 3-4. Measured features, then selection and order.
-    features = {cid: measure_features(cid, data, feature_policy) for cid, data in sources.items()}
+    # 3-4. Measured features (one recording in memory at a time), then selection and
+    # order. Holding every offered recording at once made memory grow with the supply
+    # (R5: about 60 cleared tracks for one long playlist, and the render OOM-killed).
+    features: dict[str, TrackFeatures] = {}
+    for manifest in track_manifests:
+        features[manifest.candidate_id] = measure_features(
+            manifest.candidate_id,
+            store.fetch_verified(manifest.artifact_uri, manifest.artifact_sha256),
+            feature_policy)
     playlist_res = assemble_playlist(
         manifests=track_manifests,
         features=features,
@@ -153,13 +182,16 @@ def assemble_media_package(
         now=planned_at,
     )
     visual_session = visual_res.visual_session
+    by_candidate = {m.candidate_id: m for m in track_manifests}
     renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
     render_res = renderer.render(
         media_package_id_str=package_id,
         playlist=playlist_session,
         visual_session=visual_session,
         brand=brand_profile,
-        sources={t.song_id: sources[t.song_id] for t in tracks},
+        # Only the recordings the sequence selected, fetched (and verified) again on each
+        # read, so the render holds one recording at a time.
+        sources=_FetchOnRead(store, {t.song_id: by_candidate[t.song_id] for t in tracks}),
         required_window_seconds=playlist_res.sequence.window,
         clock=clock,
     )

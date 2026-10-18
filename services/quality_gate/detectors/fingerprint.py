@@ -193,6 +193,36 @@ def fingerprint_samples(
     return AudioFingerprint(params.fingerprint_version, hashes, duration)
 
 
+def best_alignment(refs: npt.NDArray[np.int64], offsets: npt.NDArray[np.int64],
+                   tolerance: int) -> tuple[int, int, int]:
+    """The (reference, offset) with the most hits within ``tolerance`` frames of it.
+
+    ``refs``/``offsets`` hold one row per candidate hash found in a reference. Returns
+    ``(aligned_count, reference, offset)``; ties go to the smallest (reference, offset),
+    and ``(0, -1, 0)`` when there is no hit. Vectorised over the distinct
+    (reference, offset) pairs: the per-pair Python loop made every evaluation scale with
+    the number of hits against the whole internal catalog (R5: minutes per candidate
+    once the catalog held a few hundred recordings).
+    """
+    if refs.size == 0:
+        return 0, -1, 0
+    low = int(offsets.min())
+    width = int(offsets.max()) - low + 2 * tolerance + 1
+    keys = refs.astype(np.int64) * width + (offsets.astype(np.int64) - low + tolerance)
+    unique, counts = np.unique(keys, return_counts=True)  # sorted = (ref, offset) order
+    aligned = np.zeros(unique.size, dtype=np.int64)
+    for delta in range(-tolerance, tolerance + 1):
+        target = unique + delta
+        at = np.searchsorted(unique, target)
+        inside = at < unique.size
+        hit = np.zeros(unique.size, dtype=bool)
+        hit[inside] = unique[at[inside]] == target[inside]
+        aligned[hit] += counts[at[hit]]
+    best = int(np.argmax(aligned))  # the first maximum: the smallest (ref, offset)
+    key = int(unique[best])
+    return int(aligned[best]), key // width, key % width + low - tolerance
+
+
 def match_fingerprint(
     candidate: AudioFingerprint,
     entries: Sequence[ReferenceFingerprint],
@@ -283,14 +313,8 @@ def match_fingerprint(
         ref_rows = starts + (np.arange(total) - run_start)
         offsets = ref_time[ref_rows] - cand_time[cand_rows]
         refs = ref_index[ref_rows]
-        pairs, pair_counts = np.unique(np.stack([refs, offsets], axis=1), axis=0,
-                                       return_counts=True)
-        tally = {(int(r), int(o)): int(c) for (r, o), c in zip(pairs, pair_counts, strict=True)}
-        tol = params.offset_tolerance_frames
-        for (r, o) in sorted(tally):
-            aligned = sum(tally.get((r, o + d), 0) for d in range(-tol, tol + 1))
-            if aligned > best_count:
-                best_count, best_index, best_offset = aligned, r, o
+        best_count, best_index, best_offset = best_alignment(
+            refs, offsets, params.offset_tolerance_frames)
 
     if best_index < 0:
         return result(DetectorOutcome.NO_MATCH, score=0.0, metrics=base_metrics)

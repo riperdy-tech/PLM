@@ -224,3 +224,40 @@ def test_evaluation_refuses_an_incomplete_candidate_event(qa_client, qa_engine) 
     assert res.status_code == 422
     assert res.json()["detail"]["code"] == "missing_required_field"
     assert "candidate_event.lineage" in res.json()["detail"]["field_paths"]
+
+
+def test_a_concurrent_duplicate_evaluation_replays_the_stored_one(
+        qa_client, qa_engine, store, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R5: a caller's retry while the first request was still evaluating passed the
+    replay check, evaluated again and failed on the evaluation's key with a 500, which
+    ended the pipeline run. Proves: when the same evaluation was committed meanwhile, the
+    second request answers with the stored evaluation (same id, same disposition)."""
+    import quality_gate.api.routes as routes
+
+    wav_path = _make_temp_wav(duration=1.5)
+    headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
+    try:
+        body = {"candidate_event": _stored_event(
+            store, wav_path, candidate_id="cand_api_race", artifact_id="art_api_race",
+            track_spec_id="spec_api_race",
+            lineage=lineage_fields(experiment_id="exp_api_race", content_arm_id="arm_race"),
+            prompt_text="relaxing lo-fi chill beat")}
+        first = qa_client.post("/qa/evaluations", json=body, headers=headers)
+        assert first.status_code == 201, first.text
+
+        real = routes.get_candidate_evaluation
+        calls = {"n": 0}
+
+        def not_yet_visible(session, evaluation_id):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return None if calls["n"] == 1 else real(session, evaluation_id)
+
+        monkeypatch.setattr(routes, "get_candidate_evaluation", not_yet_visible)
+        second = qa_client.post("/qa/evaluations", json=body, headers=headers)
+        assert second.status_code in (200, 201), second.text
+        assert second.json()["evaluation_id"] == first.json()["evaluation_id"]
+        assert second.json()["disposition"] == first.json()["disposition"]
+        assert calls["n"] == 2
+    finally:
+        if wav_path.is_file():
+            wav_path.unlink()
