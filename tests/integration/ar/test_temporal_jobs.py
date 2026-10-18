@@ -63,7 +63,9 @@ def seeded_stack() -> None:
 
 
 @pytest.mark.integration
-def test_allocation_workflow_runs_on_ph2_ar(seeded_stack: None) -> None:
+def test_allocation_workflow_runs_on_ph2_ar(
+        seeded_stack: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PLM_SERVICE_TOKEN", raising=False)
     async def scenario() -> dict[str, object]:
         try:
             client: Client = await connect_client()
