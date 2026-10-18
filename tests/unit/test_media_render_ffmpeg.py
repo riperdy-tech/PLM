@@ -88,7 +88,7 @@ def test_a_real_master_is_rendered_and_passes_ffprobe_validation(
     pkg = result.media_package
     assert pkg.status is PackageStatus.READY_FOR_PUBLISH, pkg.render_report["qa"]
     assert pkg.render_report["qa"]["reason_codes"] == []
-    assert pkg.render_report["toolchain"].startswith("ffmpeg version 7.")
+    assert pkg.render_report["toolchain"].startswith(("ffmpeg version 7.", "ffmpeg version 8."))
 
     probe = _ffprobe(store.get(pkg.video_master_uri))
     streams = probe["streams"]

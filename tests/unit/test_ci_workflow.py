@@ -40,7 +40,9 @@ def workflow() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def job(workflow: dict[str, Any]) -> dict[str, Any]:
     jobs = workflow["jobs"]
-    assert list(jobs) == ["ci"], "the plan asks for one job; keep it that way"
+    assert set(jobs) == {"ci", "full-chain"}, (
+        "the workflow declares the PR gate (ci) and the R5 full-chain gate (full-chain)"
+    )
     return jobs["ci"]
 
 
@@ -120,3 +122,14 @@ def test_env_file_is_provided_from_the_committed_example(job: dict[str, Any]) ->
         "compose and the integration tests read .env; build it from the committed "
         "example rather than duplicating values in the workflow"
     )
+
+
+def test_full_chain_job_configured(workflow: dict[str, Any]) -> None:
+    fc = workflow["jobs"]["full-chain"]
+    assert fc["runs-on"] == "ubuntu-latest"
+    assert fc["timeout-minutes"] == 90
+    runs = _step_runs(fc)
+    assert any("full_chain" in r for r in runs), (
+        "the full-chain job must run the Gate R5 test suite"
+    )
+

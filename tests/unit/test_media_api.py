@@ -350,7 +350,7 @@ def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendere
     was OOM-killed. Proves: each recording is fetched and measured before the next is
     fetched, and the render fetches again (on each read, never keeping them) only the
     recordings the sequence selected."""
-    import media_factory.rendering.assembler as assembler
+    from media_factory.rendering import assembler
 
     store, manifests = cleared
     events: list[str] = []

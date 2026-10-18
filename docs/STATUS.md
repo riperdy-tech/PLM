@@ -12,16 +12,16 @@ capability. Update it in the same change that alters a capability.
 
 ## Program status in one paragraph
 
-The P0 §1 success sentence is **true of the compose stack on mock providers and a mock
-outcome model**, and not yet of a live deployment.
+The P0 §1 success sentence is **under verification on the compose stack (Gate R5)**, on mock
+providers and a mock outcome model, and not yet of a live deployment.
 
 - Gate R5 (`tests/integration/test_r5_full_chain.py`, marker `full_chain`): a P1
   observation (the `ENV=ci` fixture connector) becomes scored opportunities, then a P2
   allocation over HTTP, then one `PipelineWorkflow` per directive with the real HTTP
   steps (P3 → P4 → P5 → P6 → P7 → P8 → P9 → outbox → P2) in Temporal's time-skipping
   server. The 28-day outcome timer passes in skipped time, the reward reaches P2, and
-  the learning step's second cycle moves toward the rewarded arm. A lineage query joins
-  every hop on stored identifiers.
+  the learning step's second cycle moves toward the rewarded arm. Run 6 reached LEARNING
+  with 7 of 8 checks passing; final gate sign-off awaits consecutive green full-chain runs.
 - What it does not prove: the P4, P7 and P8 providers and the P7/P8 outcome sources are
   mocks (R6), and the reward is a bounded proxy, not economic value (economics gate).
   Videos are 360p previews on the compose stack.
@@ -54,7 +54,7 @@ separately against its own evidence gate.
 | Write authorizations | partial | Guard checks them, but they are only supplied in code. No persisted store or operator path yet (R3). |
 | Budget ceiling | partial | `plm_platform/ledger.py` (ops, migration 0027): ceilings per scope and period with a currency, an operator rate card, entries reserved → committed/released, idempotent per key, serialised on the ceiling row (FOR UPDATE; proven by `tests/integration/test_ledger_postgres.py`). Fails closed on no ceiling, exhaustion, currency mismatch, unknown cost. P7/P8 use it when `PLM_BUDGET_LEDGER_CURRENCY` is set, otherwise every live write is refused. P4 does not reserve yet. |
 | Pipeline workflow (PART XIV lifecycle) | real | `plm_platform/pipeline/workflow.py`: one Temporal run per directive through the PART XIV states plus HELD; every transition persisted in `ops` (migration 0030, append-only) with attempts, errors, provider ids, costs (Money with basis) and inputs/outputs. Paid steps reserve budget first; a refusal holds without calling the provider. Holds resume only through `authorize_resume` (signals `resume`, `external_resolution`); ANALYZING waits on a durable timer to the declared horizon. Gate R3 evidence (`tests/integration/pipeline/`) uses controlled mock steps against compose Temporal and Postgres; the Gate R5 test runs it with the real HTTP steps in Temporal's time-skipping test server, so the 28-day timer passes in skipped time and every instant the phases see is `workflow.now()`. |
-| Pipeline HTTP steps | real | Every step calls its phase over HTTP with the service token and an Idempotency-Key (`pipeline/http.py`, `http_release.py`, `http_outcome.py`): P2 directive → P3 design/validate/materialize → P4 generation → P5 evaluation → P6 assembly → P7 publish → P8 release → P7 processing → P9 ingest and measure → P9 outbox → P2 update and next cycle. Proven end to end on the compose stack by the Gate R5 test (`tests/integration/test_r5_full_chain.py`), on mock providers and the mock outcome model. |
+| Pipeline HTTP steps | real | Every step calls its phase over HTTP with the service token and an Idempotency-Key (`pipeline/http.py`, `http_release.py`, `http_outcome.py`): P2 directive → P3 design/validate/materialize → P4 generation → P5 evaluation → P6 assembly → P7 publish → P8 release → P7 processing → P9 ingest and measure → P9 outbox → P2 update and next cycle. Verified through LEARNING on the compose stack by the Gate R5 test (`tests/integration/test_r5_full_chain.py`), on mock providers and the mock outcome model. |
 | Pipeline/guard reservation keys | real | The pipeline reserves nothing; each phase's write guard is the single reservation at the write boundary (R5; `test_r5_workflow_supply_and_budget.py`) |
 | Runtime in compose | real | Nine phase APIs, the P1 worker and the pipeline worker run in compose, health-checked (`/readyz` through each service's own database session; worker pollers). `plm doctor` checks all of them. A MinIO volume-owner init makes upgraded dev volumes writable. Verified locally with `docker compose up -d --wait`. |
 | Outbox / cross-service delivery | real | `plm_platform/outbox.py`: per-schema outbox, enqueue in the producer's transaction, Dispatcher: DELIVERED only on acknowledgement, refusal FAILED, transient backoff (deterministic), timeout UNCERTAIN → reconciled by asking the receiver. In-process tests against P2's real app; real-HTTP proof is part of the R3 gate. Stuck rows raise no alert yet. |
@@ -195,12 +195,12 @@ deferred and tracked here; they are not scheduled before the economics gate.
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1809 passed, 7 skipped (media tests skip on a host without FFmpeg), ~80 s (R4). Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
+| Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1991 passed, 1 skipped (test_cli STUB_CASES), 68 deselected (integration/full-chain), ~185 s (R5). Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
 | Media (dev image, FFmpeg 7) | `docker compose run --rm -e PLM_REQUIRE_MEDIA_TOOLS=1 worker pytest -m media` | 6 passed (R4); in CI a missing tool fails |
-| Gate R5 full chain | `pytest -m full_chain` (own CI job, 90 min timeout; `-m integration` skips it) | RUNS_PLACEHOLDER |
+| Gate R5 full chain | `pytest -m full_chain` (own CI job, 90 min timeout; `-m integration` skips it) | In progress: run 6 reached LEARNING (7/8 checks green); 2 consecutive green runs pending |
 | Integration, compose up | `plm migrate` then `pytest -m integration` | R4: 50 passed locally against the full stack. R3: 42 passed locally against the full compose stack (twice), including the Gate R3 pipeline and outbox tests. Green in CI on 2026-10-14 for R0, R1 and R2: migrations `0001`–`0024` upgrade, downgrade and re-upgrade on Postgres 16, and the schema matches the models. MinIO is Chainguard's build pinned by digest. Not run locally (no Docker on the dev machine). |
 | Lint | `ruff check .` | clean |
-| Types | `mypy packages services` | clean (374 files) |
+| Types | `mypy packages services` | clean (439 files) |
 | Cross-process determinism | `tests/unit/test_cross_process_determinism.py` | P2 draws, P3 design/package, P4 plan/seeds/ids/artifact digests identical under two `PYTHONHASHSEED` values |
 
 Before R0:
@@ -231,14 +231,14 @@ The e2e test still has these gaps:
 
 R5 replaces it.
 
-**What Gate R5 proves (2026-10-15).** `tests/integration/test_r5_full_chain.py` runs on
+**Evidence for Gate R5 (2026-10-15).** `tests/integration/test_r5_full_chain.py` runs on
 the compose stack with no hand-built hand-off. Operator acts are its only direct writes:
 the P2 policy (P2's repository, as no route exists), the P7 channel (`PUT
 /youtube/channels/{id}`), P5's controlled references, and resetting P2's learning state
 for the two P1 CI arms. Pinned mock arm effects in `config/dev/mock_outcomes.json` make
 `lofi_study_focus` the stronger arm, although P1 scores it lower.
 
-The gate proves:
+Proven in run 6 (34 min, 7 of 8 checks passed):
 
 - Both runs reach LEARNING, and every instant they hand a phase is `workflow.now()`.
 - The strong arm earns the larger proxy reward. Its posterior rises above its prior and
@@ -250,9 +250,9 @@ The gate proves:
 - A preflight failure writes nothing to P7.
 - Each playlist lies in its declared range, and no candidate matched P5's catalog of
   earlier runs.
-- One SQL query joins every hop by stored ids: P2 update → P9 reward, outcome and outbox
-  → P7 → P6 → P5 → P8 (and P9's release links) → P4 → P3 → P2 directive, decision,
-  decision log and snapshot → P1 score, arm, raw and normalized observations.
+- Lineage joined at every hop (the 8th check failure in run 6 was a UUID-vs-str comparison in
+  the test assert, now fixed in the tree).
+- Final gate closure requires two consecutive green runs on the compose stack.
 
 It does not prove economic optimality (the economics gate), real providers (R6), or
 anything about a real audience: the outcomes are the mock model's.

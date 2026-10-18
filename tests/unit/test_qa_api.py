@@ -232,7 +232,7 @@ def test_a_concurrent_duplicate_evaluation_replays_the_stored_one(
     replay check, evaluated again and failed on the evaluation's key with a 500, which
     ended the pipeline run. Proves: when the same evaluation was committed meanwhile, the
     second request answers with the stored evaluation (same id, same disposition)."""
-    import quality_gate.api.routes as routes
+    from quality_gate.api import routes
 
     wav_path = _make_temp_wav(duration=1.5)
     headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
