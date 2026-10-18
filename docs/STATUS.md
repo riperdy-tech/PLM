@@ -12,16 +12,17 @@ capability. Update it in the same change that alters a capability.
 
 ## Program status in one paragraph
 
-The P0 §1 success sentence is **under verification on the compose stack (Gate R5)**, on mock
-providers and a mock outcome model, and not yet of a live deployment.
+The P0 §1 success sentence is **true of the compose stack on mock providers and a mock
+outcome model**, and not yet of a live deployment.
 
 - Gate R5 (`tests/integration/test_r5_full_chain.py`, marker `full_chain`): a P1
   observation (the `ENV=ci` fixture connector) becomes scored opportunities, then a P2
   allocation over HTTP, then one `PipelineWorkflow` per directive with the real HTTP
   steps (P3 → P4 → P5 → P6 → P7 → P8 → P9 → outbox → P2) in Temporal's time-skipping
   server. The 28-day outcome timer passes in skipped time, the reward reaches P2, and
-  the learning step's second cycle moves toward the rewarded arm. Run 6 reached LEARNING
-  with 7 of 8 checks passing; final gate sign-off awaits consecutive green full-chain runs.
+  the learning step's second cycle moves toward the rewarded arm. A lineage query joins
+  every hop on stored identifiers. Verified by two consecutive passing runs (8 of 8 checks
+  green each) on the compose stack.
 - What it does not prove: the P4, P7 and P8 providers and the P7/P8 outcome sources are
   mocks (R6), and the reward is a bounded proxy, not economic value (economics gate).
   Videos are 360p previews on the compose stack.
@@ -197,7 +198,7 @@ deferred and tracked here; they are not scheduled before the economics gate.
 |---|---|---|
 | Unit, contract, e2e, simulation | `pytest -m "not integration"` | 1991 passed, 1 skipped (test_cli STUB_CASES), 68 deselected (integration/full-chain), ~185 s (R5). Hermetic since R0's follow-up: no `.env` or service variables are visible to the unit tier, matching CI. |
 | Media (dev image, FFmpeg 7) | `docker compose run --rm -e PLM_REQUIRE_MEDIA_TOOLS=1 worker pytest -m media` | 6 passed (R4); in CI a missing tool fails |
-| Gate R5 full chain | `pytest -m full_chain` (own CI job, 90 min timeout; `-m integration` skips it) | In progress: run 6 reached LEARNING (7/8 checks green); 2 consecutive green runs pending |
+| Gate R5 full chain | `pytest -m full_chain` (own CI job, 90 min timeout; `-m integration` skips it) | 8 passed (run 1: 2886 s, run 2: 2843 s); two consecutive green runs on the compose stack |
 | Integration, compose up | `plm migrate` then `pytest -m integration` | R5: 60 passed, 8 skipped locally against the full compose stack. R4: 50 passed locally against the full stack. R3: 42 passed locally against the full compose stack (twice), including the Gate R3 pipeline and outbox tests. Green in CI on 2026-10-14 for R0, R1 and R2: migrations `0001`–`0024` upgrade, downgrade and re-upgrade on Postgres 16, and the schema matches the models. MinIO is Chainguard's build pinned by digest. |
 | Lint | `ruff check .` | clean |
 | Types | `mypy packages services` | clean (439 files) |
@@ -238,7 +239,7 @@ the P2 policy (P2's repository, as no route exists), the P7 channel (`PUT
 for the two P1 CI arms. Pinned mock arm effects in `config/dev/mock_outcomes.json` make
 `lofi_study_focus` the stronger arm, although P1 scores it lower.
 
-Proven in run 6 (34 min, 7 of 8 checks passed):
+Proven by Gate R5 (two consecutive passing runs, 48 min and 47 min; 8 of 8 checks passed):
 
 - Both runs reach LEARNING, and every instant they hand a phase is `workflow.now()`.
 - The strong arm earns the larger proxy reward. Its posterior rises above its prior and
@@ -250,9 +251,10 @@ Proven in run 6 (34 min, 7 of 8 checks passed):
 - A preflight failure writes nothing to P7.
 - Each playlist lies in its declared range, and no candidate matched P5's catalog of
   earlier runs.
-- Lineage joined at every hop (the 8th check failure in run 6 was a UUID-vs-str comparison in
-  the test assert, now fixed in the tree).
-- Final gate closure requires two consecutive green runs on the compose stack.
+- One SQL query joins every hop by stored ids: P2 update → P9 reward, outcome and outbox
+  → P7 → P6 → P5 → P8 (and P9's release links) → P4 → P3 → P2 directive, decision,
+  decision log and snapshot → P1 score, arm, raw and normalized observations.
+- Lineage joins at every hop without missing identifiers.
 
 It does not prove economic optimality (the economics gate), real providers (R6), or
 anything about a real audience: the outcomes are the mock model's.
