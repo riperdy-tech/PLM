@@ -18,3 +18,5 @@ __pycache__/
 # Local runtime data (never packaged data: P1 ships curated seed data in-repo)
 data/
 !services/market_intelligence/data/
+output_media/
+
