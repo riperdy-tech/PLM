@@ -498,8 +498,11 @@ def smoke_live() -> None:
     from market_intelligence.cli import smoke_live as smoke_impl
 
     reason = smoke_impl()
-    typer.echo(reason, err=True)
-    raise typer.Exit(code=BLOCKED_EXIT_CODE)
+    if reason:
+        typer.echo(reason, err=True)
+        raise typer.Exit(code=BLOCKED_EXIT_CODE)
+    typer.echo("live smoke: PASS")
+
 
 
 @ar_app.command()
