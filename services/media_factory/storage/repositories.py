@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from plm_contracts.seams import ExperimentLineage
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -25,6 +26,13 @@ from ..domain.models import (
     VisualAsset,
     VisualSession,
 )
+from ..errors import MediaAssemblyError
+from ..playlist.catalog import (
+    CatalogAlbum,
+    ordered_track_evidence_matches,
+    validate_catalog_album,
+)
+from ..playlist.diversity import DEFAULT_ALBUM_TEXTURE_POLICY
 from .models import (
     media_packages_table,
     playlist_sessions_table,
@@ -34,6 +42,7 @@ from .models import (
     visual_assets_table,
     visual_sessions_table,
 )
+from .source_evidence import archived_sources_match
 
 __all__ = [
     "get_media_package_by_id",
@@ -48,6 +57,7 @@ __all__ = [
     "insert_thumbnail_variant",
     "insert_visual_asset",
     "insert_visual_session",
+    "list_catalog_albums",
     "list_playlist_tracks",
     "list_thumbnail_variants",
     "list_visual_assets",
@@ -406,6 +416,92 @@ def update_render_job_status(
 
 
 # 7. Media Packages
+def list_catalog_albums(
+    session: Session, brand_id: str, *, max_packages: int = 100,
+) -> tuple[CatalogAlbum, ...]:
+    """Load prior ready/published album fingerprint evidence, or hold on truncation.
+
+    Includes all releases for a brand (caller ignores same-release render
+    profiles). The limit is a safety ceiling, not an incomplete silent sample.
+    """
+    if not brand_id or max_packages < 1:
+        raise ValueError("brand_id and positive max_packages required")
+    statement = (
+        select(
+            media_packages_table.c.media_package_id,
+            media_packages_table.c.release_manifest_id,
+            media_packages_table.c.brand_id,
+            media_packages_table.c.experiment_id,
+            media_packages_table.c.content_arm_id,
+            media_packages_table.c.playlist_session_id,
+            media_packages_table.c.render_report_json,
+            media_packages_table.c.tracklist_json,
+        )
+        .where(media_packages_table.c.brand_id == brand_id)
+        .where(media_packages_table.c.status.in_((
+            PackageStatus.READY_FOR_PUBLISH.value, PackageStatus.PUBLISHED.value,
+        )))
+        .order_by(media_packages_table.c.created_at.desc(), media_packages_table.c.id.desc())
+        .limit(max_packages + 1)
+    )
+    rows = session.execute(statement).mappings().all()
+    if len(rows) > max_packages:
+        raise MediaAssemblyError(
+            "album_catalog_scope_incomplete",
+            f"brand {brand_id!r} has more than {max_packages} recorded albums; "
+            "catalog comparison scope cannot be proven complete",
+            ["catalog"],
+        )
+    albums: list[CatalogAlbum] = []
+    for row in rows:
+        try:
+            report = json.loads(row["render_report_json"])
+            tracklist = json.loads(row["tracklist_json"])
+        except (TypeError, ValueError) as exc:
+            raise MediaAssemblyError(
+                "album_catalog_unmeasurable",
+                f"stored package {row['media_package_id']} has unreadable render evidence",
+                ["catalog"],
+            ) from exc
+        texture = report.get("album_texture") if isinstance(report, dict) else None
+        stored = texture.get("evidence") if isinstance(texture, dict) else None
+        signatures = stored.get("track_signatures") if isinstance(stored, dict) else None
+        # Fail closed on missing source identifiers, duplicate songs,
+        # shifted positions, or signatures detached from playlist order.
+        if not ordered_track_evidence_matches(tracklist, signatures):
+            signatures = None
+        if signatures is not None:
+            # The render-time gate must not trust a stored fingerprint merely
+            # because its package tracklist is well formed. Check its archived
+            # P6 source records, just as the read-only inventory does.
+            previous = CatalogAlbum(
+                row["media_package_id"], row["release_manifest_id"], signatures,
+                policy_version=stored.get("policy_version") if isinstance(stored, dict) else None,
+                extractor_version=(
+                    stored.get("extractor_version") if isinstance(stored, dict) else None
+                ),
+            )
+            try:
+                parsed = validate_catalog_album(previous, policy=DEFAULT_ALBUM_TEXTURE_POLICY)
+            except MediaAssemblyError:
+                # Preserve the original evidence/version for the catalog gate
+                # to report the precise corruption/version refusal.
+                pass
+            else:
+                if not archived_sources_match(session, row, tracklist, parsed):
+                    signatures = None
+        albums.append(CatalogAlbum(
+            media_package_id=row["media_package_id"],
+            release_manifest_id=row["release_manifest_id"],
+            track_signatures=signatures,
+            policy_version=stored.get("policy_version") if isinstance(stored, dict) else None,
+            extractor_version=(
+                stored.get("extractor_version") if isinstance(stored, dict) else None
+            ),
+        ))
+    return tuple(albums)
+
+
 def insert_media_package(session: Session, pkg: MediaPackage) -> None:
     session.execute(
         media_packages_table.insert().values(

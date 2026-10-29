@@ -206,6 +206,7 @@ def media_package_fields(*candidates: str, **overrides: Any) -> dict[str, Any]:
     """Keyword arguments for a complete C6 hop-1 package over the given recordings."""
     songs = candidates or ("cand_test_01",)
     digest = hashlib.sha256("|".join(songs).encode()).hexdigest()
+    duration = 150.0 * len(songs)
     fields: dict[str, Any] = {
         "media_package_id": "mpkg_test_01",
         "release_manifest_id": "plm_test_01",
@@ -215,7 +216,7 @@ def media_package_fields(*candidates: str, **overrides: Any) -> dict[str, Any]:
         "video": {
             "master_uri": "media/test/video.mp4",
             "checksum": digest,
-            "duration_seconds": 150.0 * len(songs),
+            "duration_seconds": duration,
             "render_profile": "yt_longform_1080p_v1",
         },
         "audio": {"master_uri": "media/test/audio.wav", "checksum": digest},
@@ -234,7 +235,16 @@ def media_package_fields(*candidates: str, **overrides: Any) -> dict[str, Any]:
              "tags": ["test"], "category_id": "10", "contains_synthetic_media": True},
         ],
         "short_source_assets": [],
-        "render_report": {},
+        "render_report": {
+            "status": "passed", "timeline_seconds": duration,
+            "render_profile": {"duration_tolerance_seconds": 0.5},
+            "qa": {"passed": True, "reason_codes": [], "metrics": {
+                "probe": {"duration_seconds": duration, "streams": [
+                    {"codec_type": "video", "duration_seconds": duration},
+                    {"codec_type": "audio", "duration_seconds": duration},
+                ]},
+            }},
+        },
         "status": "ready_for_publish",
     }
     fields.update(overrides)

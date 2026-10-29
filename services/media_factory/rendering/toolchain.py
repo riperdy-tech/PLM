@@ -66,6 +66,8 @@ class StreamInfo:
     pixel_format: str | None = None
     sample_rate: int | None = None
     channels: int | None = None
+    duration_seconds: float | None = None
+    """Actual FFprobe stream duration; unknown must not pass video QA."""
 
 
 @dataclass(frozen=True, slots=True)

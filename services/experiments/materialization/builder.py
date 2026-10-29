@@ -28,6 +28,7 @@ from ..domain.package import (
     VisualSpec,
 )
 from ..storage.ids import deterministic_id, package_id, spec_id
+from .arrangements import arrangement_direction
 from .supply import SupplyPolicy, default_supply_policy, plan_supply
 
 if TYPE_CHECKING:
@@ -178,6 +179,9 @@ def materialize_package(
         creative_latitude = {
             "energy": effective_genome.energy.value,
             "visual_motion": effective_genome.visual_motion_profile,
+            "track_arrangement": arrangement_direction(
+                pkg_id, i, effective_genome.instrumentation_profile
+            ),
         }
         lyric_spec = {
             "lyric_density": effective_genome.lyric_density,
@@ -318,10 +322,19 @@ def extend_package(
         )
     template = package.track_specs[0]
     ext_id = extension_id(package.package_id, idempotency_key)
+    instruments = template.instrumentation_spec.get("instrumentation_profile", [])
+    if not isinstance(instruments, list):
+        instruments = []
     specs = tuple(
         template.model_copy(update={
             "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),
             "track_role": TrackRole.SECONDARY,
+            "creative_latitude": {
+                **template.creative_latitude,
+                "track_arrangement": arrangement_direction(
+                    package.package_id, len(package.track_specs) + used + j, instruments
+                ),
+            },
         })
         for j in range(count)
     )

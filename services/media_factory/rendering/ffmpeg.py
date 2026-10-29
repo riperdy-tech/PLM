@@ -235,6 +235,7 @@ class FFmpegToolchain:
                 pixel_format=raw.get("pix_fmt"),
                 sample_rate=int(raw["sample_rate"]) if raw.get("sample_rate") else None,
                 channels=raw.get("channels"),
+                duration_seconds=_number(str(raw.get("duration", ""))),
             ))
         duration = _number(str(fmt.get("duration", "")))
         return ProbeReport(

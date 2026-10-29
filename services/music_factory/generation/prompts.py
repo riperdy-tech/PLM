@@ -57,6 +57,8 @@ class CompiledPrompt:
     style_tags: tuple[str, ...]
     negative_prompt: str
     prompt_hash: str
+    effective_bpm: int
+    effective_genre: str
 
 
 def compute_prompt_hash(
@@ -115,6 +117,54 @@ def build_generation_prompt(
         descriptors.append("instrumental, no vocals")
     else:
         descriptors.append(f"{language} {vocal_mode}")
+        vocal_spec = track_spec.raw_spec.get("vocal_spec", {})
+        if isinstance(vocal_spec, dict):
+            gender = vocal_spec.get("vocal_gender")
+            if isinstance(gender, str) and gender.strip() and gender != "none":
+                descriptors.append(f"vocal character: {gender}")
+
+    if track_spec.key_profile:
+        descriptors.append(f"harmonic key: {track_spec.key_profile}")
+    production_style = track_spec.raw_spec.get("production_style")
+    if isinstance(production_style, str) and production_style.strip():
+        descriptors.append(f"production approach: {production_style}")
+
+    instrumentation = track_spec.raw_spec.get("instrumentation_spec", {})
+    if isinstance(instrumentation, dict):
+        instruments = instrumentation.get("instrumentation_profile", [])
+        if isinstance(instruments, list) and instruments:
+            descriptors.append("instrument palette: " + ", ".join(str(x) for x in instruments))
+        hook = instrumentation.get("hook_profile")
+        if isinstance(hook, str) and hook.strip():
+            descriptors.append(f"hook character: {hook}")
+
+    lyrics = track_spec.raw_spec.get("lyric_spec", {})
+    if isinstance(lyrics, dict):
+        structure = lyrics.get("song_structure")
+        if isinstance(structure, str) and structure.strip():
+            descriptors.append(f"section structure: {structure}")
+        if vocal_mode != "instrumental":
+            density = lyrics.get("lyric_density")
+            if isinstance(density, str) and density.strip():
+                descriptors.append(f"lyric density: {density}")
+
+    latitude = track_spec.raw_spec.get("creative_latitude", {})
+    if isinstance(latitude, dict):
+        energy = latitude.get("energy")
+        if isinstance(energy, str) and energy.strip():
+            descriptors.append(f"energy: {energy}")
+        direction = latitude.get("track_arrangement", {})
+        if isinstance(direction, dict):
+            for key, label in (
+                ("lead_instrument", "foreground lead"),
+                ("rhythmic_feel", "groove"),
+                ("melodic_motion", "melodic character"),
+                ("harmonic_motion", "harmonic motion"),
+                ("arrangement_arc", "arrangement progression"),
+            ):
+                value = direction.get(key)
+                if isinstance(value, str) and value.strip():
+                    descriptors.append(f"{label}: {value}")
 
     if "extra_instruction" in delta:
         descriptors.append(delta["extra_instruction"])
@@ -155,4 +205,6 @@ def build_generation_prompt(
         style_tags=style_tuple,
         negative_prompt=negative_prompt,
         prompt_hash=prompt_hash,
+        effective_bpm=bpm,
+        effective_genre=genre,
     )

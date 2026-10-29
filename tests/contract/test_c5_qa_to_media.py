@@ -56,7 +56,8 @@ REGISTRY_ENTRY = "C5 · PHASE-P5 → PHASE-P6"
 BRAND = BrandProfile(brand_id="brand_neon", brand_name="Neon Records")
 
 
-def _wav(tmp: Path, name: str, seconds: float = 2.0) -> Path:
+def _wav(tmp: Path, name: str, seconds: float = 2.0,
+         *, frequency_hz: float = 440.0) -> Path:
     path = tmp / f"{name}.wav"
     with wave.open(str(path), "wb") as wf:
         wf.setnchannels(2)
@@ -64,7 +65,7 @@ def _wav(tmp: Path, name: str, seconds: float = 2.0) -> Path:
         wf.setframerate(44100)
         frames = bytearray()
         for i in range(int(seconds * 44100)):
-            v = int(15000 * math.sin(2.0 * math.pi * 440.0 * i / 44100))
+            v = int(15000 * math.sin(2.0 * math.pi * frequency_hz * i / 44100))
             frames.extend(struct.pack("<hh", v, v))
         wf.writeframes(frames)
     return path
@@ -72,8 +73,8 @@ def _wav(tmp: Path, name: str, seconds: float = 2.0) -> Path:
 
 def _passed_manifest(tmp: Path, candidate_id: str, *, seconds: int = 2,
                      store: InMemoryArtifactStore | None = None,
-                     **event_kw: Any) -> dict[str, Any]:
-    path = _wav(tmp, candidate_id, float(seconds))
+                     frequency_hz: float = 440.0, **event_kw: Any) -> dict[str, Any]:
+    path = _wav(tmp, candidate_id, float(seconds), frequency_hz=frequency_hz)
     if store is not None:  # P6 reads the artifact by URI and checksum
         stored = store.put_source(f"{candidate_id}/full_mix.wav", path.read_bytes())
         event_kw = {"artifact_uri": stored.uri, "artifact_sha256": stored.sha256, **event_kw}
@@ -119,7 +120,8 @@ def test_producer_emits_exactly_the_shared_wire(passed: dict[str, Any]) -> None:
 def test_real_manifests_assemble_into_a_package_with_their_lineage(tmp: Path) -> None:
     store = InMemoryArtifactStore()
     wires = [_passed_manifest(tmp, f"cand_c5_{n}", seconds=12, store=store,
-                              track_spec_id=f"trk_c5_{n}") for n in "abc"]
+                              track_spec_id=f"trk_c5_{n}", frequency_hz=freq)
+             for n, freq in zip("abc", (440.0, 554.37, 659.25), strict=True)]
     manifests = [parse_seam(ReleaseManifestPayload, m) for m in wires]
     result = assemble_media_package(
         track_manifests=manifests,

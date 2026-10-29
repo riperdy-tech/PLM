@@ -66,3 +66,40 @@ def test_variant_delta_overrides() -> None:
     assert "rainy_vibes" in compiled.prompt
     assert "Rhodes piano" in compiled.prompt
     assert "90bpm" in compiled.style_tags
+    assert compiled.effective_bpm == 90
+
+
+def test_structured_vocal_and_lyric_details_are_forwarded_without_invention() -> None:
+    spec = TrackSpecPayload.build(
+        **track_spec_fields(
+            vocal_spec={"vocal_mode": "vocal", "vocal_gender": "female"},
+            lyric_spec={"lyric_density": "sparse", "song_structure": "verse_bridge_outro"},
+        )
+    )
+    compiled = build_generation_prompt(adapt_track_spec(spec.to_wire()))
+    assert "vocal character: female" in compiled.prompt
+    assert "lyric density: sparse" in compiled.prompt
+    assert "section structure: verse_bridge_outro" in compiled.prompt
+
+
+def test_instrumental_prompt_does_not_instruct_vocal_lyrics() -> None:
+    spec = TrackSpecPayload.build(
+        **track_spec_fields(
+            hard_constraints={"genre": "ambient", "language": "english", "vocal_mode": "instrumental"},
+            vocal_spec={"vocal_mode": "instrumental", "vocal_gender": "none"},
+            lyric_spec={"lyric_density": "moderate", "song_structure": "intro_outro"},
+        )
+    )
+    compiled = build_generation_prompt(adapt_track_spec(spec.to_wire()))
+    assert "instrumental, no vocals" in compiled.prompt
+    assert "section structure: intro_outro" in compiled.prompt
+    assert "vocal character" not in compiled.prompt
+    assert "lyric density" not in compiled.prompt
+
+
+def test_variant_overridden_genre_is_retained_as_request_metadata() -> None:
+    adapted = adapt_track_spec(SAMPLE_C3_SPEC)
+    compiled = build_generation_prompt(adapted, variant_delta={"override_genre": "jazz"})
+    assert compiled.effective_genre == "jazz"
+    assert compiled.prompt.startswith("JAZZ track")
+    assert "jazz" in compiled.style_tags

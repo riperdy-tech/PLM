@@ -1,0 +1,13 @@
+{
+  "policy_version": "p6-rate-offset-pairs-v1",
+  "evaluation": "diagnostic_only_no_clearance",
+  "pairs": [
+    {
+      "left_sha256": "0f7244b22e07e8cb3cd8d4331e046cc083104671eda017ed1e9e0b87f799238c",
+      "right_sha256": "8f93592cbfd90497ca11b2e17a26ac242049c77a2a77e4a83fe46d541afc75c4",
+      "fixed_score": 0.5002244816467124,
+      "best_offset_score": 0.5002244816467124,
+      "best_rate_offset_score": 0.5245151343478276
+    }
+  ]
+}

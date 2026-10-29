@@ -21,6 +21,9 @@ sequences on from the verified bytes it is about to render:
 * **vocal density**: P6 has no vocal detector, so it is always unknown here
   (``no_vocal_detector``). The sequencer scores unknown as worst case (see
   :mod:`media_factory.playlist.sequencer`).
+* **texture signature**: four independently unit-normalised spectral snapshots of
+  the actual audio; P6 uses it only to hold near-copy tracks in the *same album*
+  before rendering. It cannot certify melodic uniqueness or copyright clearance.
 
 Every unknown carries its reason in :attr:`TrackFeatures.unknown_reasons`; an unknown
 is ``None``, never ``0``. These are signal-processing estimates, not ground truth: they
@@ -58,7 +61,7 @@ _ANALYSIS_RATE: Final[int] = 11025
 class FeatureExtractionPolicy:
     """Declared thresholds of the feature extractor (versioned data)."""
 
-    version: str = "p6-features-v1"
+    version: str = "p6-features-v2"
     edge_fraction: float = 0.15
     energy_floor_db: float = -50.0
     energy_ceiling_db: float = -6.0
@@ -95,6 +98,7 @@ class TrackFeatures:
     vocal_density: float | None
     extractor_version: str
     unknown_reasons: dict[str, str] = field(default_factory=dict)
+    texture_signature: tuple[float, ...] | None = None
 
     def to_report(self) -> dict[str, Any]:
         return {
@@ -237,6 +241,32 @@ def _key(mono: FloatArray, rate: float, policy: FeatureExtractionPolicy,
     return camelot_for(tonic, minor), best
 
 
+def _texture_signature(analysis: FloatArray, rate: float) -> tuple[float, ...] | None:
+    """Gain-invariant spectral snapshots at four positions of the delivered audio.
+
+    This detects near-identical timbre/harmonic content, NOT melodic originality or
+    legal similarity. It is deliberately conservative and uses no external model.
+    """
+    size = 2048
+    if len(analysis) < size or not np.all(np.isfinite(analysis)):
+        return None
+    freqs = np.fft.rfftfreq(size, d=1 / rate)
+    band_edges = np.geomspace(65, min(4900, rate * 0.48), 49)
+    pieces: list[float] = []
+    for frac in (0.125, 0.375, 0.625, 0.875):
+        start = min(len(analysis) - size, max(0, int(len(analysis) * frac) - size // 2))
+        window = analysis[start:start + size] * np.hanning(size)
+        powers = np.abs(np.fft.rfft(window)) ** 2
+        histogram = np.histogram(freqs, bins=band_edges, weights=powers)[0]
+        # Scale-invariance: mastering level alone does not make a different song.
+        amplitude = np.sqrt(np.maximum(histogram, 0.0))
+        norm = float(np.linalg.norm(amplitude))
+        if norm <= 1e-9:
+            return None
+        pieces.extend((amplitude / norm).tolist())
+    return tuple(pieces)
+
+
 def measure_features(candidate_id: str, audio: bytes,
                      policy: FeatureExtractionPolicy = DEFAULT_FEATURE_POLICY) -> TrackFeatures:
     """Measure one track's features from its verified bytes; unknowns are explicit."""
@@ -266,9 +296,12 @@ def measure_features(candidate_id: str, audio: bytes,
     else:
         bpm, bpm_conf = _tempo(analysis, analysis_rate, policy, unknown)
         camelot, key_conf = _key(analysis, analysis_rate, policy, unknown)
+    texture = _texture_signature(analysis, analysis_rate) if energy_mean is not None else None
+    if texture is None:
+        unknown["texture"] = "insufficient_or_silent_audio"
     return TrackFeatures(
         candidate_id=candidate_id, bpm=bpm, bpm_confidence=bpm_conf, camelot=camelot,
         key_confidence=key_conf, energy_in=energy_in, energy_out=energy_out,
         energy_mean=energy_mean, vocal_density=None, extractor_version=policy.version,
-        unknown_reasons=unknown,
+        unknown_reasons=unknown, texture_signature=texture,
     )

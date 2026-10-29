@@ -139,6 +139,8 @@ class StandInToolchain:
         fields: dict[str, Any] = {
             "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
             "duration_seconds": self._durations["audio"],
+            "video_stream_duration_seconds": self._durations["audio"],
+            "audio_stream_duration_seconds": self._durations["audio"],
             "width": profile.width, "height": profile.height, "fps": float(profile.fps),
             "video_codec": profile.video_codec, "audio_codec": profile.audio_codec,
             "sample_rate": profile.sample_rate, "channels": profile.channels,
@@ -152,9 +154,11 @@ class StandInToolchain:
             streams=(
                 StreamInfo(codec_type="video", codec_name=fields["video_codec"],
                            width=fields["width"], height=fields["height"], fps=fields["fps"],
-                           pixel_format=fields["pixel_format"]),
+                           pixel_format=fields["pixel_format"],
+                           duration_seconds=fields["video_stream_duration_seconds"]),
                 StreamInfo(codec_type="audio", codec_name=fields["audio_codec"],
-                           sample_rate=fields["sample_rate"], channels=fields["channels"]),
+                           sample_rate=fields["sample_rate"], channels=fields["channels"],
+                           duration_seconds=fields["audio_stream_duration_seconds"]),
             ),
         )
 

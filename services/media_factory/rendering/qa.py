@@ -18,16 +18,24 @@ Reason codes:
 ``audio_codec_mismatch``, ``audio_sample_rate_mismatch``, ``audio_channels_mismatch``
     the audio stream against the profile;
 ``duration_unmeasured``, ``render_duration_mismatch``
-    the container duration against the timeline, within the profile's tolerance;
+    a finite positive container duration against the timeline, within tolerance;
+``expected_duration_unmeasured``, ``duration_window_invalid``
+    reject invalid/nonfinite timeline and requested duration bounds;
+``stream_duration_unmeasured``, ``stream_duration_mismatch``,
+``video_audio_duration_mismatch``
+    the independently reported audio/video stream durations against the
+    expected timeline and each other, rather than accepting only container time;
 ``duration_outside_required_window``
     the container duration against the declared playlist range;
-``loudness_unmeasurable``, ``loudness_out_of_tolerance``, ``true_peak_exceeded``
-    the measured integrated loudness against the profile's target and tolerance, and
-    the measured true peak against its ceiling plus tolerance.
+``loudness_unmeasurable``, ``loudness_out_of_tolerance``,
+``true_peak_unmeasurable``, ``true_peak_exceeded``
+    the finite measured integrated loudness against the profile's target and tolerance;
+    a missing/nonfinite true-peak measurement is never treated as a safe peak.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -88,7 +96,7 @@ def post_render_qa(
         if (v.width, v.height) != (profile.width, profile.height):
             fail("resolution_mismatch",
                  f"{v.width}x{v.height}, profile {profile.width}x{profile.height}")
-        if v.fps is None or abs(v.fps - profile.fps) > _FPS_TOLERANCE:
+        if v.fps is None or not math.isfinite(v.fps) or v.fps <= 0 or abs(v.fps - profile.fps) > _FPS_TOLERANCE:
             fail("fps_mismatch", f"{v.fps}, profile {profile.fps}")
         if v.pixel_format != profile.pixel_format:
             fail("pixel_format_mismatch", f"{v.pixel_format!r}, profile {profile.pixel_format!r}")
@@ -101,9 +109,38 @@ def post_render_qa(
         if a.channels != profile.channels:
             fail("audio_channels_mismatch", f"{a.channels}, profile {profile.channels}")
 
+    if not math.isfinite(expected_duration_seconds) or expected_duration_seconds <= 0:
+        fail("expected_duration_unmeasured", "timeline has no finite positive duration")
+    low, high = required_window_seconds
+    if (not math.isfinite(low) or not math.isfinite(high)
+            or low <= 0 or high < low):
+        fail("duration_window_invalid", "playlist duration window is not finite and valid")
+
+    # The container's duration can equal the expected playlist while one
+    # elementary stream ends early. Require stream-level FFprobe evidence too.
+    measured_streams: dict[str, float] = {}
+    for kind, streams in (("video", videos), ("audio", audios)):
+        if not streams:
+            continue  # The missing-stream reason code is already recorded.
+        measured = streams[0].duration_seconds
+        if measured is None or not math.isfinite(measured) or measured <= 0:
+            fail("stream_duration_unmeasured", f"{kind} stream has no valid duration")
+            continue
+        measured_streams[kind] = measured
+        if abs(measured - expected_duration_seconds) > profile.duration_tolerance_seconds:
+            fail("stream_duration_mismatch",
+                 f"{kind} stream {measured:.3f}s, timeline "
+                 f"{expected_duration_seconds:.3f}s")
+    if {"video", "audio"} <= measured_streams.keys() and abs(
+        measured_streams["video"] - measured_streams["audio"]
+    ) > profile.duration_tolerance_seconds:
+        fail("video_audio_duration_mismatch",
+             f"video {measured_streams['video']:.3f}s versus "
+             f"audio {measured_streams['audio']:.3f}s")
+
     duration = probe.duration_seconds
-    if duration is None:
-        fail("duration_unmeasured", "the container reports no duration")
+    if duration is None or not math.isfinite(duration) or duration <= 0:
+        fail("duration_unmeasured", "the container has no finite positive duration")
     else:
         if abs(duration - expected_duration_seconds) > profile.duration_tolerance_seconds:
             fail("render_duration_mismatch",
@@ -115,19 +152,35 @@ def post_render_qa(
             fail("duration_outside_required_window",
                  f"{duration:.3f}s outside [{low:.3f}s, {high:.3f}s]")
 
-    if loudness is None or loudness.integrated_lufs is None:
-        fail("loudness_unmeasurable", "the meter reported no integrated loudness")
+    integrated = loudness.integrated_lufs if loudness is not None else None
+    if integrated is None or not math.isfinite(integrated):
+        fail("loudness_unmeasurable", "the meter reported no finite integrated loudness")
     else:
-        deviation = loudness.integrated_lufs - profile.loudness_target_lufs
+        deviation = integrated - profile.loudness_target_lufs
         if abs(deviation) > profile.loudness_tolerance_lu:
             fail("loudness_out_of_tolerance",
-                 f"{loudness.integrated_lufs:.2f} LUFS, target {profile.loudness_target_lufs} "
+                 f"{integrated:.2f} LUFS, target {profile.loudness_target_lufs} "
                  f"± {profile.loudness_tolerance_lu} LU")
+    peak = loudness.true_peak_dbtp if loudness is not None else None
+    if peak is None or not math.isfinite(peak):
+        fail("true_peak_unmeasurable", "the meter reported no finite true peak")
+    else:
         ceiling = profile.true_peak_dbtp + profile.true_peak_tolerance_db
-        if loudness.true_peak_dbtp is not None and loudness.true_peak_dbtp > ceiling:
+        if peak > ceiling:
             fail("true_peak_exceeded",
-                 f"{loudness.true_peak_dbtp:.2f} dBTP above the {ceiling:.2f} dBTP ceiling")
+                 f"{peak:.2f} dBTP above the {ceiling:.2f} dBTP ceiling")
     return _result(failures, probe, loudness, profile)
+
+
+def _json_safe_metric(value: Any) -> Any:
+    """Replace nonfinite measurements with unknown, never persisted JSON NaN."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe_metric(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_metric(child) for child in value]
+    return value
 
 
 def _result(failures: list[tuple[str, str]], probe: ProbeReport | None,
@@ -147,5 +200,5 @@ def _result(failures: list[tuple[str, str]], probe: ProbeReport | None,
         passed=not failures,
         reason_codes=codes,
         reasons=[f"{code}: {detail}" for code, detail in failures],
-        metrics=metrics,
+        metrics=_json_safe_metric(metrics),
     )

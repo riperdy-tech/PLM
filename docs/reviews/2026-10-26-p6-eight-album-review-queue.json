@@ -1,0 +1,129 @@
+{
+  "archived_tracks_in_selected_albums": 168,
+  "checksum_verified_sampled_tracks": 16,
+  "human_labels_supplied": 0,
+  "release_gate_changed": false,
+  "review_queue": [
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_ebc16c8c3c1754c1",
+      "left_sha256": "18effdfa85a3800edeb8df863969c97115dbef81451f3b5e616228d9df7407cd",
+      "left_song_id": "cand_580f9fb70f065675",
+      "prescreen_fixed_score": 0.6454168320469043,
+      "relative_prescreen_band": "high_relative",
+      "right_package_id": "mpkg_eca6dffca769529b",
+      "right_sha256": "52604a057739626f828ec07fbe7235d3df4c90cc3faf5999e7402825f8ac8ece",
+      "right_song_id": "cand_e830036353045849"
+    },
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_08b548e82a6b50b4",
+      "left_sha256": "0f7244b22e07e8cb3cd8d4331e046cc083104671eda017ed1e9e0b87f799238c",
+      "left_song_id": "cand_75e191cb40d15f2b",
+      "prescreen_fixed_score": 0.5002244816467124,
+      "relative_prescreen_band": "middle_relative",
+      "right_package_id": "mpkg_b93288d81ea15141",
+      "right_sha256": "8f93592cbfd90497ca11b2e17a26ac242049c77a2a77e4a83fe46d541afc75c4",
+      "right_song_id": "cand_39f0e173c7ee5998"
+    },
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_60f52efca73658e3",
+      "left_sha256": "444351888f8094baac2e0c885099bb35cc7d4d1d0d4728a2dcda8e8f430642a5",
+      "left_song_id": "cand_583dc4f5d9bc5111",
+      "prescreen_fixed_score": 0.24336617524744325,
+      "relative_prescreen_band": "low_relative",
+      "right_package_id": "mpkg_08b548e82a6b50b4",
+      "right_sha256": "724059ce59882125434edeec42e8484a9c92b25e480caf33b456e94e8cb2d40d",
+      "right_song_id": "cand_6d7d0981ffef509a"
+    },
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_ed0acf37058e5827",
+      "left_sha256": "3ae924572a3206b77dd30847530b2ebf667cdae6567db09456e080104e32f75f",
+      "left_song_id": "cand_81d8989d95a050fe",
+      "prescreen_fixed_score": 0.6106028880928644,
+      "relative_prescreen_band": "high_relative",
+      "right_package_id": "mpkg_eca6dffca769529b",
+      "right_sha256": "92ebe0be752a22749dc2058061974e239921de008c75fb02cb5791533efbaa43",
+      "right_song_id": "cand_ec1ec5ef95b45fc3"
+    },
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_c2f80bc2d2db5143",
+      "left_sha256": "718a9241b7e61ef661b1011b8428d7d56b5cd1de726683484e3afb2ee53a8a74",
+      "left_song_id": "cand_00ba961b915d53dc",
+      "prescreen_fixed_score": 0.49201815333615634,
+      "relative_prescreen_band": "middle_relative",
+      "right_package_id": "mpkg_5b742d7dcd895bd1",
+      "right_sha256": "9b342dda9c569075962fa43a98cc48da9eb928978a3ddd8a3fcac5f1629fa1d2",
+      "right_song_id": "cand_7b13412f9ddf5c44"
+    },
+    {
+      "human_label": null,
+      "left_package_id": "mpkg_60f52efca73658e3",
+      "left_sha256": "8d706bdbd4e6949cd8c380dd307d09fed86d01971aa055af0be6190b65795f71",
+      "left_song_id": "cand_4684b21f325553fd",
+      "prescreen_fixed_score": 0.33449229273066483,
+      "relative_prescreen_band": "low_relative",
+      "right_package_id": "mpkg_b93288d81ea15141",
+      "right_sha256": "9b98e792758f401fde08b48d3170a9f50e142c6be06893eb8880d7c3570772fc",
+      "right_song_id": "cand_74822c87b7415995"
+    }
+  ],
+  "scope": "explicit_sha256_verified_p6_source_sample_review_selection",
+  "selected_albums": 8,
+  "selected_review_pairs": 6,
+  "selection": "relative_spectral_strata_not_random_accuracy_sample",
+  "source_bytes": "checksum_verified_minio_reads",
+  "source_metadata_transaction": "repeatable_read_read_only",
+  "stored_audio_or_db_changes": false,
+  "unlabelled_pair_score_report": {
+    "evaluation": "diagnostic_only_no_clearance",
+    "pairs": [
+      {
+        "best_offset_score": 0.6454168320469043,
+        "best_rate_offset_score": 0.6531942744925948,
+        "fixed_score": 0.6454168320469043,
+        "left_sha256": "18effdfa85a3800edeb8df863969c97115dbef81451f3b5e616228d9df7407cd",
+        "right_sha256": "52604a057739626f828ec07fbe7235d3df4c90cc3faf5999e7402825f8ac8ece"
+      },
+      {
+        "best_offset_score": 0.5002244816467124,
+        "best_rate_offset_score": 0.5245151343478276,
+        "fixed_score": 0.5002244816467124,
+        "left_sha256": "0f7244b22e07e8cb3cd8d4331e046cc083104671eda017ed1e9e0b87f799238c",
+        "right_sha256": "8f93592cbfd90497ca11b2e17a26ac242049c77a2a77e4a83fe46d541afc75c4"
+      },
+      {
+        "best_offset_score": 0.5312733846101344,
+        "best_rate_offset_score": 0.5325019909345764,
+        "fixed_score": 0.24336617524744325,
+        "left_sha256": "444351888f8094baac2e0c885099bb35cc7d4d1d0d4728a2dcda8e8f430642a5",
+        "right_sha256": "724059ce59882125434edeec42e8484a9c92b25e480caf33b456e94e8cb2d40d"
+      },
+      {
+        "best_offset_score": 0.6497174137558207,
+        "best_rate_offset_score": 0.6497174137558207,
+        "fixed_score": 0.6106028880928644,
+        "left_sha256": "3ae924572a3206b77dd30847530b2ebf667cdae6567db09456e080104e32f75f",
+        "right_sha256": "92ebe0be752a22749dc2058061974e239921de008c75fb02cb5791533efbaa43"
+      },
+      {
+        "best_offset_score": 0.6106200394106498,
+        "best_rate_offset_score": 0.6106200394106498,
+        "fixed_score": 0.49201815333615634,
+        "left_sha256": "718a9241b7e61ef661b1011b8428d7d56b5cd1de726683484e3afb2ee53a8a74",
+        "right_sha256": "9b342dda9c569075962fa43a98cc48da9eb928978a3ddd8a3fcac5f1629fa1d2"
+      },
+      {
+        "best_offset_score": 0.49034063372264347,
+        "best_rate_offset_score": 0.5788783106273464,
+        "fixed_score": 0.33449229273066483,
+        "left_sha256": "8d706bdbd4e6949cd8c380dd307d09fed86d01971aa055af0be6190b65795f71",
+        "right_sha256": "9b98e792758f401fde08b48d3170a9f50e142c6be06893eb8880d7c3570772fc"
+      }
+    ],
+    "policy_version": "p6-rate-offset-pairs-v1"
+  }
+}
