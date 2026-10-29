@@ -84,6 +84,11 @@ def test_instrumental_without_lyrics_is_not_applicable_and_vocal_is_unknown() ->
     assert inst.outcome is DetectorOutcome.NOT_APPLICABLE
     vocal = detect_lyrics("  ", vocal_mode="vocal", detectors=detectors)
     assert vocal.outcome is DetectorOutcome.UNKNOWN
+    # P4's Suno adapter has no provider-generated transcript and emits None.
+    # The downstream detector must not classify this as screened or N/A.
+    missing_transcript = detect_lyrics(None, vocal_mode="vocal", detectors=detectors)
+    assert missing_transcript.outcome is DetectorOutcome.UNKNOWN
+    assert missing_transcript.reason == "vocal_track_without_lyrics_text"
     unconfigured = detect_lyrics(ORIGINAL, vocal_mode="vocal", detectors=detectors)
     assert unconfigured.outcome is DetectorOutcome.UNKNOWN
     assert unconfigured.reason == "not_configured"

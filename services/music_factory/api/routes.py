@@ -26,6 +26,7 @@ from plm_platform.idempotency import (
     jsonable,
 )
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..candidates.bank import (
@@ -38,8 +39,12 @@ from ..candidates.bank import (
 )
 from ..config import MusicFactorySettings
 from ..domain.enums import CandidateStatus
-from ..generation.engine import GENERATE_CAPABILITY, GenerationEngine
-from ..generation.planner import plan_generation
+from ..generation.engine import (
+    GENERATE_CAPABILITY,
+    GenerationEngine,
+    GenerationPlanSpecMismatch,
+)
+from ..generation.planner import GenerationPlanCapacityError, plan_generation
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
 from ..providers.registry import list_providers
@@ -48,7 +53,6 @@ from ..storage.models import idempotency_records_table
 from ..storage.repositories import (
     get_candidate,
     get_generation_plan,
-    get_rights_snapshot_for_attempt,
     list_artifacts_for_candidate,
     list_creative_variants,
     list_generation_attempts,
@@ -166,12 +170,74 @@ def build_router(
                     detail=exc.error.model_dump(),
                 ) from exc
 
-            plan, variants = plan_generation(spec, created_at=service_clock.now())
+            try:
+                plan, variants = plan_generation(spec, created_at=service_clock.now())
+            except GenerationPlanCapacityError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=ErrorShape(
+                        code="generation_plan_capacity_exceeded",
+                        field_paths=["candidate_target"],
+                        message=str(exc),
+                    ).model_dump(),
+                ) from exc
             from ..storage.repositories import insert_creative_variant, insert_generation_plan
 
-            insert_generation_plan(session, plan)
-            for v in variants:
-                insert_creative_variant(session, v)
+            stored = get_generation_plan(session, plan.plan_id)
+            if stored is None:
+                try:
+                    # A concurrent request may win the deterministic plan ID.
+                    # A savepoint lets us read its committed plan after UNIQUE
+                    # refusal without aborting the enclosing idempotency txn.
+                    with session.begin_nested():
+                        insert_generation_plan(session, plan)
+                        for variant in variants:
+                            insert_creative_variant(session, variant)
+                except IntegrityError:
+                    stored = get_generation_plan(session, plan.plan_id)
+                    if stored is None:
+                        raise  # An unrelated database constraint failed.
+
+            if stored is not None:
+                immutable_fields = (
+                    "track_spec_id", "experiment_id", "lineage",
+                    "track_spec_wire", "candidate_target", "max_attempts",
+                    "budget_limit", "credit_limit", "policy_version",
+                )
+                persisted_variants = list_creative_variants(session, plan.plan_id)
+                by_id = {variant.variant_id: variant for variant in persisted_variants}
+                matching_variants = (
+                    len(persisted_variants) == len(variants)
+                    and all(
+                        expected.variant_id in by_id
+                        and all(
+                            getattr(by_id[expected.variant_id], field)
+                            == getattr(expected, field)
+                            for field in (
+                                "generation_plan_id", "variant_code",
+                                "parent_variant_id", "changed_dimensions",
+                                "change_reason", "prompt_delta",
+                            )
+                        )
+                        for expected in variants
+                    )
+                )
+                if (
+                    any(getattr(stored, field) != getattr(plan, field)
+                        for field in immutable_fields)
+                    or not matching_variants
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=ErrorShape(
+                            code="generation_plan_identity_conflict",
+                            field_paths=["track_spec_id", "generation_plan_id"],
+                            message="plan ID already exists with a different C3 brief or variants",
+                        ).model_dump(),
+                    )
+                plan = stored
+                variants = [by_id[v.variant_id] for v in variants]
+
             return 200, jsonable({
                 "plan_id": plan.plan_id,
                 "status": plan.status.value,
@@ -240,6 +306,16 @@ def build_router(
                 variants=variants,
                 spec=spec,
             )
+        except GenerationPlanSpecMismatch as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorShape(
+                    code="generation_plan_spec_mismatch",
+                    field_paths=["generation_plan_id", "track_spec_id"],
+                    message=str(exc),
+                ).model_dump(),
+            ) from exc
         except ArtifactStorageUnavailable as exc:
             # Nothing is recorded for audio that could not be stored (fail closed).
             session.rollback()
@@ -255,6 +331,7 @@ def build_router(
                 provider_id=attempt.provider_id,
                 success=attempt.status.value == "succeeded",
                 credits=attempt.actual_credits,
+                credit_basis=attempt.credit_basis,
             )
 
         external_writes = [
@@ -345,25 +422,21 @@ def build_router(
         candidate_id: str,
         session: Annotated[Session, Depends(_require_session)],
     ) -> dict[str, Any]:
-        cand = get_candidate(session, candidate_id)
-        if cand is None:
+        try:
+            detail = get_candidate_detail(session, candidate_id)
+        except CandidateNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc),
+            ) from exc
+        # Rights belong to the exact producing attempt, not the plan's first
+        # attempt (which can belong to another candidate). Legacy or broken
+        # links have no verifiable license and must fail closed.
+        if detail.attempt is None or detail.rights_snapshot is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Candidate not found: {candidate_id}",
+                detail="No verified rights snapshot for candidate's producing attempt",
             )
-        attempts = list_generation_attempts(session, cand.generation_plan_id)
-        if not attempts:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No generation attempts found for candidate",
-            )
-        snapshot = get_rights_snapshot_for_attempt(session, attempts[0].attempt_id)
-        if snapshot is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Rights snapshot not found for candidate attempt",
-            )
-        return snapshot.model_dump(mode="json")
+        return detail.rights_snapshot.model_dump(mode="json")
 
     @router.get("/candidates/{candidate_id}/artifacts", dependencies=[Depends(auth_dep)])
     def get_candidate_artifacts_endpoint(

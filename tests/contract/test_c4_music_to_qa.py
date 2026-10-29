@@ -24,16 +24,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from plm_contracts import CommercialUseEligibility, GateDisposition
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.clock import FixedClock
 
-from services.music_factory.api.events import build_candidate_ready_event
+from services.music_factory.api.events import CandidateExportError, build_candidate_ready_event
 from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
+from services.music_factory.storage.models import generation_attempts_table
 from services.quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
 from services.quality_gate.gate.engine import run_candidate_evaluation
 from services.quality_gate.ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
@@ -82,6 +84,32 @@ def test_producer_emits_exactly_the_shared_wire(produced: tuple[dict[str, Any], 
     assert wire["requested_duration_seconds"] == SPEC["requested_duration"]
     assert wire["requested_duration_range"] == SPEC["duration_range"]
     assert wire["rights"]["commercial_use_status"] == CommercialUseEligibility.ELIGIBLE.value
+
+
+@pytest.mark.parametrize("legacy_job_id", ["", "   "])
+def test_c4_refuses_legacy_candidate_with_missing_provider_job_identity(
+    legacy_job_id: str,
+) -> None:
+    """A stored artifact and declared rights cannot replace a missing job ID."""
+    spec = adapt_track_spec({
+        **SPEC, "requested_duration": 12,
+        "duration_range": {"min_seconds": 10, "max_seconds": 20},
+    })
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    with music_db_session() as session:
+        generated = GenerationEngine(
+            clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage(),
+        ).execute_plan(session, plan=plan, variants=variants, spec=spec)
+        candidate = generated.candidates[0]
+        assert build_candidate_ready_event(session, candidate.candidate_id)
+        session.execute(
+            sa.update(generation_attempts_table)
+            .where(generation_attempts_table.c.id == candidate.source_attempt_id)
+            .values(provider_job_id=legacy_job_id)
+        )
+        with pytest.raises(CandidateExportError) as exc:
+            build_candidate_ready_event(session, candidate.candidate_id)
+        assert exc.value.error.code == "provider_job_id_missing"
 
 
 def test_real_event_reaches_the_p5_gate_intact(produced: tuple[dict[str, Any], bytes]) -> None:

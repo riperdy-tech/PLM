@@ -9,7 +9,7 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from ..domain.enums import CandidateStatus
+from ..domain.enums import AttemptStatus, CandidateStatus
 from ..domain.models import (
     AudioArtifact,
     GeneratedCandidate,
@@ -19,6 +19,7 @@ from ..domain.models import (
 from ..storage.models import generated_candidates_table
 from ..storage.repositories import (
     get_candidate,
+    get_generation_plan,
     get_rights_snapshot_for_attempt,
     list_artifacts_for_candidate,
     update_candidate_status,
@@ -75,7 +76,13 @@ def get_candidate_detail(session: Session, candidate_id: str) -> FullCandidateDe
 
     from ..storage.repositories import list_generation_attempts
 
-    if cand.source_attempt_id is not None:
+    plan = get_generation_plan(session, cand.generation_plan_id)
+    if (
+        cand.source_attempt_id is not None
+        and plan is not None
+        and cand.track_spec_id == plan.track_spec_id
+        and cand.experiment_id == plan.experiment_id
+    ):
         attempt = next(
             (
                 a
@@ -84,7 +91,21 @@ def get_candidate_detail(session: Session, candidate_id: str) -> FullCandidateDe
             ),
             None,
         )
-        rights = get_rights_snapshot_for_attempt(session, cand.source_attempt_id)
+        if attempt is not None and (
+            attempt.status is not AttemptStatus.SUCCEEDED
+            or not attempt.provider_job_id.strip()
+            or attempt.provider_id != cand.provider_id
+            or attempt.model_id != cand.model_id
+        ):
+            # Failed/missing-origin or cross-provider attempts cannot establish rights.
+            attempt = None
+        if attempt is not None:
+            rights = get_rights_snapshot_for_attempt(session, attempt.attempt_id)
+            if rights is not None and (
+                rights.attempt_id != attempt.attempt_id
+                or rights.provider_id != attempt.provider_id
+            ):
+                rights = None
 
     return FullCandidateDetail(
         candidate=cand,

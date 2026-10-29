@@ -202,8 +202,13 @@ def insert_generation_attempt(session: Session, attempt: GenerationAttempt) -> N
             completed_at=attempt.completed_at,
             cost_estimate=attempt.cost_estimate,
             actual_cost=attempt.actual_cost,
+            money_basis=attempt.money_basis,
+            cost_currency=attempt.cost_currency,
+            cost_receipt_ref=attempt.cost_receipt_ref,
             credit_estimate=attempt.credit_estimate,
             actual_credits=attempt.actual_credits,
+            credit_basis=attempt.credit_basis,
+            credit_receipt_ref=attempt.credit_receipt_ref,
         )
     )
 
@@ -238,8 +243,13 @@ def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttem
         completed_at=_utc_or_none(row["completed_at"]),
         cost_estimate=row["cost_estimate"],
         actual_cost=row["actual_cost"],
+        money_basis=row["money_basis"],
+        cost_currency=row["cost_currency"],
+        cost_receipt_ref=row["cost_receipt_ref"],
         credit_estimate=row["credit_estimate"],
         actual_credits=row["actual_credits"],
+        credit_basis=row["credit_basis"],
+        credit_receipt_ref=row["credit_receipt_ref"],
     )
 
 
@@ -274,8 +284,13 @@ def list_generation_attempts(session: Session, plan_id: str) -> list[GenerationA
             completed_at=_utc_or_none(r["completed_at"]),
             cost_estimate=r["cost_estimate"],
             actual_cost=r["actual_cost"],
+            money_basis=r["money_basis"],
+            cost_currency=r["cost_currency"],
+            cost_receipt_ref=r["cost_receipt_ref"],
             credit_estimate=r["credit_estimate"],
             actual_credits=r["actual_credits"],
+            credit_basis=r["credit_basis"],
+            credit_receipt_ref=r["credit_receipt_ref"],
         )
         for r in rows
     ]
@@ -499,8 +514,12 @@ def insert_cost_record(session: Session, cost: CostRecord) -> None:
             estimated_amount=cost.estimated_amount,
             actual_amount=cost.actual_amount,
             currency=cost.currency,
+            money_basis=cost.money_basis,
+            cost_receipt_ref=cost.cost_receipt_ref,
             credits_estimated=cost.credits_estimated,
             credits_actual=cost.credits_actual,
+            credit_basis=cost.credit_basis,
+            credit_receipt_ref=cost.credit_receipt_ref,
             pricing_version=cost.pricing_version,
             created_at=cost.created_at,
         )

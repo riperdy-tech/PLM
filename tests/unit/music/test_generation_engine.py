@@ -10,9 +10,11 @@ from services.music_factory.domain.enums import (
     CommercialUseStatus,
     PlanStatus,
 )
+from services.music_factory.domain.models import GenerationRequest, GenerationResponse
 from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from services.music_factory.providers.mock_provider import MockMusicProvider
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 from services.music_factory.storage.repositories import (
     get_candidate,
@@ -51,6 +53,81 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
+def test_partial_candidate_supply_never_claims_plan_completed() -> None:
+    """A preserved successful artifact is not completion of a two-candidate plan."""
+    class OneSuccessThenFailure(MockMusicProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def generate(self, request: GenerationRequest) -> GenerationResponse:
+            self.calls += 1
+            if self.calls == 1:
+                return super().generate(request)
+            return GenerationResponse(
+                provider_job_id="", status=AttemptStatus.FAILED,
+                error_message="simulated_variant_unavailable",
+            )
+
+    wire = {
+        **SAMPLE_C3_SPEC,
+        "requested_duration": 8,
+        "duration_range": {"min_seconds": 7, "max_seconds": 12},
+    }
+    spec = adapt_track_spec(wire)
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    provider = OneSuccessThenFailure()
+    engine = GenerationEngine(
+        clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage(),
+    )
+    with music_db_session() as session:
+        first = engine.execute_plan(
+            session, plan=plan, variants=variants, spec=spec, provider_adapter=provider,
+        )
+        assert first.status is PlanStatus.FAILED
+        assert len(first.candidates) == 1
+        assert "candidate_target_not_met: 1/2" in first.errors
+        assert get_generation_plan(session, plan.plan_id).status is PlanStatus.FAILED
+
+        replay = engine.execute_plan(
+            session, plan=plan, variants=variants, spec=spec, provider_adapter=provider,
+        )
+        assert replay.status is PlanStatus.FAILED
+        assert [c.candidate_id for c in replay.candidates] == [
+            c.candidate_id for c in first.candidates
+        ]
+        assert len(list_generation_attempts(session, plan.plan_id)) == 3
+    assert provider.calls == 3
+
+
+def test_four_candidate_plan_produces_four_distinct_attempts_and_replays() -> None:
+    """P4 can actually fulfill a 4-candidate C3 plan, not just describe one."""
+    spec = adapt_track_spec({
+        **SAMPLE_C3_SPEC,
+        "candidate_target": 4,
+        "requested_duration": 12,
+        "duration_range": {"min_seconds": 10, "max_seconds": 20},
+    })
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    engine = GenerationEngine(
+        clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage(),
+    )
+    with music_db_session() as session:
+        first = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
+        second = engine.execute_plan(session, plan=plan, variants=variants, spec=spec)
+        stored_attempts = list_generation_attempts(session, plan.plan_id)
+    assert first.status is PlanStatus.COMPLETED
+    assert len(first.candidates) == len(first.attempts) == 4
+    assert len(stored_attempts) == 4
+    assert {a.creative_variant_id for a in stored_attempts} == {
+        variant.variant_id for variant in variants
+    }
+    assert [candidate.candidate_id for candidate in first.candidates] == [
+        candidate.candidate_id for candidate in second.candidates
+    ]
+    assert len({candidate.source_attempt_id for candidate in first.candidates}) == 4
+
+
 def test_generation_engine_successful_execution() -> None:
     spec = adapt_track_spec(dict(SAMPLE_C3_SPEC))
     plan, variants = plan_generation(spec, created_at=FIXED_NOW)
@@ -84,6 +161,16 @@ def test_generation_engine_successful_execution() -> None:
         attempts = list_generation_attempts(session, plan.plan_id)
         assert len(attempts) == 2
         assert attempts[0].status == AttemptStatus.SUCCEEDED
+        # Credits have no currency exchange rate: P4 must not invent USD.
+        assert all(a.actual_cost is None and a.cost_currency is None
+                   and a.money_basis == "unpriced" for a in attempts)
+        from sqlalchemy import select
+
+        from services.music_factory.storage.models import provider_cost_records_table
+        costs = session.execute(select(provider_cost_records_table)).mappings().all()
+        assert len(costs) == 2
+        assert all(c["actual_amount"] is None and c["currency"] is None
+                   and c["money_basis"] == "unpriced" for c in costs)
 
         arts = list_artifacts_for_candidate(session, cand.candidate_id)
         assert len(arts) == 1
@@ -100,6 +187,41 @@ def test_generation_engine_successful_execution() -> None:
         assert rgt.account_identity_ref == "plm-mock"
         assert rgt.terms_version == "mock-v1"
         assert rgt.downloaded_at is not None
+
+
+def test_variant_request_metadata_matches_compiled_prompt() -> None:
+    """Every variant preserves the declared C3 BPM/genre experiment dimensions."""
+    from services.music_factory.providers.adapters import get_provider_adapter
+
+    class CapturingAdapter:
+        def __init__(self) -> None:
+            self.backend = get_provider_adapter("mock")
+            self.requests = []
+
+        def __getattr__(self, name: str):
+            return getattr(self.backend, name)
+
+        def generate(self, request):
+            self.requests.append(request)
+            return self.backend.generate(request)
+
+    spec = adapt_track_spec(dict(SAMPLE_C3_SPEC))
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    adapter = CapturingAdapter()
+    engine = GenerationEngine(
+        clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage(),
+    )
+    with music_db_session() as session:
+        result = engine.execute_plan(
+            session, plan=plan, variants=variants, spec=spec,
+            provider_adapter=adapter,  # type: ignore[arg-type]
+        )
+        assert result.status is PlanStatus.COMPLETED
+    assert [request.bpm for request in adapter.requests] == [84, 84]
+    assert all(f"{request.bpm} BPM" in request.prompt for request in adapter.requests)
+    assert [request.genre for request in adapter.requests] == ["rnb", "rnb"]
+    assert "leave intentional space" in adapter.requests[1].prompt
+    assert adapter.requests[0].prompt != adapter.requests[1].prompt
 
 
 def test_generation_engine_retry_on_failure() -> None:

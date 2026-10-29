@@ -24,7 +24,7 @@ from plm_contracts.seams.c4 import (
 )
 from sqlalchemy.orm import Session
 
-from ..domain.enums import ArtifactType
+from ..domain.enums import ArtifactType, AttemptStatus, PlanStatus
 from ..generation.prompts import build_generation_prompt
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..storage.repositories import (
@@ -67,12 +67,33 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
             "its lineage and generation facts are unknown",
             ["generation_plan_id"],
         )
+    if plan.status is not PlanStatus.COMPLETED:
+        # The public C4 endpoint is independently callable; do not allow it
+        # to bypass the pipeline's completed-plan requirement. An individual
+        # candidate may exist even when P3's target was not met.
+        raise CandidateExportError(
+            "generation_plan_not_completed",
+            f"candidate {candidate_id!r} belongs to a {plan.status.value} generation plan",
+            ["generation_plan_id", "status"],
+        )
     try:
         spec = adapt_track_spec(plan.track_spec_wire)
     except TrackSpecValidationError as exc:
         raise CandidateExportError(
             "stored_track_spec_invalid", exc.error.message, exc.error.field_paths
         ) from exc
+
+    if (
+        cand.track_spec_id != plan.track_spec_id
+        or cand.experiment_id != plan.experiment_id
+        or spec.track_spec_id != plan.track_spec_id
+        or spec.experiment_id != plan.experiment_id
+    ):
+        raise CandidateExportError(
+            "candidate_plan_identity_mismatch",
+            "candidate, generation plan and stored C3 spec identify different source work",
+            ["track_spec_id", "experiment_id"],
+        )
 
     if cand.source_attempt_id is None:
         raise CandidateExportError(
@@ -84,6 +105,30 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
     if attempt is None:
         raise CandidateExportError(
             "attempt_not_found", f"attempt {cand.source_attempt_id!r} is missing"
+        )
+    if attempt.generation_plan_id != plan.plan_id:
+        raise CandidateExportError(
+            "attempt_plan_mismatch", "candidate's producing attempt belongs to another plan",
+            ["source_attempt_id", "generation_plan_id"],
+        )
+    if attempt.status is not AttemptStatus.SUCCEEDED:
+        raise CandidateExportError(
+            "attempt_not_succeeded", "candidate's producing attempt did not succeed",
+            ["source_attempt_id", "status"],
+        )
+    if not attempt.provider_job_id.strip():
+        # Historical rows may hold artifacts and even rights despite having
+        # no originating provider job identity. Do not export them as C4 facts.
+        raise CandidateExportError(
+            "provider_job_id_missing",
+            "candidate's producing attempt has no provider job identifier",
+            ["source_attempt_id", "provider_job_id"],
+        )
+    if attempt.provider_id != cand.provider_id or attempt.model_id != cand.model_id:
+        raise CandidateExportError(
+            "candidate_attempt_provider_mismatch",
+            "candidate provider/model does not match its producing attempt",
+            ["provider_id", "model_id"],
         )
     variant = next(
         (
@@ -113,6 +158,15 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
     art = full_mixes[0]
 
     snapshot = get_rights_snapshot_for_attempt(session, attempt.attempt_id)
+    if snapshot is not None and (
+        snapshot.attempt_id != attempt.attempt_id
+        or snapshot.provider_id != attempt.provider_id
+    ):
+        raise CandidateExportError(
+            "rights_provider_mismatch",
+            "rights snapshot does not identify the producing attempt and its provider",
+            ["rights", "source_attempt_id"],
+        )
     rights = (
         RightsSnapshotPayload(
             commercial_use_status=snapshot.commercial_use_status,

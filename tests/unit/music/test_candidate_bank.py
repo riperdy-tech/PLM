@@ -2,6 +2,7 @@
 from datetime import UTC, datetime
 
 import pytest
+import sqlalchemy as sa
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_platform.clock import FixedClock
 
@@ -20,6 +21,7 @@ from services.music_factory.generation.engine import GenerationEngine
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
+from services.music_factory.storage.models import generation_attempts_table
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
@@ -48,6 +50,33 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
 ).to_wire()
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("legacy_job_id", ["", "   "])
+def test_candidate_detail_with_missing_job_id_cannot_assert_provider_rights(
+    legacy_job_id: str,
+) -> None:
+    """An old rights row is not sufficient without an originating job identity."""
+    spec = adapt_track_spec({
+        **SAMPLE_C3_SPEC,
+        "requested_duration": 12,
+        "duration_range": {"min_seconds": 10, "max_seconds": 20},
+    })
+    plan, variants = plan_generation(spec, created_at=FIXED_NOW)
+    with music_db_session() as session:
+        generated = GenerationEngine(
+            clock=FixedClock(FIXED_NOW), storage=InMemoryArtifactStorage(),
+        ).execute_plan(session, plan=plan, variants=variants, spec=spec)
+        candidate = generated.candidates[0]
+        assert get_candidate_detail(session, candidate.candidate_id).rights_snapshot is not None
+        session.execute(
+            sa.update(generation_attempts_table)
+            .where(generation_attempts_table.c.id == candidate.source_attempt_id)
+            .values(provider_job_id=legacy_job_id)
+        )
+        detail = get_candidate_detail(session, candidate.candidate_id)
+        assert detail.rights_snapshot is None
+        assert detail.attempt is None
 
 
 def test_candidate_bank_transitions_and_queries() -> None:
