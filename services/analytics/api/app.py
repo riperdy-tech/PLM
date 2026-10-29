@@ -13,6 +13,8 @@ from plm_platform.service_urls import service_url
 from plm_platform.temporal import Phase
 
 from ..config import AnalyticsSettings, load_analytics_settings
+from ..ingestion.youtube_client import RealYouTubeAnalyticsClient
+from ..ingestion.youtube_reporting import AuthenticatedReachDownloader
 from .routes import build_analytics_router
 from .service_token import require_service_token
 
@@ -24,6 +26,8 @@ def create_app(
     clock: Clock | None = None,
     analytics_settings: AnalyticsSettings | None = None,
     reward_client: httpx.Client | None = None,
+    youtube_client: httpx.Client | None = None,
+    reporting_downloader: AuthenticatedReachDownloader | None = None,
 ) -> FastAPI:
     """Create a configured FastAPI application instance for the `/analytics` service.
 
@@ -58,6 +62,15 @@ def create_app(
     if reward_client is None and token:
         reward_client = httpx.Client(base_url=service_url(Phase.AR),
                                      timeout=p9_settings.ar_timeout_seconds)
+    if youtube_client is None and token:
+        youtube_client = httpx.Client(base_url=service_url(Phase.YOUTUBE), timeout=10.0)
+    if reporting_downloader is None:
+        reporting_oauth = RealYouTubeAnalyticsClient()
+        if reporting_oauth.is_configured:
+            reporting_downloader = AuthenticatedReachDownloader(
+                client=httpx.Client(timeout=30.0, follow_redirects=False),
+                access_token=reporting_oauth._get_access_token,
+            )
     router = build_analytics_router(
         session_factory,
         auth_dep,
@@ -65,6 +78,9 @@ def create_app(
         settings=p9_settings,
         reward_client=reward_client,
         reward_token=token,
+        youtube_client=youtube_client,
+        youtube_token=token,
+        reporting_downloader=reporting_downloader,
     )
     app.include_router(router)
     app.include_router(health_router("analytics", session_factory))

@@ -7,6 +7,7 @@ that was not measured is omitted or ``null``, never ``0``.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 
@@ -59,6 +60,53 @@ class HealthResponse(BaseModel):
     status: str = "healthy"
     service: str = "analytics"
     timestamp: str
+
+
+class CandidateReachPreviewRequest(BaseModel):
+    """Preview operator-supplied Reporting API-shaped CSV without ingesting data.
+
+    The CSV format does not authenticate its origin. Caller-supplied source
+    references and units are preserved, never treated as verified evidence.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    reach_csv: str = Field(min_length=1, max_length=2_000_000)
+    report_type: Literal["channel_reach_basic_a1"]
+    ctr_unit: Literal["ratio", "percent"]
+    source_reference: NonEmpty
+    start_date: date
+    end_date: date
+    window: ObservationWindow = ObservationWindow.D28
+
+    @model_validator(mode="after")
+    def _chronological(self) -> Self:
+        if self.start_date > self.end_date:
+            raise ValueError("reach start_date must be on or before end_date")
+        return self
+
+
+class ReachReadinessRequest(BaseModel):
+    """Read-only catalog readiness for one exact P7 publication and report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    report_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    start_date: date
+    end_date: date
+    window: ObservationWindow = ObservationWindow.D28
+
+    @model_validator(mode="after")
+    def _chronological(self) -> Self:
+        if self.start_date > self.end_date:
+            raise ValueError("reach start_date must be on or before end_date")
+        return self
+
+
+class AuthenticatedReachPreviewRequest(ReachReadinessRequest):
+    """Authenticated download additionally declares CSV CTR units."""
+
+    ctr_unit: Literal["ratio", "percent"]
 
 
 class YouTubeIngestRequest(BaseModel):

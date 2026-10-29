@@ -44,6 +44,7 @@ from .storage.repositories import (
     insert_publish_attempt,
     update_publish_attempt,
 )
+from .verification import verify_remote_video
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +428,35 @@ class YouTubePublishingEngine:
                 return PublishingEngineResult(
                     attempt=attempt, error=f"Remote video {youtube_video_id} not found"
                 )
+
+            # A successful GET is not processing or chapter-metadata verification.
+            # Real channels must return the approved description and processed
+            # duration before any thumbnail/playlist write or Hop-2 success event.
+            # The API still cannot confirm clickability of watch-page chapters.
+            if self.provider_mode is ProviderMode.REAL:
+                remote_check = verify_remote_video(
+                    remote_video, video_id=youtube_video_id,
+                    manifest=manifest, now=self._clock.now(),
+                )
+                if not remote_check.ready:
+                    retryable = remote_check.retryable
+                    update_publish_attempt(
+                        session,
+                        attempt.attempt_id,
+                        state=(PublishState.FAILED_RETRYABLE if retryable
+                               else PublishState.FAILED_PERMANENT),
+                        error_code=(
+                            FailureReasonCode.REMOTE_PROCESSING_NOT_CONFIRMED.value
+                            if retryable else FailureReasonCode.REMOTE_METADATA_MISMATCH.value
+                        ),
+                        error_message=remote_check.reason,
+                        updated_at=self._clock.now(),
+                    )
+                    session.commit()
+                    updated = get_publish_attempt_by_id(session, attempt.attempt_id)
+                    return PublishingEngineResult(
+                        attempt=updated or attempt, error=remote_check.reason
+                    )
 
             # 5. Thumbnail upload
             decision = self._authorize(CAPABILITY_THUMBNAIL, manifest, operating_mode)

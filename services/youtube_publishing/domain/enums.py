@@ -87,5 +87,7 @@ class FailureReasonCode(str, Enum):
     PROCESSING_TIMEOUT_EXCEEDED = "processing_timeout_exceeded"
     POLICY_VIOLATION = "policy_violation"
     REMOTE_NOT_FOUND = "remote_not_found"
+    REMOTE_PROCESSING_NOT_CONFIRMED = "remote_processing_not_confirmed"
+    REMOTE_METADATA_MISMATCH = "remote_metadata_mismatch"
     EXTERNAL_WRITE_NOT_AUTHORIZED = "external_write_not_authorized"
     RELEASE_NOT_CLEARED = "release_not_cleared"

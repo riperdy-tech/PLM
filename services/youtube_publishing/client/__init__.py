@@ -10,9 +10,11 @@ from .base import (
     YouTubeTransientError,
 )
 from .mock import MockYouTubeClient
+from .real import RealYouTubeClient
 
 __all__ = [
     "MockYouTubeClient",
+    "RealYouTubeClient",
     "YouTubeAuthError",
     "YouTubeClientError",
     "YouTubeClientProtocol",

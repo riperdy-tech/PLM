@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, NoReturn
 
 import httpx
@@ -14,6 +14,7 @@ from plm_contracts.money import CurrencyMismatchError, FxRateMissingError, FxTab
 from plm_contracts.seams import ExperimentLineage, SeamRejection, parse_seam
 from plm_contracts.seams.c6 import YouTubePublicationPayload
 from plm_platform.clock import Clock
+from plm_platform.config import SERVICE_TOKEN_HEADER
 from plm_platform.decision_log import DecisionConflictError, DecisionNotFoundError
 from plm_platform.outbox import OutboxConflictError
 from sqlalchemy.orm import Session
@@ -38,6 +39,22 @@ from ..ingestion.releases import (
     lineage_for_isrc,
 )
 from ..ingestion.youtube import ingest_youtube_metrics
+from ..ingestion.youtube_client import YouTubeAnalyticsError
+from ..ingestion.youtube_reach import ReachReportError
+from ..ingestion.youtube_reporting import (
+    AuthenticatedReachDownloader,
+    ReachReportVersion,
+    ReportingAccessDenied,
+    ReportingDownloadError,
+)
+from ..projection.candidate_performance import (
+    REPORTING_PACIFIC,
+    CandidateAttributionError,
+    build_candidate_performance,
+    build_reporting_readiness,
+    preview_authenticated_reach,
+    preview_operator_reach,
+)
 from ..projection.p10_features import build_p10_feature_view
 from ..storage.repositories import (
     FxRateConflictError,
@@ -50,6 +67,8 @@ from ..storage.repositories import (
     load_fx_table,
 )
 from .schemas import (
+    AuthenticatedReachPreviewRequest,
+    CandidateReachPreviewRequest,
     CostIngestRequest,
     DispatchRequest,
     DistributorIngestRequest,
@@ -57,6 +76,7 @@ from .schemas import (
     FxRateIngestRequest,
     HealthResponse,
     MeasureRequest,
+    ReachReadinessRequest,
     ReleaseRecordIngestRequest,
     YouTubeIngestRequest,
 )
@@ -82,6 +102,9 @@ def build_analytics_router(
     settings: AnalyticsSettings | None = None,
     reward_client: httpx.Client | None = None,
     reward_token: str | None = None,
+    youtube_client: httpx.Client | None = None,
+    youtube_token: str | None = None,
+    reporting_downloader: AuthenticatedReachDownloader | None = None,
 ) -> APIRouter:
     """Build the analytics API router configured with auth and dependencies.
 
@@ -257,6 +280,148 @@ def build_analytics_router(
                 _refuse(409, "fx_rate_conflict", str(exc), ["rates"])
             session.commit()
             return {"recorded": recorded}
+
+    def _candidate_context(
+        attempt_id: str, window: ObservationWindow,
+    ) -> dict[str, Any]:
+        """Read the authoritative P7 assignment and join one P9 video snapshot.
+
+        This read-only diagnostic neither creates a reward nor claims A/B
+        impressions. Without a configured, authenticated P7 source it refuses.
+        """
+        if youtube_client is None or not youtube_token:
+            _refuse(503, "p7_attribution_source_unavailable",
+                    "authenticated P7 read source is not configured")
+        try:
+            upstream = youtube_client.get(
+                f"/youtube/attempts/{attempt_id}",
+                headers={SERVICE_TOKEN_HEADER: youtube_token},
+            )
+        except httpx.HTTPError as exc:
+            _refuse(502, "p7_attribution_source_failed", str(exc))
+        if upstream.status_code == 404:
+            _refuse(404, "p7_attempt_not_found", "P7 has no such publish attempt")
+        if upstream.status_code != 200:
+            _refuse(502, "p7_attribution_source_failed",
+                    f"P7 returned HTTP {upstream.status_code}")
+        try:
+            receipt = upstream.json()
+        except ValueError:
+            _refuse(502, "p7_attribution_source_invalid", "P7 returned invalid JSON")
+        if not isinstance(receipt, dict):
+            _refuse(502, "p7_attribution_source_invalid", "P7 receipt must be an object")
+        video_id = receipt.get("youtube_video_id")
+        if not isinstance(video_id, str) or not video_id:
+            _refuse(409, "p7_publication_unverified",
+                    "P7 has not established a published video identity")
+        with session_factory() as session:
+            observations = get_video_metrics(session, video_id)
+        try:
+            return build_candidate_performance(
+                receipt, observations, attempt_id=attempt_id, window=window,
+            )
+        except CandidateAttributionError as exc:
+            _refuse(409, "candidate_attribution_unverified", str(exc))
+
+    @router.get(
+        "/candidate-performance/{attempt_id}",
+        dependencies=[Depends(auth_dependency)],
+    )
+    def get_candidate_performance(
+        attempt_id: str,
+        window: ObservationWindow = ObservationWindow.D28,
+    ) -> dict[str, Any]:
+        """Read-only published candidate context with no inferred reach/CTR."""
+        return _candidate_context(attempt_id, window)
+
+    @router.post(
+        "/candidate-performance/{attempt_id}/reach-preview",
+        dependencies=[Depends(auth_dependency)],
+    )
+    def post_candidate_reach_preview(
+        attempt_id: str,
+        req: CandidateReachPreviewRequest,
+    ) -> dict[str, Any]:
+        """Check operator-supplied Reporting CSV without persisting or training."""
+        context = _candidate_context(attempt_id, req.window)
+        try:
+            return preview_operator_reach(
+                context,
+                csv_content=req.reach_csv,
+                ctr_unit=req.ctr_unit,
+                source_reference=req.source_reference,
+                start_date=req.start_date,
+                end_date=req.end_date,
+                as_of_date=clock.now().astimezone(UTC).date(),
+            )
+        except (ReachReportError, CandidateAttributionError) as exc:
+            _refuse(422, "reach_evidence_invalid", str(exc))
+
+    def _catalog_revision(job_id: str, report_id: str) -> ReachReportVersion:
+        """Authenticated catalog lookup; no report download or guessed winner."""
+        if reporting_downloader is None:
+            _refuse(503, "reporting_source_unavailable",
+                    "Google Reporting OAuth source is not configured")
+        try:
+            revisions = reporting_downloader.list_reach_reports(job_id=job_id)
+        except ReportingAccessDenied as exc:
+            _refuse(403, "google_reporting_access_denied", str(exc))
+        except (ReportingDownloadError, YouTubeAnalyticsError, httpx.HTTPError) as exc:
+            _refuse(502, "authenticated_reporting_source_failed", str(exc))
+        revision = next((r for r in revisions if r.report_id == report_id), None)
+        if revision is None:
+            _refuse(404, "reporting_revision_not_found",
+                    "requested report ID is not in the authenticated job catalog")
+        return revision
+
+    @router.post(
+        "/candidate-performance/{attempt_id}/reporting-readiness",
+        dependencies=[Depends(auth_dependency)],
+    )
+    def check_reporting_readiness(
+        attempt_id: str, req: ReachReadinessRequest,
+    ) -> dict[str, Any]:
+        """Read authenticated catalog metadata only; never fetch a report CSV."""
+        context = _candidate_context(attempt_id, req.window)
+        revision = _catalog_revision(req.job_id, req.report_id)
+        try:
+            return build_reporting_readiness(
+                context, revision=revision,
+                start_date=req.start_date, end_date=req.end_date,
+                as_of_date=clock.now().astimezone(REPORTING_PACIFIC).date(),
+            )
+        except CandidateAttributionError as exc:
+            _refuse(422, "reporting_readiness_ineligible", str(exc))
+
+    @router.post(
+        "/candidate-performance/{attempt_id}/authenticated-reach-preview",
+        dependencies=[Depends(auth_dependency)],
+    )
+    def post_authenticated_reach_preview(
+        attempt_id: str,
+        req: AuthenticatedReachPreviewRequest,
+    ) -> dict[str, Any]:
+        """Read an exact Google report revision; never post reach into P2."""
+        context = _candidate_context(attempt_id, req.window)
+        revision = _catalog_revision(req.job_id, req.report_id)
+        if reporting_downloader is None:
+            _refuse(503, "reporting_source_unavailable", "Google Reporting source unavailable")
+        try:
+            report = reporting_downloader.fetch(
+                job_id=req.job_id, report_id=req.report_id, ctr_unit=req.ctr_unit,
+            )
+        except ReportingAccessDenied as exc:
+            _refuse(403, "google_reporting_access_denied", str(exc))
+        except (ReportingDownloadError, ReachReportError, YouTubeAnalyticsError, httpx.HTTPError) as exc:
+            _refuse(502, "authenticated_reporting_source_failed", str(exc))
+        try:
+            return preview_authenticated_reach(
+                context, report=report, revision=revision, ctr_unit=req.ctr_unit,
+                start_date=req.start_date, end_date=req.end_date,
+                as_of_date=clock.now().astimezone(REPORTING_PACIFIC).date(),
+            )
+        except CandidateAttributionError as exc:
+            _refuse(422, "authenticated_reach_evidence_invalid", str(exc))
 
     @router.get(
         "/metrics/videos/{video_id}",
