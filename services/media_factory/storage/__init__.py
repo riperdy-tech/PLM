@@ -10,6 +10,13 @@ from .models import (
     visual_assets_table,
     visual_sessions_table,
 )
+from .render_claims import (
+    claim_queued_render_job,
+    finish_claimed_render_job,
+    list_stale_render_job_candidates,
+    quarantine_stale_render_job,
+    queue_render_job,
+)
 from .repositories import (
     get_media_package_by_id,
     get_media_package_by_release_manifest,
@@ -33,6 +40,8 @@ from .repositories import (
 
 __all__ = [
     "MEDIA_METADATA",
+    "claim_queued_render_job",
+    "finish_claimed_render_job",
     "get_media_package_by_id",
     "get_media_package_by_release_manifest",
     "get_playlist_session",
@@ -46,11 +55,14 @@ __all__ = [
     "insert_visual_asset",
     "insert_visual_session",
     "list_playlist_tracks",
+    "list_stale_render_job_candidates",
     "list_thumbnail_variants",
     "list_visual_assets",
     "media_packages_table",
     "playlist_sessions_table",
     "playlist_tracks_table",
+    "quarantine_stale_render_job",
+    "queue_render_job",
     "render_jobs_table",
     "thumbnail_variants_table",
     "update_media_package_status",

@@ -9,8 +9,12 @@ package and its C6 payload; and replays an assembled request without rendering a
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -121,6 +125,15 @@ def test_assemble_by_candidate_id_then_query_and_replay(cleared: Any) -> None:
     assert pkg["blocking_reason_codes"] == []
     assert len(pkg["chapters"]) == 3
     assert pkg["video_master_uri"].startswith("memory://media/")
+    # The HTTP entry point commits a real SQL claim before this stand-in render.
+    # Provisional blobs remain segregated by a hashed execution identity.
+    namespace = pkg["render_report"]["artifact_claim_namespace"]
+    assert isinstance(namespace, str) and len(namespace) == 64
+    assert f"/claims/{namespace}/" in pkg["video_master_uri"]
+    assert f"/claims/{namespace}/" in pkg["audio_master_uri"]
+    assert all(f"/claims/{namespace}/" in item["uri"] for item in pkg["thumbnails"])
+    assert all(f"/claims/{namespace}/" in key for key in store.objects
+               if key.startswith(("media/renders/", "media/thumbnails/")))
 
     assert client.get(f"/media/packages/{pkg['media_package_id']}",
                       headers=HEADERS).json()["video_checksum"] == pkg["video_checksum"]
@@ -130,12 +143,45 @@ def test_assemble_by_candidate_id_then_query_and_replay(cleared: Any) -> None:
                           headers=HEADERS).json()
     assert sorted(t["song_id"] for t in playlist["tracks"]) == sorted(ids)
 
-    # The same request (any order) resolves to the same package and is not re-rendered.
+    # A replay must not depend on the historical catalog being readable.
     rendered = list(toolchain.calls)
-    again = client.post("/media/packages/assemble", json=_request(*reversed(ids)),
-                        headers=HEADERS)
+    with patch("media_factory.service.list_catalog_albums",
+               side_effect=RuntimeError("unavailable historical catalog")):
+        again = client.post("/media/packages/assemble",
+                            json=_request(*reversed(ids)), headers=HEADERS)
     assert again.status_code == 200
     assert again.json()["media_package_id"] == pkg["media_package_id"]
+    assert toolchain.calls == rendered
+
+
+def test_new_album_with_reused_music_is_rejected_by_stored_catalog(cleared: Any) -> None:
+    store, first_album = cleared
+    repeat_album = [
+        stored_manifest(
+            store, f"song_reused_{i}", measured_duration_seconds=60.0, synth=spec
+        )
+        for i, spec in enumerate(synth_specs())
+    ]
+    toolchain = StandInToolchain()
+    client = _client(backend_for(
+        store, [*first_album, *repeat_album], toolchain=toolchain,
+    ))
+    first_ids = [track.candidate_id for track in first_album]
+    second_ids = [track.candidate_id for track in repeat_album]
+
+    initial = client.post("/media/packages/assemble",
+                          json=_request(*first_ids), headers=HEADERS)
+    assert initial.status_code == 200, initial.text
+    report = initial.json()["render_report"]["album_texture"]
+    assert report["catalog"]["coverage"] == "complete"
+    assert report["catalog"]["compared_packages"] == 0
+    assert len(report["evidence"]["track_signatures"]) == 3
+    rendered = list(toolchain.calls)
+
+    repeated = client.post("/media/packages/assemble",
+                           json=_request(*second_ids), headers=HEADERS)
+    assert repeated.status_code == 422, repeated.text
+    assert repeated.json()["detail"]["code"] == "album_catalog_near_duplicate"
     assert toolchain.calls == rendered
 
 
@@ -230,6 +276,194 @@ def test_a_package_blocked_by_post_render_qa_is_reported(cleared: Any) -> None:
     assert resp.status_code == 200
     assert resp.json()["status"] == "failed"
     assert resp.json()["blocking_reason_codes"] == ["loudness_out_of_tolerance"]
+
+
+@pytest.mark.parametrize(("probe_overrides", "expected_codes"), [
+    ({"audio_stream_duration_seconds": None}, {"stream_duration_unmeasured"}),
+    ({"audio_stream_duration_seconds": 100.0},
+     {"stream_duration_mismatch", "video_audio_duration_mismatch"}),
+    ({"video_stream_duration_seconds": None}, {"stream_duration_unmeasured"}),
+])
+def test_stream_duration_failure_survives_authenticated_p6_http_and_replay(
+    cleared: Any, probe_overrides: dict[str, float | None],
+    expected_codes: set[str],
+) -> None:
+    """P6 emits its real package failure/codes on POST and persisted GET."""
+    store, manifests = cleared
+    toolchain = StandInToolchain(probe_overrides=probe_overrides)
+    client = _client(backend_for(store, manifests, toolchain=toolchain))
+    ids = [m.candidate_id for m in manifests]
+    first = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
+    assert first.status_code == 200, first.text
+    pkg = first.json()
+    assert pkg["status"] == "failed"
+    assert expected_codes <= set(pkg["blocking_reason_codes"])
+    assert expected_codes <= set(pkg["render_report"]["qa"]["reason_codes"])
+    retrieved = client.get(f"/media/packages/{pkg['media_package_id']}", headers=HEADERS)
+    assert retrieved.status_code == 200
+    assert retrieved.json()["status"] == "failed"
+    assert retrieved.json()["blocking_reason_codes"] == pkg["blocking_reason_codes"]
+    retry = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
+    assert retry.status_code == 200
+    assert retry.json()["blocking_reason_codes"] == pkg["blocking_reason_codes"]
+    assert toolchain.calls.count("video") == 1
+
+    # Feed P7 the real persisted C6 hop-1 payload, not a hand-built failed
+    # package. A blocked P6 render must never reach the publishing adapter.
+    from youtube_publishing.client.mock import MockYouTubeClient
+
+    from tests.unit.test_youtube_api_r5 import HEADERS as P7_HEADERS
+    from tests.unit.test_youtube_api_r5 import _app as p7_app
+
+    c6_response = client.get(f"/media/packages/{pkg['media_package_id']}/c6",
+                             headers=HEADERS)
+    assert c6_response.status_code == 200, c6_response.text
+    assert c6_response.json()["status"] == "failed"
+    youtube = MockYouTubeClient()
+    refused = p7_app(client=youtube).post(
+        "/youtube/publish", headers=P7_HEADERS, json={
+            "channel_id": "UC_r5", "operating_mode": "dry_run",
+            "media_package": c6_response.json(),
+        },
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "package_not_ready"
+    assert youtube.recorded_calls == []
+
+
+@pytest.mark.parametrize(("which", "value", "reason"), [
+    ("true_peak", None, "true_peak_unmeasurable"),
+    ("true_peak", float("nan"), "true_peak_unmeasurable"),
+    ("integrated", float("nan"), "loudness_unmeasurable"),
+    ("probe_duration", float("nan"), "duration_unmeasured"),
+    ("probe_fps", float("nan"), "fps_mismatch"),
+])
+def test_invalid_measurements_persist_as_p6_http_failure_and_block_p7(
+    cleared: Any, which: str, value: float | None, reason: str,
+) -> None:
+    """Nonfinite measured numbers must never crash HTTP JSON or reach publishing."""
+    from media_factory.rendering.toolchain import LoudnessMeasurement, ProbeReport
+    from youtube_publishing.client.mock import MockYouTubeClient
+
+    from tests.unit.test_youtube_api_r5 import HEADERS as P7_HEADERS
+    from tests.unit.test_youtube_api_r5 import _app as p7_app
+
+    class InvalidLoudnessToolchain(StandInToolchain):
+        def measure_loudness(self, path: Path) -> LoudnessMeasurement:
+            measured = super().measure_loudness(path)
+            if which == "true_peak":
+                return replace(measured, true_peak_dbtp=value)
+            if which == "integrated":
+                return replace(measured, integrated_lufs=value)
+            return measured
+
+        def probe(self, path: Path) -> ProbeReport:
+            measured = super().probe(path)
+            if which == "probe_duration":
+                return replace(measured, duration_seconds=value)
+            if which == "probe_fps":
+                return replace(measured, streams=(
+                    replace(measured.streams[0], fps=value), measured.streams[1],
+                ))
+            return measured
+
+    def strict_json(raw: str) -> Any:
+        def reject_constant(value: str) -> None:
+            raise ValueError(f"non-JSON numeric constant: {value}")
+        return json.loads(raw, parse_constant=reject_constant)
+
+    store, manifests = cleared
+    toolchain = InvalidLoudnessToolchain()
+    client = _client(backend_for(store, manifests, toolchain=toolchain))
+    ids = [m.candidate_id for m in manifests]
+    request = _request(*ids)
+    response = client.post("/media/packages/assemble", json=request, headers=HEADERS)
+    assert response.status_code == 200, response.text
+    package = strict_json(response.text)
+    assert package["status"] == "failed"
+    assert reason in package["blocking_reason_codes"]
+    render_id = package["render_report"]["render_job_id"]
+    saved = client.get(f"/media/renders/{render_id}", headers=HEADERS)
+    assert saved.status_code == 200
+    assert strict_json(saved.text)["job_status"] == "failed"
+    assert strict_json(saved.text)["error_code"] == "post_render_qa_failed"
+    persisted = client.get(f"/media/packages/{package['media_package_id']}", headers=HEADERS)
+    assert persisted.status_code == 200
+    assert strict_json(persisted.text)["blocking_reason_codes"] == package["blocking_reason_codes"]
+    replay = client.post("/media/packages/assemble", json=request, headers=HEADERS)
+    assert replay.status_code == 200
+    assert strict_json(replay.text)["media_package_id"] == package["media_package_id"]
+    assert toolchain.calls.count("video") == 1
+
+    c6 = client.get(f"/media/packages/{package['media_package_id']}/c6", headers=HEADERS)
+    assert c6.status_code == 200
+    assert strict_json(c6.text)["status"] == "failed"
+    mock = MockYouTubeClient()
+    refused = p7_app(client=mock).post("/youtube/publish", headers=P7_HEADERS, json={
+        "channel_id": "UC_r5", "operating_mode": "dry_run", "media_package": c6.json(),
+    })
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "package_not_ready"
+    assert mock.recorded_calls == []
+
+
+def test_actual_p6_http_failure_payload_is_refused_by_pipeline_transport(
+    cleared: Any,
+) -> None:
+    """Join real P6 TestClient JSON to real pipeline HTTP logic, no external services.
+
+    This does not start Temporal or live P7; the pipeline's mock transport
+    delivers the exact failed P6 response instead of a hand-written fixture.
+    """
+    import asyncio
+
+    from plm_platform.temporal import ValidationFailure
+
+    from tests.unit.test_pipeline_http_assemble import _Phases, _steps
+    from tests.unit.test_pipeline_http_assemble import _request as pipeline_request
+
+    store, manifests = cleared
+    client = _client(backend_for(
+        store, manifests, toolchain=StandInToolchain(
+            probe_overrides={"audio_stream_duration_seconds": 80.0},
+        ),
+    ))
+    ids = [m.candidate_id for m in manifests]
+    response = client.post(
+        "/media/packages/assemble", json=_request(*ids), headers=HEADERS,
+    )
+    assert response.status_code == 200
+    actual_p6_answer = response.json()
+    assert actual_p6_answer["status"] == "failed"
+    assert "video_audio_duration_mismatch" in actual_p6_answer["blocking_reason_codes"]
+
+    phases = _Phases({"c0": (response.status_code, actual_p6_answer)})
+    with pytest.raises(ValidationFailure, match="video_audio_duration_mismatch"):
+        asyncio.run(_steps(phases).assemble(pipeline_request(["c0", "c1", "c2"])))
+    assert len(phases.p6_bodies) == 1
+
+    # Exercise the actual Temporal activity wrapper too: a stream-timing
+    # refusal must be non-retryable before any upload activity can run.
+    from unittest.mock import Mock
+
+    from plm_platform.pipeline.activities import build_activities
+    from plm_platform.pipeline.states import Step, step_activity_name
+    from temporalio.exceptions import ApplicationError
+    from temporalio.testing import ActivityEnvironment
+
+    activity_name = step_activity_name(Step.ASSEMBLE)
+    activities = build_activities(_steps(phases), Mock())
+    assemble_activity = next(
+        fn for fn in activities if fn.__temporal_activity_definition.name == activity_name
+    )
+    with pytest.raises(ApplicationError, match="video_audio_duration_mismatch") as raised:
+        asyncio.run(ActivityEnvironment().run(
+            assemble_activity, pipeline_request(["c0", "c1", "c2"]),
+        ))
+    assert raised.value.type == "ValidationFailure"
+    assert raised.value.non_retryable is True
+    assert raised.value.details[0]["attempt"] == 1
+    assert len(phases.p6_bodies) == 2  # direct call plus activity, no upload
 
 
 def test_short_supply_reports_the_missing_seconds_for_a_top_up(cleared: Any) -> None:
@@ -380,3 +614,105 @@ def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendere
     # The render reads each selected recording when it needs it (verify, then write to
     # its work directory) instead of keeping them all.
     assert events[2 * offered:] == ["fetch"] * (2 * selected)
+
+
+def test_http_render_claim_survives_worker_exception_and_refuses_duplicate(
+    cleared: Any,
+) -> None:
+    """A failed HTTP process cannot erase its already-committed render claim."""
+    import sqlalchemy as sa
+    from media_factory.domain.enums import RenderJobStatus
+    from media_factory.storage.models import render_jobs_table
+    from media_factory.storage.repositories import get_media_package_by_id
+
+    store, manifests = cleared
+    toolchain = StandInToolchain()
+    engine = create_media_engine(static_pool=True)
+    platform = load_settings(env={**MINIMAL_ENV, "PLM_SERVICE_TOKEN": TOKEN})
+    app = create_app(
+        session_factory=lambda: media_session(engine),
+        settings=MediaFactorySettings(platform=platform), clock=FixedClock(NOW),
+        backend=backend_for(store, manifests, toolchain=toolchain),
+    )
+    client = TestClient(app)
+    payload = _request(*[m.candidate_id for m in manifests])
+    with (
+        patch("media_factory.rendering.assembler.MediaRenderer.render",
+              side_effect=RuntimeError("simulated worker killed before FFmpeg")),
+        pytest.raises(RuntimeError, match="simulated worker killed"),
+    ):
+        client.post("/media/packages/assemble", headers=HEADERS, json=payload)
+    with media_session(engine) as session:
+        rows = session.execute(sa.select(render_jobs_table)).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["job_status"] == RenderJobStatus.RUNNING.value
+        assert rows[0]["worker_id"]
+        assert len(rows[0]["input_manifest_hash"]) == 64
+        assert get_media_package_by_id(session, rows[0]["media_package_id"]) is None
+    assert toolchain.calls == []
+    retry = client.post("/media/packages/assemble", headers=HEADERS, json=payload)
+    assert retry.status_code == 409
+    assert retry.json()["detail"]["code"] == "render_job_reconciliation_required"
+    assert toolchain.calls == []
+    with media_session(engine) as session:
+        assert session.execute(sa.select(sa.func.count()).select_from(render_jobs_table)).scalar_one() == 1
+    engine.dispose()
+
+
+def test_http_render_completion_is_fenced_if_claim_was_quarantined(
+    cleared: Any,
+) -> None:
+    """A stale owner may render blobs but cannot publish a C6 media package."""
+    import sqlalchemy as sa
+    from media_factory.domain.enums import RenderJobStatus
+    from media_factory.rendering.renderer import MediaRenderer
+    from media_factory.storage.models import media_packages_table, render_jobs_table
+    from media_factory.storage.render_claims import quarantine_stale_render_job
+
+    store, manifests = cleared
+    engine = create_media_engine(static_pool=True)
+    platform = load_settings(env={**MINIMAL_ENV, "PLM_SERVICE_TOKEN": TOKEN})
+    toolchain = StandInToolchain()
+    app = create_app(
+        session_factory=lambda: media_session(engine),
+        settings=MediaFactorySettings(platform=platform), clock=FixedClock(NOW),
+        backend=backend_for(store, manifests, toolchain=toolchain),
+    )
+    actual_render = MediaRenderer.render
+
+    def render_then_quarantine(renderer: MediaRenderer, **kwargs: Any) -> Any:
+        output = actual_render(renderer, **kwargs)
+        with media_session(engine) as claim_session:
+            from media_factory.storage.repositories import get_render_job
+
+            prior = get_render_job(claim_session, output.render_job.id)
+            assert prior is not None and prior.worker_id is not None
+            # SQLite strips timezone metadata; the injected clock has the
+            # original aware start instant used by the committed claim.
+            assert prior.started_at == NOW.replace(tzinfo=None)
+            assert quarantine_stale_render_job(
+                claim_session, job_id=output.render_job.id,
+                input_manifest_hash=output.preflight.input_manifest_hash,
+                started_before=NOW, quarantined_at=NOW,
+                expected_worker_id=prior.worker_id,
+                expected_started_at=NOW,
+                worker_termination_confirmed=True,  # Simulated forced termination only.
+            )
+            claim_session.commit()
+        return output
+
+    with patch.object(MediaRenderer, "render", render_then_quarantine):
+        response = TestClient(app).post(
+            "/media/packages/assemble", headers=HEADERS,
+            json=_request(*[m.candidate_id for m in manifests]),
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "render_ownership_lost"
+    with media_session(engine) as session:
+        assert session.execute(sa.select(render_jobs_table.c.job_status)).scalar_one() == (
+            RenderJobStatus.QUARANTINED.value
+        )
+        assert session.execute(
+            sa.select(sa.func.count()).select_from(media_packages_table),
+        ).scalar_one() == 0
+    engine.dispose()

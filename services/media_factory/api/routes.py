@@ -7,6 +7,7 @@ runtime types for dependency injection with closures.
 import threading
 from collections.abc import Callable, Iterator
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from plm_contracts import ErrorShape
@@ -139,11 +140,16 @@ def build_router(
             with render_lock:
                 package = assemble_and_persist(
                     session, backend, payload, clock=clock,
-                    default_render_profile=settings.default_render_profile)
+                    default_render_profile=settings.default_render_profile,
+                    render_session_factory=session_factory,
+                    worker_id_factory=lambda: uuid4().hex)
                 session.commit()
         except MediaAssemblyError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=(status.HTTP_409_CONFLICT if exc.code in {
+                    "render_job_reconciliation_required", "render_ownership_lost",
+                    "render_input_changed",
+                } else status.HTTP_422_UNPROCESSABLE_ENTITY),
                 detail=exc.detail(),
             ) from exc
         except MediaInfrastructureError as exc:

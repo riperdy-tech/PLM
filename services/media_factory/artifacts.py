@@ -18,7 +18,9 @@ P6 reads the cleared track audio and writes what it renders through one protocol
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from itertools import islice
 from typing import Final, Protocol
 
 import urllib3
@@ -52,14 +54,31 @@ __all__ = [
     "SOURCE_URI_INVALID",
     "STORE_UNAVAILABLE",
     "ArtifactStore",
+    "ClaimObjectEvidence",
+    "ClaimObjectPage",
     "MinioArtifactStore",
     "StoredArtifact",
+    "scoped_artifact_root",
 ]
 
 SOURCE_ARTIFACT_MISSING: Final[str] = "source_artifact_missing"
 SOURCE_CHECKSUM_MISMATCH: Final[str] = "source_checksum_mismatch"
 SOURCE_URI_INVALID: Final[str] = "source_uri_invalid"
 STORE_UNAVAILABLE: Final[str] = "artifact_store_unavailable"
+
+
+def scoped_artifact_root(base: str, claim_namespace: str | None) -> str:
+    """Keep a claimed render's provisional blobs under one isolated execution prefix.
+
+    Only a 64-character lowercase SHA256 token is accepted; never use raw worker
+    identifiers, timestamps or untrusted paths as storage key components. The
+    legacy direct-render path keeps its existing keys when there is no claim.
+    """
+    if claim_namespace is None:
+        return base
+    if re.fullmatch(r"[0-9a-f]{64}", claim_namespace) is None:
+        raise ValueError("render artifact claim namespace must be lowercase SHA256")
+    return f"{base}/claims/{claim_namespace}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +88,22 @@ class StoredArtifact:
     uri: str
     sha256: str
     size: int
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimObjectEvidence:
+    """Object metadata from listing only; SHA256 is a *key claim*, not verified bytes."""
+
+    uri: str
+    pinned_sha256: str | None
+    size_bytes: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimObjectPage:
+    objects: tuple[ClaimObjectEvidence, ...]
+    truncated: bool
+    # A list operation is not a content-integrity or publication proof.
 
 
 class ArtifactStore(Protocol):
@@ -112,6 +147,77 @@ class MinioArtifactStore:
         if sha256_digest(data) != sha256:  # get_verified checked the key; check the claim too
             raise MediaAssemblyError(SOURCE_CHECKSUM_MISMATCH, f"{uri} does not hash to {sha256}")
         return data
+
+    def list_claim_objects(
+        self, *, brand_id: str, media_package_id: str,
+        claim_namespace: str, limit: int = 20,
+    ) -> ClaimObjectPage:
+        """Bounded metadata-only listing of this render's two output trees.
+
+        This never downloads bytes, mutates MinIO, discovers unrelated package
+        prefixes, or validates a purported key digest against object content.
+        The caller must establish the claim identity from persistent records.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("claim artifact listing limit must be in 1..100")
+        for label, value in (("brand_id", brand_id), ("media_package_id", media_package_id)):
+            if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is None:
+                raise ValueError(f"{label} must be an exact safe identifier")
+        roots = (
+            scoped_artifact_root(
+                f"renders/{brand_id}/{media_package_id}", claim_namespace,
+            ),
+            scoped_artifact_root(
+                f"thumbnails/{brand_id}/{media_package_id}", claim_namespace,
+            ),
+        )
+        # Validate every segment through the platform key builder before
+        # passing a prefix to the object store; never accept arbitrary paths.
+        prefixes = []
+        for root in roots:
+            probe = build_key(MEDIA_PREFIX, f"{root}/probe", "0" * 64)
+            prefixes.append(probe.removesuffix("probe/" + "0" * 64))
+        observed: list[ClaimObjectEvidence] = []
+        truncated = False
+        try:
+            for prefix in prefixes:
+                remaining = limit - len(observed)
+                if remaining == 0:
+                    # Check whether another prefix contains objects before
+                    # declaring complete, without scanning unbounded output.
+                    extra = next(iter(self._client.list_objects(
+                        self._settings.minio_bucket, prefix=prefix, recursive=True,
+                    )), None)
+                    if extra is not None:
+                        truncated = True
+                        break
+                    continue
+                listings = self._client.list_objects(
+                    self._settings.minio_bucket, prefix=prefix, recursive=True,
+                )
+                for item in islice(listings, remaining + 1):
+                    key = item.object_name
+                    if not isinstance(key, str) or not key.startswith(prefix):
+                        raise StorageError("claim object listing returned an out-of-scope key")
+                    if len(observed) >= limit:
+                        truncated = True
+                        break
+                    try:
+                        digest = digest_from_key(key)
+                    except (InvalidObjectKeyError, UnknownPrefixError):
+                        digest = None
+                    observed.append(ClaimObjectEvidence(
+                        uri=to_uri(key, settings=self._settings),
+                        pinned_sha256=digest,
+                        size_bytes=item.size,
+                    ))
+                if truncated:
+                    break
+        except (S3Error, StorageError, urllib3.exceptions.HTTPError, OSError) as exc:
+            raise MediaInfrastructureError(
+                STORE_UNAVAILABLE, f"claim listing failed: {type(exc).__name__}"
+            ) from exc
+        return ClaimObjectPage(objects=tuple(observed), truncated=truncated)
 
     def put(self, resource_path: str, data: bytes, *, content_type: str) -> StoredArtifact:
         digest = sha256_digest(data)

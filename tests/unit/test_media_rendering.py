@@ -11,7 +11,10 @@ encoding: ``test_media_render_ffmpeg.py`` (``media``) does that.
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -81,6 +84,32 @@ def test_every_checksum_is_the_sha256_of_the_stored_bytes() -> None:
     assert pkg.render_report["sequencing"]["policy"]["version"] == "seq-beam-v2"
 
 
+def test_claimed_render_scopes_all_blobs_and_preserves_content_checksums() -> None:
+    """One committed claim isolates masters, background and thumbnails, not C6 IDs."""
+    store, toolchain = InMemoryArtifactStore(), StandInToolchain()
+    token = "a" * 64
+    result = _assemble(store, toolchain, before_render=lambda *_: token)
+    package = result.media_package
+    assert package.render_report["artifact_claim_namespace"] == token
+    assert f"/claims/{token}/" in package.audio_master_uri
+    assert f"/claims/{token}/" in package.video_master_uri
+    assert all(f"/claims/{token}/" in thumb["uri"] for thumb in package.thumbnails)
+    assert all(f"/claims/{token}/" in asset.uri for asset in result.visual_assets)
+    assert package.video_checksum == hashlib.sha256(store.get(package.video_master_uri)).hexdigest()
+    assert package.audio_checksum == hashlib.sha256(store.get(package.audio_master_uri)).hexdigest()
+    assert package.to_c6_payload()["video"]["master_uri"] == package.video_master_uri
+
+
+def test_claimed_render_rejects_unsafe_storage_prefix_before_writing() -> None:
+    """An invalid execution token must not create any render or thumbnail outputs."""
+    store, toolchain = InMemoryArtifactStore(), StandInToolchain()
+    with pytest.raises(ValueError, match="claim namespace"):
+        _assemble(store, toolchain, before_render=lambda *_: "../other-package")
+    assert toolchain.calls == []
+    assert all(not key.startswith("media/renders/") for key in store.objects)
+    assert all(not key.startswith("media/thumbnails/") for key in store.objects)
+
+
 def test_a_tampered_source_track_fails_closed_before_rendering() -> None:
     store, toolchain = InMemoryArtifactStore(), StandInToolchain()
     manifests = [stored_manifest(store, f"cand_{n}", measured_duration_seconds=60.0)
@@ -132,8 +161,10 @@ def _probe(**overrides: object) -> ProbeReport:
     fields.update(overrides)
     streams = fields["streams"] if fields["streams"] is not None else (
         StreamInfo(codec_type="video", codec_name="h264", width=fields["width"],  # type: ignore[arg-type]
-                   height=fields["height"], fps=fields["fps"], pixel_format="yuv420p"),  # type: ignore[arg-type]
-        StreamInfo(codec_type="audio", codec_name="aac", sample_rate=48000, channels=2),
+                   height=fields["height"], fps=fields["fps"], pixel_format="yuv420p",
+                   duration_seconds=100.0),  # type: ignore[arg-type]
+        StreamInfo(codec_type="audio", codec_name="aac", sample_rate=48000, channels=2,
+                   duration_seconds=100.0),
     )
     return ProbeReport(format_name="mov,mp4,m4a", duration_seconds=100.0, size_bytes=10,
                        streams=streams)  # type: ignore[arg-type]
@@ -163,6 +194,160 @@ def test_post_render_qa_codes() -> None:
     assert "true_peak_exceeded" in codes(
         loudness=LoudnessMeasurement(integrated_lufs=-14.0, true_peak_dbtp=0.8, meter="t"))
     assert "empty_output" in codes(size_bytes=0)
+
+
+def test_stream_timing_cannot_be_hidden_by_matching_container_duration() -> None:
+    loud = LoudnessMeasurement(integrated_lufs=-14.0, true_peak_dbtp=-1.0, meter="fixture")
+    normal = _probe()
+    video, audio = normal.streams
+
+    def check(*, video_seconds: float | None = 100.0,
+              audio_seconds: float | None = 100.0) -> list[str]:
+        probe = replace(
+            normal, streams=(
+                replace(video, duration_seconds=video_seconds),
+                replace(audio, duration_seconds=audio_seconds),
+            ),
+        )
+        return post_render_qa(
+            probe=probe, loudness=loud, profile=PROFILE,
+            expected_duration_seconds=100.0,
+            required_window_seconds=(95.0, 105.0), size_bytes=10,
+        ).reason_codes
+
+    assert check() == []
+    assert "stream_duration_unmeasured" in check(audio_seconds=None)
+    assert "stream_duration_unmeasured" in check(video_seconds=float("nan"))
+    assert "stream_duration_mismatch" in check(audio_seconds=80.0)
+    assert "video_audio_duration_mismatch" in check(audio_seconds=80.0)
+    assert "stream_duration_mismatch" in check(video_seconds=120.0)
+    assert "video_audio_duration_mismatch" in check(video_seconds=120.0)
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"audio_stream_duration_seconds": None}, "stream_duration_unmeasured"),
+    ({"video_stream_duration_seconds": 60.0}, "stream_duration_mismatch"),
+    ({"audio_stream_duration_seconds": 60.0}, "video_audio_duration_mismatch"),
+])
+def test_p6_package_blocks_unverified_stream_durations(
+    overrides: dict[str, float | None], expected: str,
+) -> None:
+    result = _assemble(InMemoryArtifactStore(), StandInToolchain(probe_overrides=overrides))
+    assert result.media_package.status is PackageStatus.FAILED
+    assert result.render_job.job_status is RenderJobStatus.FAILED
+    assert expected in result.media_package.render_report["qa"]["reason_codes"]
+
+
+
+@pytest.mark.parametrize(("value", "code"), [
+    (None, "true_peak_unmeasurable"),
+    (float("nan"), "true_peak_unmeasurable"),
+    (float("inf"), "true_peak_unmeasurable"),
+    (-float("inf"), "true_peak_unmeasurable"),
+    (0.8, "true_peak_exceeded"),
+])
+def test_true_peak_requires_finite_measured_fact(value: float | None, code: str) -> None:
+    result = post_render_qa(
+        probe=_probe(),
+        loudness=LoudnessMeasurement(integrated_lufs=-14.0, true_peak_dbtp=value, meter="test"),
+        profile=PROFILE,
+        expected_duration_seconds=100.0, required_window_seconds=(95.0, 105.0),
+        size_bytes=10,
+    )
+    assert not result.passed
+    assert code in result.reason_codes
+
+
+@pytest.mark.parametrize(("value", "code"), [
+    (float("nan"), "loudness_unmeasurable"),
+    (float("inf"), "loudness_unmeasurable"),
+    (-float("inf"), "loudness_unmeasurable"),
+])
+def test_integrated_loudness_requires_finite_fact(value: float, code: str) -> None:
+    result = post_render_qa(
+        probe=_probe(),
+        loudness=LoudnessMeasurement(integrated_lufs=value, true_peak_dbtp=-1.0, meter="test"),
+        profile=PROFILE,
+        expected_duration_seconds=100.0, required_window_seconds=(95.0, 105.0),
+        size_bytes=10,
+    )
+    assert not result.passed
+    assert code in result.reason_codes
+
+
+@pytest.mark.parametrize(("probe", "expected", "window", "code"), [
+    (_probe(fps=float("nan")), 100.0, (95.0, 105.0), "fps_mismatch"),
+    (_probe(fps=float("inf")), 100.0, (95.0, 105.0), "fps_mismatch"),
+    (replace(_probe(), duration_seconds=float("nan")), 100.0,
+     (95.0, 105.0), "duration_unmeasured"),
+    (replace(_probe(), duration_seconds=float("inf")), 100.0,
+     (95.0, 105.0), "duration_unmeasured"),
+    (_probe(), float("nan"), (95.0, 105.0), "expected_duration_unmeasured"),
+    (_probe(), 100.0, (float("nan"), 105.0), "duration_window_invalid"),
+    (_probe(), 100.0, (105.0, 95.0), "duration_window_invalid"),
+])
+def test_nonfinite_or_invalid_timeline_fails_closed(
+    probe: ProbeReport, expected: float, window: tuple[float, float], code: str,
+) -> None:
+    result = post_render_qa(
+        probe=probe,
+        loudness=LoudnessMeasurement(integrated_lufs=-14.0, true_peak_dbtp=-1.0, meter="test"),
+        profile=PROFILE, expected_duration_seconds=expected,
+        required_window_seconds=window, size_bytes=10,
+    )
+    assert not result.passed
+    assert code in result.reason_codes
+
+
+def test_missing_true_peak_blocks_p6_package_and_render_job() -> None:
+    class _NoPeakToolchain(StandInToolchain):
+        def measure_loudness(self, path: Path) -> LoudnessMeasurement:
+            measured = super().measure_loudness(path)
+            return replace(measured, true_peak_dbtp=None)
+
+    result = _assemble(InMemoryArtifactStore(), _NoPeakToolchain())
+    assert result.media_package.status is PackageStatus.FAILED
+    assert result.render_job.job_status is RenderJobStatus.FAILED
+    assert result.render_job.error_code == "post_render_qa_failed"
+    assert "true_peak_unmeasurable" in result.media_package.render_report["qa"]["reason_codes"]
+    assert result.media_package.to_c6_payload()["status"] == "failed"
+
+
+
+@pytest.mark.parametrize("field", [
+    "true_peak_dbtp", "integrated_lufs", "probe_video_fps", "probe_container_duration",
+])
+def test_nonfinite_qa_readings_stay_strict_json_serializable(field: str) -> None:
+    """Stored P6 JSON must never contain NaN, including on FAILED reports."""
+    class _InvalidMeasurements(StandInToolchain):
+        def measure_loudness(self, path: Path) -> LoudnessMeasurement:
+            reading = super().measure_loudness(path)
+            if field in ("true_peak_dbtp", "integrated_lufs"):
+                return replace(reading, **{field: float("nan")})
+            return reading
+
+        def probe(self, path: Path) -> ProbeReport:
+            reading = super().probe(path)
+            if field == "probe_video_fps":
+                return replace(reading, streams=(
+                    replace(reading.streams[0], fps=float("nan")), reading.streams[1],
+                ))
+            if field == "probe_container_duration":
+                return replace(reading, duration_seconds=float("nan"))
+            return reading
+
+    result = _assemble(InMemoryArtifactStore(), _InvalidMeasurements())
+    assert result.media_package.status is PackageStatus.FAILED
+    report = result.media_package.render_report
+    json.dumps(report, allow_nan=False)
+    metrics = report["qa"]["metrics"]
+    if field in ("true_peak_dbtp", "integrated_lufs"):
+        assert metrics["loudness"][field] is None
+    elif field == "probe_video_fps":
+        assert metrics["probe"]["streams"][0]["fps"] is None
+    else:
+        assert metrics["probe"]["duration_seconds"] is None
+        assert report["duration_seconds"] > 0
 
 
 ENV = {

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -34,7 +35,7 @@ from typing import Any
 
 from plm_platform.clock import Clock
 
-from ..artifacts import ArtifactStore, StoredArtifact
+from ..artifacts import ArtifactStore, StoredArtifact, scoped_artifact_root
 from ..artwork.generator import render_background
 from ..domain.enums import RenderJobStatus, VisualAssetType
 from ..domain.ids import render_job_id
@@ -103,7 +104,8 @@ class MediaRenderer:
         self.profile = profile
 
     def run_preflight(self, playlist: PlaylistSession, visual_session: VisualSession,
-                      sources: Mapping[str, bytes]) -> PreflightCheckResult:
+                      sources: Mapping[str, bytes], *,
+                      playlist_concept: str = "") -> PreflightCheckResult:
         """Validate inputs before rendering (P6 §28, §29)."""
         reasons: list[str] = []
         if not playlist.tracks:
@@ -119,19 +121,40 @@ class MediaRenderer:
             reasons.append("the visual plan names no visualiser colour")
         if len((plan.get("background") or {}).get("colors") or []) < 2:
             reasons.append("the visual plan names no background colours")
+        return PreflightCheckResult(
+            passed=not reasons, reasons=reasons,
+            input_manifest_hash=self.input_manifest_hash(
+                playlist, visual_session, playlist_concept=playlist_concept,
+            ),
+        )
+
+    def input_manifest_hash(
+        self, playlist: PlaylistSession, visual_session: VisualSession, *,
+        playlist_concept: str = "",
+    ) -> str:
+        """Stable pre-render identity using the verified source checksums.
+
+        This metadata-only calculation does not fetch every recording again.
+        The normal render preflight still checks the source bytes before
+        invoking FFmpeg; the identity and check share this implementation.
+        """
         manifest = {
             "playlist_id": playlist.id,
             "sequence_checksum": playlist.sequence_checksum,
             "tracks": [[t.id, t.audio_checksum] for t in playlist.tracks],
             "visual_session_id": visual_session.id,
-            "visual_plan": plan,
+            "visual_plan": visual_session.visual_plan_json,
             "render_profile": self.profile.to_dict(),
             "render_version": RENDER_VERSION,
         }
-        manifest_hash = hashlib.sha256(
-            json.dumps(manifest, sort_keys=True).encode("utf-8")).hexdigest()
-        return PreflightCheckResult(passed=not reasons, reasons=reasons,
-                                    input_manifest_hash=manifest_hash)
+        if playlist_concept:
+            # Thumbnail artwork and metadata depend on this concept even when
+            # the audio timeline/visual profile are identical. A staged retry
+            # must never accept a changed package presentation as the same input.
+            manifest["playlist_concept"] = playlist_concept
+        return hashlib.sha256(
+            json.dumps(manifest, sort_keys=True).encode("utf-8"),
+        ).hexdigest()
 
     def _store(self, path: str, data: bytes, content_type: str) -> StoredArtifact:
         return self.store.put(path, data, content_type=content_type)
@@ -146,15 +169,21 @@ class MediaRenderer:
         sources: Mapping[str, bytes],
         required_window_seconds: tuple[float, float],
         attempt: int = 1,
+        claim_namespace: str | None = None,
+        playlist_concept: str = "",
         clock: Clock,
     ) -> RenderExecutionResult:
         """Render, store and QA the masters; ``clock`` stamps the job."""
+        root = scoped_artifact_root(
+            f"renders/{playlist.brand_id}/{media_package_id_str}", claim_namespace,
+        )
         started_at = clock.now()
-        preflight = self.run_preflight(playlist, visual_session, sources)
+        preflight = self.run_preflight(
+            playlist, visual_session, sources, playlist_concept=playlist_concept,
+        )
         if not preflight.passed:
             raise MediaAssemblyError("render_preflight_failed", "; ".join(preflight.reasons))
         profile = self.profile
-        root = f"renders/{playlist.brand_id}/{media_package_id_str}"
         transition = playlist.tracks[0].transition_type
         transition_seconds = playlist.tracks[0].transition_duration_seconds
 
@@ -211,7 +240,11 @@ class MediaRenderer:
             required_window_seconds=required_window_seconds, size_bytes=video.size,
         )
         finished_at = clock.now()
-        duration = (probe.duration_seconds if probe is not None and probe.duration_seconds
+        # A corrupt FFprobe number is already a QA failure. Never persist
+        # NaN/Infinity as the package's structural duration or JSON metadata.
+        measured_duration = probe.duration_seconds if probe is not None else None
+        duration = (measured_duration if measured_duration is not None
+                    and math.isfinite(measured_duration) and measured_duration > 0
                     else playlist.actual_duration_seconds)
         job = RenderJob(
             id=render_job_id(media_package_id_str, profile.name, attempt),
@@ -248,6 +281,7 @@ class MediaRenderer:
         )
         report = {
             "render_job_id": job.id,
+            "artifact_claim_namespace": claim_namespace,
             "render_version": RENDER_VERSION,
             "render_profile": profile.to_dict(),
             "toolchain": self.toolchain.version,

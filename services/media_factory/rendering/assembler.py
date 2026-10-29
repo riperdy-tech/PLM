@@ -50,6 +50,8 @@ from ..domain.models import (
 from ..metadata.chapters import require_valid_chapters
 from ..metadata.compiler import compile_metadata_and_chapters
 from ..playlist.assembler import assemble_playlist, check_clearance
+from ..playlist.catalog import CatalogAlbum, check_catalog_texture
+from ..playlist.diversity import check_album_texture
 from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
 from ..visuals.planner import BrandProfile, plan_visual_session
 from .profiles import RenderProfile, render_profile
@@ -115,6 +117,10 @@ def assemble_media_package(
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     existing: Callable[[str], MediaPackage | None] | None = None,
+    catalog_albums: Sequence[CatalogAlbum] | None = None,
+    catalog_loader: Callable[[], Sequence[CatalogAlbum]] | None = None,
+    before_render: Callable[[str, str, str], str] | None = None,
+    render_attempt: int = 1,
     clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
@@ -172,6 +178,29 @@ def assemble_media_package(
     )
     require_valid_chapters(meta_res.chapter_objects, playlist_res.total_duration_seconds)
 
+    # Every known format/timeline error has precedence. Then refuse a likely
+    # near-copy album before spending render resources or writing artifacts.
+    selected_ids = [track.song_id for track in tracks]
+    texture_report = check_album_texture(selected_ids, features)
+    checksums = {item.candidate_id: item.artifact_sha256 for item in track_manifests}
+    if catalog_loader is not None and catalog_albums is not None:
+        raise ValueError("provide either a catalog loader or catalog albums, not both")
+    # Lazy lookup is essential: a replay of an already assembled package must
+    # succeed even when unrelated historical albums need remediation.
+    recorded = catalog_loader() if catalog_loader is not None else catalog_albums
+    catalog_report = check_catalog_texture(
+        selected_ids, features, checksums,
+        current_release_manifest_id=rel_id,
+        history=recorded if recorded is not None else (),
+    )
+    # The assembly service supplies historical evidence; direct in-process calls
+    # without a catalogue are explicitly marked as unverified.
+    texture_report["evidence"] = catalog_report.pop("evidence")
+    texture_report["catalog"] = {
+        **catalog_report,
+        "coverage": "complete" if recorded is not None else "not_configured",
+    }
+
     # 6. Visual plan and render.
     visual_res = plan_visual_session(
         playlist_session_id_str=playlist_session.id,
@@ -184,6 +213,18 @@ def assemble_media_package(
     visual_session = visual_res.visual_session
     by_candidate = {m.candidate_id: m for m in track_manifests}
     renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
+    claim_namespace: str | None = None
+    if before_render is not None:
+        # Commit the durable job and its single-worker claim before FFmpeg or
+        # any output-blob write. This fingerprint is the renderer's exact
+        # metadata identity, using hashes of sources verified during feature
+        # extraction, without loading all selected audio a second time.
+        claim_namespace = before_render(
+            package_id, profile.name,
+            renderer.input_manifest_hash(
+                playlist_session, visual_session, playlist_concept=playlist_concept,
+            ),
+        )
     render_res = renderer.render(
         media_package_id_str=package_id,
         playlist=playlist_session,
@@ -193,6 +234,9 @@ def assemble_media_package(
         # read, so the render holds one recording at a time.
         sources=_FetchOnRead(store, {t.song_id: by_candidate[t.song_id] for t in tracks}),
         required_window_seconds=playlist_res.sequence.window,
+        claim_namespace=claim_namespace,
+        attempt=render_attempt,
+        playlist_concept=playlist_concept,
         clock=clock,
     )
     visual_session.assets = list(render_res.visual_assets)
@@ -205,6 +249,7 @@ def assemble_media_package(
         brand_profile=brand_profile,
         playlist_concept=playlist_concept,
         store=store,
+        claim_namespace=claim_namespace,
         now=packaged_at,
     )
 
@@ -229,6 +274,7 @@ def assemble_media_package(
     render_report = {
         **render_res.render_report,
         "sequencing": playlist_res.sequence.report,
+        "album_texture": texture_report,
         "chapters": {"rules": "yt-chapters-v1", "count": len(meta_res.chapters)},
     }
     media_package = MediaPackage.create(

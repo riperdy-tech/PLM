@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 import pytest
 from media_factory.artwork.generator import (
     THUMBNAIL_VARIANTS,
+    _contrast_ink,
+    _fit,
     generate_thumbnails,
     render_thumbnail,
 )
@@ -24,7 +26,7 @@ from media_factory.errors import MediaAssemblyError
 from media_factory.metadata.compiler import compile_metadata_and_chapters
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from tests.support.media_backend import InMemoryArtifactStore
 
@@ -67,6 +69,63 @@ def test_thumbnails_are_stored_with_the_checksum_of_the_stored_bytes() -> None:
     for variant in variants:
         assert hashlib.sha256(store.get(variant.uri)).hexdigest() == variant.checksum
         assert variant.uri.endswith(variant.checksum)
+        assert variant.text_payload == "Focus"
+        assert variant.layout_version.startswith("thumb-layout-v3+")
+
+
+@pytest.mark.parametrize(("width", "start", "minimum"), [
+    (558, 87, 72),
+    (1120, 120, 82),
+    (980, 88, 72),
+])
+def test_thumbnail_title_fits_readably_even_when_very_long(
+    width: int, start: int, minimum: int,
+) -> None:
+    draw = ImageDraw.Draw(Image.new("RGB", (1280, 720)))
+    for title in (
+        "SUPERCALIFRAGILISTICEXPIALIDOCIOUS" * 12,
+        "DEEP LATE NIGHT STUDY RAINY CITY LOFI FOCUS " * 40,
+    ):
+        font, lines = _fit(draw, title, width, start, minimum=minimum)
+        assert len(lines) <= 3
+        assert lines
+        assert font.size >= minimum
+        assert any(line.endswith("…") for line in lines)
+        assert all(draw.textlength(line, font=font) <= width for line in lines)
+        again = _fit(draw, title, width, start, minimum=minimum)
+        assert (font.size, lines) == (again[0].size, again[1])
+
+
+def test_pale_palette_still_has_dark_text_backing() -> None:
+    light = BrandProfile(
+        brand_id="light", brand_name="Light",
+        palette=["#FAFAFA", "#F0F0F0", "#FADEB4", "#FFFFFF"],
+    )
+    for variant, point in (
+        ("thumb_a_hero", (56, 680)),
+        ("thumb_b_bold_text", (100, 140)),
+        ("thumb_c_minimal", (120, 120)),
+    ):
+        png = render_thumbnail(variant, light, "Night Drive")
+        image = Image.open(io.BytesIO(png))
+        assert image.getpixel(point) == (12, 19, 38)
+
+
+def test_accent_labels_choose_high_contrast_ink() -> None:
+    assert _contrast_ink((255, 255, 255)) == (0, 0, 0)
+    assert _contrast_ink((0, 0, 0)) == (255, 255, 255)
+    assert _contrast_ink((15, 20, 32)) == (255, 255, 255)
+    assert _contrast_ink((250, 222, 180)) == (0, 0, 0)
+
+
+def test_blank_brand_label_keeps_legacy_rendering_safe() -> None:
+    unnamed = BrandProfile(
+        brand_id="brand_neon", brand_name=" ",
+        palette=["#111111", "#222222", "#33AAFF", "#FF44AA"],
+    )
+    for variant in THUMBNAIL_VARIANTS:
+        data = render_thumbnail(variant, unnamed, "Night Drive")
+        assert Image.open(io.BytesIO(data)).size == (1280, 720)
 
 
 def test_an_invalid_palette_is_refused() -> None:
