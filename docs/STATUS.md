@@ -198,6 +198,31 @@ PostgreSQL 16 at 55432, `plm migrate` upgraded an empty `plm_r5_ci` to
 `0042_media_render_evidence` and refused a decoy `plm` (left empty).
 **Not verified:** CI with this change, the compose stack, any R5 pass.
 
+CI on the pushed branch (2026-10-29), mock providers only, each run on
+its own fresh CI compose stack:
+- Run 40830399821 on `e798b8e` (Option A plus R5 MinIO bucket setup):
+  **Gate R5 full chain 8 passed** (1,767.81 s), the first isolated R5
+  pass. The main job failed on 3 stale integration tests (62 passed,
+  3 failed, 30 skipped): the R3 worker-kill test still expected automatic
+  recovery that ADR-0041 now refuses (`budget_reservation_replayed`); the
+  P6 assemble test reused the R5 step test's audio and brand and was held
+  as a near-copy (`album_catalog_near_duplicate`); the AR allocation test's
+  token removal was undone by `.env`, so the stored-fallback path never ran.
+- Fixed in `2b0d2db` (tests only). Locally, on a throwaway PostgreSQL 16 and
+  Temporal: the R3 module 5 passed and the AR test passed, and the old R3 test
+  timed out as in CI. The P6 change was checked offline: P6's own feature code
+  scores the new tracks at most 0.930 against the R5 step tracks (threshold 0.998).
+- Run 40883791600 on `2b0d2db`: **all green**. Ruff clean; mypy 465 files
+  clean; non-integration 3,280 passed, 19 skipped; integration (compose
+  PostgreSQL/Temporal/MinIO) 65 passed, 30 skipped; FFmpeg media 11 passed;
+  **Gate R5 full chain 8 passed** (1,778.13 s).
+
+The two R5 passes are on different revisions, which differ only in those three
+integration test files, and on separate stacks. This is not two full-chain runs
+on one revision and one stack. It does not show that every compose service used
+`plm_r5_ci`, and it is no evidence for real providers. Not repeated on the
+local compose stack. A03 and the R5 gate stay open.
+
 A02 intake: on branch `review/r6-live-adapters` at HEAD `4a35ce2`,
 the inherited working tree had **62 tracked modified paths and 134
 untracked paths**; many changes precede this task. Existing `.bridge/`

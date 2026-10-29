@@ -116,4 +116,20 @@ Each row corresponds to **one original bullet** in Part 2 (including multiple su
 
 **First CI run and Option A, 2026-10-29 (A02 still partial):** the branch was pushed on owner instruction; CI run 40804097280 on `ecd1456` failed. (1) Unit step: Typer forces Rich styling under `GITHUB_ACTIONS`, splitting option names in `--help` output; four tests fixed in `456b4eb` (reproduced and verified on `ubuntu:26.04` with the toolcache Python 3.12.16). (2) `plm migrate` refused the empty CI DB because the code-only hold, raw Alembic and the R5 guard accepted three different targets and CI used the shared-DB address `plm` on 5432. Owner chose Option A: one shared disposable-target rule (`is_disposable_migration_target`) for all three, CI on `plm_migration_disposable_ci` / `plm_r5_ci` at `127.0.0.1:55432`, and `PLM_R5_ISOLATED_STACK=1` on the R5 step. The shared development DB stays held. Verified locally (unit suite, disposable PostgreSQL 16, compose render); **not** verified: a CI run with these changes, the compose stack in CI, or any R5 pass.
 
+**CI evidence, 2026-10-29 (A02 and A03 still partial):**
+- CI run 40830399821 on `e798b8e`: Gate R5 full chain 8 passed, the first isolated R5 pass.
+  Its main job failed on 3 stale integration tests (R3 worker-kill vs ADR-0041, P6 assemble
+  near-copy of the R5 step test's audio, AR token removal undone by `.env`).
+- Fixed in `2b0d2db` (tests only).
+- CI run 40883791600 on `2b0d2db` is fully green: Ruff; mypy 465 files; non-integration
+  3,280 passed / 19 skipped; integration 65 passed / 30 skipped; FFmpeg media 11 passed;
+  R5 full chain 8 passed.
+- A02: the "clean CI branch" part now has evidence at the branch tip. Commits 1–8 of the
+  series are still not individually green, and closing A02 stays an owner decision.
+- A03: not met. There are two R5 passes, but on two revisions (differing only in the three
+  test files) and two fresh stacks, not two runs on one revision and one stack. There is no
+  independent check that every service used `plm_r5_ci`. Mock providers only.
+
+See `docs/STATUS.md`. Formal counts unchanged.
+
 **Do not mark R6/economics complete as part of A/B.** Other live-account provider writes and production DB/media backfill are **not authorized** by this register. Existing owner-requested stages A–B authorize code, local tests and review; human rights conclusions and production publishes remain separate.
