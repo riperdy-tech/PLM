@@ -30,7 +30,13 @@ from ..domain.models import (
     YouTubeVideoPublishedEvent,
 )
 from ..engine import YouTubePublishingEngine
-from ..manifests import PackageNotReadyError, build_publish_manifest, preflight_metadata
+from ..manifests import (
+    CandidateSelectionError,
+    PackageNotReadyError,
+    build_publish_manifest,
+    preflight_metadata,
+    same_publish_choice,
+)
 from ..preflight.gates import evaluate_preflight_all
 from ..storage.repositories import (
     get_channel_profile_by_channel_id,
@@ -187,7 +193,8 @@ def create_youtube_router(
             # 2. Manifest from the package's facts, then preflight
             try:
                 manifest = build_publish_manifest(
-                    pkg, profile, publish_at=req.publish_at, now=now
+                    pkg, profile, publish_at=req.publish_at, now=now,
+                    metadata_variant_id=req.metadata_variant_id, thumbnail_id=req.thumbnail_id,
                 )
             except PackageNotReadyError as exc:
                 raise HTTPException(
@@ -198,8 +205,16 @@ def create_youtube_router(
                         message=str(exc),
                     ).model_dump(),
                 ) from exc
+            except CandidateSelectionError as exc:
+                raise _refused(
+                    422, "candidate_selection_invalid", str(exc),
+                    ["metadata_variant_id", "thumbnail_id"],
+                ) from exc
             passed, results, reason = evaluate_preflight_all(
-                profile, pkg.to_wire(), preflight_metadata(pkg), req.publish_at, now=now
+                profile, pkg.to_wire(),
+                preflight_metadata(pkg, metadata_variant_id=manifest.metadata_version),
+                req.publish_at, now=now,
+                selected_thumbnail_id=manifest.selection.thumbnail_id if manifest.selection else None,
             )
             if not passed:
                 diags = [d for r in results for d in r.diagnostics]
@@ -219,6 +234,19 @@ def create_youtube_router(
                 insert_publish_manifest(session, manifest)
                 session.commit()
             else:
+                # One package/channel/video identity is one immutable publication.
+                # Never silently switch its thumbnail, title, or experiment arm
+                # under the same idempotency key on a later call.
+                if not same_publish_choice(
+                    stored, manifest,
+                    explicit_requested=req.metadata_variant_id is not None
+                    or req.thumbnail_id is not None,
+                ):
+                    raise _refused(
+                        409, "candidate_selection_conflict",
+                        "this publication identity already has a different frozen assignment",
+                        ["metadata_variant_id", "thumbnail_id"],
+                    )
                 manifest = stored
 
             # 4. Execute Publishing Engine
@@ -243,6 +271,8 @@ def create_youtube_router(
             return PublishResponse(
                 attempt_id=result.attempt.attempt_id,
                 manifest_id=manifest.manifest_id,
+                candidate_selection=manifest.selection.model_dump(mode="json")
+                if manifest.selection else None,
                 state=result.attempt.state.value,
                 youtube_video_id=vid_id,
                 video_url=record.video_url if record else None,
@@ -269,10 +299,13 @@ def create_youtube_router(
             return AttemptStatusResponse(
                 attempt_id=attempt.attempt_id,
                 manifest_id=attempt.manifest_id,
+                candidate_selection=manifest.selection.model_dump(mode="json")
+                if manifest and manifest.selection else None,
                 channel_id=attempt.channel_id,
                 state=attempt.state.value,
                 operating_mode=attempt.operating_mode.value,
                 youtube_video_id=attempt.youtube_video_id,
+                thumbnail_uploaded=attempt.thumbnail_uploaded,
                 bytes_uploaded=attempt.bytes_uploaded,
                 total_bytes=attempt.total_bytes,
                 error_code=attempt.error_code,

@@ -55,7 +55,7 @@ def test_gate_b_artifact_validates_video_and_thumbnails() -> None:
             "duration_seconds": 120.0,
         },
         "thumbnails": [
-            {"id": "thumb_01", "uri": "media/thumb/01.jpg"},
+            {"id": "thumb_01", "uri": "media/thumb/01.jpg", "checksum": "a" * 64},
         ],
     }
     assert evaluate_gate_b_artifact(valid_payload, now=NOW).passed
@@ -66,7 +66,7 @@ def test_gate_b_artifact_validates_video_and_thumbnails() -> None:
     # Zero duration
     bad_duration = {
         "video": {"master_uri": "media/video/track.mp4", "checksum": "chk_video_valid", "duration_seconds": 0.0},
-        "thumbnails": [{"id": "thumb_01", "uri": "media/thumb/01.jpg"}],
+        "thumbnails": [{"id": "thumb_01", "uri": "media/thumb/01.jpg", "checksum": "a" * 64}],
     }
     assert not evaluate_gate_b_artifact(bad_duration, now=NOW).passed
 
@@ -76,6 +76,23 @@ def test_gate_b_artifact_validates_video_and_thumbnails() -> None:
         "thumbnails": [],
     }
     assert not evaluate_gate_b_artifact(no_thumbs, now=NOW).passed
+
+
+def test_gate_b_checks_selected_thumbnail_not_just_first() -> None:
+    package = {
+        "video": {"master_uri": "media/test.mp4", "checksum": "a" * 64,
+                  "duration_seconds": 120.0},
+        "thumbnails": [
+            {"id": "broken", "uri": "", "checksum": ""},
+            {"id": "valid", "uri": "media/valid.png", "checksum": "b" * 64},
+        ],
+    }
+    assert evaluate_gate_b_artifact(
+        package, now=NOW, selected_thumbnail_id="valid",
+    ).passed
+    assert not evaluate_gate_b_artifact(
+        package, now=NOW, selected_thumbnail_id="missing",
+    ).passed
 
 
 def test_gate_c_metadata_limits_and_category() -> None:

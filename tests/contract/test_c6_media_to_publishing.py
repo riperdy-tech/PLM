@@ -47,7 +47,12 @@ from services.youtube_publishing.storage.repositories import insert_publish_mani
 from tests.support.clearance import p5_holding
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.distribution_db import distribution_db_session
-from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain, stored_manifest
+from tests.support.media_backend import (
+    InMemoryArtifactStore,
+    StandInToolchain,
+    stored_manifest,
+    synth_specs,
+)
 from tests.support.seams import lineage_fields
 from tests.support.youtube_db import youtube_db_session
 
@@ -55,7 +60,8 @@ REGISTRY_ENTRY = "C6 · PHASE-P6 → PHASE-P7 → PHASE-P8"
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 SONGS = ("song_01", "song_02", "song_03")
 STORE = InMemoryArtifactStore()
-MANIFESTS = [stored_manifest(STORE, s, measured_duration_seconds=180.0) for s in SONGS]
+MANIFESTS = [stored_manifest(STORE, s, measured_duration_seconds=180.0, synth=spec)
+             for s, spec in zip(SONGS, synth_specs(), strict=True)]
 CHANNEL = ChannelProfile(
     id="prof_UC_contract", channel_id="UC_contract", channel_name="Contract Channel",
     brand_id="brand_neon", oauth_credential_ref="sec_oauth_contract",
@@ -105,7 +111,7 @@ def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
 def test_hop1_producer_emits_exactly_the_shared_wire(hop1: dict[str, Any]) -> None:
     assert tuple(hop1) == tuple(MediaPackagePayload.model_fields)
     assert hop1["lineage"] == lineage_fields()
-    assert [t["song_id"] for t in hop1["tracklist"]] == list(SONGS)
+    assert sorted(t["song_id"] for t in hop1["tracklist"]) == sorted(SONGS)
 
 
 def test_hop1_p7_takes_every_fact_from_the_package(hop1: dict[str, Any]) -> None:

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..domain.enums import OperatingMode, PrivacyStatus, PublishState
 from ..domain.models import (
+    CandidateSelection,
     ChannelProfile,
     ManifestTrack,
     PublishAttempt,
@@ -142,6 +143,7 @@ def _to_manifest_domain(row: PublishManifestRow) -> PublishManifest:
         playlist_id=row.playlist_id,
         playlist_title=row.playlist_title,
         metadata_version=row.metadata_version,
+        selection=CandidateSelection.model_validate(row.selection_json) if row.selection_json else None,
         tracks=tuple(ManifestTrack(**t) for t in (row.tracks_json or [])),
         created_at=_utc(row.created_at),
     )
@@ -176,6 +178,7 @@ def insert_publish_manifest(session: Session, manifest: PublishManifest) -> None
         playlist_id=manifest.playlist_id,
         playlist_title=manifest.playlist_title,
         metadata_version=manifest.metadata_version,
+        selection_json=manifest.selection.model_dump(mode="json") if manifest.selection else None,
         tracks_json=[t.model_dump() for t in manifest.tracks],
         created_at=manifest.created_at,
     )

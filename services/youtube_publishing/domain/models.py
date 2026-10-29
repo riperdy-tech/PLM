@@ -54,6 +54,19 @@ class ManifestTrack(BaseModel):
     artifact_id: str = Field(min_length=1)
 
 
+class CandidateSelection(BaseModel):
+    """Frozen P7 candidate assignment, not a claim about measured winner performance."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy_version: str = "p7-candidate-assignment-v1"
+    method: str = Field(pattern="^(first_declared|explicit)$")
+    metadata_variant_id: str = Field(min_length=1)
+    thumbnail_id: str = Field(min_length=1)
+    eligible_metadata_ids: tuple[str, ...] = Field(min_length=1)
+    eligible_thumbnail_ids: tuple[str, ...] = Field(min_length=1)
+
+
 class PublishManifest(BaseModel):
     """Immutable frozen publish manifest (P7 §10)."""
 
@@ -86,6 +99,8 @@ class PublishManifest(BaseModel):
     playlist_id: str | None = None
     playlist_title: str | None = None
     metadata_version: str = "v1"
+    selection: CandidateSelection | None = None
+    """NULL on historical manifests: never invent an exposure assignment."""
     tracks: tuple[ManifestTrack, ...]
     """The package's tracklist; an empty one is never cleared (a legacy manifest)."""
     created_at: datetime

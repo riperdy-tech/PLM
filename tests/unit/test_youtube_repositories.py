@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from youtube_publishing.domain.enums import OperatingMode, PrivacyStatus, PublishState
 from youtube_publishing.domain.models import (
+    CandidateSelection,
     ChannelProfile,
     PublishAttempt,
     PublishManifest,
@@ -83,6 +84,11 @@ def test_manifest_and_attempt_repositories_roundtrip() -> None:
         contains_synthetic_media=True,
         made_for_kids=False,
         metadata_version="v1",
+        selection=CandidateSelection(
+            method="explicit", metadata_variant_id="meta_b", thumbnail_id="thumb_b",
+            eligible_metadata_ids=("meta_a", "meta_b"),
+            eligible_thumbnail_ids=("thumb_a", "thumb_b"),
+        ),
         created_at=now,
         tracks=test_track_refs(),
     )
@@ -105,6 +111,9 @@ def test_manifest_and_attempt_repositories_roundtrip() -> None:
         m_fetch = get_publish_manifest_by_id(session, "pub_man_01")
         assert m_fetch is not None
         assert m_fetch.title == "Title Test"
+        assert m_fetch.selection == manifest.selection
+        assert m_fetch.selection is not None
+        assert m_fetch.selection.thumbnail_id == "thumb_b"
 
         m_idem = get_publish_manifest_by_idempotency_key(session, "idem_01")
         assert m_idem is not None

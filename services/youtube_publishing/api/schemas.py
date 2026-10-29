@@ -20,6 +20,9 @@ class PublishRequest(BaseModel):
     channel_id: str = Field(min_length=1)
     """A channel profile configured by an operator (P0 §10); never auto-created."""
     operating_mode: str = "dry_run"
+    metadata_variant_id: str | None = Field(default=None, min_length=1)
+    thumbnail_id: str | None = Field(default=None, min_length=1)
+    """Explicit P7 selection IDs; omitted IDs retain first-declared compatibility."""
     publish_at: AwareDatetime | None = None
     """Must carry a timezone; a naive time is ambiguous and is refused (422)."""
 
@@ -31,6 +34,7 @@ class PublishResponse(BaseModel):
 
     attempt_id: str
     manifest_id: str
+    candidate_selection: dict[str, Any] | None = None
     state: str
     youtube_video_id: str | None = None
     video_url: str | None = None
@@ -51,10 +55,13 @@ class AttemptStatusResponse(BaseModel):
 
     attempt_id: str
     manifest_id: str
+    candidate_selection: dict[str, Any] | None = None
     channel_id: str
     state: str
     operating_mode: str
     youtube_video_id: str | None = None
+    thumbnail_uploaded: bool = False
+    """P7 upload receipt, not proof of user impressions or on-screen exposure."""
     bytes_uploaded: int = 0
     total_bytes: int = 0
     error_code: str | None = None

@@ -103,6 +103,7 @@ def test_publish_and_status_roundtrip(client: TestClient) -> None:
     assert res_att.status_code == 200
     att_data = res_att.json()
     assert att_data["state"] == "verified"
+    assert att_data["thumbnail_uploaded"] is True
     assert att_data["youtube_video_id"] == data["youtube_video_id"]
     assert datetime.fromisoformat(att_data["completed_at"]) == T0
 
@@ -111,6 +112,102 @@ def test_publish_and_status_roundtrip(client: TestClient) -> None:
     assert res_rec.status_code == 200
     rec_data = res_rec.json()
     assert rec_data["youtube_video_id"] == data["youtube_video_id"]
+
+
+def _multi_candidate_package() -> dict:
+    package = media_package(
+        "cand_api_01", media_package_id="pkg_candidate_assignment_test",
+    ).to_wire()
+    package["thumbnails"].append({
+        **package["thumbnails"][0], "id": "thumb_b",
+        "uri": "media/test/thumb_b.jpg", "checksum": "f" * 64,
+    })
+    package["metadata_candidates"].append({
+        **package["metadata_candidates"][0], "variant_id": "meta_b",
+        "title": "Alternate Test Mix",
+    })
+    return package
+
+
+def test_explicit_candidate_assignment_replays_without_switching(client: TestClient) -> None:
+    headers = {SERVICE_TOKEN_HEADER: "test-secret-token"}
+    request = {
+        "channel_id": "UC_neon_api_test", "operating_mode": "dry_run",
+        "media_package": _multi_candidate_package(),
+        "metadata_variant_id": "meta_b", "thumbnail_id": "thumb_b",
+    }
+    first = client.post("/youtube/publish", json=request, headers=headers)
+    assert first.status_code == 200, first.text
+    data = first.json()
+    assert data["state"] == "verified"
+    selection = data["candidate_selection"]
+    assert selection["method"] == "explicit"
+    assert selection["policy_version"] == "p7-candidate-assignment-v1"
+    assert selection["metadata_variant_id"] == "meta_b"
+    assert selection["thumbnail_id"] == "thumb_b"
+    assert selection["eligible_metadata_ids"] == ["meta_a", "meta_b"]
+    assert selection["eligible_thumbnail_ids"] == ["thumb_a", "thumb_b"]
+
+    retry = client.post("/youtube/publish", json=request, headers=headers)
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["manifest_id"] == data["manifest_id"]
+    assert retry.json()["candidate_selection"] == selection
+
+    conflict = client.post(
+        "/youtube/publish",
+        json={**request, "thumbnail_id": "thumb_a"}, headers=headers,
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "candidate_selection_conflict"
+
+    no_selection = client.post(
+        "/youtube/publish",
+        json={k: v for k, v in request.items()
+              if k not in ("metadata_variant_id", "thumbnail_id")}, headers=headers,
+    )
+    assert no_selection.status_code == 409
+    assert no_selection.json()["detail"]["code"] == "candidate_selection_conflict"
+
+    status = client.get(
+        f"/youtube/attempts/{data['attempt_id']}", headers=headers,
+    )
+    assert status.status_code == 200
+    assert status.json()["candidate_selection"] == selection
+
+
+def test_candidate_selection_rejects_missing_or_duplicate_ids(client: TestClient) -> None:
+    headers = {SERVICE_TOKEN_HEADER: "test-secret-token"}
+    package = _multi_candidate_package()
+    base = {"channel_id": "UC_neon_api_test", "media_package": package}
+    missing = client.post(
+        "/youtube/publish",
+        json={**base, "thumbnail_id": "not_a_candidate"}, headers=headers,
+    )
+    assert missing.status_code == 422
+    assert missing.json()["detail"]["code"] == "candidate_selection_invalid"
+
+    dup_package = _multi_candidate_package()
+    dup_package["thumbnails"][1]["id"] = "thumb_a"
+    duplicate = client.post(
+        "/youtube/publish",
+        json={**base, "media_package": dup_package}, headers=headers,
+    )
+    assert duplicate.status_code == 422
+    assert duplicate.json()["detail"]["code"] == "candidate_selection_invalid"
+
+
+def test_default_candidate_selection_records_first_declared(client: TestClient) -> None:
+    headers = {SERVICE_TOKEN_HEADER: "test-secret-token"}
+    data = client.post(
+        "/youtube/publish",
+        json={"channel_id": "UC_neon_api_test", "media_package": _multi_candidate_package()},
+        headers=headers,
+    )
+    assert data.status_code == 200, data.text
+    selection = data.json()["candidate_selection"]
+    assert selection["method"] == "first_declared"
+    assert selection["metadata_variant_id"] == "meta_a"
+    assert selection["thumbnail_id"] == "thumb_a"
 
 
 def test_publish_refuses_an_unconfigured_channel(client: TestClient) -> None:
