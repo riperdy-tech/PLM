@@ -1,15 +1,13 @@
-"""W0.5 integration: the real alembic chain against the dev postgres.
+"""W0.5 integration: Alembic chain tests with a destructive target guard.
 
-Skips with an explicit reason when postgres is unreachable — start it with
-``docker compose up -d --wait postgres``.
-
-DESTRUCTIVE BY DESIGN: the round-trip test downgrades to base, which drops the
-nine phase schemas. That is safe while Wave 0 holds no phase tables; point this
-suite only at the dedicated development database.
+The round-trip test drops all nine phase schemas by downgrading to base.
+It must NEVER run on the shared development database. Only an explicitly
+selected disposable database is eligible, after verifying current_database().
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import psycopg
@@ -24,7 +22,13 @@ from plm_platform.db import (
     scoped_session,
     session_factory,
 )
+from plm_platform.migration_safety import user_object_count
 from sqlalchemy import text
+
+from tests.support.migration_safety import (
+    destructive_migration_name_refusal,
+    destructive_migration_target_refusal,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -69,7 +73,34 @@ def _schema_names() -> set[str]:
         engine.dispose()
 
 
+def _require_disposable_migration_database() -> None:
+    """Refuse destructive Alembic calls on the default/shared database."""
+    settings = _settings()
+    configured = database_url(settings).database
+    declared = os.environ.get("PLM_DESTRUCTIVE_MIGRATION_TEST_DB")
+    # The opt-in must be valid before opening any database connection.
+    initial_refusal = destructive_migration_name_refusal(configured, declared)
+    if initial_refusal is not None:
+        pytest.skip(f"destructive migration test disabled: {initial_refusal}")
+    engine = build_engine(settings)
+    try:
+        with engine.connect() as connection:
+            connected = connection.execute(text("SELECT current_database()")).scalar_one()
+            # A disposable target must really be empty, including unrelated
+            # user schemas and public routines/types/extensions. Use exactly
+            # the same read-only catalog inventory as 'plm migrate'.
+            existing_objects = user_object_count(connection)
+    finally:
+        engine.dispose()
+    reason = destructive_migration_target_refusal(
+        configured, declared, connected, existing_objects
+    )
+    if reason is not None:
+        pytest.skip(f"destructive migration test disabled: {reason}")
+
+
 def test_upgrade_downgrade_upgrade_round_trips_the_nine_schemas() -> None:
+    _require_disposable_migration_database()
     config = _alembic_config()
     command.upgrade(config, "head")
     assert set(SCHEMAS) <= _schema_names()
