@@ -22,6 +22,7 @@ from .validators import (
     CLASSIFICATION_SCHEMA_VERSION,
     ClassificationDraft,
     classification_input_fingerprint,
+    measured_duration_bucket,
     validate_classification,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
 class ClassificationInput:
     title: str | None
     description: str | None
+    video_duration_seconds: float | None = None
 
 
 class Classifier(Protocol):
@@ -51,7 +53,7 @@ class RuleBasedClassifier:
     """
 
     name = "rule_based"
-    version = "1"
+    version = "2-measured-duration"
 
     def classify(self, text: ClassificationInput) -> ClassificationDraft:
         haystack = normalize_text(" ".join(filter(None, (text.title, text.description))))
@@ -59,12 +61,19 @@ class RuleBasedClassifier:
         found: dict[D, list[str]] = {}
         unmatched: set[str] = set()
         for phrase, (dimension, value) in sorted(SYNONYMS.items(), key=lambda kv: -len(kv[0])):
+            # Playlist/video length is measured, never inferred from a label
+            # in a title, description, or fake numeric claim (ADR-0042).
+            if dimension is D.DURATION_BUCKET:
+                continue
             # A language is claimed only where the work declares it (its title):
             # prose like "Korean city vibes" describes content, not the language of
             # the track, and §15's example keeps `language` English-or-absent there.
             source = title_text if dimension is D.LANGUAGE else haystack
             if phrase in source:
                 found.setdefault(dimension, []).append(value)
+        duration_bucket = measured_duration_bucket(text.video_duration_seconds)
+        if duration_bucket is not None:
+            found[D.DURATION_BUCKET] = [duration_bucket]
         for token in haystack.split():
             if len(token) >= 4 and token not in {p.split()[-1] for p in SYNONYMS} \
                     and lookup_synonym(token) is None and not any(
@@ -94,7 +103,9 @@ def classify_observation(
     schema_version: str = CLASSIFICATION_SCHEMA_VERSION,
 ) -> tuple[str, bool]:
     """§28 cache first, §29 versions on every row; returns (classification_id, created)."""
-    fingerprint = classification_input_fingerprint(text.title, text.description)
+    fingerprint = classification_input_fingerprint(
+        text.title, text.description, video_duration_seconds=text.video_duration_seconds,
+    )
     cached = load_classification(
         session, content_fingerprint=fingerprint, taxonomy_version=taxonomy_version
     )

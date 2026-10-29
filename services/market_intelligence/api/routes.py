@@ -12,6 +12,7 @@ dependencies are per-app closures that only the eager form can see.
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
+from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..config import MarketSettings
 from ..domain.value_objects import classify_freshness
+from ..storage.models import observations
 from ..storage.raw_store import load_raw_observation
 from ..storage.repositories import latest_scores, load_run
 from .schemas import (
@@ -116,12 +118,31 @@ def build_router(*, session_factory: SessionFactory | None,
     @router.get("/observations/{observation_id}", response_model=ObservationOut)
     def observation(observation_id: str, _: Annotated[None, Depends(_auth(settings))],
                     session: Annotated[Session, Depends(dependency)]) -> ObservationOut:
+        # C1 score evidence historically names RAW observations, whereas the
+        # normal read endpoint originally accepted only normalized IDs. Keep
+        # the frozen C1 wire intact and resolve a unique raw alias read-only.
+        try:
+            identifier = str(UUID(observation_id))
+        except (TypeError, ValueError, AttributeError):
+            raise _not_found("observation", observation_id) from None
         row = session.execute(
-            sa.text("SELECT * FROM market.market_observations WHERE id = :id"),
-            {"id": observation_id},
+            sa.select(observations).where(observations.c.id == identifier)
         ).mappings().one_or_none()
         if row is None:
-            raise _not_found("observation", observation_id)
+            raw_matches = session.execute(
+                sa.select(observations).where(
+                    observations.c.raw_observation_id == identifier
+                ).order_by(observations.c.id).limit(2)
+            ).mappings().all()
+            if len(raw_matches) > 1:
+                raise HTTPException(status_code=409, detail=ErrorShape(
+                    code="observation_id_ambiguous",
+                    field_paths=["observation_id"],
+                    message="raw observation maps to multiple normalized observations",
+                ).model_dump())
+            if not raw_matches:
+                raise _not_found("observation", observation_id)
+            row = raw_matches[0]
         raw = load_raw_observation(session, str(row["raw_observation_id"])) or {}
         return ObservationOut(
             id=str(row["id"]), entity_id=str(row["entity_id"]), source_id=str(row["source_id"]),

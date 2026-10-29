@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -18,7 +19,7 @@ from .ontology import DIMENSION_SPECS
 
 __all__ = [
     "CLASSIFICATION_SCHEMA_VERSION", "ClassificationDraft", "ClassificationSchemaError",
-    "classification_input_fingerprint", "validate_classification",
+    "classification_input_fingerprint", "measured_duration_bucket", "validate_classification",
 ]
 
 CLASSIFICATION_SCHEMA_VERSION: Final[str] = "p1-classification-v1"
@@ -122,13 +123,54 @@ def validate_classification(raw: Mapping[str, Any]) -> ClassificationDraft:
                                unmapped_terms=tuple(unmapped))
 
 
-def classification_input_fingerprint(title: str | None, description: str | None) -> str:
-    """§28's cache key input: content, not observation id."""
-    payload = json.dumps(
-        {"title": title or "", "description": description or ""}, sort_keys=True,
-        separators=(",", ":"), ensure_ascii=False,
+def measured_duration_bucket(seconds: float | None) -> str | None:
+    """P1 taxonomy v2: classify video length from observed metadata only.
+
+    The bins are disjoint half-open intervals in seconds. Exactly 75 min
+    belongs to 45_75m; more than 75 min is gt_75m. Missing is UNKNOWN,
+    not the length advertised in the title. Invalid observations must be
+    quarantined by ingestion, not silently converted into a bucket.
+    """
+    if seconds is None:
+        return None
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise TypeError("video duration must be numeric")
+    if not math.isfinite(seconds) or seconds < 0:
+        raise ValueError("video duration must be finite and nonnegative")
+    if seconds < 60:
+        return "lt_60s"
+    if seconds < 180:
+        return "60_180s"
+    if seconds < 600:
+        return "3_10m"
+    if seconds < 2700:
+        return "10_45m"
+    if seconds <= 4500:
+        return "45_75m"
+    return "gt_75m"
+
+
+def classification_input_fingerprint(
+    title: str | None, description: str | None,
+    *, video_duration_seconds: float | None = None,
+) -> str:
+    """§28: cache by observed content AND measured duration bucket (v2).
+
+    Text-only calls retain their historical fingerprint, but the default
+    taxonomy version is bumped to v2 so those legacy classifications are
+    never reused under the new measured-duration policy. Equal text with
+    genuinely different measured buckets cannot share a classification.
+    """
+    payload: dict[str, object] = {
+        "title": title or "", "description": description or "",
+    }
+    duration_bucket = measured_duration_bucket(video_duration_seconds)
+    if duration_bucket is not None:
+        payload["measured_duration_bucket"] = duration_bucket
+    serialized = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _dimension_for(key: str) -> D | None:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -474,7 +475,10 @@ def _classify_pending(session: Session, *, now: datetime, settings: MarketSettin
     classified = cached = unclassifiable = 0
     for row in rows:
         title, description = row["text_title"], row["text_description"]
-        content_fingerprint = classification_input_fingerprint(title, description)
+        measured_seconds = row["video_duration_seconds"]
+        content_fingerprint = classification_input_fingerprint(
+            title, description, video_duration_seconds=measured_seconds,
+        )
         if repositories.load_classification(
             session, content_fingerprint=content_fingerprint,
             taxonomy_version=settings.taxonomy_version,
@@ -484,7 +488,10 @@ def _classify_pending(session: Session, *, now: datetime, settings: MarketSettin
         try:
             classify_observation(
                 session, entity_id=str(row["entity_id"]), observation_id=str(row["id"]),
-                text=ClassificationInput(title=title, description=description),
+                text=ClassificationInput(
+                    title=title, description=description,
+                    video_duration_seconds=measured_seconds,
+                ),
                 classifier=classifier, taxonomy_version=settings.taxonomy_version,
             )
         except ClassificationSchemaError:
@@ -502,40 +509,75 @@ def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> 
     rows = repositories.latest_classifications_for(
         session, taxonomy_version=settings.taxonomy_version
     )
-    drafts = [_classification_draft(row) for row in rows]
+    # Rebuild the membership from measured, stored observations. The §28
+    # classification cache holds *one* row for identical content+duration;
+    # its single observation_id is not all of the evidence that shares it.
+    # Counting that row once incorrectly drops a supported arm below the
+    # min-support threshold and underreports score provenance.
+    by_observation_id: dict[str, Any] = {}
+    observed_ids_by_content: dict[str, list[str]] = {}
+    for observation in repositories.load_observations(session):
+        observed_at = observation.observed_at
+        if observed_at.tzinfo is None:
+            # SQLAlchemy SQLite drops tzinfo; the write boundary uses UTC.
+            observed_at = observed_at.replace(tzinfo=UTC)
+        if observed_at > now:
+            continue
+        published_at = observation.published_at
+        if published_at is not None and published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=UTC)
+        observation = replace(
+            observation, observed_at=observed_at, published_at=published_at,
+        )
+        observation_id = repositories.deterministic_id(
+            "observation", observation.entity_id, observation.source_id,
+            observed_at.isoformat(),
+        )
+        by_observation_id[observation_id] = observation
+        measured_seconds = (
+            float(observation.video_duration_seconds.unwrap())
+            if observation.video_duration_seconds.is_known else None
+        )
+        content_key = classification_input_fingerprint(
+            observation.text_title, observation.text_description,
+            video_duration_seconds=measured_seconds,
+        )
+        observed_ids_by_content.setdefault(content_key, []).append(observation_id)
+    drafts: list[ClassificationDraft] = []
     observation_ids: dict[str, tuple[str, ...]] = {}
     for row in rows:
-        if row["observation_id"] is None:
-            continue
-        current = observation_ids.get(row["content_fingerprint"], ())
-        observation_ids[row["content_fingerprint"]] = (*current, str(row["observation_id"]))
+        draft = _classification_draft(row)
+        content_key = str(row["content_fingerprint"])
+        matched = tuple(dict.fromkeys(observed_ids_by_content.get(content_key, ())))
+        if matched:
+            observation_ids[content_key] = matched
+            drafts.extend([draft] * len(matched))
+        else:
+            # Keep the historical classification-only path (e.g. a manual
+            # imported label without an observation) without inventing
+            # observed evidence. Unsupported arms cannot score.
+            drafts.append(draft)
+            if row["observation_id"] is not None:
+                observation_ids[content_key] = (str(row["observation_id"]),)
     arms = generate_candidate_arms(
-        drafts, min_support=settings.min_arm_support, observation_ids_by_content=observation_ids
+        drafts, min_support=settings.min_arm_support,
+        observation_ids_by_content=observation_ids,
+        taxonomy_version=settings.taxonomy_version,
     )
     arm_ids: dict[str, str] = {}
     for arm in arms:
-        stored_id, _ = repositories.upsert_arm(session, arm, brand_id=settings.default_brand_id)
+        stored_id, _ = repositories.upsert_arm(
+            session, arm, brand_id=settings.default_brand_id,
+            refuse_slug_collision=True,
+        )
         arm_ids[arm.fingerprint] = stored_id
-    # A scoring run at `now` reads the observations that existed at `now`: rows newer
-    # than the run's own instant are not inputs to its scores (a replay of an earlier
-    # instant must reproduce that instant's numbers, and §21's freshness refuses a
-    # future `as_of` outright).
-    observations_at_instant = [observation for observation in repositories.load_observations(session)
-                               if observation.observed_at <= now]
-    by_observation_id = {
-        repositories.deterministic_id(
-            "observation", observation.entity_id, observation.source_id,
-            observation.observed_at.isoformat(),
-        ): observation
-        for observation in observations_at_instant
-    }
     grouped: dict[str, list[Any]] = {}
     for arm in arms:
         group = [by_observation_id[oid] for oid in arm.source_observation_ids
                  if oid in by_observation_id]
         if group:
             grouped[arm.fingerprint] = group
-    confidence = _taxonomy_confidence(drafts)
+    confidence = _taxonomy_confidence(drafts, taxonomy_version=settings.taxonomy_version)
     features = compute_arm_features(
         grouped, as_of=now, settings=settings, arm_ids=arm_ids,
         profiles={arm.fingerprint: arm.profile for arm in arms},
@@ -560,12 +602,18 @@ def _classification_draft(row: Any) -> ClassificationDraft:
     )
 
 
-def _taxonomy_confidence(drafts: list[ClassificationDraft]) -> dict[str, float]:
-    """Mean classification confidence per arm fingerprint — the confidence input (§19)."""
+def _taxonomy_confidence(
+    drafts: list[ClassificationDraft], *, taxonomy_version: str | None = None,
+) -> dict[str, float]:
+    """Mean confidence keyed by the same namespace as persisted arm identity."""
     buckets: dict[str, list[float]] = {}
     for draft in drafts:
-        arm_fingerprint = fingerprint(profile_from_dimensions(draft.dimensions))
-        buckets.setdefault(arm_fingerprint, []).append(draft.confidence)
+        profile_key = fingerprint(profile_from_dimensions(draft.dimensions))
+        arm_key = (
+            f"{taxonomy_version}|{profile_key}"
+            if taxonomy_version is not None else profile_key
+        )
+        buckets.setdefault(arm_key, []).append(draft.confidence)
     return {key: sum(values) / len(values) for key, values in buckets.items()}
 
 

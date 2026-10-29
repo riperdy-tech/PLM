@@ -420,15 +420,15 @@ def observations_for_entities(
 def observation_classification_inputs(
     session: Session, *, since: datetime | None = None, limit: int = 1000,
 ) -> list[Mapping[str, Any]]:
-    """Observation rows with the text a classifier needs — id, entity, title, description.
+    """Observation source text plus observed video duration for taxonomy v2.
 
-    The classification cache keys on content, but §16's arms need the observation id the
-    content came from; `load_observations` cannot supply it (it returns Tri-valued domain
-    records), so this read exists for `cli._classify_pending`.
+    Duration comes from normalized measured metadata, not the title.
+    SQL NULL is UNKNOWN/NOT_READY: neither state licenses a guessed bucket.
+    The observation ID is retained for arm evidence lineage.
     """
     statement = (
         sa.select(observations.c.id, observations.c.entity_id, observations.c.text_title,
-                  observations.c.text_description)
+                  observations.c.text_description, observations.c.video_duration_seconds)
         .order_by(observations.c.observed_at)
         .limit(limit)
     )
@@ -688,7 +688,10 @@ def latest_classifications_for(
     return [dict(row) for row in session.execute(statement).mappings()]
 
 
-def upsert_arm(session: Session, draft: ArmDraft, *, brand_id: str) -> tuple[str, bool]:
+def upsert_arm(
+    session: Session, draft: ArmDraft, *, brand_id: str,
+    refuse_slug_collision: bool = False,
+) -> tuple[str, bool]:
     """One row per identity; an existing arm keeps its arm_id (Review Focus 4).
 
     Arm ids are deterministic (R15), so re-running the same pipeline against one
@@ -699,9 +702,11 @@ def upsert_arm(session: Session, draft: ArmDraft, *, brand_id: str) -> tuple[str
     * a row already carries this fingerprint: it keeps its id and slug, and its
       evidence-bearing fields are refreshed (a later run sees at least the same
       corpus; support and source observations may grow);
-    * the slug is already taken by a *different* fingerprint: the incumbent row is
-      returned untouched. The slug is the schema's unique key, and rewriting a row's
-      fingerprint would silently merge two identities (§14.3), so first writer wins.
+    * the slug is already taken by a *different* fingerprint: legacy callers
+      retain the incumbent-first behavior without changing the old record.
+      Versioned taxonomy-v2 recomputation opts into strict collision refusal.
+      Returning the old slug as the new identity would silently attach new
+      score evidence to a different P1 arm (§14.3/ADR-0042).
 
     The row id is derived from the fingerprint (uuid5), never minted: replaying the
     same classifications into a fresh schema reproduces the same arm row.
@@ -721,6 +726,11 @@ def upsert_arm(session: Session, draft: ArmDraft, *, brand_id: str) -> tuple[str
         sa.select(arms.c.arm_id).where(arms.c.arm_id == draft.arm_id)
     ).scalar_one_or_none()
     if by_arm_id is not None:
+        if refuse_slug_collision:
+            raise ValueError(
+                f"arm_slug_identity_conflict: {draft.arm_id!r} already "
+                "belongs to a different taxonomy fingerprint"
+            )
         return str(by_arm_id), False
     session.execute(sa.insert(arms).values(
         id=deterministic_id("arm", draft.fingerprint), brand_id=brand_id, arm_id=draft.arm_id,

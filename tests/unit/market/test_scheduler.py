@@ -59,6 +59,33 @@ def test_a_quota_reset_reschedules_with_a_reason_and_reopens_the_query(market_se
     assert row["last_run_at"] is not None
 
 
+def test_quota_reset_keeps_real_long_tail_priority_and_freshness(market_session) -> None:
+    source_id = _install(market_session)
+    query_id, _ = repositories.upsert_query(
+        market_session, source_id=source_id, query_text="rare ambient niche",
+        query_type=QueryType.MUSIC_GENRE, locale="en", country_code="US",
+        language="english", seed_group="long_tail", priority=10,
+        query_version="p1-queries-v1",
+    )
+    # The query was genuinely fetched, so it must not become "never run" again.
+    mark_run(market_session, query_id, at=NOW)
+    reset_schedule(
+        market_session, query_id, now=NOW + timedelta(hours=2), settings=SETTINGS,
+        reason="DAILY_QUOTA_EXHAUSTED",
+    )
+    row = next(r for r in repositories.load_queries(market_session) if r["id"] == query_id)
+    assert row["last_run_at"] == NOW
+    assert row["next_run_at"] == NOW + timedelta(hours=170)
+
+
+def test_quota_reset_rejects_unknown_query_instead_of_inventing_it(market_session) -> None:
+    with pytest.raises(ValueError, match="unknown market query"):
+        reset_schedule(
+            market_session, "no_such_query", now=NOW, settings=SETTINGS,
+            reason="QUOTA_EXCEEDED",
+        )
+
+
 # -- §27 daily quota ceiling: the connector's budget is per-run, the day's is not --------
 
 

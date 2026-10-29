@@ -81,8 +81,14 @@ def reset_schedule(session: Session, query_id: str, *, now: datetime,
     query comes back before a long-tail one. `reason` is the caller's log token
     (`QUOTA_EXCEEDED`, `DAILY_QUOTA_EXHAUSTED`, …) — recorded by the caller, not here.
     """
-    state = QueryState(query_id=query_id, query_fingerprint="", query_text="", priority=100,
-                       seed_group="bootstrap", last_run_at=None, next_run_at=None, active=True)
+    # Reuse the *stored* importance, seed group and actual last successful run.
+    # Synthesising priority=100/never-run made quota failures force every long-tail
+    # query into the high-frequency queue, wasting quota and biasing coverage.
+    row = next((row for row in load_queries(session, active_only=False)
+                if str(row["id"]) == query_id), None)
+    if row is None:
+        raise ValueError(f"cannot reschedule unknown market query {query_id!r}")
+    state = _state(row)
     update_query_schedule(
         session, query_id=query_id, now=now,
         next_run_at=next_run_at(state, now=now, settings=settings), last_run_at=None,

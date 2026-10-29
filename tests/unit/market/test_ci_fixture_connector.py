@@ -15,11 +15,16 @@ integration tier (`tests/integration/test_r5_full_chain.py`) runs `run_daily` wh
 
 from __future__ import annotations
 
+from decimal import Decimal
+from pathlib import Path
+
 import pytest
 from plm_platform.config import load_settings
+from plm_platform.testing.mock_outcomes import load_mock_outcome_model
 
 from services.market_intelligence.cli import _production_connector
 from services.market_intelligence.config import load_market_settings
+from services.market_intelligence.normalization.youtube import _seconds
 from services.market_intelligence.taxonomy.arms import generate_candidate_arms
 from services.market_intelligence.taxonomy.classifier import (
     ClassificationInput,
@@ -47,8 +52,24 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
         snippet = video.payload["snippet"]
         try:
             drafts.append(classifier.classify(ClassificationInput(
-                title=snippet.get("title"), description=snippet.get("description"))))
+                title=snippet.get("title"), description=snippet.get("description"),
+                video_duration_seconds=_seconds(
+                    (video.payload.get("contentDetails") or {}).get("duration"),
+                ),
+            )))
         except ClassificationSchemaError:
             continue
-    arms = generate_candidate_arms(drafts, min_support=settings.min_arm_support)
+    arms = generate_candidate_arms(
+        drafts, min_support=settings.min_arm_support,
+        taxonomy_version=settings.taxonomy_version,
+    )
     assert len(arms) >= 2, [d.dimensions for d in drafts]
+    # R5's synthetic outcomes must name the IDs P1 now actually creates;
+    # v1's historical arm IDs are not reused by taxonomy v2.
+    strong = "p1_taxonomy_v2_lofi_study_focus_45_75m"
+    weak = "p1_taxonomy_v2_rnb_45_75m"
+    assert {strong, weak} <= {arm.arm_id for arm in arms}
+    model = load_mock_outcome_model(
+        Path(__file__).resolve().parents[3] / "config/dev/mock_outcomes.json",
+    )
+    assert model.effect(strong) >= model.effect(weak) * Decimal("1.2")
