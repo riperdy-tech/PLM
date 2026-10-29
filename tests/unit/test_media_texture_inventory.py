@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from click import unstyle
 from media_factory.audio.features import (
     DEFAULT_FEATURE_POLICY,
     measure_features,
@@ -244,8 +245,10 @@ def test_inventory_cli_help_and_required_brand() -> None:
     runner = CliRunner()
     help_result = runner.invoke(app, ["media", "inspect-album-textures", "--help"])
     assert help_result.exit_code == 0
-    assert "--brand-id" in help_result.output
-    assert "--after-id" in help_result.output
-    assert "--limit" in help_result.output
+    # Typer forces Rich styling under GITHUB_ACTIONS; compare plain text.
+    help_output = unstyle(help_result.output)
+    assert "--brand-id" in help_output
+    assert "--after-id" in help_output
+    assert "--limit" in help_output
     missing_brand = runner.invoke(app, ["media", "inspect-album-textures"])
     assert missing_brand.exit_code != 0

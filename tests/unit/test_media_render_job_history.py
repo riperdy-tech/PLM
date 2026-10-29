@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from click import unstyle
 from media_factory.domain.enums import RenderJobStatus
 from media_factory.domain.models import RenderJob
 from media_factory.storage.render_claims import (
@@ -134,7 +135,9 @@ def test_render_history_cli_requires_exact_package() -> None:
     runner = CliRunner()
     help_result = runner.invoke(app, ["media", "render-jobs", "--help"])
     assert help_result.exit_code == 0
-    assert "--package-id" in help_result.output
-    assert "--limit" in help_result.output
+    # Typer forces Rich styling under GITHUB_ACTIONS; compare plain text.
+    help_output = unstyle(help_result.output)
+    assert "--package-id" in help_output
+    assert "--limit" in help_output
     missing = runner.invoke(app, ["media", "render-jobs"])
     assert missing.exit_code != 0

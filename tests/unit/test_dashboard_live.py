@@ -496,9 +496,12 @@ def test_a_malformed_reviewer_file_is_refused_at_startup(tmp_path: Any) -> None:
 
 
 def test_cli_serves_live_by_default_and_demo_only_behind_the_flag() -> None:
+    from click import unstyle
     from plm_platform.cli import app
     from typer.testing import CliRunner
 
     result = CliRunner().invoke(app, ["dashboard", "serve", "--help"])
     assert result.exit_code == 0
-    assert "--demo" in result.output and "--reviewers-file" in result.output
+    # Typer forces Rich styling under GITHUB_ACTIONS; compare plain text.
+    output = unstyle(result.output)
+    assert "--demo" in output and "--reviewers-file" in output

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from click import unstyle
 from media_factory import cli, render_reconciliation
 from media_factory.artifacts import MinioArtifactStore
 from media_factory.domain.enums import RenderJobStatus
@@ -243,7 +244,9 @@ def test_render_inspect_cli_is_read_only_and_explicitly_non_recovery(
         assert len(fake.listed) == 2
         help_result = CliRunner().invoke(app, ["media", "render-inspect", "--help"])
         assert help_result.exit_code == 0
-        assert "--job-id" in help_result.output and "--brand-id" in help_result.output
+        # Typer forces Rich styling under GITHUB_ACTIONS; compare plain text.
+        help_output = unstyle(help_result.output)
+        assert "--job-id" in help_output and "--brand-id" in help_output
     finally:
         engine.dispose()
 
