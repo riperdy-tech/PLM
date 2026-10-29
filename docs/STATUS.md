@@ -107,6 +107,16 @@ record is 2026-10-15 and later entries are uncommitted work. The P9
 video uploaded outside `ExternalWriteGuard`, R6 is not approved, and it
 contradicts the `autonomous_loop_worker.py` stub row below it.
 
+**Owner decisions D1–D4 (2026-10-29)**, recorded in
+[`reviews/2026-10-29-owner-decisions-d1-d4.md`](reviews/2026-10-29-owner-decisions-d1-d4.md):
+D1 — the R6-scope live work and public uploads `lPYmaPHPQr4` / `aqTf6gzjsNI`
+are retroactively recorded; **R6 is still not approved** and no new live call is
+authorized. D2 — the dev P2 posterior is annotated, not reset. D3 — the
+inherited tree and this session's changes are committed in 10 provenance
+groups on local `review/r6-live-adapters` (not pushed); A02 stays partial
+until CI and same-SHA gates run. D4 — R1–R5 approvals confirmed (authorization
+only; no gate re-verified).
+
 **Independent review of this session's diff** (separate reviewer, 0 critical, 7
 risks) led to further fixes: the owner fence now also covers failures while
 persisting a finished render, and first rolls the failing request back — without
@@ -1516,7 +1526,7 @@ separately against its own evidence gate.
 | Currency, decimal money | real | `Numeric(20,6)` plus currency columns (migration `0022_analytics_money`); `fx_rates` table and `POST /analytics/fx-rates`; reporting currency KRW by default; a missing rate is HTTP 409 `fx_rate_missing`; legacy rows with no currency are unreconciled, never assumed USD. C7 `raw_metrics.estimated_revenue` is still a float in the reporting currency (economics gate) |
 | Reward computation | partial | `engagement-contribution-proxy-v1`, a bounded proxy, not economic value (economics gate). Net contribution as `Money` in the reporting currency; the USD 50 scale is converted through FX; attribution confidence passed through; sensitivity tests pin bounds and monotonicity |
 | Reward delivery to P2 | real | Recorded and enqueued in one transaction (`analytics.outbox_events`, 0026); the pipeline's `dispatch_reward` step (or `plm analytics dispatch`) delivers with an idempotency key; P2 dedupes and answers `GET /ar/results` for reconciliation. A re-dispatch and a replayed payload are not counted twice (Gate R5). |
-| Closed-loop Bayesian learning (P9 -> P2) | partial | **Downgraded 2026-10-29 (takeover audit):** the run below used a video uploaded outside `ExternalWriteGuard` (see the 2026-10-23 content-quality audit) and R6 is not approved; its reward provenance is not auditable, and the dev P2 posterior it changed may need an owner decision (`docs/reviews/2026-10-29-unified-remaining-work-roadmap.md` §3). Original claim: verified live end-to-end via `scripts/run_phase_p9_closed_loop.py`: real metrics ingested from YouTube Analytics API v2 for published album `lPYmaPHPQr4`, evaluated under `engagement-contribution-proxy-v1`, delivered over Seam C7 leg-2 to `POST /ar/results`, applied in `POST /ar/update` (arm `lofi_study_focus` posterior mean 0.40825 -> 0.45798, variance 0.10649 -> 0.04878), and subsequent cycle allocated with Thompson sampling draws in `POST /ar/cycles`. |
+| Closed-loop Bayesian learning (P9 -> P2) | partial | **Downgraded 2026-10-29 (takeover audit):** the run below used a video uploaded outside `ExternalWriteGuard` (see the 2026-10-23 content-quality audit) and R6 is not approved; its reward provenance is not auditable, and the dev P2 posterior it changed is **annotated as contaminated** by owner decision D2 (2026-10-29, not reset, no DB write; `docs/reviews/2026-10-29-owner-decisions-d1-d4.md`). Original claim: verified live end-to-end via `scripts/run_phase_p9_closed_loop.py`: real metrics ingested from YouTube Analytics API v2 for published album `lPYmaPHPQr4`, evaluated under `engagement-contribution-proxy-v1`, delivered over Seam C7 leg-2 to `POST /ar/results`, applied in `POST /ar/update` (arm `lofi_study_focus` posterior mean 0.40825 -> 0.45798, variance 0.10649 -> 0.04878), and subsequent cycle allocated with Thompson sampling draws in `POST /ar/cycles`. |
 | Autonomous loop worker & Go/No-Go Gate | stub | `scripts/autonomous_loop_worker.py` is a prototype, **not a working autonomous publish chain**: it reads an existing MP4/thumbnail and fixed tracklist, never uploads a new video, uses hardcoded YouTube video ID `lPYmaPHPQr4`, falls back to invented arm scores/identities on P1/P2 failures, and can post a D28 `MATURE` reward built from a seven-day Analytics query with a fixed experiment identity and asserted attribution. Do not schedule it for production or use its rewards to train P2. Go/No-Go is a prompt, not the independent proof that a new package passed P5/P7. See `docs/reviews/2026-10-23-content-quality-audit.md`. |
 
 ### Architecture parts with no code

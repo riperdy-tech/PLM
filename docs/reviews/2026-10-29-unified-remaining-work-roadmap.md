@@ -49,7 +49,7 @@ Source: `docs/reviews/2026-10-13-system-review-and-remediation-plan.md`. Line 9:
 | R6 live adapters | **Not approved** (HANDOVER.md:20, STATUS:1185, A/B handover) | none | n/a — but see §3 |
 | Later: economics gate, P10, PARTS X/XII/XIII/XXIII | not approved | none | n/a |
 
-R1–R5 were executed and their gates recorded; the only gap is that the approvals were evidently given in conversation and never written down. **Decision needed (owner):** confirm R1–R5 approvals for the record. Not blocking.
+R1–R5 were executed and their gates recorded; the approvals were given in conversation and never written down. **Owner confirmed R1–R5 approvals on 2026-10-29 (D4, [`2026-10-29-owner-decisions-d1-d4.md`](2026-10-29-owner-decisions-d1-d4.md)).** That confirms authorization only; the "Re-verified" column is unchanged.
 
 ### 2.3 Layer 3 — A/B original-audit remediation
 
@@ -77,7 +77,7 @@ Work packages A01–A03 and B01–B07 are all `partial` or `triaged`; none meets
 3. **Possible contamination of the shared dev P2 posterior.** The STATUS P9 row "Closed-loop Bayesian learning — real" records a live reward for `lPYmaPHPQr4` applied to arm `lofi_study_focus` (posterior mean 0.40825 → 0.45798). The STATUS row for `scripts/autonomous_loop_worker.py` (same document) says that path used a hardcoded video ID, a fixed experiment identity and a 7-day query posted as a D28 MATURE reward, and must not be used to train P2. The two rows contradict each other; the dev P2 state may carry an unauditable reward. This session changed the first row's mark from `real` to `partial` with a pointer (STATUS.md) and did **not** touch any database.
 4. **Stale or overstated documents:** STATUS.md header "Last verified 2026-10-15, branch review/r5-full-chain"; HANDOVER.md R5 "gate not met" (superseded by `589decb`); SESSION_HANDOFF_2026-10-21.md "fully integrated, closed-loop autonomous engine" (contradicted by STATUS and the 2026-10-23 audit); the A/B handover's `__nexus_history__/…/INDEX.md` (does not exist) and "not copied into the PC repository" (they are on disk).
 
-**Owner decisions requested:** (D1) authorize, retroactively record or quarantine the existing live R6 work and the two public uploads; (D2) decide whether the dev P2 posterior must be reset or annotated (a DB write — not done); (D3) authorize provenance-grouped commits of the 267-entry tree (A02); (D4) confirm R1–R5 approvals for the record.
+**Owner decisions (2026-10-29, recorded in [`2026-10-29-owner-decisions-d1-d4.md`](2026-10-29-owner-decisions-d1-d4.md)):** D1 — the live R6 work and both uploads are **retroactively recorded**, not approved as R6, and R6 stays unapproved; D2 — the dev P2 posterior is **annotated, not reset** (no DB write); D3 — provenance-grouped commits **authorized** and made locally on `review/r6-live-adapters` (not pushed); D4 — R1–R5 approvals **confirmed**.
 
 ---
 
@@ -147,7 +147,7 @@ Each item merges every plan that describes the same underlying issue. "Tested" n
 
 | ID | Underlying issue | Sources (P / R / A-B / other) | Implemented | Tested (environment) | Unverified | Gate / dependency | Done when |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **U1** | Uncommitted, mixed-provenance tree; no reproducible revision | A02, A03; RC2; PL-03; R0 gate (CI) | Inventory docs only | Full Ruff/mypy/pytest on the exact snapshot (this session, §7) | CI on a committed revision | **D3** owner authorization for grouped commits | Provenance-grouped commits, CI green on that SHA |
+| **U1** | Uncommitted, mixed-provenance tree; no reproducible revision | A02, A03; RC2; PL-03; R0 gate (CI) | Inventory docs only | Full Ruff/mypy/pytest on the exact snapshot (this session, §7) | CI on a committed revision | D3 given; grouped commits made locally (not pushed) | Provenance-grouped commits, CI green on that SHA |
 | **U2** | Full chain not re-proven after A/B changes | A03, X02, RC2, R5-MEM, PL-01, PL-04; R5 gate; P0 §1 | Destructive-test isolation guard (`PLM_R5_ISOLATED_STACK`) | 12 guard unit tests; old R5 double-run (pre-A/B code) | Isolated compose R5 ×2 on consolidated SHA; memory budget | U1; isolated stack (`plm_r5_*` DB, loopback) | Two consecutive isolated R5 passes on the U1 SHA, resource profile recorded |
 | **U3** | P6 long render is not durably recoverable | B02; R5-RENDER, R5-TIME, X04, RC3; R3 gate (worker kill/resume); P6 plan | Queue/claim/finish/quarantine fencing; claim-scoped namespaces; read-only inspection; staged retry; **this session: persisted recovery evidence replaces caller booleans, owner-observed exit quarantine** | SQLite unit; disposable PG16 (this session: existing 5 + new race tests) | Independent supervisor process, heartbeat/lease, real FFmpeg kill/restart, MinIO byte reconciliation, multi-worker compose | Migration `0042_media_render_evidence` rollout needs approval | Kill-restart test on real FFmpeg+MinIO+PG passes; R5 with forced worker death recovers |
 | **U4** | Spend authorization and money semantics incomplete | B03; RC4, RC5, PL-02, P3-02, P4-04 (budget); R3 cost ceiling; ADR-0038–0041 | Unpriced/legacy cost provenance; zero/NaN limits refused; paid-replay refusal; reservation replay; **this session: paid attempts made durable before/after each REAL call** | SQLite unit; disposable PG 0039→0041 | Concurrency-safe **positive** per-plan limits; C3 currency (needs ADR, frozen seam); invoice/receipt reconciliation (no P4 path exists — Suno reports no credits, so real multi-variant plans stall); invented planner `credit_limit`; unguarded Suno `/download/authorize`; pipeline drops a failed step's receipts; 0040/0041 rollout | ADR for C3 currency; DB rollout approval | Positive per-plan limit holds under concurrent PG runs; receipts reconciled from a provider record |
@@ -157,7 +157,7 @@ Each item merges every plan that describes the same underlying issue. "Tested" n
 | **U8** | Media timing and player-visible publication evidence | B07; P6-04, QA-CHAPTER, QA-OLD-MP4, P5-02 | Stream-duration QA, chapter validation, P7 legacy hold | Real local FFmpeg, loopback P6→P7 | Watch-page chapter check; old MP4 tails | R6 for live checks | Player evidence recorded per published video |
 | **U9** | P1 identity and duration taxonomy | B01; R5-OBS, R5-DUR, P1-01, P1-03; R2 | Raw-ID lookup (409 on ambiguity), measured-duration v2, v3 design (off) | SQLite, disposable PG | Historical v1↔v2 arm/score mapping, live P1→P2→P3 | Migration strategy approval | Mapping applied on a clone, R5 consumes v2 arms |
 | **U10** | Measurement and economics | P2-02, P9-02, RC5; R2; Later economics gate | Typed snapshots, Decimal/FX, proxy versioned | Gate R2 tests (SQLite) | C7 `estimated_revenue` float; EEV; capital allocation | Economics gate (not approved) | Separate economics gate |
-| **U11** | Live adapters and staged rollout | R6; P1-02, P7-01, P8-01, P8-02, P9-01; plus §3 governance | P7 real client, P9 Analytics/Reporting reads (uncommitted, unapproved) | Mock HTTP; some live reads/uploads outside the guard | Everything under READ_ONLY→SHADOW→LIVE; distributor, UPC, P20; Spotify/Trends | **D1** + R6 approval | Per-capability conformance on recorded responses, then shadow, then guarded live |
+| **U11** | Live adapters and staged rollout | R6; P1-02, P7-01, P8-01, P8-02, P9-01; plus §3 governance | P7 real client, P9 Analytics/Reporting reads (uncommitted, unapproved) | Mock HTTP; some live reads/uploads outside the guard | Everything under READ_ONLY→SHADOW→LIVE; distributor, UPC, P20; Spotify/Trends | R6 approval (D1 recorded the past work only) | Per-capability conformance on recorded responses, then shadow, then guarded live |
 | **U12** | Truthful status | RC6, PL-01; R0 | Many corrections | — | STATUS header, HANDOVER, SESSION_HANDOFF overstatement | none | Docs agree with each other and with code |
 | **U13** | Deferred architecture | PL-05; PARTS X, XII, XIII, XXIII, P10 | absent | — | — | Later | Separate plan |
 
@@ -173,7 +173,7 @@ The 27 "implemented—reverify" register rows are not separate work: they close 
 4. **U2** — isolated R5 ×2 on the U1 SHA. Needs a separate compose project (own DB, ports, MinIO bucket); the shared dev DB must never run the destructive R5 suite.
 5. **U4 → U5** — positive per-plan limits need the C3 currency ADR first (frozen seam).
 6. **U9, U6, U7, U8** — require labelled data, clones or human review.
-7. **U11** — only after D1 and an R6 approval.
+7. **U11** — only after an R6 approval (D1 recorded the past live work; it did not approve R6).
 8. **U10, U13** — later gates.
 
 ---
