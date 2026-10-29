@@ -89,10 +89,38 @@ generation_attempts_table = sa.Table(
     sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-    sa.Column("cost_estimate", sa.Float, nullable=False),
-    sa.Column("actual_cost", sa.Float, nullable=False),
-    sa.Column("credit_estimate", sa.Float, nullable=False),
-    sa.Column("actual_credits", sa.Float, nullable=False),
+    sa.Column("cost_estimate", sa.Float, nullable=True),
+    sa.Column("actual_cost", sa.Float, nullable=True),
+    # Legacy rows are backfilled by migration 0040; new callers must supply
+    # their verified/unpriced provenance, not inherit a historical default.
+    sa.Column("money_basis", sa.String(32), nullable=False),
+    sa.Column("cost_currency", sa.String(8), nullable=True),
+    sa.Column("cost_receipt_ref", sa.String(256), nullable=True),
+    sa.Column("credit_estimate", sa.Float, nullable=True),
+    sa.Column("actual_credits", sa.Float, nullable=True),
+    sa.Column("credit_basis", sa.String(32), nullable=False),
+    sa.Column("credit_receipt_ref", sa.String(256), nullable=True),
+    sa.CheckConstraint(
+        "credit_basis IN ('unknown', 'mock_simulated', 'provider_reported', 'legacy_unverified') "
+        "AND (credit_basis != 'unknown' OR "
+        "(credit_estimate IS NULL AND actual_credits IS NULL AND credit_receipt_ref IS NULL)) "
+        "AND (credit_basis != 'mock_simulated' OR "
+        "(actual_credits IS NOT NULL AND credit_receipt_ref IS NULL)) "
+        "AND (credit_basis != 'provider_reported' OR "
+        "(actual_credits IS NOT NULL AND credit_receipt_ref IS NOT NULL "
+        "AND credit_receipt_ref <> ''))",
+        name="ck_generation_attempts_credit_provenance",
+    ),
+    sa.CheckConstraint(
+        "money_basis IN ('unpriced', 'provider_reported', 'legacy_unverified') "
+        "AND (money_basis != 'unpriced' OR "
+        "(cost_estimate IS NULL AND actual_cost IS NULL "
+        "AND cost_currency IS NULL AND cost_receipt_ref IS NULL)) "
+        "AND (money_basis != 'provider_reported' OR "
+        "(actual_cost IS NOT NULL AND cost_currency IS NOT NULL "
+        "AND cost_receipt_ref IS NOT NULL AND cost_receipt_ref <> ''))",
+        name="ck_generation_attempts_money_provenance",
+    ),
 )
 
 generated_candidates_table = sa.Table(
@@ -164,13 +192,39 @@ provider_cost_records_table = sa.Table(
     sa.Column("id", sa.String(64), primary_key=True),
     sa.Column("attempt_id", sa.String(64), nullable=False, index=True),
     sa.Column("cost_type", sa.String(32), nullable=False),
-    sa.Column("estimated_amount", sa.Float, nullable=False),
-    sa.Column("actual_amount", sa.Float, nullable=False),
-    sa.Column("currency", sa.String(8), nullable=False),
-    sa.Column("credits_estimated", sa.Float, nullable=False),
-    sa.Column("credits_actual", sa.Float, nullable=False),
+    sa.Column("estimated_amount", sa.Float, nullable=True),
+    sa.Column("actual_amount", sa.Float, nullable=True),
+    sa.Column("currency", sa.String(8), nullable=True),
+    sa.Column("money_basis", sa.String(32), nullable=False),
+    sa.Column("cost_receipt_ref", sa.String(256), nullable=True),
+    sa.Column("credits_estimated", sa.Float, nullable=True),
+    sa.Column("credits_actual", sa.Float, nullable=True),
+    sa.Column("credit_basis", sa.String(32), nullable=False),
+    sa.Column("credit_receipt_ref", sa.String(256), nullable=True),
+    sa.CheckConstraint(
+        "credit_basis IN ('unknown', 'mock_simulated', 'provider_reported', 'legacy_unverified') "
+        "AND (credit_basis != 'unknown' OR "
+        "(credits_estimated IS NULL AND credits_actual IS NULL AND credit_receipt_ref IS NULL)) "
+        "AND (credit_basis != 'mock_simulated' OR "
+        "(credits_actual IS NOT NULL AND credit_receipt_ref IS NULL)) "
+        "AND (credit_basis != 'provider_reported' OR "
+        "(credits_actual IS NOT NULL AND credit_receipt_ref IS NOT NULL "
+        "AND credit_receipt_ref <> ''))",
+        name="ck_provider_cost_records_credit_provenance",
+    ),
     sa.Column("pricing_version", sa.String(64), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint(
+        "money_basis IN ('unpriced', 'provider_reported', 'legacy_unverified') "
+        "AND (money_basis != 'unpriced' OR "
+        "(estimated_amount IS NULL AND actual_amount IS NULL "
+        "AND currency IS NULL AND cost_receipt_ref IS NULL)) "
+        "AND (money_basis != 'provider_reported' OR "
+        "(actual_amount IS NOT NULL AND currency IS NOT NULL "
+        "AND cost_receipt_ref IS NOT NULL AND cost_receipt_ref <> '' "
+        "AND pricing_version != 'unpriced'))",
+        name="ck_provider_cost_records_money_provenance",
+    ),
 )
 
 # HTTP Idempotency-Key records for plan / execute / export (R5, plm_platform.idempotency)

@@ -126,7 +126,7 @@ class TrackSpecPayload(SeamModel):
     """Seconds: the genome's allowed track duration, which P5 judges against."""
     candidate_target: int = Field(ge=1)
     priority: int = Field(ge=1)
-    budget_limit: float = Field(ge=0.0)
+    budget_limit: float = Field(ge=0.0, allow_inf_nan=False)
     provider_policy: ProviderPolicy
 
     @model_validator(mode="after")

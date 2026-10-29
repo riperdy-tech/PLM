@@ -49,7 +49,10 @@ class MoneyAmount:
 class PipelineOptions:
     """Activity timeouts. Retries come from the Temporal retry policy, not from here."""
 
-    step_start_to_close_seconds: float = 600.0
+    # R5 found that 600 seconds is shorter than an album-scale QA / P6 render
+    # step. The tested full-chain workflow already uses a 3600-second bound;
+    # make the default match without changing an explicitly supplied limit.
+    step_start_to_close_seconds: float = 3600.0
     step_heartbeat_seconds: float = 30.0
     """A step whose worker dies is retried after this long without a heartbeat."""
     step_maximum_attempts: int = 5

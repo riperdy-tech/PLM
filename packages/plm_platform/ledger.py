@@ -312,7 +312,8 @@ class ReservationResult:
     """Global headroom after this reservation (``None`` when no ceiling was reached)."""
 
     def verdict(self) -> BudgetVerdict:
-        return BudgetVerdict(allowed=self.allowed, reason=self.reason.value)
+        return BudgetVerdict(allowed=self.allowed, reason=self.reason.value,
+                             replayed=self.replayed)
 
 
 @dataclass(frozen=True, slots=True)

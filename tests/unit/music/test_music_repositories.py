@@ -100,6 +100,7 @@ def test_attempt_and_candidate_and_artifact_crud() -> None:
             completed_at=NOW,
             cost_estimate=1.0,
             actual_cost=1.0,
+            money_basis="legacy_unverified",
         )
         repositories.insert_generation_attempt(session, attempt)
 
@@ -160,8 +161,10 @@ def test_attempt_and_candidate_and_artifact_crud() -> None:
             estimated_amount=1.5,
             actual_amount=1.5,
             currency="USD",
+            money_basis="legacy_unverified",
             credits_estimated=10.0,
             credits_actual=10.0,
+            credit_basis="legacy_unverified",
             pricing_version="price-v1",
             created_at=NOW,
         )

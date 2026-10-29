@@ -182,6 +182,9 @@ def test_p4_refuses_a_pre_adr_0032_spec_without_a_duration_range() -> None:
         ("duration_range", {"min_seconds": 221, "max_seconds": 160}),
         ("duration_range", {"min_seconds": 0, "max_seconds": 160}),
         ("budget_limit", -1.0),
+        ("budget_limit", float("nan")),
+        ("budget_limit", float("inf")),
+        ("budget_limit", float("-inf")),
     ],
 )
 def test_p4_refuses_invalid_or_placeholder_values(field: str, value: Any) -> None:

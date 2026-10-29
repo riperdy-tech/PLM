@@ -28,7 +28,7 @@ from plm_platform.pipeline.phase_client import request_key
 from plm_platform.pipeline.states import Step
 from plm_platform.pipeline.types import StepRequest
 from plm_platform.service_urls import service_url, service_urls
-from plm_platform.temporal import CreativeRejection, Phase, PolicyRejection
+from plm_platform.temporal import CreativeRejection, Phase, PolicyRejection, ValidationFailure
 
 TOKEN = "unit-token"
 KEY = "pipeline.dir-1:research"
@@ -208,7 +208,8 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
         if request.url.path == "/music/plans":
             return httpx.Response(200, json={"plan_id": "plan-1"})
         if request.url.path.endswith("/execute"):
-            return httpx.Response(200, json={"candidates": [{"candidate_id": "c-1"}],
+            return httpx.Response(200, json={"status": "completed",
+                                             "candidates": [{"candidate_id": "c-1"}],
                                              "external_writes": [receipt]})
         return httpx.Response(200, json={"candidate": {}, "event": {}})
 
@@ -234,7 +235,8 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
         Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, lambda r: httpx.Response(
             200, json={"track_specs": [spec, {"track_spec_id": "ts-2"}]})),
         Phase.MUSIC: _client(Phase.MUSIC, lambda r: httpx.Response(
-            200, json={"plan_id": "plan-2", "candidates": [{"candidate_id": "c-2"}]})),
+            200, json={"plan_id": "plan-2", "status": "completed",
+                       "candidates": [{"candidate_id": "c-2"}]})),
     })
     topped = asyncio.run(bare.generate(_request(Step.GENERATE, {
         **inputs, "track_spec_ids": ["ts-2"]})))
@@ -245,10 +247,256 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
     empty = HttpPhaseSteps({
         Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
         Phase.MUSIC: _client(Phase.MUSIC, lambda r: httpx.Response(
-            200, json={"plan_id": "plan-1", "candidates": []})),
+            200, json={"plan_id": "plan-1", "status": "completed", "candidates": []})),
     })
     with pytest.raises(CreativeRejection):
         asyncio.run(empty.generate(_request(Step.GENERATE, inputs)))
+
+
+@pytest.mark.parametrize(
+    ("bad_status", "error_type"),
+    [
+        ("failed", CreativeRejection),
+        ("running", ValidationFailure),
+        (None, ValidationFailure),
+    ],
+)
+def test_generation_does_not_export_any_candidate_if_later_plan_is_not_complete(
+    bad_status: str | None, error_type: type[Exception],
+) -> None:
+    """A failed P4 plan cannot be silently passed to P5, even after earlier success."""
+    p4_paths: list[str] = []
+
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "track_specs": [{"track_spec_id": "ts-1"}, {"track_spec_id": "ts-2"}]
+        })
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        p4_paths.append(path)
+        if path == "/music/plans":
+            spec = json.loads(request.content)
+            return httpx.Response(200, json={"plan_id": spec["track_spec_id"]})
+        if path.endswith("/execute"):
+            status = "completed" if "/ts-1/" in path else bad_status
+            response: dict[str, Any] = {
+                "candidates": [{"candidate_id": f"candidate-{path.split('/')[3]}"}],
+                "external_writes": [{"decision": "simulate", "reason": "mock_provider"}],
+            }
+            if status is not None:
+                response["status"] = status
+            if status == "failed":
+                response["errors"] = ["candidate_target_not_met: 1/2"]
+            return httpx.Response(200, json=response)
+        raise AssertionError(f"P5 export must not happen: {path}")
+
+    steps = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+        Phase.MUSIC: _client(Phase.MUSIC, p4),
+    })
+    with pytest.raises(error_type):
+        asyncio.run(steps.generate(_request(Step.GENERATE, {
+            "policy_check": {"package_ids": ["pkg-1"]},
+        })))
+    assert p4_paths == [
+        "/music/plans", "/music/plans/ts-1/execute",
+        "/music/plans", "/music/plans/ts-2/execute",
+    ]
+
+
+def test_generation_exports_only_after_all_plans_confirm_completion() -> None:
+    """Do not expose half a package to P5 before confirming its last P4 plan."""
+    calls: list[str] = []
+
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "track_specs": [{"track_spec_id": "a"}, {"track_spec_id": "b"}],
+        })
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/music/plans":
+            return httpx.Response(200, json={
+                "plan_id": json.loads(request.content)["track_spec_id"],
+            })
+        if request.url.path.endswith("/execute"):
+            return httpx.Response(200, json={
+                "status": "completed",
+                "candidates": [{"candidate_id": request.url.path.split("/")[3]}],
+                "external_writes": [],
+            })
+        return httpx.Response(200, json={"event": {}})
+
+    steps = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+        Phase.MUSIC: _client(Phase.MUSIC, p4),
+    })
+    result = asyncio.run(steps.generate(_request(Step.GENERATE, {
+        "policy_check": {"package_ids": ["pkg-1"]},
+    })))
+    assert result.outputs["candidate_ids"] == ["a", "b"]
+    assert calls == [
+        "/music/plans", "/music/plans/a/execute",
+        "/music/plans", "/music/plans/b/execute",
+        "/music/candidates/a/export-to-p5",
+        "/music/candidates/b/export-to-p5",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("second_candidates", "error_type"),
+    [
+        ([], CreativeRejection),
+        ("not-a-list", ValidationFailure),
+        ([{"candidate_id": 123}], ValidationFailure),
+        ([{"candidate_id": "  "}], ValidationFailure),
+        ([{"candidate_id": None}], ValidationFailure),
+        ([{"wrong_key": "x"}], ValidationFailure),
+        ([{"candidate_id": "c-1"}], ValidationFailure),
+    ],
+)
+def test_generate_refuses_malformed_or_empty_later_plan_without_any_c4_export(
+    second_candidates: Any, error_type: type[Exception],
+) -> None:
+    """A completed status must not mask absent/invalid/duplicate candidate identities."""
+    calls: list[str] = []
+
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "track_specs": [{"track_spec_id": "ts-1"}, {"track_spec_id": "ts-2"}],
+        })
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append(path)
+        if path == "/music/plans":
+            return httpx.Response(200, json={
+                "plan_id": json.loads(request.content)["track_spec_id"],
+            })
+        if path.endswith("/execute"):
+            return httpx.Response(200, json={
+                "status": "completed",
+                "candidates": (
+                    [{"candidate_id": "c-1"}] if "/ts-1/" in path else second_candidates
+                ),
+            })
+        raise AssertionError(f"unexpected C4 export after invalid plan: {path}")
+
+    steps = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+        Phase.MUSIC: _client(Phase.MUSIC, p4),
+    })
+    with pytest.raises(error_type):
+        asyncio.run(steps.generate(_request(Step.GENERATE, {
+            "policy_check": {"package_ids": ["pkg-1"]},
+        })))
+    assert calls == [
+        "/music/plans", "/music/plans/ts-1/execute",
+        "/music/plans", "/music/plans/ts-2/execute",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reported", "retained", "reason"),
+    [
+        (None, 0, "p4_reported_no_guard_receipt"),
+        ([], 0, "p4_reported_no_guard_receipt"),
+        ("bad-shape", 0, "p4_reported_no_guard_receipt"),
+        ([None], 0, "p4_reported_invalid_guard_receipt"),
+        ([{}], 0, "p4_reported_invalid_guard_receipt"),
+        ([{"decision": "simulate"}], 0, "p4_reported_invalid_guard_receipt"),
+        ([{"capability": "music.generate", "idempotency_key": "att-1",
+           "decision": "simulate"}, None], 1, "p4_reported_invalid_guard_receipt"),
+    ],
+)
+def test_generate_preserves_unknown_cost_for_missing_or_malformed_guard_receipts(
+    reported: Any, retained: int, reason: str,
+) -> None:
+    """Incomplete P4 receipts must not erase potential paid spend from the workflow."""
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"track_specs": [{"track_spec_id": "ts-1"}]})
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/music/plans":
+            return httpx.Response(200, json={"plan_id": "plan-1"})
+        if path.endswith("/execute"):
+            return httpx.Response(200, json={
+                "status": "completed",
+                "candidates": [{"candidate_id": "candidate-1"}],
+                "external_writes": reported,
+            })
+        return httpx.Response(200, json={"event": {}})
+
+    steps = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+        Phase.MUSIC: _client(Phase.MUSIC, p4),
+    })
+    result = asyncio.run(steps.generate(_request(Step.GENERATE, {
+        "policy_check": {"package_ids": ["pkg-1"]},
+    })))
+    receipts = result.outputs["external_writes"]
+    assert len(receipts) == retained + 1
+    if retained:
+        assert receipts[0]["idempotency_key"] == "att-1"
+        assert receipts[0]["p3_package_id"] == "pkg-1"
+    unknown = receipts[-1]
+    assert unknown == {
+        "capability": "music.generate",
+        "idempotency_key": "pipeline.dir-1:generate/execute/plan-1",
+        "decision": "unreported",
+        "reason": reason,
+        "p3_package_id": "pkg-1",
+    }
+
+
+@pytest.mark.parametrize(
+    ("attempts_count", "duplicate", "expected_reason"),
+    [
+        (1, False, None),
+        (2, False, "p4_attempt_count_receipt_mismatch"),
+        (2, True, "p4_attempt_count_receipt_mismatch"),
+        ("2", False, "p4_attempt_count_receipt_mismatch"),
+        (True, False, "p4_attempt_count_receipt_mismatch"),
+    ],
+)
+def test_generate_reconciles_reported_attempt_count_with_unique_guard_receipts(
+    attempts_count: Any, duplicate: bool, expected_reason: str | None,
+) -> None:
+    """The reported number of calls needs at least that many distinct receipts."""
+    valid = {"capability": "music.generate", "idempotency_key": "paid-1",
+             "decision": "execute"}
+
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"track_specs": [{"track_spec_id": "ts-1"}]})
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/music/plans":
+            return httpx.Response(200, json={"plan_id": "plan-1"})
+        if path.endswith("/execute"):
+            return httpx.Response(200, json={
+                "status": "completed",
+                "candidates": [{"candidate_id": "candidate-1"}],
+                "attempts_count": attempts_count,
+                "external_writes": [valid, valid] if duplicate else [valid],
+            })
+        return httpx.Response(200, json={"event": {}})
+
+    steps = HttpPhaseSteps({
+        Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+        Phase.MUSIC: _client(Phase.MUSIC, p4),
+    })
+    result = asyncio.run(steps.generate(_request(Step.GENERATE, {
+        "policy_check": {"package_ids": ["pkg-1"]},
+    })))
+    receipts = result.outputs["external_writes"]
+    assert receipts[0] == {**valid, "p3_package_id": "pkg-1"}
+    assert len(receipts) == (2 if expected_reason else 1)
+    if expected_reason:
+        assert receipts[-1]["decision"] == "unreported"
+        assert receipts[-1]["reason"] == expected_reason
 
 
 def test_service_urls_default_to_compose_names_or_loopback_and_accept_overrides(

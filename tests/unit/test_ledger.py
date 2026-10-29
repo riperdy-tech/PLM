@@ -273,6 +273,60 @@ def test_a_replayed_key_returns_the_original_verdict_and_never_double_reserves()
     assert _remaining(ledger) == Decimal(6)
 
 
+def test_persisted_budget_replay_never_authorizes_a_second_paid_call() -> None:
+    """Idempotent funding is not permission to repeat an unknown external effect."""
+    ledger = _ledger()
+    _ceiling(ledger, "10")
+    caps = ("youtube.upload",)
+    first_guard = _live_guard(ledger, caps)
+    original = first_guard.authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL,
+        idempotency_key="write-001", cost_estimate=usd("2"), now=NOW,
+    )
+    assert original.decision.value == "execute"
+
+    retry_guard = _live_guard(ledger, caps)
+    replay = retry_guard.authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL,
+        idempotency_key="write-001", cost_estimate=usd("2"), now=NOW,
+    )
+    assert replay.decision.value == "deny"
+    assert replay.reason == "budget_reservation_replayed"
+    assert len(ledger.entries()) == 1
+    assert _remaining(ledger) == Decimal(8)
+
+    # After settlement, the prior charge is even more clearly not new work.
+    assert first_guard.settle_external_write(original, performed=True)
+    committed_replay = _live_guard(ledger, caps).authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL,
+        idempotency_key="write-001", cost_estimate=usd("2"), now=NOW,
+    )
+    assert committed_replay.decision.value == "deny"
+    assert committed_replay.reason == "budget_reservation_replayed"
+    assert len(ledger.entries()) == 1
+    assert _remaining(ledger) == Decimal(8)
+
+
+def test_released_write_can_reserve_same_key_for_a_known_no_effect_retry() -> None:
+    """Explicit release establishes that an external job was not accepted."""
+    ledger = _ledger()
+    _ceiling(ledger, "10")
+    first_guard = _live_guard(ledger, ("youtube.upload",))
+    first = first_guard.authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL,
+        idempotency_key="not-accepted", cost_estimate=usd("2"), now=NOW,
+    )
+    assert first.decision.value == "execute"
+    assert first_guard.settle_external_write(first, performed=False)
+    retry = _live_guard(ledger, ("youtube.upload",)).authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL,
+        idempotency_key="not-accepted", cost_estimate=usd("2"), now=NOW,
+    )
+    assert retry.decision.value == "execute"
+    assert len(ledger.entries()) == 1
+    assert _remaining(ledger) == Decimal(8)
+
+
 def test_a_released_reservation_frees_its_headroom() -> None:
     ledger = _ledger()
     _ceiling(ledger, "5")
@@ -344,6 +398,40 @@ def _race(ledger: BudgetLedger) -> list[Any]:
     for t in threads:
         t.join(timeout=60)
     return results
+
+
+def test_two_racing_live_guards_share_one_reservation_without_double_execution(
+    tmp_path: Path,
+) -> None:
+    """SQLite race: one worker may call the provider; replaying worker must hold."""
+    engine = create_ops_engine(tmp_path)
+    try:
+        ledger = _ledger(engine)
+        _ceiling(ledger, "5")
+        barrier = threading.Barrier(2)
+        outcomes: list[Any] = [None, None]
+
+        def decide(index: int) -> None:
+            guard = _live_guard(ledger, ("youtube.upload",))
+            barrier.wait()
+            outcomes[index] = guard.authorize_external_write(
+                "youtube.upload", provider_mode=ProviderMode.REAL,
+                idempotency_key="same-paid-job", cost_estimate=usd("4"), now=NOW,
+            )
+
+        with _slow_entry_reads(engine):
+            workers = [threading.Thread(target=decide, args=(index,)) for index in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=60)
+
+        assert sorted(d.decision.value for d in outcomes) == ["deny", "execute"]
+        assert {d.reason for d in outcomes} == {"authorized", "budget_reservation_replayed"}
+        assert len(ledger.entries()) == 1
+        assert _remaining(ledger) == Decimal(1)
+    finally:
+        engine.dispose()
 
 
 def test_two_reservations_racing_for_the_last_headroom_exactly_one_passes(tmp_path: Path) -> None:

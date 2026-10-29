@@ -67,10 +67,11 @@ unmapped hard stop (fail closed, ``policy_mapped = False``)."""
 
 _BUDGET_REASONS: Final[frozenset[str]] = frozenset(
     {reason.value for reason in Reason if reason is not Reason.RESERVED}
-    | {"budget_ledger_unavailable", "budget_ledger_not_configured"}
+    | {"budget_ledger_unavailable", "budget_ledger_not_configured",
+       "budget_reservation_replayed"}
 )
-"""The ledger's refusal codes plus the two "no ledger" refusals
-(``execution.NoBudgetLedger`` and the pipeline's own)."""
+"""Ledger refusal codes plus missing-ledger and replayed-reservation guards.
+All stop real writes and require evidence before a workflow is resumed."""
 
 _AUTHORIZATION_REASONS: Final[frozenset[str]] = frozenset({
     "missing_idempotency_key", "policy_read_only", "policy_dry_run", "policy_shadow",

@@ -151,6 +151,16 @@ def test_a_guard_refusal_travels_with_its_hold_and_no_effect(
                                                                  "budget_exhausted")
 
 
+def test_replayed_budget_reservation_is_a_budget_hold_not_permission() -> None:
+    refusal = ExternalWriteRefused(
+        Phase.YOUTUBE, "/youtube/publish", 409, "external_write_deny",
+        "youtube.upload not performed: budget_reservation_replayed",
+    )
+    assert refusal.hold_reason_code == "BUDGET_RESERVATION_REFUSED"
+    assert refusal.details["guard_reason"] == "budget_reservation_replayed"
+    assert refusal.details["ledger_reason"] == "budget_reservation_replayed"
+
+
 def test_write_costs_need_a_ledger(factory: sessionmaker[Session]) -> None:
     platform = _platform(factory, ledger=False)
     with pytest.raises(ValidationFailure, match=BUDGET_LEDGER_NOT_CONFIGURED):

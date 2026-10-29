@@ -122,6 +122,8 @@ class WriteAuthorization:
 class BudgetVerdict:
     allowed: bool
     reason: str
+    replayed: bool = False
+    """True when this key already holds/held budget; not permission for a new write."""
 
 
 type CostEstimate = Money | Decimal | None
@@ -275,18 +277,22 @@ class ExternalWriteGuard:
         idempotency_key: str,
         cost_estimate: CostEstimate = None,
         policy_ceiling: ExecutionPolicy | None = None,
+        preflight_refusal: str | None = None,
         now: datetime,
     ) -> GuardDecision:
-        """Decide one write at ``now``. ``policy_ceiling`` lets a caller tighten, never loosen, policy.
+        """Decide one write at ``now``.
 
-        ``cost_estimate`` defaults to ``None`` (not priced by the caller), never to zero.
+        ``policy_ceiling`` and ``preflight_refusal`` can only tighten policy.
+        A caller with a known-zero plan budget may refuse before any ledger
+        reservation or provider write. ``None`` cost is unknown, not zero.
         """
         now = require_aware(now)
         policy = self._settings.policy(capability)
         if policy_ceiling is not None and _rank(policy_ceiling) < _rank(policy):
             policy = policy_ceiling
         decision, reason = self._decide(
-            capability, provider_mode, policy, idempotency_key, cost_estimate, now
+            capability, provider_mode, policy, idempotency_key, cost_estimate, now,
+            preflight_refusal=preflight_refusal,
         )
         result = GuardDecision(
             capability=capability,
@@ -320,9 +326,13 @@ class ExternalWriteGuard:
         idempotency_key: str,
         cost_estimate: CostEstimate,
         now: datetime,
+        *,
+        preflight_refusal: str | None = None,
     ) -> tuple[WriteDecision, str]:
         if not idempotency_key.strip():
             return WriteDecision.DENY, "missing_idempotency_key"
+        if preflight_refusal:
+            return WriteDecision.DENY, preflight_refusal
         if provider_mode is ProviderMode.MOCK:
             return WriteDecision.SIMULATE, "mock_provider"
         if policy is ExecutionPolicy.READ_ONLY:
@@ -339,6 +349,11 @@ class ExternalWriteGuard:
         verdict = self._budget.reserve(capability, idempotency_key, cost_estimate)
         if not verdict.allowed:
             return WriteDecision.DENY, verdict.reason
+        if verdict.replayed:
+            # The ledger returns an allowed reservation replay to prove
+            # idempotent *funding*, not to authorize a second provider call.
+            # The previous external outcome may be committed or unknown.
+            return WriteDecision.DENY, "budget_reservation_replayed"
         return WriteDecision.EXECUTE, "authorized"
 
     def settle_external_write(

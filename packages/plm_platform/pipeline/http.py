@@ -260,6 +260,10 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         plans: list[str] = []
         receipts: list[dict[str, Any]] = []
         by_package: dict[str, list[str]] = {}
+        # Do not export *any* C4 candidate until every P4 plan confirms
+        # completion. A partial plan may retain useful audio in P4, but must
+        # not be mistaken for successful completion of the generating step.
+        pending_exports: list[str] = []
         for package_id in package_ids:
             package = p3.get(f"/experiments/v1/packages/{package_id}", idempotency_key=key)
             for spec in require(package, "track_specs", f"P3 package {package_id}"):
@@ -274,18 +278,88 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 run = p4.post(f"/music/plans/{plan_id}/execute", idempotency_key=execute_key,
                               body=spec)
                 writes = run.get("external_writes")
+                missing_receipt = not isinstance(writes, list) or not writes
+                receipt_keys: set[tuple[str, str]] = set()
                 if isinstance(writes, list):
-                    receipts.extend({**w, "p3_package_id": str(package_id)}
-                                    for w in writes if isinstance(w, dict))
-                else:
-                    receipts.append({"capability": "music.generate",
-                                     "idempotency_key": execute_key, "decision": "unreported",
-                                     "reason": "p4_reported_no_guard_receipt",
-                                     "p3_package_id": str(package_id)})
-                for candidate in run.get("candidates") or []:
-                    candidate_id = str(require(candidate, "candidate_id", "P4 candidate"))
-                    p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
-                            idempotency_key=request_key(key, "export", candidate_id))
+                    for write in writes:
+                        if isinstance(write, dict) and all(
+                            isinstance(write.get(field), str) and write[field].strip()
+                            for field in ("capability", "idempotency_key", "decision")
+                        ):
+                            receipt_key = (write["capability"], write["idempotency_key"])
+                            if receipt_key in receipt_keys:
+                                # Duplicate ledger keys cannot prove additional
+                                # attempts and must not be counted twice as spend.
+                                missing_receipt = True
+                                continue
+                            receipt_keys.add(receipt_key)
+                            receipts.append({**write, "p3_package_id": str(package_id)})
+                        else:
+                            # Never silently drop an invalid receipt: the omitted
+                            # paid attempt would otherwise appear to cost nothing.
+                            missing_receipt = True
+                # The real P4 endpoint reports attempts_count for this execution.
+                # Fewer distinct guard receipts than attempted provider calls
+                # means some costs cannot be verified, even if the supplied
+                # receipts are individually well-formed.
+                count = run.get("attempts_count")
+                count_gap = (
+                    count is not None
+                    and (type(count) is not int or count < 0 or count > len(receipt_keys))
+                )
+                if count_gap:
+                    missing_receipt = True
+                if missing_receipt:
+                    receipts.append({
+                        "capability": "music.generate",
+                        "idempotency_key": execute_key,
+                        "decision": "unreported",
+                        "reason": (
+                            "p4_attempt_count_receipt_mismatch"
+                            if count_gap else (
+                                "p4_reported_invalid_guard_receipt"
+                                if isinstance(writes, list) and writes
+                                else "p4_reported_no_guard_receipt"
+                            )
+                        ),
+                        "p3_package_id": str(package_id),
+                    })
+                outcome = require(run, "status", f"P4 plan {plan_id} execute")
+                if outcome == "failed":
+                    # HTTP 200 can still mean P4 completed only part of its C3
+                    # candidate target. Retain the provider's recorded attempt
+                    # and funds in P4; do not export any C4 event or continue QA.
+                    raise CreativeRejection(
+                        f"P4 plan {plan_id} failed its candidate target; "
+                        f"produced {len(run.get('candidates') or [])} candidates "
+                        f"and reported errors {run.get('errors')!r}"
+                    )
+                if outcome != "completed":
+                    raise ValidationFailure(
+                        f"P4 plan {plan_id}: unexpected execute status {outcome!r}"
+                    )
+                plan_candidates = require(run, "candidates", f"P4 plan {plan_id} execute")
+                if not isinstance(plan_candidates, list):
+                    raise ValidationFailure(
+                        f"P4 plan {plan_id}: completed plan returned a non-list candidate set"
+                    )
+                if not plan_candidates:
+                    # One empty completed plan must not be masked by another
+                    # successful plan in the same multi-track generation step.
+                    raise CreativeRejection(
+                        f"P4 plan {plan_id}: completed plan returned zero candidates"
+                    )
+                for candidate in plan_candidates:
+                    candidate_id = require(candidate, "candidate_id", f"P4 plan {plan_id} candidate")
+                    if not isinstance(candidate_id, str) or not candidate_id.strip():
+                        raise ValidationFailure(
+                            f"P4 plan {plan_id}: candidate_id must be a nonempty string"
+                        )
+                    if candidate_id in candidates:
+                        raise ValidationFailure(
+                            f"P4 plan {plan_id}: duplicate candidate_id {candidate_id!r}"
+                        )
+                    pending_exports.append(candidate_id)
                     candidates.append(candidate_id)
                     by_package.setdefault(str(package_id), []).append(candidate_id)
         for n, plan_id in enumerate(plans):
@@ -295,6 +369,9 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         if not candidates:
             # Provider calls were made and may have spent credits: not a no-effect failure.
             raise CreativeRejection(f"P4 produced no candidates for plans {plans}")
+        for candidate_id in pending_exports:
+            p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
+                    idempotency_key=request_key(key, "export", candidate_id))
         return StepResult(
             outputs={"plan_ids": plans, "candidate_ids": candidates,
                      "candidates_by_package": by_package, "external_writes": receipts},
@@ -337,8 +414,11 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
 
     # -- assemble: P6 assembles and renders each P3 package's cleared recordings -----------
 
-    ASSEMBLE_TIMEOUT_SECONDS: Final[float] = 570.0
-    """P6 renders inside the request; this stays under the step's start-to-close."""
+    ASSEMBLE_TIMEOUT_SECONDS: Final[float] = 3300.0
+    """A bounded, long P6 render call with headroom under the 3600s default
+    activity limit. Multiple packages or overriden shorter activity timeouts
+    still require a durable render job; this is not a recovery guarantee.
+    """
 
     async def assemble(self, request: StepRequest) -> StepResult:
         return await asyncio.to_thread(self._assemble, request)

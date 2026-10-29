@@ -48,7 +48,7 @@ class AdaptedTrackSpec(BaseModel):
     """The genome's allowed duration (ADR-0032); forwarded to P5 on C4, never widened."""
     candidate_target: int = Field(ge=1)
     priority: int = Field(ge=1)
-    budget_limit: float = Field(ge=0.0)
+    budget_limit: float = Field(ge=0.0, allow_inf_nan=False)
     allowed_providers: tuple[str, ...] = Field(min_length=1)
     raw_spec: dict[str, Any]
 

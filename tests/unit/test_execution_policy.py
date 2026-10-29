@@ -159,6 +159,23 @@ def test_live_authorized_and_funded_executes() -> None:
     assert budget.reservations == [("youtube.upload", "k1", Decimal("1.50"))]
 
 
+def test_caller_preflight_hold_denies_before_reserving_any_budget() -> None:
+    budget = AllowAll()
+    guard = _guard(
+        {"youtube.upload": ExecutionPolicy.LIVE},
+        grants=(_grant("youtube.upload"),),
+        budget=budget,
+    )
+    decision = guard.authorize_external_write(
+        "youtube.upload", provider_mode=ProviderMode.REAL, idempotency_key="k1",
+        preflight_refusal="caller_budget_exhausted", now=NOW,
+    )
+    assert decision.decision is WriteDecision.DENY
+    assert decision.reason == "caller_budget_exhausted"
+    assert budget.reservations == []
+    assert guard.decisions == [decision]
+
+
 def test_missing_idempotency_key_is_refused_even_for_mocks() -> None:
     guard = _guard({"youtube.upload": ExecutionPolicy.LIVE})
     assert _decide(guard, ProviderMode.MOCK, key="  ") is WriteDecision.DENY
@@ -272,9 +289,19 @@ def _platform() -> Any:
 
 
 class SpyRealYouTubeClient(MockYouTubeClient):
-    """Behaves like the mock but declares itself real, so the guard treats it as external."""
+    """No-network real-mode test adapter with realistic processed-video metadata."""
 
     provider_mode = ProviderMode.REAL
+
+    def get_video(self, video_id: str) -> dict[str, Any] | None:
+        resource = super().get_video(video_id)
+        if resource is None:
+            return None
+        # The test manifest is a four-minute single without required chapters.
+        # A REAL provider must give P7 processing and duration evidence.
+        resource["contentDetails"] = {"duration": "PT4M"}
+        resource["status"]["uploadStatus"] = "processed"
+        return resource
 
 
 _YT_WRITES = {"insert_resumable_session", "upload_video_chunk", "set_thumbnail", "insert_playlist_item"}

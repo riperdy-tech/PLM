@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+from pydantic import ValidationError
+
 from services.music_factory.domain.enums import (
     ArtifactType,
     AttemptStatus,
@@ -75,6 +78,18 @@ def test_generation_plan_and_attempt_lifecycle() -> None:
         submitted_at=NOW,
     )
     assert attempt.status == AttemptStatus.SUBMITTED
+
+
+@pytest.mark.parametrize("field", ["budget_limit", "credit_limit"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_plan_limits_reject_nonfinite_numbers(field: str, value: float) -> None:
+    fields = {
+        "plan_id": "p1", "track_spec_id": "t1", "experiment_id": "e1",
+        "lineage": None, "track_spec_wire": None, "created_at": NOW,
+        field: value,
+    }
+    with pytest.raises(ValidationError):
+        GenerationPlan.model_validate(fields)
 
 
 def test_candidate_and_audio_artifact() -> None:

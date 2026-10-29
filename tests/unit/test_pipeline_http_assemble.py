@@ -27,7 +27,7 @@ from plm_platform.pipeline.http import (
     PlaylistSupplyShort,
 )
 from plm_platform.pipeline.states import Step
-from plm_platform.pipeline.types import StepRequest
+from plm_platform.pipeline.types import PipelineOptions, StepRequest
 from plm_platform.temporal import Phase, ValidationFailure
 
 from tests.support.seams import release_manifest
@@ -39,6 +39,18 @@ OVERRIDE = {
     "resolved_at": "2026-09-25T12:00:00+00:00", "reason_codes": ["UNKNOWN_COMMERCIAL_LICENSE"],
 }
 RANGE = {"min_seconds": 2700, "max_seconds": 4500}
+
+
+def test_default_pipeline_timeout_covers_long_p6_render_with_headroom() -> None:
+    options = PipelineOptions()
+    assert options.step_start_to_close_seconds >= 3600
+    assert 600 < HttpPhaseSteps.ASSEMBLE_TIMEOUT_SECONDS
+    assert HttpPhaseSteps.ASSEMBLE_TIMEOUT_SECONDS <= (
+        options.step_start_to_close_seconds - 120
+    )
+    assert options.step_heartbeat_seconds < options.step_start_to_close_seconds
+    # Explicit scenario-specific activity deadlines remain owner-controlled.
+    assert PipelineOptions(step_start_to_close_seconds=45).step_start_to_close_seconds == 45
 
 
 def _package(package_id: str, specs: list[str]) -> dict[str, Any]:
@@ -78,16 +90,18 @@ MANIFESTS = {
 
 
 class _Phases:
-    def __init__(self, p6_answers: dict[str, tuple[int, dict[str, Any]]] | None = None) -> None:
+    def __init__(self, p6_answers: dict[str, tuple[int, dict[str, Any]]] | None = None,
+                 *, step_key: str = STEP_KEY) -> None:
         self.p6_bodies: list[dict[str, Any]] = []
         self.p6_keys: list[str] = []
         self.p6_answers = p6_answers or {}
+        self.step_key = step_key
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         assert request.headers["X-PLM-Service-Token"] == TOKEN
         if path.startswith("/qa/release-manifests/"):
-            assert request.headers["Idempotency-Key"] == STEP_KEY
+            assert request.headers["Idempotency-Key"] == self.step_key
             body = MANIFESTS.get(path.rsplit("/", 1)[-1])
             if body is None:
                 return httpx.Response(404, json={"detail": {"code": "manifest_not_found",
@@ -149,6 +163,26 @@ def test_a_package_blocked_by_post_render_qa_fails_the_step() -> None:
                                    "blocking_reason_codes": ["loudness_out_of_tolerance"]})})
     with pytest.raises(ValidationFailure, match="loudness_out_of_tolerance"):
         asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
+
+
+@pytest.mark.parametrize("reason", [
+    "stream_duration_unmeasured",
+    "stream_duration_mismatch",
+    "video_audio_duration_mismatch",
+])
+def test_stream_timing_failed_p6_http_response_blocks_pipeline_assembly(reason: str) -> None:
+    """The real pipeline HTTP step refuses P6's new post-render reason codes."""
+    phases = _Phases({"c0": (200, {
+        "media_package_id": "m_timing_failed",
+        "status": "failed",
+        "video_checksum": "a" * 64,
+        "blocking_reason_codes": [reason],
+    })})
+    with pytest.raises(ValidationFailure, match=reason):
+        asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
+    # A non-retryable validation error stops the step before producing a package list.
+    assert len(phases.p6_bodies) == 1
+    assert phases.p6_keys == [f"{STEP_KEY}/assemble/pkg_1"]
 
 
 def test_a_p6_refusal_fails_the_step_with_its_code() -> None:
