@@ -153,14 +153,16 @@ async def test_happy_path_reaches_learning_and_persists_every_transition(
     assert run.completed_at is not None and run.last_sequence == len(HAPPY_PATH)
 
 
-async def test_worker_killed_mid_activity_recovers_with_each_effect_exactly_once(
+async def test_worker_killed_mid_paid_activity_holds_the_replay_and_never_repeats_it(
     client: Client, factory: sessionmaker[Session], budget: Budget, platform: PlatformOperations,
 ) -> None:
     """Proves: the worker running a paid activity is shut down after the activity's
     effect but before it returned; the run stays RUNNING on the server; a new worker
-    picks it up, the activity is retried with the same idempotency key, and every
-    side-effecting step's effect happened exactly once; the ledger holds one entry per
-    paid step and no transition is duplicated by the replay on the new worker."""
+    picks it up and retries the activity with the same idempotency key, and the guard
+    refuses the retry because the key's reservation already exists (ADR-0041: a
+    replayed reservation is not permission for a second paid call). The run is HELD
+    from GENERATING under a budget hold for the budget owner, the effect happened once
+    and the reservation stays RESERVED: the outcome must be reconciled, not retried."""
     steps = guarded_steps(factory, _scripts(
         generate=ScriptedStep(**{**default_scripts()[Step.GENERATE].__dict__,
                                  "block_after_effect_on_first_attempt": True})))
@@ -179,21 +181,26 @@ async def test_worker_killed_mid_activity_recovers_with_each_effect_exactly_once
 
     second = worker_for(client, steps, platform, identity=f"gate-b-{uuid.uuid4().hex[:6]}")
     async with running(second):
-        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), RESULT_TIMEOUT)
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the replay hold")
+        await asyncio.sleep(1.0)  # give a wrongly-repeated paid effect time to show up
+        assert held.held_from == PipelineState.GENERATING.value
+        assert held.last_error_code == "budget_reservation_replayed"
+        with factory() as session:
+            case = ExceptionQueue().require(session, held.open_case_ids[0])
+        await handle.terminate(reason="R3 test: the held replay is reconciled, not resumed")
 
-    assert outcome.completed
     assert len(steps.calls_for(Step.GENERATE)) >= 2, "the killed attempt was never retried"
-    for step in SIDE_EFFECT_STEPS:
-        key = idempotency_key(workflow_id, step.value)
-        assert steps.effect_counts[key] == 1, f"{step.value} effect count"
+    assert steps.effect_counts[generate_key] == 1
+    assert case.reason_code == "BUDGET_RESERVATION_REFUSED"
+    assert case.reviewer_role == "budget_owner" and case.origin_phase == "P4"
+    assert case.details["ledger_reason"] == "budget_reservation_replayed"
     rows = transitions(factory, workflow_id)
-    assert [t.to_state.value for t in rows] == HAPPY_PATH
+    assert [t.to_state.value for t in rows] == HAPPY_PATH[:4] + ["HELD"]
+    assert rows[-1].hold_case_ids == (case.id,)
     _assert_contiguous(factory, workflow_id)
-    generated = next(t for t in rows if t.step == Step.GENERATE.value
-                     and t.to_state is PipelineState.GENERATED)
-    assert generated.attempt >= 2 and generated.retry_count == generated.attempt - 1
     entries = _entries(factory, workflow_id)
-    assert len(entries) == 3 and {e.status for e in entries} == {"committed"}
+    assert [(e.capability, e.status) for e in entries] == [
+        ("music.generate", EntryStatus.RESERVED.value)]
 
 
 async def test_exhausted_budget_holds_the_run_and_never_calls_the_paid_activity(

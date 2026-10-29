@@ -52,8 +52,10 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
-TRACKS = ((12.0, {"bpm": 120.0, "tonic": 0}), (13.0, {"bpm": 122.0, "tonic": 7}),
-          (12.0, {"bpm": 118.0, "tonic": 9, "minor": True}))
+# 3 BPM above the R5 step test's tracks: P6 holds a near-copy of an earlier same-brand
+# package (album-texture-v1, 0.998); against those tracks these measure at most 0.93.
+TRACKS = ((12.0, {"bpm": 123.0, "tonic": 0}), (13.0, {"bpm": 125.0, "tonic": 7}),
+          (12.0, {"bpm": 121.0, "tonic": 9, "minor": True}))
 
 
 @pytest.fixture(scope="module")

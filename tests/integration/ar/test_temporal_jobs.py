@@ -2,9 +2,10 @@
 """The workflow runs on `ph2.ar` against the compose stack; skipped when it is down.
 
 The brand is seeded (policy + one stored feature snapshot) so the outcome is
-deterministic without a live P1 service: the activity's live read fails (no token in
-CI), §102's stored fallback rebuilds the arm from P2's own snapshots — this test is that
-degraded path's end-to-end exercise — and the cycle completes in SHADOW.
+deterministic without a live P1 service: the test makes the activity's live read fail
+(the stack's P1 would answer, `.env` holds the token), §102's stored fallback rebuilds the
+arm from P2's own snapshots — this test is that degraded path's end-to-end exercise —
+and the cycle completes in SHADOW.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from temporalio.worker import Worker
 
 from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
 from services.autonomous_ar.domain.policy import DEFAULT_POLICY
+from services.autonomous_ar.ingestion.p1_adapter import MarketUnavailable, P1Client
 from services.autonomous_ar.jobs import REGISTRATIONS
 from services.autonomous_ar.storage import repositories
 
@@ -65,7 +67,11 @@ def seeded_stack() -> None:
 @pytest.mark.integration
 def test_allocation_workflow_runs_on_ph2_ar(
         seeded_stack: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("PLM_SERVICE_TOKEN", raising=False)
+    def unavailable(self: P1Client, **_: object) -> None:
+        raise MarketUnavailable("P1 made unavailable by the test")
+
+    # The worker below runs in this process, so the patch reaches its activity.
+    monkeypatch.setattr(P1Client, "fetch_opportunities", unavailable)
     async def scenario() -> dict[str, object]:
         try:
             client: Client = await connect_client()
