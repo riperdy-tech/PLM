@@ -149,6 +149,7 @@ from plm_platform.pipeline.types import (
 )
 from plm_platform.pipeline.workflow import PipelineWorkflow
 from plm_platform.service_urls import LOOPBACK_HOST, service_urls
+from plm_platform.storage import build_client, ensure_bucket
 from plm_platform.temporal import Phase
 from plm_platform.testing.mock_outcomes import load_mock_outcome_model
 from sqlalchemy.orm import Session, sessionmaker
@@ -423,6 +424,8 @@ async def _drive(settings: Settings, factory: sessionmaker[Session], token: str,
 def chain(settings: Settings, factory: sessionmaker[Session]) -> Iterator[Chain]:
     token = _token(settings)
     _require_stack()
+    # A fresh stack has no bucket; on the dev stack an earlier storage test made it.
+    ensure_bucket(settings=settings, client=build_client(settings))
     api = Api(token)
     engine: sa.Engine = factory.kw["bind"]
     now = datetime.now(UTC)
