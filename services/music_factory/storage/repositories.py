@@ -54,6 +54,7 @@ __all__ = [
     "list_candidates_by_track",
     "list_creative_variants",
     "list_generation_attempts",
+    "settle_generation_attempt",
     "update_candidate_status",
     "update_plan_status",
 ]
@@ -180,37 +181,58 @@ def list_creative_variants(session: Session, plan_id: str) -> list[CreativeVaria
     ]
 
 
+def _attempt_row(attempt: GenerationAttempt) -> dict[str, Any]:
+    return {
+        "id": attempt.attempt_id,
+        "generation_plan_id": attempt.generation_plan_id,
+        "creative_variant_id": attempt.creative_variant_id,
+        "provider_id": attempt.provider_id,
+        "model_id": attempt.model_id,
+        "model_version": attempt.model_version,
+        "lyrics_text": attempt.lyrics_text,
+        "provider_job_id": attempt.provider_job_id,
+        "attempt_type": attempt.attempt_type.value,
+        "transport_retry_of": attempt.transport_retry_of,
+        "request_hash": attempt.request_hash,
+        "request_payload_hash": attempt.request_payload_hash,
+        "status": attempt.status.value,
+        "failure_code": attempt.failure_code,
+        "started_at": attempt.started_at,
+        "submitted_at": attempt.submitted_at,
+        "completed_at": attempt.completed_at,
+        "cost_estimate": attempt.cost_estimate,
+        "actual_cost": attempt.actual_cost,
+        "money_basis": attempt.money_basis,
+        "cost_currency": attempt.cost_currency,
+        "cost_receipt_ref": attempt.cost_receipt_ref,
+        "credit_estimate": attempt.credit_estimate,
+        "actual_credits": attempt.actual_credits,
+        "credit_basis": attempt.credit_basis,
+        "credit_receipt_ref": attempt.credit_receipt_ref,
+    }
+
+
 def insert_generation_attempt(session: Session, attempt: GenerationAttempt) -> None:
-    session.execute(
-        sa.insert(generation_attempts_table).values(
-            id=attempt.attempt_id,
-            generation_plan_id=attempt.generation_plan_id,
-            creative_variant_id=attempt.creative_variant_id,
-            provider_id=attempt.provider_id,
-            model_id=attempt.model_id,
-            model_version=attempt.model_version,
-            lyrics_text=attempt.lyrics_text,
-            provider_job_id=attempt.provider_job_id,
-            attempt_type=attempt.attempt_type.value,
-            transport_retry_of=attempt.transport_retry_of,
-            request_hash=attempt.request_hash,
-            request_payload_hash=attempt.request_payload_hash,
-            status=attempt.status.value,
-            failure_code=attempt.failure_code,
-            started_at=attempt.started_at,
-            submitted_at=attempt.submitted_at,
-            completed_at=attempt.completed_at,
-            cost_estimate=attempt.cost_estimate,
-            actual_cost=attempt.actual_cost,
-            money_basis=attempt.money_basis,
-            cost_currency=attempt.cost_currency,
-            cost_receipt_ref=attempt.cost_receipt_ref,
-            credit_estimate=attempt.credit_estimate,
-            actual_credits=attempt.actual_credits,
-            credit_basis=attempt.credit_basis,
-            credit_receipt_ref=attempt.credit_receipt_ref,
-        )
-    )
+    session.execute(sa.insert(generation_attempts_table).values(**_attempt_row(attempt)))
+
+
+def settle_generation_attempt(session: Session, attempt: GenerationAttempt) -> None:
+    """Replace the stored SUBMITTED row of this attempt with its outcome, exactly once.
+
+    Used when the SUBMITTED row was made durable before a paid provider call. A
+    missing or already settled row is a fault: the outcome is never written twice.
+    """
+    row = _attempt_row(attempt)
+    attempt_id = row.pop("id")
+    settled = session.execute(
+        sa.update(generation_attempts_table)
+        .where(generation_attempts_table.c.id == attempt_id,
+               generation_attempts_table.c.status == AttemptStatus.SUBMITTED.value)
+        .values(**row)
+        .returning(generation_attempts_table.c.id)
+    ).scalar_one_or_none()
+    if settled is None:
+        raise RuntimeError(f"no SUBMITTED attempt {attempt_id} to settle")
 
 
 def get_generation_attempt(session: Session, attempt_id: str) -> GenerationAttempt | None:

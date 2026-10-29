@@ -16,12 +16,17 @@ from .api.schemas import AssemblePackageRequest
 from .artifacts import MinioArtifactStore
 from .backend import deployed_backend
 from .config import load_media_factory_settings
-from .domain.enums import PackageStatus
+from .domain.enums import PackageStatus, RenderJobStatus
 from .errors import MediaAssemblyError, MediaInfrastructureError
-from .render_reconciliation import inspect_render_claim
+from .render_reconciliation import inspect_render_claim, record_claim_inventory
 from .service import assemble_and_persist
-from .storage.render_claims import list_render_job_summaries
-from .storage.repositories import get_media_package_by_id
+from .storage.render_claims import (
+    RecoveryEvidenceKind,
+    list_render_job_summaries,
+    quarantine_stale_render_job,
+    record_render_recovery_evidence,
+)
+from .storage.repositories import get_media_package_by_id, get_render_job
 from .texture_backfill import backfill_package_texture, backfill_packages_texture
 from .texture_inventory import inspect_brand_album_textures
 
@@ -254,8 +259,19 @@ def cli_render_inspect(
         ..., "--brand-id", help="Brand path hint (unverified without a package row)",
     ),
     limit: int = typer.Option(20, "--limit", min=1, max=100),
+    record_inventory: bool = typer.Option(
+        False, "--record-inventory",
+        help="Persist a complete listing of a QUARANTINED claim as recovery evidence",
+    ),
+    recorded_by: str | None = typer.Option(
+        None, "--recorded-by", help="Operator identity, required with --record-inventory",
+    ),
 ) -> None:
-    """Read-only inventory of one render claim's MinIO object names, not recovery."""
+    """Inventory one render claim's MinIO object names; optionally record it (ADR-0043)."""
+    if record_inventory and not (recorded_by and recorded_by.strip()):
+        typer.echo("--record-inventory requires --recorded-by", err=True)
+        raise typer.Exit(code=2)
+    recorded = False
     try:
         factory = platform_session_factory()
         store = MinioArtifactStore(load_settings())
@@ -263,7 +279,15 @@ def cli_render_inspect(
             inspection = inspect_render_claim(
                 session, store, job_id=job_id, brand_id=brand_id, limit=limit,
             )
-            session.rollback()
+            if record_inventory:
+                assert recorded_by is not None
+                recorded = record_claim_inventory(
+                    session, inspection, recorded_by=recorded_by.strip(),
+                    recorded_at=SystemClock().now(),
+                )
+                session.commit()
+            else:
+                session.rollback()
     except (ValueError, MediaInfrastructureError) as exc:
         typer.echo(f"Render inspection refused: {exc}", err=True)
         raise typer.Exit(code=2) from exc
@@ -286,9 +310,69 @@ def cli_render_inspect(
             f"Observed objects: {len(inspection.evidence.objects)}; "
             f"truncated: {inspection.evidence.truncated}; limit: {limit}"
         )
+    if record_inventory:
+        typer.echo(
+            "Recorded orphan_artifacts evidence." if recorded
+            else "Identical orphan_artifacts evidence was already recorded."
+        )
     typer.echo(
-        "Read-only object NAMES only: no bytes, integrity, worker termination, "
-        "rights, recoverability or safe deletion verified. No retry or mutation."
+        "Object NAMES only: no bytes, integrity, worker termination, "
+        "rights, recoverability or safe deletion verified. "
+        + ("No retry or deletion." if record_inventory else "No retry or mutation.")
+    )
+
+
+@media_cli.command(name="render-attest-termination")
+def cli_render_attest_termination(
+    job_id: str = typer.Option(..., "--job-id", help="Exact RUNNING render job ID"),
+    evidence_ref: str = typer.Option(
+        ..., "--evidence-ref",
+        help="Where the out-of-band proof lives (ticket, log, host check output)",
+    ),
+    recorded_by: str = typer.Option(..., "--recorded-by", help="Operator identity"),
+) -> None:
+    """Record that a claimed render's worker is verified stopped, then fence the claim.
+
+    The operator must have verified termination out of band (for example the
+    worker container is gone). Age alone is not proof. Nothing is retried.
+    """
+    try:
+        factory = platform_session_factory()
+        with factory() as session:
+            job = get_render_job(session, job_id)
+            if job is None or job.worker_id is None or job.started_at is None:
+                raise ValueError("render job has no committed execution identity")
+            # The attestation, not the operator's clock, proves termination;
+            # never let a worker clock ahead of this host defeat the fence.
+            now = max(SystemClock().now(), job.started_at)
+            record_render_recovery_evidence(
+                session, job_id=job.id, kind=RecoveryEvidenceKind.WORKER_TERMINATION,
+                method="supervisor_attestation", worker_id=job.worker_id,
+                started_at=job.started_at, input_manifest_hash=job.input_manifest_hash,
+                recorded_by=recorded_by.strip(), recorded_at=now,
+                evidence_ref=evidence_ref, detail={},
+            )
+            fenced = quarantine_stale_render_job(
+                session, job_id=job.id, input_manifest_hash=job.input_manifest_hash,
+                started_before=now, quarantined_at=now,
+                expected_worker_id=job.worker_id, expected_started_at=job.started_at,
+            )
+            session.commit()
+            current = get_render_job(session, job_id)
+    except ValueError as exc:
+        typer.echo(f"Termination attestation refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    if not fenced and (current is None or current.job_status is not RenderJobStatus.QUARANTINED):
+        state = current.job_status.value if current is not None else "missing"
+        typer.echo(
+            f"Job: {job_id}; termination evidence recorded, but the claim was NOT "
+            f"fenced (status {state}). No retry was staged.", err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"Job: {job_id}; termination evidence recorded; "
+        f"claim {'fenced as QUARANTINED' if fenced else 'already fenced'}. "
+        "No retry was staged and no artifact was touched."
     )
 
 

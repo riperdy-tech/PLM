@@ -161,7 +161,7 @@ class SunoAdapter:
                 # P5 must treat vocal lyrics as UNKNOWN, not screened.
                 lyrics_text=None,
             )
-        except SunoClientError as exc:
+        except Exception as exc:  # noqa: BLE001 - any failure after submit keeps the clip ID
             return GenerationResponse(
                 # Never invent a provider job identity from the local spec.
                 # A successful submit can have failed while polling or

@@ -261,7 +261,8 @@ class SunoClient:
                                     video_url=raw.get("video_url"),
                                     image_url=raw.get("image_url"),
                                     duration_seconds=float(raw.get("duration", 0.0)) or None,
-                                    model_name=raw.get("model_name", "chirp-v3-5"),
+                                    # Only what Suno reports; never the requested default.
+                                    model_name=str(raw.get("model_name") or ""),
                                     tags=raw.get("tags", ""),
                                 )
                             if status in ("error", "failed"):

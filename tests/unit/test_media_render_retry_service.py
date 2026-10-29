@@ -15,11 +15,8 @@ from media_factory.errors import MediaAssemblyError, MediaInfrastructureError
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.rendering.toolchain import MediaToolError, VisualizerSpec
 from media_factory.service import assemble_and_persist
-from media_factory.storage.models import render_jobs_table
-from media_factory.storage.render_claims import (
-    quarantine_stale_render_job,
-    queue_reconciled_render_retry,
-)
+from media_factory.storage.models import render_jobs_table, render_recovery_evidence_table
+from media_factory.storage.render_claims import queue_reconciled_render_retry
 from media_factory.storage.repositories import get_render_job
 from plm_platform.clock import FixedClock
 
@@ -31,6 +28,7 @@ from tests.support.media_backend import (
     synth_specs,
 )
 from tests.support.media_db import create_media_engine, media_session
+from tests.support.render_evidence import attest_inventory
 
 NOW = datetime(2026, 10, 29, 9, tzinfo=UTC)
 
@@ -80,23 +78,36 @@ def test_prepared_retry_uses_second_attempt_and_refuses_changed_inputs() -> None
             initial_id = session.execute(sa.select(render_jobs_table.c.id)).scalar_one()
             initial = get_render_job(session, initial_id)
             assert initial is not None
-            assert initial.job_status is RenderJobStatus.RUNNING
+            # The owner saw its own render raise, so it fenced its claim with
+            # persisted evidence instead of leaving an ambiguous RUNNING row.
+            assert initial.job_status is RenderJobStatus.QUARANTINED
+            assert initial.error_code == "render_run_stale"
             assert initial.started_at is not None
             assert initial.worker_id == "terminated-worker"
+            evidence = session.execute(sa.select(
+                render_recovery_evidence_table.c.method,
+                render_recovery_evidence_table.c.detail_json,
+            )).one()
+            assert evidence.method == "owner_exit_observed"
+            assert evidence.detail_json["error_code"] == "render_timeout"
             session.rollback()
         with factory() as session:
-            assert quarantine_stale_render_job(
-                session, job_id=initial.id, input_manifest_hash=initial.input_manifest_hash,
-                started_before=NOW, quarantined_at=NOW + timedelta(minutes=5),
+            # Termination alone is not enough to stage a retry.
+            assert queue_reconciled_render_retry(
+                session, previous_job_id=initial.id,
                 expected_worker_id="terminated-worker", expected_started_at=NOW,
-                worker_termination_confirmed=True,
+                input_manifest_hash=initial.input_manifest_hash,
+                now=NOW + timedelta(minutes=6),
+            ) is None
+            assert attest_inventory(
+                session, initial.id, worker_id="terminated-worker", started_at=NOW,
+                sha=initial.input_manifest_hash, at=NOW + timedelta(minutes=5),
             )
             prepared = queue_reconciled_render_retry(
                 session, previous_job_id=initial.id,
                 expected_worker_id="terminated-worker", expected_started_at=NOW,
                 input_manifest_hash=initial.input_manifest_hash,
-                worker_termination_confirmed=True, orphan_artifacts_reconciled=True,
-                source_inputs_reverified=True, now=NOW + timedelta(minutes=6),
+                now=NOW + timedelta(minutes=6),
             )
             assert prepared is not None and prepared.attempt_count == 2
             session.commit()

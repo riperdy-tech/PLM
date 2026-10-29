@@ -1,5 +1,6 @@
 """Unit tests for music factory provider protocol and adapters (§4.4, §111)."""
 
+import httpx
 import pytest
 
 from services.music_factory.domain.enums import AttemptStatus
@@ -208,6 +209,10 @@ def test_suno_adapter_generation_mocked(
     ("missing_receipt", ""),
     ("poll_error", "real-clip-from-provider"),
     ("download_error", "real-clip-from-provider"),
+    # Not only the client's own error type: a transport or parse failure after
+    # submit must also keep the observed clip ID for reconciliation.
+    ("poll_transport_error", "real-clip-from-provider"),
+    ("download_parse_error", "real-clip-from-provider"),
 ])
 def test_suno_error_never_invents_provider_job_identity(
     monkeypatch: pytest.MonkeyPatch, failure_stage: str, expected_clip_id: str,
@@ -231,6 +236,17 @@ def test_suno_error_never_invents_provider_job_identity(
         )
         if failure_stage == "poll_error":
             monkeypatch.setattr(suno._client, "poll_clip", raise_provider_error)
+        elif failure_stage == "poll_transport_error":
+            def transport_error(*args: object, **kwargs: object) -> None:
+                raise httpx.ConnectError("connection reset during poll")
+
+            monkeypatch.setattr(suno._client, "poll_clip", transport_error)
+        elif failure_stage == "download_parse_error":
+            def parse_error(*args: object, **kwargs: object) -> None:
+                raise ValueError("malformed download response")
+
+            monkeypatch.setattr(suno._client, "poll_clip", lambda clip_id: None)
+            monkeypatch.setattr(suno._client, "download_clip_wav", parse_error)
         else:
             monkeypatch.setattr(suno._client, "poll_clip", lambda clip_id: None)
             monkeypatch.setattr(suno._client, "download_clip_wav", raise_provider_error)

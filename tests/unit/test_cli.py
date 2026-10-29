@@ -9,6 +9,7 @@ and never needs a ``.env`` file. (The against-the-stack green path lives in
 from __future__ import annotations
 
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -204,6 +205,28 @@ def test_new_0041_credit_migration_still_refuses_shared_0039_rollout() -> None:
     refusal = cli._merge_code_only_refusal(head, current)
     assert refusal is not None and "NOT approved" in refusal
     assert cli._merge_code_only_refusal(head, head) is None
+
+
+def test_new_0042_render_evidence_migration_still_refuses_shared_rollout() -> None:
+    head = "0042_media_render_evidence"
+    current = "0039_merge_0038_branches"
+    known = frozenset({current, "0040_p4_unpriced_costs", "0041_p4_credit_provenance", head})
+    result = cli._migration_revision_result(current, head, known)
+    assert not result.passed
+    assert "CODE ONLY" in result.detail
+    assert cli._merge_code_only_refusal(head, current) is not None
+    assert cli._merge_code_only_refusal(head, head) is None
+
+
+def test_actual_checkout_head_is_a_declared_code_only_head() -> None:
+    """A new revision that becomes head must not silently lift the rollout refusal."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[2]
+    heads = ScriptDirectory.from_config(Config(str(root / "alembic.ini"))).get_heads()
+    assert len(heads) == 1
+    assert heads[0] in cli._CODE_ONLY_HEADS
 
 
 def test_migration_check_distinguishes_known_pending_and_current_revisions() -> None:

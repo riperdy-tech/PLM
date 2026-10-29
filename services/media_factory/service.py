@@ -21,13 +21,20 @@ from .domain.enums import RenderJobStatus
 from .domain.models import MediaPackage, RenderJob
 from .errors import MediaAssemblyError
 from .playlist.intake import fetch_cleared_manifests
-from .rendering.assembler import PackageAlreadyAssembled, assemble_media_package
+from .rendering.assembler import (
+    AssemblyPipelineResult,
+    PackageAlreadyAssembled,
+    assemble_media_package,
+)
 from .rendering.profiles import render_profile
 from .rendering.renderer import RENDER_VERSION
 from .storage.render_claims import (
+    RecoveryEvidenceKind,
     claim_queued_render_job,
     finish_claimed_render_job,
+    quarantine_stale_render_job,
     queue_render_job,
+    record_render_recovery_evidence,
     render_claim_namespace,
 )
 from .storage.repositories import (
@@ -164,7 +171,29 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
         )
     except PackageAlreadyAssembled as replay:
         return replay.package
+    except Exception as exc:
+        if claim is not None and render_session_factory is not None:
+            _quarantine_own_claim(render_session_factory, claim, exc, clock)
+        raise
 
+    try:
+        return _persist_assembled(session, result, claim, clock)
+    except Exception as exc:
+        # The render finished but this process could not or would not persist
+        # it. Fence the claim unless another actor already did (ownership lost).
+        if (claim is not None and render_session_factory is not None
+                and getattr(exc, "code", None) != "render_ownership_lost"):
+            # This request is failing anyway. Release its uncommitted writes first:
+            # the fenced completion UPDATE holds the job row lock, and fencing from
+            # another session while it is held would wait on this thread forever.
+            session.rollback()
+            _quarantine_own_claim(render_session_factory, claim, exc, clock)
+        raise
+
+
+def _persist_assembled(session: Session, result: AssemblyPipelineResult,
+                       claim: tuple[str, str, str, datetime] | None,
+                       clock: Clock) -> MediaPackage:
     # The sequence and the visual plan do not depend on the render profile, so the same
     # recordings rendered under another profile (a new package) share them: they are
     # stored once, and a stored sequence that differs is a conflict, never overwritten.
@@ -210,3 +239,39 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
     # The fenced job completion and package publication commit atomically.
     insert_media_package(session, result.media_package)
     return result.media_package
+
+
+def _quarantine_own_claim(render_session_factory: Callable[[], Session],
+                          claim: tuple[str, str, str, datetime], exc: Exception,
+                          clock: Clock) -> None:
+    """Owner-observed exit (ADR-0043): record it and fence this claim.
+
+    This process owns the claim and its render call has already returned or
+    raised; ``subprocess.run`` reaps FFmpeg before either, so no child of this
+    execution can still write. A supervisor then finds QUARANTINED with
+    evidence instead of an ambiguous RUNNING row. A killed process never
+    reaches this code; its claim still needs out-of-band termination evidence.
+    The original failure is always re-raised by the caller, never masked.
+    """
+    job_id, worker_id, input_hash, started_at = claim
+    now = clock.now()
+    try:
+        with render_session_factory() as fence_session:
+            record_render_recovery_evidence(
+                fence_session, job_id=job_id,
+                kind=RecoveryEvidenceKind.WORKER_TERMINATION,
+                method="owner_exit_observed", worker_id=worker_id,
+                started_at=started_at, input_manifest_hash=input_hash,
+                recorded_by=worker_id, recorded_at=now,
+                detail={"exception_type": type(exc).__name__,
+                        "error_code": getattr(exc, "code", None)},
+            )
+            quarantine_stale_render_job(
+                fence_session, job_id=job_id, input_manifest_hash=input_hash,
+                started_before=now, quarantined_at=now,
+                expected_worker_id=worker_id, expected_started_at=started_at,
+            )
+            fence_session.commit()
+    except Exception as fence_error:  # noqa: BLE001 - the render failure is what propagates
+        exc.add_note(f"render claim {job_id} left RUNNING: owner fence failed "
+                     f"({type(fence_error).__name__})")

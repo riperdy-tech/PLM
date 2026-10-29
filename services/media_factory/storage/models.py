@@ -115,6 +115,28 @@ render_jobs_table = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+# B02 (ADR-0043): append-only evidence that one claimed render execution has
+# stopped and that its claim-scoped artifacts were inventoried. Quarantine and
+# retry staging require these rows instead of caller-asserted booleans.
+render_recovery_evidence_table = sa.Table(
+    "render_recovery_evidence",
+    MEDIA_METADATA,
+    sa.Column("id", sa.String(64), primary_key=True),
+    sa.Column("render_job_id", sa.String(64), nullable=False, index=True),
+    sa.Column("evidence_kind", sa.String(32), nullable=False),
+    sa.Column("method", sa.String(64), nullable=False),
+    sa.Column("worker_id", sa.String(64), nullable=False),
+    sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("input_manifest_hash", sa.String(64), nullable=False),
+    sa.Column("evidence_ref", sa.Text, nullable=True),
+    sa.Column("detail_json", sa.JSON, nullable=False),
+    sa.Column("recorded_by", sa.String(128), nullable=False),
+    sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint(
+        "render_job_id", "evidence_kind", name="uq_render_recovery_evidence_job_kind",
+    ),
+)
+
 media_packages_table = sa.Table(
     "media_packages",
     MEDIA_METADATA,

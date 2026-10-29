@@ -324,3 +324,56 @@ and **verified orphan output reconciliation** and fencing at publication.
 Test actual kill/restart on isolated PostgreSQL+MinIO/FFmpeg infrastructure;
 per-execution namespaces isolate blobs but cannot by themselves prove
 safe reclaim, retry or complete B02 durable recovery.
+
+## Persisted recovery evidence and owner-observed exit (2026-10-29, Claude takeover, code-only partial)
+
+Reviewed the retry-authority code above before continuing. Found and fixed:
+
+1. **Caller booleans were the only recovery authority.** `quarantine_stale_render_job`
+   took `worker_termination_confirmed`, and `queue_reconciled_render_retry` took three
+   booleans. Replaced by an append-only `media.render_recovery_evidence` table
+   (ADR-0043, code-only migration `0042_media_render_evidence`). Evidence is inserted
+   with `INSERT … SELECT` bound to the exact claim identity and an allowed status, so
+   it cannot be recorded for another execution. Quarantine requires a
+   `worker_termination` row; retry staging requires `worker_termination` and
+   `orphan_artifacts` rows for the predecessor claim, all inside the same conditional
+   statement. Supervisor attestations need an `evidence_ref`; an inventory needs a
+   complete, counted, non-truncated listing.
+2. **An in-process render failure left RUNNING forever.** The claim owner now records
+   `owner_exit_observed` (exception type and code) and quarantines its own claim in a
+   separate session, then re-raises. A failure to fence never masks the original
+   error. Interrupts (`BaseException`) and killed processes are not covered: those
+   claims stay RUNNING for a supervisor.
+3. **Positional `INSERT … SELECT` in retry staging** depended silently on column order;
+   now name-keyed.
+4. **`plm migrate` code-only refusal was a repeated literal head list** in three
+   places; any new head would have lifted the refusal. Now one `_CODE_ONLY_HEADS`
+   constant plus a test that the checkout's actual head is listed.
+5. Rehearsal also caught an over-long revision ID (35 > `alembic_version`
+   VARCHAR(32)); renamed before any use. The existing layout test would also have
+   caught it.
+
+Verification (all in this session, worktree `plm-handover-audit-277422`):
+- Disposable PostgreSQL 16 container on loopback `127.0.0.1:55432` (tmpfs, not the
+  shared dev DB): the B02 suite `tests/integration/test_media_render_claims_postgres.py`
+  **10 passed** — the 5 previous cases updated to the evidence API, plus concurrent
+  evidence insert (one row), quarantine without evidence refused, two concurrent
+  supervisors stage exactly one retry with every column correct, old attempt cannot
+  finish once the retry is claimed, and HTTP owner-exit fencing with real
+  `timestamptz` equality.
+- Same container, database `plm_migration_disposable_b02`: `alembic upgrade head`
+  from base through `0042` passed; table, columns, nullability and indexes match the
+  ORM; downgrade **refused** while an evidence row existed; empty downgrade and
+  re-upgrade passed. Base-to-head on an empty DB only, not a clone of real data.
+- SQLite unit tests: see STATUS.md 2026-10-29 entry for counts.
+- An independent review of the diff led to: fencing post-render persistence
+  failures too, after rolling back the failing request (otherwise a PostgreSQL
+  self-deadlock on the job row, confirmed by a mutation check of the new PG
+  test); refusing inventories taken before quarantine or empty under an
+  unverified brand hint; clock-skew-safe termination CLI. B02 PG suite then
+  11 passed.
+
+Still **not** done: independent supervisor process, heartbeat/lease, verification of
+termination for killed processes, MinIO byte-level inventory recorded as evidence
+(the `render-inspect` command still only prints), real FFmpeg kill/restart, compose
+R5. B02 stays partial.

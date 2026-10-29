@@ -16,13 +16,14 @@ from media_factory.storage.render_claims import (
 from media_factory.storage.repositories import get_render_job
 
 from tests.support.media_db import create_media_engine, media_session
+from tests.support.render_evidence import attest_inventory, attest_termination
 
 NOW = datetime(2026, 10, 29, 9, tzinfo=UTC)
 SHA = "a" * 64
 VIDEO = "f" * 64
 
 
-def _quarantine(engine: object, suffix: str = "base") -> RenderJob:
+def _quarantine(engine: object, suffix: str = "base", *, inventory: bool = True) -> RenderJob:
     job = RenderJob.create(
         f"retry_package_{suffix}", "preview_360p_v1", input_manifest_hash=SHA,
         now=NOW,
@@ -35,12 +36,16 @@ def _quarantine(engine: object, suffix: str = "base") -> RenderJob:
             session, job_id=job.id, worker_id="terminated-worker",
             input_manifest_hash=SHA, started_at=NOW,
         )
+        assert attest_termination(session, job.id, worker_id="terminated-worker",
+                                  started_at=NOW, sha=SHA, at=NOW + timedelta(minutes=5))
         assert quarantine_stale_render_job(
             session, job_id=job.id, input_manifest_hash=SHA,
             started_before=NOW, quarantined_at=NOW + timedelta(minutes=5),
             expected_worker_id="terminated-worker", expected_started_at=NOW,
-            worker_termination_confirmed=True,
         )
+        if inventory:
+            assert attest_inventory(session, job.id, worker_id="terminated-worker",
+                                    started_at=NOW, sha=SHA, at=NOW + timedelta(minutes=5))
         session.commit()
     return job
 
@@ -51,9 +56,6 @@ def _retry(session: object, prior: RenderJob, **overrides: object) -> RenderJob 
         "expected_worker_id": "terminated-worker",
         "expected_started_at": NOW,
         "input_manifest_hash": SHA,
-        "worker_termination_confirmed": True,
-        "orphan_artifacts_reconciled": True,
-        "source_inputs_reverified": True,
         "now": NOW + timedelta(minutes=6),
     }
     arguments.update(overrides)
@@ -98,17 +100,29 @@ def test_recovery_intent_is_new_queued_attempt_without_rendering_or_mutating_pri
         engine.dispose()
 
 
+def test_retry_requires_persisted_artifact_inventory_not_a_flag() -> None:
+    engine = create_media_engine(static_pool=True)
+    try:
+        prior = _quarantine(engine, "no_inventory", inventory=False)
+        with media_session(engine) as session:
+            assert _retry(session, prior) is None
+            with pytest.raises(TypeError):
+                _retry(session, prior, orphan_artifacts_reconciled=True)
+            assert attest_inventory(session, prior.id, worker_id="terminated-worker",
+                                    started_at=NOW, sha=SHA, at=NOW + timedelta(minutes=5))
+            assert _retry(session, prior) is not None
+            session.rollback()
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.parametrize("override", [
-    {"worker_termination_confirmed": False},
-    {"orphan_artifacts_reconciled": False},
-    {"source_inputs_reverified": False},
-    {"orphan_artifacts_reconciled": None},
     {"expected_started_at": NOW.replace(tzinfo=None)},
     {"input_manifest_hash": "bad"},
     {"max_attempts": 1},
     {"max_attempts": True},
 ])
-def test_retry_requires_explicit_supervisor_attestation_and_valid_inputs(
+def test_retry_requires_valid_inputs(
     override: dict[str, object],
 ) -> None:
     engine = create_media_engine(static_pool=True)

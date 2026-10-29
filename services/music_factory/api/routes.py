@@ -305,6 +305,9 @@ def build_router(
                 plan=plan,
                 variants=variants,
                 spec=spec,
+                # Paid calls commit their SUBMITTED and settled attempts, so a
+                # later failure in this request cannot erase a provider job.
+                checkpoint=session.commit,
             )
         except GenerationPlanSpecMismatch as exc:
             session.rollback()

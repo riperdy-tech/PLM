@@ -180,6 +180,15 @@ def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
     return Check("postgres", True, f"reachable at {target} (PostgreSQL {version})")
 
 
+# Heads installed in CODE ONLY: `plm migrate` refuses to apply them without a
+# separately approved rollout. Every new code-only revision must be added here,
+# otherwise becoming the head would silently lift the refusal.
+_CODE_ONLY_HEADS = frozenset({
+    "0039_merge_0038_branches", "0040_p4_unpriced_costs",
+    "0041_p4_credit_provenance", "0042_media_render_evidence",
+})
+
+
 def _migration_revision_result(
     current: str | None,
     head: str | None,
@@ -194,7 +203,7 @@ def _migration_revision_result(
     if current == head:
         return Check("migrations", True, f"at {current} (head)")
     if current is None:
-        if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"}:
+        if head in _CODE_ONLY_HEADS:
             return Check(
                 "migrations", False,
                 f"database not migrated; {head} installed in CODE ONLY - "
@@ -212,7 +221,7 @@ def _migration_revision_result(
             f"(head {head}); possible divergent worktree/branch - do NOT run plm migrate "
             "until revision history is reconciled and reviewed",
         )
-    if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"}:
+    if head in _CODE_ONLY_HEADS:
         return Check(
             "migrations", False,
             f"database at {current}, head {head}; pending revisions installed in CODE ONLY - "
@@ -455,9 +464,9 @@ def _unversioned_target_refusal(existing_objects: object) -> str | None:
 
 def _merge_code_only_refusal(head: str, current: str | None) -> str | None:
     """Hold the 0039 rollout until separately approved, even after code installation."""
-    if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"} and current != head:
+    if head in _CODE_ONLY_HEADS and current != head:
         return (
-            "0039/0040/0041 revisions are installed in code only; database migration "
+            "0039-0042 revisions are installed in code only; database migration "
             "is NOT approved. Refusing plm migrate until a separately "
             "reviewed rollout/restore plan."
         )
@@ -891,11 +900,30 @@ def media_render_inspect(
     job_id: str = typer.Option(..., "--job-id", help="Exact persisted render job ID"),
     brand_id: str = typer.Option(..., "--brand-id", help="Explicit brand ID path hint"),
     limit: int = typer.Option(20, "--limit", min=1, max=100),
+    record_inventory: bool = typer.Option(
+        False, "--record-inventory",
+        help="Persist a complete listing of a QUARANTINED claim as recovery evidence",
+    ),
+    recorded_by: str | None = typer.Option(None, "--recorded-by", help="Operator identity"),
 ) -> None:
-    """Read-only B02 object-name inventory; not recovery or safe reclaim."""
+    """B02 object-name inventory, optionally recorded as evidence; not recovery or reclaim."""
     from media_factory.cli import cli_render_inspect
 
-    cli_render_inspect(job_id=job_id, brand_id=brand_id, limit=limit)
+    cli_render_inspect(job_id=job_id, brand_id=brand_id, limit=limit,
+                       record_inventory=record_inventory, recorded_by=recorded_by)
+
+
+@media_app.command(name="render-attest-termination")
+def media_render_attest_termination(
+    job_id: str = typer.Option(..., "--job-id", help="Exact RUNNING render job ID"),
+    evidence_ref: str = typer.Option(..., "--evidence-ref", help="Out-of-band proof reference"),
+    recorded_by: str = typer.Option(..., "--recorded-by", help="Operator identity"),
+) -> None:
+    """Record verified worker termination and fence the claim (ADR-0043); no retry."""
+    from media_factory.cli import cli_render_attest_termination
+
+    cli_render_attest_termination(job_id=job_id, evidence_ref=evidence_ref,
+                                  recorded_by=recorded_by)
 
 
 @media_app.command(name="package")

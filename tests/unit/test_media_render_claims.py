@@ -18,6 +18,7 @@ from media_factory.storage.render_claims import (
 from media_factory.storage.repositories import get_render_job, insert_render_job
 
 from tests.support.media_db import create_media_engine, media_session
+from tests.support.render_evidence import attest_termination
 
 NOW = datetime(2026, 10, 28, 3, 0, tzinfo=UTC)
 SHA = "a" * 64
@@ -230,16 +231,18 @@ def test_stale_running_claim_is_quarantined_and_old_worker_is_fenced() -> None:
                 input_manifest_hash=SHA, started_at=NOW)
             session.commit()
         with media_session(engine) as session:
-            with pytest.raises(ValueError, match="confirmed worker termination"):
-                quarantine_stale_render_job(
-                    session, job_id=job.id, input_manifest_hash=SHA,
-                    started_before=NOW, quarantined_at=cutoff,
-                    expected_worker_id="worker-lost", expected_started_at=NOW, worker_termination_confirmed=False,
-                )
+            # Without a persisted termination record, age and identity are not enough.
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=NOW, quarantined_at=cutoff,
-                expected_worker_id="other-worker", expected_started_at=NOW, worker_termination_confirmed=True,
+                expected_worker_id="worker-lost", expected_started_at=NOW,
+            )
+            assert attest_termination(session, job.id, worker_id="worker-lost",
+                                      started_at=NOW, sha=SHA, at=cutoff)
+            assert not quarantine_stale_render_job(
+                session, job_id=job.id, input_manifest_hash=SHA,
+                started_before=NOW, quarantined_at=cutoff,
+                expected_worker_id="other-worker", expected_started_at=NOW,
             )
             # The same worker token is not enough to identify a run: stale
             # evidence from an earlier run must never fence a newer claim.
@@ -248,7 +251,6 @@ def test_stale_running_claim_is_quarantined_and_old_worker_is_fenced() -> None:
                 started_before=cutoff, quarantined_at=cutoff,
                 expected_worker_id="worker-lost",
                 expected_started_at=NOW + timedelta(seconds=1),
-                worker_termination_confirmed=True,
             )
             with pytest.raises(ValueError, match="timezone"):
                 quarantine_stale_render_job(
@@ -256,20 +258,19 @@ def test_stale_running_claim_is_quarantined_and_old_worker_is_fenced() -> None:
                     started_before=cutoff, quarantined_at=cutoff,
                     expected_worker_id="worker-lost",
                     expected_started_at=NOW.replace(tzinfo=None),
-                    worker_termination_confirmed=True,
                 )
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash="b" * 64,
                 started_before=cutoff, quarantined_at=cutoff,
-                expected_worker_id="worker-lost", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker-lost", expected_started_at=NOW)
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=NOW - timedelta(seconds=1), quarantined_at=cutoff,
-                expected_worker_id="worker-lost", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker-lost", expected_started_at=NOW)
             assert quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=NOW, quarantined_at=cutoff,
-                expected_worker_id="worker-lost", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker-lost", expected_started_at=NOW)
             session.commit()
         with media_session(engine) as session:
             assert not finish_claimed_render_job(
@@ -284,7 +285,7 @@ def test_stale_running_claim_is_quarantined_and_old_worker_is_fenced() -> None:
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=cutoff, quarantined_at=cutoff,
-                expected_worker_id="worker-lost", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker-lost", expected_started_at=NOW)
             stored = get_render_job(session, job.id)
             assert stored is not None
             assert stored.job_status is RenderJobStatus.QUARANTINED
@@ -306,10 +307,12 @@ def test_stale_quarantine_is_guarded_and_cannot_replace_completed_work() -> None
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=NOW, quarantined_at=NOW,
-                expected_worker_id="worker", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker", expected_started_at=NOW)
             assert claim_queued_render_job(
                 session, job_id=job.id, worker_id="worker",
                 input_manifest_hash=SHA, started_at=NOW)
+            assert attest_termination(session, job.id, worker_id="worker",
+                                      started_at=NOW, sha=SHA, at=NOW)
             assert finish_claimed_render_job(
                 session, job_id=job.id, worker_id="worker",
                 input_manifest_hash=SHA, started_at=NOW,
@@ -318,7 +321,7 @@ def test_stale_quarantine_is_guarded_and_cannot_replace_completed_work() -> None
             assert not quarantine_stale_render_job(
                 session, job_id=job.id, input_manifest_hash=SHA,
                 started_before=NOW, quarantined_at=NOW + timedelta(hours=1),
-                expected_worker_id="worker", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker", expected_started_at=NOW)
             for invalid_hash, before, when in (
                 ("invalid", NOW, NOW),
                 (SHA, NOW, NOW - timedelta(seconds=1)),
@@ -328,7 +331,7 @@ def test_stale_quarantine_is_guarded_and_cannot_replace_completed_work() -> None
                     quarantine_stale_render_job(
                         session, job_id=job.id, input_manifest_hash=invalid_hash,
                         started_before=before, quarantined_at=when,
-                        expected_worker_id="worker", expected_started_at=NOW, worker_termination_confirmed=True)
+                        expected_worker_id="worker", expected_started_at=NOW)
             stored = get_render_job(session, job.id)
             assert stored is not None
             assert stored.job_status is RenderJobStatus.COMPLETED
@@ -390,10 +393,12 @@ def test_stale_render_scan_is_bounded_ordered_and_read_only() -> None:
             assert stored is not None
             assert stored.job_status is RenderJobStatus.RUNNING
             assert stored.worker_id == "worker-old"
+            assert attest_termination(session, old.id, worker_id="worker-old",
+                                      started_at=NOW, sha=SHA, at=NOW + timedelta(minutes=5))
             assert quarantine_stale_render_job(
                 session, job_id=old.id, input_manifest_hash=SHA,
                 started_before=NOW, quarantined_at=NOW + timedelta(minutes=5),
-                expected_worker_id="worker-old", expected_started_at=NOW, worker_termination_confirmed=True)
+                expected_worker_id="worker-old", expected_started_at=NOW)
             assert list_stale_render_job_candidates(
                 session, started_before=NOW + timedelta(minutes=3)
             ) == [recent.id]

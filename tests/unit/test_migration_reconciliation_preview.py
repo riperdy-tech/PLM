@@ -58,8 +58,8 @@ def test_draft_merge_has_one_head_and_preserves_both_revisions(
     draft_graph: ScriptDirectory,
 ) -> None:
     # The original merge remains immutable even when later revisions
-    # (currently 0041) extend the same single-head chain.
-    assert draft_graph.get_heads() == ["0041_p4_credit_provenance"]
+    # (currently 0042) extend the same single-head chain.
+    assert draft_graph.get_heads() == ["0042_media_render_evidence"]
     assert draft_graph.get_bases() == ["0001_baseline"]
     merge = draft_graph.get_revision(MERGE_REV)
     assert merge is not None
@@ -135,9 +135,11 @@ def test_draft_merge_node_has_no_schema_operations() -> None:
 def test_installed_revisions_form_one_head_without_changing_historical_sql() -> None:
     active = Config(str(ROOT / "alembic.ini"))
     current = ScriptDirectory.from_config(active)
-    # 0040 and 0041 are code-only P4 extensions. The original merged
-    # 0038 branches and 0039 SQL remain installed byte-for-byte.
-    assert current.get_heads() == ["0041_p4_credit_provenance"]
+    # 0040/0041 (P4) and 0042 (P6) are code-only extensions. The original
+    # merged 0038 branches and 0039 SQL remain installed byte-for-byte.
+    assert current.get_heads() == ["0042_media_render_evidence"]
+    assert current.get_revision(
+        "0042_media_render_evidence").down_revision == "0041_p4_credit_provenance"
     assert current.get_revision("0041_p4_credit_provenance").down_revision == "0040_p4_unpriced_costs"
     assert current.get_revision("0040_p4_unpriced_costs").down_revision == MERGE_REV
     assert current.get_bases() == ["0001_baseline"]

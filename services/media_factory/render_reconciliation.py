@@ -7,15 +7,20 @@ render can have no media package row; the operator brand hint is then UNKNOWN.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from .artifacts import ClaimObjectPage, MinioArtifactStore
 from .domain.enums import RenderJobStatus
-from .storage.render_claims import render_claim_namespace
+from .storage.render_claims import (
+    RecoveryEvidenceKind,
+    record_render_recovery_evidence,
+    render_claim_namespace,
+)
 from .storage.repositories import get_media_package_by_id, get_render_job
 
-__all__ = ["RenderClaimInspection", "inspect_render_claim"]
+__all__ = ["RenderClaimInspection", "inspect_render_claim", "record_claim_inventory"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,4 +85,51 @@ def inspect_render_claim(
     return RenderClaimInspection(
         job.id, job.job_status, namespace, page, source,
         "metadata_only_unverified_bytes_and_worker_liveness",
+    )
+
+
+def record_claim_inventory(
+    session: Session, inspection: RenderClaimInspection, *,
+    recorded_by: str, recorded_at: datetime,
+) -> bool:
+    """Persist a complete claim listing as ``orphan_artifacts`` evidence (ADR-0043).
+
+    Only a non-truncated listing of a QUARANTINED claim qualifies. The record
+    keeps the object names and the brand source exactly as listed: key hashes
+    are not byte verification, and an operator brand hint stays unverified.
+    The caller commits; nothing is deleted or retried here.
+    """
+    if inspection.evidence is None or inspection.claim_namespace is None:
+        raise ValueError(f"no claim listing to record ({inspection.reason})")
+    if inspection.evidence.truncated:
+        raise ValueError("a truncated listing is not an inventory; raise --limit")
+    if inspection.job_status is not RenderJobStatus.QUARANTINED:
+        # A live claim can still write after the listing was taken.
+        raise ValueError("only a listing taken after the claim was quarantined is an inventory")
+    if not inspection.evidence.objects and inspection.brand_source != "persisted_package":
+        # Under an unverified brand hint an empty listing cannot tell "no
+        # orphans" from "wrong prefix". A non-empty one proves the prefix, since
+        # the claim namespace is derived from this execution's identity.
+        raise ValueError("an empty listing under an unverified brand hint is not an inventory")
+    job = get_render_job(session, inspection.job_id)
+    if job is None or job.worker_id is None or job.started_at is None:
+        raise ValueError("render job has no committed execution identity")
+    objects = [
+        {"uri": item.uri, "pinned_sha256": item.pinned_sha256, "size_bytes": item.size_bytes}
+        for item in inspection.evidence.objects
+    ]
+    return record_render_recovery_evidence(
+        session, job_id=job.id, kind=RecoveryEvidenceKind.ORPHAN_ARTIFACTS,
+        method="claim_namespace_inventory", worker_id=job.worker_id,
+        started_at=job.started_at, input_manifest_hash=job.input_manifest_hash,
+        recorded_by=recorded_by, recorded_at=recorded_at,
+        evidence_ref=f"render-inspect:{inspection.claim_namespace}",
+        detail={
+            "claim_namespace": inspection.claim_namespace,
+            "brand_source": inspection.brand_source,
+            "object_count": len(objects),
+            "objects": objects,
+            "truncated": False,
+            "bytes_verified": False,
+        },
     )

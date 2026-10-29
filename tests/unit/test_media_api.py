@@ -36,6 +36,7 @@ from tests.support.media_backend import (
     synth_specs,
 )
 from tests.support.media_db import create_media_engine, media_session
+from tests.support.render_evidence import attest_termination
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",
@@ -622,7 +623,7 @@ def test_http_render_claim_survives_worker_exception_and_refuses_duplicate(
     """A failed HTTP process cannot erase its already-committed render claim."""
     import sqlalchemy as sa
     from media_factory.domain.enums import RenderJobStatus
-    from media_factory.storage.models import render_jobs_table
+    from media_factory.storage.models import render_jobs_table, render_recovery_evidence_table
     from media_factory.storage.repositories import get_media_package_by_id
 
     store, manifests = cleared
@@ -645,7 +646,15 @@ def test_http_render_claim_survives_worker_exception_and_refuses_duplicate(
     with media_session(engine) as session:
         rows = session.execute(sa.select(render_jobs_table)).mappings().all()
         assert len(rows) == 1
-        assert rows[0]["job_status"] == RenderJobStatus.RUNNING.value
+        # The owner observed its own render raise (ADR-0043): it fenced the
+        # claim with persisted evidence. A killed process would leave RUNNING.
+        assert rows[0]["job_status"] == RenderJobStatus.QUARANTINED.value
+        assert rows[0]["error_code"] == "render_run_stale"
+        evidence = session.execute(sa.select(render_recovery_evidence_table)).mappings().all()
+        assert [(e["evidence_kind"], e["method"], e["worker_id"]) for e in evidence] == [
+            ("worker_termination", "owner_exit_observed", rows[0]["worker_id"])]
+        assert evidence[0]["detail_json"] == {
+            "error_code": None, "exception_type": "RuntimeError"}
         assert rows[0]["worker_id"]
         assert len(rows[0]["input_manifest_hash"]) == 64
         assert get_media_package_by_id(session, rows[0]["media_package_id"]) is None
@@ -690,13 +699,17 @@ def test_http_render_completion_is_fenced_if_claim_was_quarantined(
             # SQLite strips timezone metadata; the injected clock has the
             # original aware start instant used by the committed claim.
             assert prior.started_at == NOW.replace(tzinfo=None)
+            # Simulated supervisor evidence of forced termination only.
+            assert attest_termination(
+                claim_session, output.render_job.id, worker_id=prior.worker_id,
+                started_at=NOW, sha=output.preflight.input_manifest_hash, at=NOW,
+            )
             assert quarantine_stale_render_job(
                 claim_session, job_id=output.render_job.id,
                 input_manifest_hash=output.preflight.input_manifest_hash,
                 started_before=NOW, quarantined_at=NOW,
                 expected_worker_id=prior.worker_id,
                 expected_started_at=NOW,
-                worker_termination_confirmed=True,  # Simulated forced termination only.
             )
             claim_session.commit()
         return output

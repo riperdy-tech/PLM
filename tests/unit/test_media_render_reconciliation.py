@@ -246,3 +246,163 @@ def test_render_inspect_cli_is_read_only_and_explicitly_non_recovery(
         assert "--job-id" in help_result.output and "--brand-id" in help_result.output
     finally:
         engine.dispose()
+
+
+def _quarantined_claim(engine: Any) -> RenderJob:
+    """A committed claim, fenced with simulated termination evidence."""
+    from media_factory.storage.render_claims import quarantine_stale_render_job
+
+    from tests.support.render_evidence import attest_termination
+
+    queued = RenderJob.create("package_01", "preview_360p_v1", input_manifest_hash=SHA, now=NOW)
+    with media_session(engine) as session:
+        assert queue_render_job(session, queued)
+        assert claim_queued_render_job(session, job_id=queued.id, worker_id="worker_alpha",
+                                       input_manifest_hash=SHA, started_at=NOW)
+        assert attest_termination(session, queued.id, worker_id="worker_alpha",
+                                  started_at=NOW, sha=SHA, at=NOW)
+        assert quarantine_stale_render_job(
+            session, job_id=queued.id, input_manifest_hash=SHA, started_before=NOW,
+            quarantined_at=NOW, expected_worker_id="worker_alpha", expected_started_at=NOW)
+        session.commit()
+    return replace(queued, job_status=RenderJobStatus.QUARANTINED,
+                   worker_id="worker_alpha", started_at=NOW)
+
+
+def test_complete_listing_is_recorded_as_inventory_evidence_but_truncated_is_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlalchemy as sa
+    from media_factory.storage.models import render_recovery_evidence_table
+
+    store, fake = _store()
+    engine = create_media_engine(static_pool=True)
+    try:
+        job = _quarantined_claim(engine)
+        # SQLite drops the timezone; serve the aware row the way PostgreSQL does.
+        monkeypatch.setattr(render_reconciliation, "get_render_job", lambda *_: job)
+        monkeypatch.setattr(render_reconciliation, "get_media_package_by_id", lambda *_: None)
+        namespace = render_reconciliation.render_claim_namespace(
+            job_id=job.id, worker_id="worker_alpha", input_manifest_hash=SHA, started_at=NOW)
+        _add(fake, f"renders/brand_01/package_01/claims/{namespace}/master.mp4", b"a")
+        _add(fake, f"thumbnails/brand_01/package_01/claims/{namespace}/a.png", b"b")
+        with media_session(engine) as session:
+            partial = inspect_render_claim(session, store, job_id=job.id,
+                                           brand_id="brand_01", limit=1)
+            assert partial.evidence is not None and partial.evidence.truncated
+            with pytest.raises(ValueError, match="truncated listing"):
+                render_reconciliation.record_claim_inventory(
+                    session, partial, recorded_by="operator", recorded_at=NOW)
+            complete = inspect_render_claim(session, store, job_id=job.id,
+                                            brand_id="brand_01", limit=10)
+            assert render_reconciliation.record_claim_inventory(
+                session, complete, recorded_by="operator", recorded_at=NOW)
+            session.commit()
+        with media_session(engine) as session:
+            row = session.execute(sa.select(render_recovery_evidence_table).where(
+                render_recovery_evidence_table.c.evidence_kind == "orphan_artifacts",
+            )).mappings().one()
+            assert row["detail_json"]["object_count"] == 2
+            assert row["detail_json"]["brand_source"] == "unverified_operator_hint"
+            assert row["detail_json"]["bytes_verified"] is False
+        assert fake.reads == fake.writes == 0
+    finally:
+        engine.dispose()
+
+
+def test_attest_termination_cli_requires_a_reference_and_fences_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlalchemy as sa
+    from media_factory.storage.models import render_recovery_evidence_table
+    from media_factory.storage.repositories import get_render_job as stored_job
+
+    engine = create_media_engine(static_pool=True)
+    started = datetime(2026, 10, 1, tzinfo=UTC)  # the CLI fences against the real clock
+    queued = RenderJob.create("package_cli", "preview_360p_v1", input_manifest_hash=SHA,
+                              now=started)
+    with media_session(engine) as session:
+        assert queue_render_job(session, queued)
+        assert claim_queued_render_job(session, job_id=queued.id, worker_id="worker_gone",
+                                       input_manifest_hash=SHA, started_at=started)
+        session.commit()
+    running = replace(queued, job_status=RenderJobStatus.RUNNING,
+                      worker_id="worker_gone", started_at=started)
+    monkeypatch.setattr(cli, "platform_session_factory", lambda: lambda: media_session(engine))
+    monkeypatch.setattr(cli, "get_render_job", lambda *_: running)
+    try:
+        missing = CliRunner().invoke(app, [
+            "media", "render-attest-termination", "--job-id", queued.id,
+            "--recorded-by", "operator", "--evidence-ref", "  "])
+        assert missing.exit_code == 2
+        assert "evidence reference" in missing.output
+        done = CliRunner().invoke(app, [
+            "media", "render-attest-termination", "--job-id", queued.id,
+            "--recorded-by", "operator", "--evidence-ref", "ticket://ops-42"])
+        assert done.exit_code == 0, done.output
+        assert "fenced as QUARANTINED" in done.output and "No retry" in done.output
+        with media_session(engine) as session:
+            fenced = stored_job(session, queued.id)
+            assert fenced is not None and fenced.job_status is RenderJobStatus.QUARANTINED
+            row = session.execute(sa.select(render_recovery_evidence_table)).mappings().one()
+            assert (row["method"], row["evidence_ref"]) == (
+                "supervisor_attestation", "ticket://ops-42")
+    finally:
+        engine.dispose()
+
+
+def test_inventory_refuses_live_claims_and_empty_unverified_listings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _fake = _store()
+    engine = create_media_engine(static_pool=True)
+    try:
+        job = _quarantined_claim(engine)
+        monkeypatch.setattr(render_reconciliation, "get_media_package_by_id", lambda *_: None)
+        with media_session(engine) as session:
+            # Wrong or right, an unverified brand hint with no objects proves nothing.
+            monkeypatch.setattr(render_reconciliation, "get_render_job", lambda *_: job)
+            empty = inspect_render_claim(session, store, job_id=job.id,
+                                         brand_id="brand_typo", limit=10)
+            with pytest.raises(ValueError, match="empty listing under an unverified"):
+                render_reconciliation.record_claim_inventory(
+                    session, empty, recorded_by="operator", recorded_at=NOW)
+            live = replace(job, job_status=RenderJobStatus.RUNNING)
+            monkeypatch.setattr(render_reconciliation, "get_render_job", lambda *_: live)
+            running = inspect_render_claim(session, store, job_id=job.id,
+                                           brand_id="brand_01", limit=10)
+            with pytest.raises(ValueError, match="after the claim was quarantined"):
+                render_reconciliation.record_claim_inventory(
+                    session, running, recorded_by="operator", recorded_at=NOW)
+    finally:
+        engine.dispose()
+
+
+def test_attest_termination_tolerates_a_worker_clock_ahead_of_the_operator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from media_factory.storage.repositories import get_render_job as stored_job
+
+    engine = create_media_engine(static_pool=True)
+    ahead = datetime(2099, 1, 1, tzinfo=UTC)  # worker stamped a start in our future
+    queued = RenderJob.create("package_skew", "preview_360p_v1", input_manifest_hash=SHA,
+                              now=ahead)
+    with media_session(engine) as session:
+        assert queue_render_job(session, queued)
+        assert claim_queued_render_job(session, job_id=queued.id, worker_id="worker_skew",
+                                       input_manifest_hash=SHA, started_at=ahead)
+        session.commit()
+    running = replace(queued, job_status=RenderJobStatus.RUNNING,
+                      worker_id="worker_skew", started_at=ahead)
+    monkeypatch.setattr(cli, "platform_session_factory", lambda: lambda: media_session(engine))
+    monkeypatch.setattr(cli, "get_render_job",
+                        lambda session, job_id: running if session.info.get("first", True)
+                        and not session.info.update(first=False) else stored_job(session, job_id))
+    try:
+        done = CliRunner().invoke(app, [
+            "media", "render-attest-termination", "--job-id", queued.id,
+            "--recorded-by", "operator", "--evidence-ref", "ticket://skew"])
+        assert done.exit_code == 0, done.output
+        assert "fenced as QUARANTINED" in done.output
+    finally:
+        engine.dispose()

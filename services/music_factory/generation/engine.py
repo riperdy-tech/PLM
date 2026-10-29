@@ -16,11 +16,17 @@ verified REAL-provider job ID cannot become an exportable candidate.
 **Re-execution is resumable.** Running a plan again never pays twice for a variant that
 already succeeded: its stored candidate is reused, attempt numbering continues after the
 stored attempts, and the plan's attempt budget counts them.
+
+**A paid call stays on record (B03/B04).** With a ``checkpoint`` (the API and CLI pass the
+session's commit), a REAL call's SUBMITTED attempt is made durable before the call and its
+outcome, with the provider job ID, right after it. A later failure in the same request can
+then roll back only unpaid work, never the evidence that a paid request was sent.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Literal
@@ -68,6 +74,7 @@ from ..storage.repositories import (
     insert_rights_snapshot,
     list_candidates_by_track,
     list_generation_attempts,
+    settle_generation_attempt,
     update_plan_status,
 )
 from .prompts import ProtectedArtistPromptRefused, build_generation_prompt
@@ -92,6 +99,23 @@ class GenerationPlanSpecMismatch(ValueError):
 
 class GenerationProviderNotAllowed(GenerationPlanSpecMismatch):
     """A selected provider was not authorized by the persisted C3 provider policy."""
+
+
+def _record_outcome(session: Session, attempt: GenerationAttempt,
+                    checkpoint: Callable[[], None] | None) -> None:
+    """Store an attempt's outcome; a journaled paid call settles its SUBMITTED row durably."""
+    if checkpoint is None:
+        insert_generation_attempt(session, attempt)
+        return
+    try:
+        settle_generation_attempt(session, attempt)
+        checkpoint()
+    except Exception as exc:
+        # The durable row still says SUBMITTED; keep the provider's job ID in
+        # the error so reconciliation has something to look up.
+        exc.add_note(f"paid attempt {attempt.attempt_id} left SUBMITTED; provider job "
+                     f"id {attempt.provider_job_id!r} was not stored")
+        raise
 
 
 def _prior_paid_credit_refusal(
@@ -199,8 +223,14 @@ class GenerationEngine:
         spec: AdaptedTrackSpec,
         provider_adapter: MusicProviderProtocol | None = None,
         max_retries_per_variant: int = 1,
+        checkpoint: Callable[[], None] | None = None,
     ) -> GenerationEngineResult:
-        """Run generation loop across all variants within plan constraints."""
+        """Run generation loop across all variants within plan constraints.
+
+        ``checkpoint`` commits the caller's session. When given, every REAL (paid)
+        call is bracketed by durable records; without it the run stays one
+        all-or-nothing transaction, as for in-process callers and mock providers.
+        """
         now = self.clock.now()
         from ..storage.repositories import get_generation_plan, list_creative_variants
 
@@ -408,6 +438,13 @@ class GenerationEngine:
                         f"{decision.decision.value} ({decision.reason})"
                     )
                     break
+                journaled = mode is ProviderMode.REAL and checkpoint is not None
+                if journaled:
+                    assert checkpoint is not None
+                    # Durable before the paid call: a crash, or any later failure in
+                    # this request, leaves SUBMITTED on record and blocks a re-buy.
+                    insert_generation_attempt(session, attempt)
+                    checkpoint()
                 # A raise here leaves an EXECUTE reservation held (outcome unknown).
                 gen_res = adapter.generate(gen_req)
                 accepted = gen_res.status is AttemptStatus.SUCCEEDED or bool(
@@ -477,7 +514,7 @@ class GenerationEngine:
                         credit_basis=credit_basis,
                         credit_receipt_ref=credit_ref,
                     )
-                    insert_generation_attempt(session, completed_attempt)
+                    _record_outcome(session, completed_attempt, checkpoint if journaled else None)
                     attempts.append(completed_attempt)
 
                     # Probe audio
@@ -600,7 +637,7 @@ class GenerationEngine:
                         submitted_at=attempt.submitted_at,
                         completed_at=self.clock.now(),
                     )
-                    insert_generation_attempt(session, failed_attempt)
+                    _record_outcome(session, failed_attempt, checkpoint if journaled else None)
                     attempts.append(failed_attempt)
                     errors.append(gen_res.error_message or "Unknown failure")
                     if mode is ProviderMode.REAL and not gen_res.confirmed_unsubmitted:

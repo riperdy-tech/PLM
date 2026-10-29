@@ -75,6 +75,7 @@ def cli_generate(
             variants=variants,
             spec=spec,
             provider_adapter=adapter,
+            checkpoint=session.commit,
         )
         session.commit()
     except ArtifactStorageUnavailable as exc:

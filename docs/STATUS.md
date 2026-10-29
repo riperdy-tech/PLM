@@ -5,10 +5,130 @@ commit messages and the dashboard record intent or progress; this file records v
 capability. Update it in the same change that alters a capability.
 
 - Last verified: 2026-10-15, branch `review/r5-full-chain` (R5 of the remediation plan;
-  R4, R3, R2, R1 and R0 on their own `review/*` branches).
+  R4, R3, R2, R1 and R0 on their own `review/*` branches). That is the date of the last
+  **gate** record. Later entries (to 2026-10-29) are uncommitted work on local branch
+  `review/r6-live-adapters` at `4a35ce2`; none of them is a re-verified gate.
+- Unified view of all remaining work across P0–P9, R0–R6 and A/B:
+  [`reviews/2026-10-29-unified-remaining-work-roadmap.md`](reviews/2026-10-29-unified-remaining-work-roadmap.md).
 - Evidence: the review in
   [`reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md),
   which has file:line references for every finding.
+
+## Takeover audit and B02/B03/B04 follow-up (2026-10-29, Claude Code session)
+
+A new session took over from the ChatGPT/Nexus A/B session and audited before
+continuing. The unified roadmap across P0–P9, R0–R6 and A/B, the document index,
+R-stage approval evidence and governance findings are in
+[`reviews/2026-10-29-unified-remaining-work-roadmap.md`](reviews/2026-10-29-unified-remaining-work-roadmap.md).
+The A/B "27/57" figure reconciles exactly: 27 rows `implemented—reverify`, 22
+`partial`, 8 `open`, PL-05 deferred and excluded; **0 closed**. No formal
+finding or stage changed state in this session.
+
+**Where the work was done.** The main checkout's exact 267-entry uncommitted state
+(100 modified + 196 untracked paths on `review/r6-live-adapters` at `4a35ce2`) was
+mirrored byte-for-byte into worktree `.claude/worktrees/plm-handover-audit-277422`
+(baseline tree `cd56903473d2ef89f595348714f789859e8a15df`). All edits are there;
+the main checkout was not modified, staged or committed. The worktree has no
+`.env`, so no test could reach a real provider.
+
+**Baseline on the inherited snapshot (before any edit):** Ruff passed; mypy
+**465 source files** passed; `pytest -m "not integration"` **3,246 passed,
+1 skipped, 88 deselected, 0 failed** (296.77 s). This is the first full
+regression after the previous session's last B02 hardening (which had only an
+81-test focused run). SQLite/stand-in tier only.
+
+**B02 — persisted recovery evidence (ADR-0043, code-only migration
+`0042_media_render_evidence`):**
+- Caller-asserted booleans removed from `quarantine_stale_render_job` and
+  `queue_reconciled_render_retry`. Both now require rows in the new append-only
+  `media.render_recovery_evidence`, bound by `INSERT … SELECT` to the exact claim
+  identity (job, worker, start, input SHA256) and an allowed status.
+- An in-process render failure (encoder error, timeout, storage error, or a
+  finished render the owner refuses to persist) now records
+  `owner_exit_observed` and fences the claim as QUARANTINED instead of leaving an
+  ambiguous RUNNING row. Interrupts and killed processes still leave RUNNING.
+- Operator paths: `plm media render-inspect … --record-inventory --recorded-by`
+  persists a complete, non-truncated listing of a QUARANTINED claim;
+  `plm media render-attest-termination --job-id --evidence-ref --recorded-by`
+  records a supervisor attestation and fences the claim. Neither retries,
+  deletes or verifies bytes.
+- Retry staging's positional `INSERT … SELECT` is now name-keyed.
+- `plm migrate` code-only refusal now reads one `_CODE_ONLY_HEADS` constant; a
+  test asserts the checkout's real head is listed (the old repeated literal
+  would have silently lifted the refusal for any new head).
+- Disposable PostgreSQL 16 (container on `127.0.0.1:55432`, tmpfs — never the
+  shared DB): `tests/integration/test_media_render_claims_postgres.py`
+  **10 passed** (5 previous updated + concurrent evidence insert, quarantine
+  without evidence refused, two supervisors stage one retry with correct
+  columns, old attempt cannot finish after the retry claim, HTTP owner-exit
+  with real `timestamptz`). Alembic base→`0042` upgrade, schema check,
+  downgrade refused with evidence present, empty downgrade and re-upgrade
+  **passed** on disposable DB `plm_migration_disposable_b02`. The rehearsal also
+  caught a 35-character revision ID (> VARCHAR(32)), renamed before use.
+- After the B02 code batch: Ruff found 1 issue (fixed), mypy 465 passed, full
+  non-integration **3,269 passed, 1 skipped, 93 deselected, 0 failed**.
+- **Still open for B02:** independent supervisor/heartbeat/lease, termination
+  proof for killed workers, byte-level MinIO inventory, real FFmpeg
+  kill/restart, compose R5. B02 remains **partial**.
+
+**B03/B04 — independent audit of the previous P4 fixes.** Claims verified as
+holding: paid-replay refusal, unpriced costs, zero/NaN limit refusal, C4
+blank-job-ID refusal, no fabricated Suno job IDs. Found and fixed:
+- **A paid provider job could be erased by a later failure in the same
+  request.** The engine only flushed; the API rolled the whole request back on
+  any exception or `ArtifactStorageUnavailable`, losing an earlier paid
+  attempt's provider job ID (the ops ledger still held the reservation, so the
+  plan stuck with nothing to reconcile against). `execute_plan(checkpoint=…)`
+  now commits a REAL call's SUBMITTED attempt before the call and its settled
+  outcome right after it (`settle_generation_attempt`); the API and CLI pass
+  `session.commit`. Mock providers and callers without a checkpoint keep the
+  single-transaction contract.
+- The Suno client substituted the hardcoded model `chirp-v3-5` when the
+  provider omitted `model_name` (an invented provenance fact); now empty →
+  UNKNOWN.
+- The Suno adapter dropped the observed clip ID on any error other than its
+  own `SunoClientError` (e.g. a transport or parse error during poll or
+  download); it now keeps it for any failure after submit.
+- Tests: `tests/unit/music/test_paid_attempt_checkpoints.py` (5) and two new
+  Suno adapter cases; P4 unit + contract tests **481 passed**.
+- **Recorded, not fixed (owner/R6 decisions):** Suno never reports credits, so
+  after one real success the plan refuses further variants
+  (`plan_credit_usage_reconciliation_required`) and P4 has no reconciliation
+  path; `credit_limit = max_attempts * 2` in the planner is an invented ceiling;
+  the Suno client's `/download/authorize` fallback consumes account allowance
+  outside the write guard; for vocal tracks the request still sends the
+  descriptive prompt in Suno's lyric field; pipeline spend receipts of a failed
+  plan step are dropped; migration 0040's downgrade does not check legacy
+  currency/receipt values; `plm budget release` needs no proof.
+
+**Status corrections:** the STATUS header now states that its last gate
+record is 2026-10-15 and later entries are uncommitted work. The P9
+"Closed-loop Bayesian learning" row moves from `real` to `partial`: it used a
+video uploaded outside `ExternalWriteGuard`, R6 is not approved, and it
+contradicts the `autonomous_loop_worker.py` stub row below it.
+
+**Independent review of this session's diff** (separate reviewer, 0 critical, 7
+risks) led to further fixes: the owner fence now also covers failures while
+persisting a finished render, and first rolls the failing request back — without
+that, on PostgreSQL the fence waited forever on the row lock held by the
+request's own completion UPDATE (a mutation check confirmed the new PG test
+times out without the rollback); an inventory is recordable only from a listing
+taken after quarantine, and an empty listing under an unverified brand hint is
+refused (it could have unlocked a retry for a mistyped brand); the termination
+CLI no longer depends on the operator's clock being ahead of the worker's, and
+reports the post-commit state; a failed P4 settle keeps the provider job ID in
+the raised error. Disposable PG: B02 suite **11 passed** plus P4 **1 passed**.
+
+**Disposable PostgreSQL for P4:** `tests/integration/test_music_paid_attempt_checkpoints_postgres.py`
+(opt-in `PLM_MUSIC_PG_ISOLATED=1`) **1 passed** on the same throwaway PG16: a
+REAL success then a transport error leaves SUCCEEDED+job ID and SUBMITTED rows
+under the real CHECK constraints, and a replay makes no further paid call.
+
+**Gates after the combined B02 + P4 batch (same worktree):** Ruff passed; mypy
+465 source files passed; `pytest -m "not integration"` **3,278 passed,
+1 skipped, 93 deselected, 0 failed** (294.88 s). Integration tier: only the two
+opt-in disposable-PG files above were run; no compose, Temporal, MinIO, FFmpeg
+or R5 run. No gate is closed by this session.
 
 ## A–B original-audit remediation restart (2026-10-28)
 
@@ -1396,7 +1516,7 @@ separately against its own evidence gate.
 | Currency, decimal money | real | `Numeric(20,6)` plus currency columns (migration `0022_analytics_money`); `fx_rates` table and `POST /analytics/fx-rates`; reporting currency KRW by default; a missing rate is HTTP 409 `fx_rate_missing`; legacy rows with no currency are unreconciled, never assumed USD. C7 `raw_metrics.estimated_revenue` is still a float in the reporting currency (economics gate) |
 | Reward computation | partial | `engagement-contribution-proxy-v1`, a bounded proxy, not economic value (economics gate). Net contribution as `Money` in the reporting currency; the USD 50 scale is converted through FX; attribution confidence passed through; sensitivity tests pin bounds and monotonicity |
 | Reward delivery to P2 | real | Recorded and enqueued in one transaction (`analytics.outbox_events`, 0026); the pipeline's `dispatch_reward` step (or `plm analytics dispatch`) delivers with an idempotency key; P2 dedupes and answers `GET /ar/results` for reconciliation. A re-dispatch and a replayed payload are not counted twice (Gate R5). |
-| Closed-loop Bayesian learning (P9 -> P2) | real | Verified live end-to-end via `scripts/run_phase_p9_closed_loop.py`: real metrics ingested from YouTube Analytics API v2 for published album `lPYmaPHPQr4`, evaluated under `engagement-contribution-proxy-v1`, delivered over Seam C7 leg-2 to `POST /ar/results`, applied in `POST /ar/update` (arm `lofi_study_focus` posterior mean 0.40825 -> 0.45798, variance 0.10649 -> 0.04878), and subsequent cycle allocated with Thompson sampling draws in `POST /ar/cycles`. |
+| Closed-loop Bayesian learning (P9 -> P2) | partial | **Downgraded 2026-10-29 (takeover audit):** the run below used a video uploaded outside `ExternalWriteGuard` (see the 2026-10-23 content-quality audit) and R6 is not approved; its reward provenance is not auditable, and the dev P2 posterior it changed may need an owner decision (`docs/reviews/2026-10-29-unified-remaining-work-roadmap.md` §3). Original claim: verified live end-to-end via `scripts/run_phase_p9_closed_loop.py`: real metrics ingested from YouTube Analytics API v2 for published album `lPYmaPHPQr4`, evaluated under `engagement-contribution-proxy-v1`, delivered over Seam C7 leg-2 to `POST /ar/results`, applied in `POST /ar/update` (arm `lofi_study_focus` posterior mean 0.40825 -> 0.45798, variance 0.10649 -> 0.04878), and subsequent cycle allocated with Thompson sampling draws in `POST /ar/cycles`. |
 | Autonomous loop worker & Go/No-Go Gate | stub | `scripts/autonomous_loop_worker.py` is a prototype, **not a working autonomous publish chain**: it reads an existing MP4/thumbnail and fixed tracklist, never uploads a new video, uses hardcoded YouTube video ID `lPYmaPHPQr4`, falls back to invented arm scores/identities on P1/P2 failures, and can post a D28 `MATURE` reward built from a seven-day Analytics query with a fixed experiment identity and asserted attribution. Do not schedule it for production or use its rewards to train P2. Go/No-Go is a prompt, not the independent proof that a new package passed P5/P7. See `docs/reviews/2026-10-23-content-quality-audit.md`. |
 
 ### Architecture parts with no code
