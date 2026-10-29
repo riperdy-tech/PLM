@@ -17,9 +17,13 @@ Other targets: `down`, `logs`, `test`, `lint`, `fmt`, `typecheck`, `doctor`,
 ## Status
 
 Read [`docs/STATUS.md`](docs/STATUS.md) first. It records which capabilities are real,
-mocked, stubbed or absent, and it is the source of truth over plan checkboxes and commit
-messages. The phases do not yet run as one system; the staged plan to get there is
+mocked, stubbed or absent, and is the source of truth over plan checkboxes and
+commit messages. P1–P9 previously passed a **mock-provider Compose full-chain**
+gate; a fully autonomous, rights-cleared, real-provider release and economic
+learning cycle has **not** passed. The staged plan is
 [`docs/reviews/2026-10-13-system-review-and-remediation-plan.md`](docs/reviews/2026-10-13-system-review-and-remediation-plan.md).
+The current A–B finding-by-finding remediation tracker is
+[`docs/reviews/2026-10-28-audit-remediation-register.md`](docs/reviews/2026-10-28-audit-remediation-register.md).
 
 ## Docs
 

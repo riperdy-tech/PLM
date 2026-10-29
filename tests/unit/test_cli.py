@@ -8,6 +8,8 @@ and never needs a ``.env`` file. (The against-the-stack green path lives in
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -144,6 +146,274 @@ def test_doctor_exit_code_follows_the_check_table(monkeypatch: pytest.MonkeyPatc
     assert "2 PASS, 1 FAIL" in result.output
 
 
+def test_migration_check_refuses_unknown_revision_without_upgrade_advice() -> None:
+    known = frozenset({"0037_dashboard_views", "0038_youtube_candidate_selection"})
+    result = cli._migration_revision_result(
+        "0038_release_reviews", "0038_youtube_candidate_selection", known
+    )
+    assert not result.passed
+    assert "NOT in this checkout" in result.detail
+    assert "do NOT run plm migrate" in result.detail
+    assert "0038_release_reviews" in result.detail
+
+
+def test_code_installed_merge_never_advises_unapproved_db_upgrade() -> None:
+    known = frozenset({
+        "0037_dashboard_views", "0038_release_reviews",
+        "0038_youtube_candidate_selection", "0039_merge_0038_branches",
+    })
+    for current in (None, "0038_release_reviews", "0038_youtube_candidate_selection"):
+        result = cli._migration_revision_result(
+            current, "0039_merge_0038_branches", known,
+        )
+        assert not result.passed
+        assert "do NOT run plm migrate" in result.detail
+        assert "CODE ONLY" in result.detail
+        hold = cli._merge_code_only_refusal("0039_merge_0038_branches", current)
+        assert hold is not None
+        assert "NOT approved" in hold
+    assert cli._merge_code_only_refusal(
+        "0039_merge_0038_branches", "0039_merge_0038_branches"
+    ) is None
+    assert cli._merge_code_only_refusal(
+        "0038_youtube_candidate_selection", "0037_dashboard_views"
+    ) is None
+
+
+def test_new_0040_cost_migration_remains_code_only_on_local_0039_db() -> None:
+    head = "0040_p4_unpriced_costs"
+    current = "0039_merge_0038_branches"
+    known = frozenset({current, head})
+    check = cli._migration_revision_result(current, head, known)
+    assert not check.passed
+    assert "CODE ONLY" in check.detail
+    assert "do NOT run plm migrate" in check.detail
+    hold = cli._merge_code_only_refusal(head, current)
+    assert hold is not None and "NOT approved" in hold
+    assert cli._merge_code_only_refusal(head, head) is None
+
+
+def test_new_0041_credit_migration_still_refuses_shared_0039_rollout() -> None:
+    head = "0041_p4_credit_provenance"
+    current = "0039_merge_0038_branches"
+    known = frozenset({current, "0040_p4_unpriced_costs", head})
+    result = cli._migration_revision_result(current, head, known)
+    assert not result.passed
+    assert "CODE ONLY" in result.detail
+    assert "do NOT run plm migrate" in result.detail
+    refusal = cli._merge_code_only_refusal(head, current)
+    assert refusal is not None and "NOT approved" in refusal
+    assert cli._merge_code_only_refusal(head, head) is None
+
+
+def test_migration_check_distinguishes_known_pending_and_current_revisions() -> None:
+    known = frozenset({"0037_dashboard_views", "0038_youtube_candidate_selection"})
+    current = cli._migration_revision_result(
+        "0038_youtube_candidate_selection", "0038_youtube_candidate_selection", known
+    )
+    assert current.passed
+    previous = cli._migration_revision_result(
+        "0037_dashboard_views", "0038_youtube_candidate_selection", known
+    )
+    assert not previous.passed
+    assert "run: plm migrate" in previous.detail
+    empty = cli._migration_revision_result(
+        None, "0038_youtube_candidate_selection", known
+    )
+    assert not empty.passed
+    assert "database not migrated" in empty.detail
+    no_head = cli._migration_revision_result("0037_dashboard_views", None, known)
+    assert not no_head.passed
+    assert "no Alembic head" in no_head.detail
+    assert "do NOT run plm migrate" in no_head.detail
+
+
+@pytest.mark.parametrize(
+    ("database_revision", "allowed"),
+    [
+        ("0038_release_reviews", False),
+        ("0037_dashboard_views", True),
+        ("0038_youtube_candidate_selection", True),
+        (None, True),
+    ],
+)
+def test_migrate_preflight_prevents_unknown_branch_before_upgrade(
+    monkeypatch: pytest.MonkeyPatch,
+    database_revision: str | None,
+    allowed: bool,
+) -> None:
+    upgrades: list[str] = []
+    disposed: list[bool] = []
+    script = SimpleNamespace(
+        get_current_head=lambda: "0038_youtube_candidate_selection",
+        walk_revisions=lambda: [
+            SimpleNamespace(revision="0038_youtube_candidate_selection"),
+            SimpleNamespace(revision="0037_dashboard_views"),
+        ],
+    )
+    query_counts: list[int] = []
+
+    def inspect_count(statement: Any) -> Any:
+        query = str(statement)
+        assert "pg_catalog.pg_namespace" in query
+        assert "nspname NOT IN ('public', 'information_schema')" in query
+        assert "pg_catalog.pg_proc" in query
+        assert "pg_catalog.pg_type" in query
+        assert "pg_catalog.pg_extension" in query
+        query_counts.append(0)
+        return SimpleNamespace(scalar_one=lambda: 0)
+
+    engine = SimpleNamespace(
+        connect=lambda: nullcontext(SimpleNamespace(execute=inspect_count)),
+        dispose=lambda: disposed.append(True),
+    )
+    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
+    monkeypatch.setattr(
+        cli.MigrationContext,
+        "configure",
+        lambda connection: SimpleNamespace(get_current_revision=lambda: database_revision),
+    )
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    result = runner.invoke(app, ["migrate"])
+    assert disposed == [True]
+    assert (result.exit_code == 0) is allowed
+    assert upgrades == (["head"] if allowed else [])
+    assert query_counts == ([0] if database_revision is None else [])
+    if not allowed:
+        assert "refusing migration" in _output(result)
+
+
+def test_migrate_refuses_installed_0039_on_shared_database_without_upgrade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upgrades: list[str] = []
+    closed: list[bool] = []
+    script = SimpleNamespace(
+        get_current_head=lambda: "0039_merge_0038_branches",
+        walk_revisions=lambda: [
+            SimpleNamespace(revision=rev)
+            for rev in ("0037_dashboard_views", "0038_release_reviews",
+                        "0038_youtube_candidate_selection", "0039_merge_0038_branches")
+        ],
+    )
+    engine = SimpleNamespace(
+        connect=lambda: nullcontext(SimpleNamespace()),
+        dispose=lambda: closed.append(True),
+    )
+    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
+    monkeypatch.setattr(
+        cli.MigrationContext, "configure",
+        lambda connection: SimpleNamespace(
+            get_current_revision=lambda: "0038_release_reviews"
+        ),
+    )
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, revision: upgrades.append(revision))
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 1
+    assert "NOT approved" in _output(result)
+    assert not upgrades
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("object_count", [1, 12, None, -1, True, "0"])
+def test_migrate_never_upgrades_an_unversioned_nonempty_or_unknown_database(
+    monkeypatch: pytest.MonkeyPatch, object_count: object,
+) -> None:
+    upgrades: list[str] = []
+    disposed: list[bool] = []
+    script = SimpleNamespace(
+        get_current_head=lambda: "0038_youtube_candidate_selection",
+        walk_revisions=lambda: [
+            SimpleNamespace(revision="0038_youtube_candidate_selection"),
+        ],
+    )
+
+    def inspect_count(statement: Any) -> Any:
+        sql = str(statement)
+        assert "pg_catalog.pg_class" in sql
+        assert "pg_catalog.pg_namespace" in sql
+        assert "pg_catalog.pg_proc" in sql
+        assert "pg_catalog.pg_type" in sql
+        assert "pg_catalog.pg_extension" in sql
+        return SimpleNamespace(scalar_one=lambda: object_count)
+
+    engine = SimpleNamespace(
+        connect=lambda: nullcontext(SimpleNamespace(execute=inspect_count)),
+        dispose=lambda: disposed.append(True),
+    )
+    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
+    monkeypatch.setattr(
+        cli.MigrationContext, "configure",
+        lambda connection: SimpleNamespace(get_current_revision=lambda: None),
+    )
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 1
+    assert "unversioned" in _output(result)
+    assert upgrades == []
+    assert disposed == [True]
+
+
+def test_migrate_refuses_failed_unversioned_catalog_read_before_alembic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upgrades: list[str] = []
+    disposed: list[bool] = []
+    script = SimpleNamespace(
+        get_current_head=lambda: "0038_youtube_candidate_selection",
+        walk_revisions=lambda: [
+            SimpleNamespace(revision="0038_youtube_candidate_selection"),
+        ],
+    )
+
+    def fail_read(statement: Any) -> Any:
+        raise RuntimeError("catalog inspection unavailable")
+
+    engine = SimpleNamespace(
+        connect=lambda: nullcontext(SimpleNamespace(execute=fail_read)),
+        dispose=lambda: disposed.append(True),
+    )
+    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
+    monkeypatch.setattr(
+        cli.MigrationContext, "configure",
+        lambda connection: SimpleNamespace(get_current_revision=lambda: None),
+    )
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 1
+    assert "catalog inspection unavailable" in _output(result)
+    assert upgrades == []
+    assert disposed == [True]
+
+
+def test_migrate_refuses_unreachable_preflight_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upgrades: list[str] = []
+    monkeypatch.setattr(
+        cli, "_migration_preflight",
+        lambda config: (_ for _ in ()).throw(RuntimeError("preflight failed")),
+    )
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 1
+    assert "preflight failed" in _output(result)
+    assert upgrades == []
+
+
 def test_migrate_runs_the_alembic_chain_at_the_checkout_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -153,6 +423,7 @@ def test_migrate_runs_the_alembic_chain_at_the_checkout_config(
         calls.append((config.config_file_name, revision))
 
     monkeypatch.setattr(cli.command, "upgrade", fake_upgrade)
+    monkeypatch.setattr(cli, "_migration_preflight", lambda config: None)
     first = runner.invoke(app, ["migrate"])
     second = runner.invoke(app, ["migrate", "0001_baseline"])
     assert first.exit_code == 0, _output(first)
@@ -168,6 +439,7 @@ def test_migrate_failure_is_reported_without_a_traceback(
         raise RuntimeError("connection refused (simulated)")
 
     monkeypatch.setattr(cli.command, "upgrade", fake_upgrade)
+    monkeypatch.setattr(cli, "_migration_preflight", lambda config: None)
     result = runner.invoke(app, ["migrate"])
     output = _output(result)
     assert result.exit_code == 1

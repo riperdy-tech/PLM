@@ -20,3 +20,6 @@ data/
 !services/market_intelligence/data/
 output_media/
 
+# Connector scratch and local bridge state must never be committed.
+.bridge/
+

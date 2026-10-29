@@ -1,0 +1,109 @@
+{
+  "manifest_type": "PLM A-B session handover index (not runtime release/media manifest)",
+  "snapshot_date": "2026-10-29",
+  "timezone": "Asia/Seoul",
+  "project": "PLM",
+  "connected_pc_project_root": "C:\\Users\\riper\\Downloads\\PLM",
+  "workspace": "main",
+  "nexus_run_id": "a784bde74dea41449f95a58ede3dcab1",
+  "handover_file": "PLM_AB_SESSION_HANDOVER_2026-10-29.md",
+  "current_connection_status": "PLM bridge unavailable during handover creation; files below not copied to connected PC",
+  "latest_confirmed_audit_counts": {
+    "implemented_or_awaiting_verification": 27,
+    "total": 57,
+    "partial": 22,
+    "open": 8,
+    "formally_closed": 0
+  },
+  "latest_git_state": {
+    "staged_count": 0,
+    "porcelain_entries": 265,
+    "diff_check": "PASS",
+    "job_id": "5e7c7a982b31de2b591d50fd191ee2de"
+  },
+  "latest_b02_verification": {
+    "job_id": "6711db43c5387cc91fe3f7761461371d",
+    "focused_tests_passed": 81,
+    "warnings": 11,
+    "ruff": "PASS",
+    "mypy_source_files": 465,
+    "mypy": "PASS",
+    "git_diff_check": "PASS",
+    "real_postgres_ffmpeg_minio": "NOT VERIFIED"
+  },
+  "plans": [
+    {
+      "name": "A-B audit implementation tracker",
+      "relative_path": "docs/reviews/2026-10-28-audit-remediation-register.md",
+      "verification": "previously read/edited"
+    },
+    {
+      "name": "Master P0 integration implementation plan",
+      "relative_path": "docs/P0_master_integration_implementation_plan.md",
+      "verification": "linked by repo README"
+    },
+    {
+      "name": "Staged R0-R6 remediation plan",
+      "relative_path": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md",
+      "verification": "linked by repo README and AGENTS"
+    },
+    {
+      "name": "B02 render recovery assessment",
+      "relative_path": "docs/reviews/2026-10-28-b02-render-recovery-assessment.md",
+      "verification": "previously read/edited"
+    },
+    {
+      "name": "B03 budget atomicity design",
+      "relative_path": "docs/reviews/2026-10-28-b03-plan-budget-atomicity-boundary.md",
+      "verification": "referenced from earlier work"
+    },
+    {
+      "name": "A02 worktree consolidation",
+      "relative_path": "docs/reviews/2026-10-28-working-tree-consolidation.md",
+      "verification": "referenced from earlier work"
+    },
+    {
+      "name": "Current status",
+      "relative_path": "docs/STATUS.md",
+      "verification": "previously read/edited"
+    },
+    {
+      "name": "Cross-phase contract registry",
+      "relative_path": "docs/contracts/CONTRACT_REGISTRY.md",
+      "verification": "linked by README"
+    }
+  ],
+  "manifest_locations": {
+    "this_handover_manifest": "PLM_AB_SESSION_MANIFEST_2026-10-29.json (conversation artifact)",
+    "release_manifest": "runtime C5 ReleaseManifestPayload; exact static source filepath not verified in latest reads",
+    "media_manifest": "runtime media_packages.manifest_uri/manifest_hash; per-instance storage URI, not one static repo path",
+    "existing_static_MANIFEST_file": "NOT VERIFIED; search selected PC project when connection returns",
+    "nexus_history_index": "__nexus_history__/a784bde74dea41449f95a58ede3dcab1/INDEX.md (history index; NOT application manifest)"
+  },
+  "changed_primary_files": [
+    "services/media_factory/storage/render_claims.py",
+    "services/media_factory/service.py",
+    "services/media_factory/artifacts.py",
+    "services/media_factory/render_reconciliation.py",
+    "services/media_factory/rendering/assembler.py",
+    "services/media_factory/rendering/renderer.py",
+    "services/media_factory/artwork/generator.py",
+    "services/media_factory/cli.py",
+    "packages/plm_platform/cli.py",
+    "tests/unit/test_media_render_claims.py",
+    "tests/unit/test_media_render_reconciliation.py",
+    "tests/unit/test_media_render_retry.py",
+    "tests/unit/test_media_render_retry_boundaries.py",
+    "tests/unit/test_media_render_retry_service.py",
+    "tests/unit/test_media_render_claim_fence_hardening.py",
+    "tests/unit/test_media_render_job_history.py",
+    "tests/unit/test_media_rendering.py",
+    "tests/unit/test_media_api.py",
+    "docs/STATUS.md",
+    "docs/reviews/2026-10-28-b02-render-recovery-assessment.md",
+    "docs/reviews/2026-10-28-audit-remediation-register.md"
+  ],
+  "runtime_migration_policy": "No shared/production migrations or external provider publishing without authorization",
+  "formal_completion": "IN PROGRESS / B02 PARTIAL",
+  "next_priority": "Independent worker termination/heartbeat/evidence plus real isolated PostgreSQL/FFmpeg/MinIO recovery gate; A02 worktree provenance; B03 priced atomic budget"
+}

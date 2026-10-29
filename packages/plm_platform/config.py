@@ -171,7 +171,10 @@ def load_settings(
         youtube_oauth_client_secret=_resolve_optional_secret(
             "YOUTUBE_OAUTH_CLIENT_SECRET", layers
         ),
-        music_provider_api_key=_resolve_optional_secret("MUSIC_PROVIDER_API_KEY", layers),
+        music_provider_api_key=(
+            _resolve_optional_secret("MUSIC_PROVIDER_API_KEY", layers)
+            or _resolve_optional_secret("SUNO_API_KEY", layers)
+        ),
         distributor_api_key=_resolve_optional_secret("DISTRIBUTOR_API_KEY", layers),
         spotify_client_id=_resolve_optional_secret("SPOTIFY_CLIENT_ID", layers),
         spotify_client_secret=_resolve_optional_secret("SPOTIFY_CLIENT_SECRET", layers),

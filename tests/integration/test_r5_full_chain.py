@@ -116,6 +116,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import math
+import os
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -123,11 +124,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
 import sqlalchemy as sa
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
+from plm_platform.db import database_url
 from plm_platform.exceptions import ExceptionQueue
 from plm_platform.ledger import BudgetLedger
 from plm_platform.pipeline.activities import PlatformOperations, build_activities
@@ -192,6 +195,44 @@ TERMINAL = {"FAILED", "CANCELLED", "REJECTED", "HELD"}
 
 def _urls() -> dict[Phase, str]:
     return service_urls(dotenv_path=REPO_ROOT / ".env", default_host=LOOPBACK_HOST)
+
+
+def _r5_isolation_refusal(
+    *, opted_in: bool, db: sa.engine.URL, endpoints: dict[Phase, str],
+) -> str | None:
+    """Pure pre-write safety gate, also testable without a running stack."""
+    if not opted_in:
+        return "r5_isolated_stack_opt_in_required"
+    hosts = {"localhost", "127.0.0.1", "::1"}
+    if (
+        db.get_backend_name() != "postgresql"
+        or db.host not in hosts
+        or not (db.database or "").startswith("plm_r5_")
+    ):
+        return "r5_isolated_postgres_required"
+    if not endpoints or any(
+        urlsplit(endpoint).scheme not in {"http", "https"}
+        or urlsplit(endpoint).hostname not in hosts
+        for endpoint in endpoints.values()
+    ):
+        return "r5_isolated_phase_endpoints_required"
+    return None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_disposable_r5_stack(settings: Settings) -> None:
+    """Fail before any destructive fixture can open the configured database."""
+    refusal = _r5_isolation_refusal(
+        opted_in=os.environ.get("PLM_R5_ISOLATED_STACK") == "1",
+        db=database_url(settings), endpoints=_urls(),
+    )
+    if refusal == "r5_isolated_stack_opt_in_required":
+        pytest.skip(
+            "R5 mutates P1/P2/P7 and QA state; "
+            "PLM_R5_ISOLATED_STACK=1 is required"
+        )
+    if refusal is not None:
+        pytest.fail(f"R5 isolation guard: {refusal}")
 
 
 def _token(settings: Settings) -> str:

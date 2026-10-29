@@ -23,6 +23,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "temporalio>=1.33",
     "typer>=0.12",
+    "tzdata>=2025.1",  # Windows zoneinfo needs the IANA Pacific DST transition table.
     "uvicorn>=0.30",
 ]
 

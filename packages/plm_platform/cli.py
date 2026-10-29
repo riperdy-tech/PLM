@@ -58,6 +58,7 @@ from .clock import SystemClock, require_aware
 from .config import Settings, SettingsError, load_settings
 from .db import database_url, redacted_database_url
 from .ledger import BudgetLedger
+from .migration_safety import user_object_count
 from .service_urls import LOOPBACK_HOST, service_urls
 from .storage import bucket_name, split_endpoint
 from .temporal import (
@@ -179,9 +180,52 @@ def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
     return Check("postgres", True, f"reachable at {target} (PostgreSQL {version})")
 
 
+def _migration_revision_result(
+    current: str | None,
+    head: str | None,
+    known_revisions: frozenset[str],
+) -> Check:
+    """Distinguish an ordinary pending upgrade from an unknown revision branch."""
+    if head is None:
+        return Check(
+            "migrations", False,
+            "checkout has no Alembic head - do NOT run plm migrate before reviewing revisions",
+        )
+    if current == head:
+        return Check("migrations", True, f"at {current} (head)")
+    if current is None:
+        if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"}:
+            return Check(
+                "migrations", False,
+                f"database not migrated; {head} installed in CODE ONLY - "
+                "do NOT run plm migrate without separate database rollout approval",
+            )
+        return Check(
+            "migrations", False,
+            f"database not migrated (head is {head}); confirm the target is empty "
+            "before running plm migrate",
+        )
+    if current not in known_revisions:
+        return Check(
+            "migrations", False,
+            f"database at {current}, which is NOT in this checkout's migration chain "
+            f"(head {head}); possible divergent worktree/branch - do NOT run plm migrate "
+            "until revision history is reconciled and reviewed",
+        )
+    if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"}:
+        return Check(
+            "migrations", False,
+            f"database at {current}, head {head}; pending revisions installed in CODE ONLY - "
+            "do NOT run plm migrate without separate database rollout approval",
+        )
+    return Check("migrations", False, f"database at {current}, head is {head} - run: plm migrate")
+
+
 def _migrations_check(settings: Settings, connect_timeout: float) -> Check:
     try:
-        head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
+        script = ScriptDirectory.from_config(_alembic_config())
+        head = script.get_current_head()
+        known_revisions = frozenset(r.revision for r in script.walk_revisions())
     except Exception as exc:  # noqa: BLE001 - a broken checkout is a FAIL row too
         return Check("migrations", False, f"alembic configuration unreadable - {_describe(exc)}")
     engine = _engine(settings, connect_timeout)
@@ -196,13 +240,7 @@ def _migrations_check(settings: Settings, connect_timeout: float) -> Check:
         )
     finally:
         engine.dispose()
-    if current == head:
-        return Check("migrations", True, f"at {current} (head)")
-    if current is None:
-        return Check(
-            "migrations", False, f"database not migrated (head is {head}) - run: plm migrate"
-        )
-    return Check("migrations", False, f"database at {current}, head is {head} - run: plm migrate")
+    return _migration_revision_result(current, head, known_revisions)
 
 
 def _minio_check(settings: Settings) -> Check:
@@ -403,6 +441,64 @@ def doctor() -> None:
 # migrate: the single alembic chain
 
 
+def _unversioned_target_refusal(existing_objects: object) -> str | None:
+    """Never treat an unversioned but populated database as a fresh baseline."""
+    if type(existing_objects) is not int or existing_objects < 0:
+        return "cannot verify that the unversioned migration target is empty"
+    if existing_objects:
+        return (
+            "unversioned database contains existing user schemas or public objects; "
+            "refusing migration. Inspect and reconcile its history before upgrade"
+        )
+    return None
+
+
+def _merge_code_only_refusal(head: str, current: str | None) -> str | None:
+    """Hold the 0039 rollout until separately approved, even after code installation."""
+    if head in {"0039_merge_0038_branches", "0040_p4_unpriced_costs", "0041_p4_credit_provenance"} and current != head:
+        return (
+            "0039/0040/0041 revisions are installed in code only; database migration "
+            "is NOT approved. Refusing plm migrate until a separately "
+            "reviewed rollout/restore plan."
+        )
+    return None
+
+
+def _migration_preflight(config: Config) -> None:
+    """Read-only guard against foreign revisions and unapproved 0039 rollout.
+
+    The revision table must be reachable and belong to this checkout's sole
+    chain. Never stamp, downgrade or guess at an unknown branch.
+    """
+    script = ScriptDirectory.from_config(config)
+    head = script.get_current_head()
+    known = frozenset(item.revision for item in script.walk_revisions())
+    if head is None:
+        raise RuntimeError("checkout has no migration head; reconcile revisions before upgrade")
+    settings = load_settings(dotenv_path=REPO_ROOT / ".env")
+    engine = _engine(settings, _CONNECT_TIMEOUT_SECONDS)
+    try:
+        with engine.connect() as connection:
+            current = MigrationContext.configure(connection).get_current_revision()
+            if current is None:
+                # A missing version does not imply an empty database.
+                # Both the operator CLI and destructive test use this same
+                # read-only catalog inventory.
+                reason = _unversioned_target_refusal(user_object_count(connection))
+                if reason is not None:
+                    raise RuntimeError(reason)
+    finally:
+        engine.dispose()
+    if current is not None and current not in known:
+        raise RuntimeError(
+            f"database revision {current} is not in this checkout's Alembic chain "
+            f"(head {head}); refusing migration. Reconcile branch history first."
+        )
+    merge_hold = _merge_code_only_refusal(head, current)
+    if merge_hold is not None:
+        raise RuntimeError(merge_hold)
+
+
 @app.command()
 def migrate(
     revision: str = typer.Argument("head", help="Target revision (default: head)."),
@@ -410,6 +506,7 @@ def migrate(
     """Upgrade the database along the alembic chain to REVISION (default: head)."""
     config = _alembic_config()
     try:
+        _migration_preflight(config)
         command.upgrade(config, revision)
     except Exception as exc:
         typer.echo(
@@ -776,6 +873,31 @@ def media_assemble(
     cli_assemble(request_path=request_path)
 
 
+@media_app.command(name="render-jobs")
+def media_render_jobs(
+    package_id: str = typer.Option(
+        ..., "--package-id", "-p", help="Exact media package to inspect",
+    ),
+    limit: int = typer.Option(20, "--limit", min=1, max=100),
+) -> None:
+    """Read persisted P6 render history without changing or retrying work."""
+    from media_factory.cli import cli_render_jobs
+
+    cli_render_jobs(package_id=package_id, limit=limit)
+
+
+@media_app.command(name="render-inspect")
+def media_render_inspect(
+    job_id: str = typer.Option(..., "--job-id", help="Exact persisted render job ID"),
+    brand_id: str = typer.Option(..., "--brand-id", help="Explicit brand ID path hint"),
+    limit: int = typer.Option(20, "--limit", min=1, max=100),
+) -> None:
+    """Read-only B02 object-name inventory; not recovery or safe reclaim."""
+    from media_factory.cli import cli_render_inspect
+
+    cli_render_inspect(job_id=job_id, brand_id=brand_id, limit=limit)
+
+
 @media_app.command(name="package")
 def media_package(
     package_id: str = typer.Option(..., "--package-id", "-p", help="Media package ID to inspect"),
@@ -784,6 +906,44 @@ def media_package(
     from media_factory.cli import cli_package
 
     cli_package(package_id=package_id)
+
+
+@media_app.command(name="inspect-album-textures")
+def media_inspect_album_textures(
+    brand_id: str = typer.Option(..., "--brand-id", help="Exact brand ID"),
+    limit: int = typer.Option(20, "--limit", min=1, max=100),
+    after_id: str | None = typer.Option(None, "--after-id"),
+) -> None:
+    """Read-only paginated metadata inventory for archived album texture."""
+    from media_factory.cli import cli_inspect_album_textures
+
+    cli_inspect_album_textures(brand_id=brand_id, limit=limit, after_id=after_id)
+
+
+@media_app.command(name="backfill-album-texture")
+def media_backfill_album_texture(
+    package_id: str = typer.Option(..., "--package-id", "-p", help="Exact archived package ID"),
+    apply: bool = typer.Option(False, "--apply", help="Write verified evidence (default: dry run)"),
+) -> None:
+    """Backfill original archived audio texture, without generating or publishing music."""
+    from media_factory.cli import cli_backfill_album_texture
+
+    cli_backfill_album_texture(package_id=package_id, apply=apply)
+
+
+@media_app.command(name="backfill-album-textures")
+def media_backfill_album_textures(
+    package_ids: list[str] = typer.Option(  # noqa: B008 - Typer CLI declaration
+        ..., "--package-id", "-p", help="Repeat for each archived package (max 20)",
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", help="Commit verified packages individually (default: dry run)",
+    ),
+) -> None:
+    """Backfill multiple explicitly selected archived albums without external writes."""
+    from media_factory.cli import cli_backfill_album_textures
+
+    cli_backfill_album_textures(package_ids=package_ids, apply=apply)
 
 
 @media_app.command(name="serve")
@@ -812,11 +972,20 @@ def youtube_publish(
     ),
     channel_id: str = typer.Option("UC_neon_records", "--channel-id", "-c", help="Target YouTube channel ID"),
     mode: str = typer.Option("dry_run", "--mode", "-m", help="Operating mode: dry_run, private_only, staged, autonomous"),
+    metadata_variant_id: str | None = typer.Option(
+        None, "--metadata-variant-id", help="Select a declared C6 metadata candidate ID",
+    ),
+    thumbnail_id: str | None = typer.Option(
+        None, "--thumbnail-id", help="Select a declared C6 thumbnail candidate ID",
+    ),
 ) -> None:
     """Publish a media package to YouTube (P7)."""
     from youtube_publishing.cli import cli_publish
 
-    cli_publish(package_path=package_path, channel_id=channel_id, mode=mode)
+    cli_publish(
+        package_path=package_path, channel_id=channel_id, mode=mode,
+        metadata_variant_id=metadata_variant_id, thumbnail_id=thumbnail_id,
+    )
 
 
 @youtube_app.command(name="attempt")
