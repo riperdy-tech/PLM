@@ -49,6 +49,38 @@ def user_object_count(connection: Connection) -> int:
     return count
 
 
+# Names reserved for independently provisioned throwaway databases: Alembic
+# rehearsals (plm_migration_disposable_*) and the Gate R5 stack (plm_r5_*).
+DISPOSABLE_DATABASE_NAME = re.compile(r"plm_(?:migration_disposable|r5)_[a-z0-9_]+")
+
+
+def is_disposable_migration_target(
+    *,
+    configured_database: object,
+    connected_database: object,
+    host: object,
+    port: object,
+) -> bool:
+    """The one target rule shared by `plm migrate`, raw Alembic and Gate R5.
+
+    A reserved disposable name, identical configured and connected names, a
+    loopback host and a non-default port. Checking the actual connected name
+    prevents a DSN/name mismatch. This is a guard, not proof that a database
+    is isolated or disposable.
+    """
+    return (
+        type(configured_database) is str
+        and type(connected_database) is str
+        and configured_database == connected_database
+        and DISPOSABLE_DATABASE_NAME.fullmatch(connected_database) is not None
+        and type(host) is str
+        and host in ("127.0.0.1", "localhost")
+        and type(port) is int
+        and 1024 <= port <= 65535
+        and port != 5432
+    )
+
+
 def code_only_0039_alembic_refusal(
     *,
     known_revisions: frozenset[str],
@@ -62,25 +94,16 @@ def code_only_0039_alembic_refusal(
     Alembic bypasses the guarded `plm migrate` CLI. Until a separately
     approved rollout changes this policy, only independently provisioned
     disposable databases on a non-default loopback port can be migrated.
-    Checking the actual connected name prevents a DSN/name mismatch.
-    This is a guard, not proof that a database is isolated or disposable.
     """
     if "0039_merge_0038_branches" not in known_revisions:
         return None
 
-    eligible = (
-        type(configured_database) is str
-        and type(connected_database) is str
-        and configured_database == connected_database
-        and re.fullmatch(r"plm_migration_disposable_[a-z0-9_]+", connected_database)
-        is not None
-        and type(host) is str
-        and host in ("127.0.0.1", "localhost")
-        and type(port) is int
-        and 1024 <= port <= 65535
-        and port != 5432
-    )
-    if eligible:
+    if is_disposable_migration_target(
+        configured_database=configured_database,
+        connected_database=connected_database,
+        host=host,
+        port=port,
+    ):
         return None
     return (
         "0039 is installed in code ONLY; direct Alembic database operations "

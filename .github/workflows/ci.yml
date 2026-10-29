@@ -64,7 +64,15 @@ jobs:
       # Compose reads .env for POSTGRES_PASSWORD, MINIO_* and friends; the
       # committed example documents the canonical local values.
       - name: Provide .env for compose and tests
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          # A disposable database (plm_platform.migration_safety): the code-only
+          # migration hold and the R5 guard exempt only reserved names on a loopback,
+          # non-5432 port. The shared development DB plm on 5432 stays held.
+          sed -i 's#@127.0.0.1:5432/plm$#@127.0.0.1:55432/plm_migration_disposable_ci#' .env
+          grep -qx 'DATABASE_URL=postgresql://plm:.*@127.0.0.1:55432/plm_migration_disposable_ci' .env
+          echo 'PLM_POSTGRES_DB=plm_migration_disposable_ci' >> .env
+          echo 'PLM_POSTGRES_HOST_PORT=55432' >> .env
 
       - name: Start the compose stack and wait for health
         run: docker compose up -d --wait --wait-timeout 420
@@ -115,7 +123,15 @@ jobs:
         run: pip install -c constraints.txt -e ".[dev]"
 
       - name: Provide .env for compose and tests
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          # A disposable database (plm_platform.migration_safety): the code-only
+          # migration hold and the R5 guard exempt only reserved names on a loopback,
+          # non-5432 port. The shared development DB plm on 5432 stays held.
+          sed -i 's#@127.0.0.1:5432/plm$#@127.0.0.1:55432/plm_r5_ci#' .env
+          grep -qx 'DATABASE_URL=postgresql://plm:.*@127.0.0.1:55432/plm_r5_ci' .env
+          echo 'PLM_POSTGRES_DB=plm_r5_ci' >> .env
+          echo 'PLM_POSTGRES_HOST_PORT=55432' >> .env
 
       - name: Start the compose stack and wait for health
         run: docker compose up -d --wait --wait-timeout 420
@@ -123,7 +139,11 @@ jobs:
       - name: Apply migrations
         run: plm migrate
 
+      # The explicit opt-in: without it the destructive R5 suite skips (a skip is not a
+      # pass). Its guard still requires the disposable plm_r5_ci target above.
       - name: Full chain (Gate R5)
+        env:
+          PLM_R5_ISOLATED_STACK: "1"
         run: pytest -q -m full_chain
 
       - name: Tear down the compose stack

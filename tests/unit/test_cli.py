@@ -16,9 +16,12 @@ from typing import Any
 import pytest
 from plm_platform import cli
 from plm_platform.cli import NOT_IMPLEMENTED_EXIT_CODE, PHASES_BY_GROUP, Check, app
+from sqlalchemy.engine import make_url
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+_DSN = "postgresql+psycopg://plm:fixture@127.0.0.1:{port}/{db}"
 
 STUB_CASES: list[tuple[str, str, str]] = []
 
@@ -179,6 +182,10 @@ def test_code_installed_merge_never_advises_unapproved_db_upgrade() -> None:
     assert cli._merge_code_only_refusal(
         "0038_youtube_candidate_selection", "0037_dashboard_views"
     ) is None
+    for current in (None, "0038_release_reviews"):
+        assert cli._merge_code_only_refusal(
+            "0039_merge_0038_branches", current, disposable=True,
+        ) is None
 
 
 def test_new_0040_cost_migration_remains_code_only_on_local_0039_db() -> None:
@@ -323,11 +330,16 @@ def test_migrate_refuses_installed_0039_on_shared_database_without_upgrade(
         ],
     )
     engine = SimpleNamespace(
-        connect=lambda: nullcontext(SimpleNamespace()),
+        connect=lambda: nullcontext(SimpleNamespace(
+            execute=lambda statement: SimpleNamespace(scalar_one=lambda: "plm"),
+        )),
         dispose=lambda: closed.append(True),
     )
     monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(
+        cli, "database_url", lambda settings: make_url(_DSN.format(port=5432, db="plm")),
+    )
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
         cli.MigrationContext, "configure",
@@ -342,6 +354,72 @@ def test_migrate_refuses_installed_0039_on_shared_database_without_upgrade(
     assert "NOT approved" in _output(result)
     assert not upgrades
     assert closed == [True]
+
+
+def _code_only_preflight(
+    monkeypatch: pytest.MonkeyPatch, *, configured: str, connected: str, port: int,
+) -> list[str]:
+    """Fake an empty, unversioned database behind a code-only 0042 head."""
+    upgrades: list[str] = []
+    script = SimpleNamespace(
+        get_current_head=lambda: "0042_media_render_evidence",
+        walk_revisions=lambda: [SimpleNamespace(revision="0042_media_render_evidence")],
+    )
+
+    def execute(statement: Any) -> Any:
+        query = str(statement)
+        answer: object = connected if "current_database()" in query else 0
+        return SimpleNamespace(scalar_one=lambda: answer)
+
+    engine = SimpleNamespace(
+        connect=lambda: nullcontext(SimpleNamespace(execute=execute)),
+        dispose=lambda: None,
+    )
+    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
+    monkeypatch.setattr(
+        cli, "database_url", lambda settings: make_url(_DSN.format(port=port, db=configured)),
+    )
+    monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
+    monkeypatch.setattr(
+        cli.MigrationContext, "configure",
+        lambda connection: SimpleNamespace(get_current_revision=lambda: None),
+    )
+    monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
+    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    return upgrades
+
+
+@pytest.mark.parametrize("database", ["plm_r5_ci", "plm_migration_disposable_ci"])
+def test_migrate_applies_code_only_head_to_an_empty_disposable_database(
+    monkeypatch: pytest.MonkeyPatch, database: str,
+) -> None:
+    upgrades = _code_only_preflight(
+        monkeypatch, configured=database, connected=database, port=55432,
+    )
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 0, _output(result)
+    assert upgrades == ["head"]
+
+
+@pytest.mark.parametrize(
+    ("configured", "connected", "port"),
+    [
+        ("plm", "plm", 5432),
+        ("plm_r5_ci", "plm_r5_ci", 5432),
+        ("plm_r5_ci", "plm", 55432),
+    ],
+)
+def test_migrate_keeps_code_only_hold_for_shared_or_mismatched_targets(
+    monkeypatch: pytest.MonkeyPatch, configured: str, connected: str, port: int,
+) -> None:
+    upgrades = _code_only_preflight(
+        monkeypatch, configured=configured, connected=connected, port=port,
+    )
+    result = runner.invoke(app, ["migrate"])
+    assert result.exit_code == 1
+    assert "NOT approved" in _output(result)
+    assert upgrades == []
 
 
 @pytest.mark.parametrize("object_count", [1, 12, None, -1, True, "0"])

@@ -182,6 +182,22 @@ The explicit opt-in **invalid-DB path has unit evidence**, not a
 live destructive test (unsafe to use a shared DB as a negative test).
 No isolated R5 full chain or double-run has passed yet.
 
+Option A (2026-10-29, owner decision after CI run 40804097280 failed at
+`plm migrate`): `plm migrate`, raw Alembic and this R5 guard now share
+one target rule, `migration_safety.is_disposable_migration_target`
+(`plm_r5_*` or `plm_migration_disposable_*`, configured = connected name,
+`127.0.0.1`/`localhost`, explicit port other than 5432). Only such a
+target is exempt from the 0039–0042 code-only hold; the shared
+development DB `plm` on 5432 stays held. Compose takes the DB name and
+host port from `PLM_POSTGRES_DB` / `PLM_POSTGRES_HOST_PORT` (defaults
+render identically to before); CI uses `plm_migration_disposable_ci` and
+`plm_r5_ci` at `127.0.0.1:55432` and sets `PLM_R5_ISOLATED_STACK=1` on
+the R5 step. Local evidence: full non-integration suite 3,298 passed,
+1 skipped, 0 failed; Ruff and mypy (465 files) clean; on a throwaway
+PostgreSQL 16 at 55432, `plm migrate` upgraded an empty `plm_r5_ci` to
+`0042_media_render_evidence` and refused a decoy `plm` (left empty).
+**Not verified:** CI with this change, the compose stack, any R5 pass.
+
 A02 intake: on branch `review/r6-live-adapters` at HEAD `4a35ce2`,
 the inherited working tree had **62 tracked modified paths and 134
 untracked paths**; many changes precede this task. Existing `.bridge/`

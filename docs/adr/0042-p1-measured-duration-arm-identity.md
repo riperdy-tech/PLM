@@ -124,5 +124,14 @@ fails before its first state mutation. This protects the default
 shared development DB from the test's destructive cleanup, but the
 operator must still verify that the isolated HTTP services use the
 same disposable database and resource namespace.
+
+*Amendment (2026-10-29, Option A):* the database part of this gate is now
+the shared rule `plm_platform.migration_safety.is_disposable_migration_target`,
+also used by `plm migrate` and raw Alembic: a `plm_r5_*` or
+`plm_migration_disposable_*` name, `127.0.0.1`/`localhost` and an explicit
+port other than 5432 (`::1` and an implicit port are no longer accepted).
+CI runs R5 on `plm_r5_ci` at `127.0.0.1:55432`, with
+`PLM_R5_ISOLATED_STACK=1` on the step, and the compose services receive the
+same name through `PLM_POSTGRES_DB`.
 The isolated single-P1 PostgreSQL test does **not** replace that
 full-chain gate.

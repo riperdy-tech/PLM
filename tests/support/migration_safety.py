@@ -5,9 +5,7 @@ test separately checks current_database() before invoking Alembic.
 """
 from __future__ import annotations
 
-import re
-
-_DISPOSABLE_DB = re.compile(r"\Aplm_migration_disposable_[a-z0-9_]+\Z")
+from plm_platform.migration_safety import DISPOSABLE_DATABASE_NAME
 
 
 def destructive_migration_name_refusal(
@@ -15,8 +13,14 @@ def destructive_migration_name_refusal(
     opted_in_database: str | None,
 ) -> str | None:
     """Check explicit opt-in before opening a connection to the database."""
-    if configured_database is None or _DISPOSABLE_DB.fullmatch(configured_database) is None:
-        return "a separately named plm_migration_disposable_* database is required"
+    if (
+        configured_database is None
+        or DISPOSABLE_DATABASE_NAME.fullmatch(configured_database) is None
+    ):
+        return (
+            "a separately named disposable database "
+            "(plm_migration_disposable_* or plm_r5_*) is required"
+        )
     if opted_in_database != configured_database:
         return "explicit opt-in must name the exact disposable database"
     return None

@@ -12,10 +12,12 @@ the ruling fails long before anyone pushes.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
 import yaml
+from plm_platform.migration_safety import DISPOSABLE_DATABASE_NAME
 
 from tests.support import REPO_ROOT
 
@@ -133,3 +135,26 @@ def test_full_chain_job_configured(workflow: dict[str, Any]) -> None:
         "the full-chain job must run the Gate R5 test suite"
     )
 
+
+@pytest.mark.parametrize("job_name", ["ci", "full-chain"])
+def test_ci_database_is_a_disposable_migration_target(
+    workflow: dict[str, Any], job_name: str,
+) -> None:
+    """`plm migrate` and the R5 guard exempt only disposable targets, never shared plm:5432."""
+    joined = "\n".join(_step_runs(workflow["jobs"][job_name]))
+    names = re.findall(r"PLM_POSTGRES_DB=(\S+)'", joined)
+    assert len(names) == 1 and DISPOSABLE_DATABASE_NAME.fullmatch(names[0]), names
+    assert "PLM_POSTGRES_HOST_PORT=55432" in joined
+    assert f"@127.0.0.1:55432/{names[0]}" in joined, "DATABASE_URL must name the same DB"
+
+
+def test_full_chain_step_opts_in_to_the_isolated_stack(workflow: dict[str, Any]) -> None:
+    steps = workflow["jobs"]["full-chain"]["steps"]
+    step = next(s for s in steps if "full_chain" in s.get("run", ""))
+    assert step.get("env", {}).get("PLM_R5_ISOLATED_STACK") == "1", (
+        "without the opt-in the R5 suite skips, and a skip is not a pass"
+    )
+    joined = "\n".join(_step_runs(workflow["jobs"]["full-chain"]))
+    assert "PLM_POSTGRES_DB=plm_r5_ci'" in joined, (
+        "the R5 job keeps its own plm_r5_* database (ADR-0042)"
+    )

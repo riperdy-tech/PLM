@@ -133,6 +133,7 @@ from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
 from plm_platform.db import database_url
 from plm_platform.exceptions import ExceptionQueue
 from plm_platform.ledger import BudgetLedger
+from plm_platform.migration_safety import is_disposable_migration_target
 from plm_platform.pipeline.activities import PlatformOperations, build_activities
 from plm_platform.pipeline.client import pipeline_workflow_id
 from plm_platform.pipeline.config import PublishConfig, load_pipeline_config
@@ -204,10 +205,11 @@ def _r5_isolation_refusal(
     if not opted_in:
         return "r5_isolated_stack_opt_in_required"
     hosts = {"localhost", "127.0.0.1", "::1"}
-    if (
-        db.get_backend_name() != "postgresql"
-        or db.host not in hosts
-        or not (db.database or "").startswith("plm_r5_")
+    # The shared disposable-target rule (as `plm migrate` and raw Alembic), checked
+    # on the configured URL before any connection exists.
+    if db.get_backend_name() != "postgresql" or not is_disposable_migration_target(
+        configured_database=db.database, connected_database=db.database,
+        host=db.host, port=db.port,
     ):
         return "r5_isolated_postgres_required"
     if not endpoints or any(

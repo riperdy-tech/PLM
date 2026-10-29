@@ -58,7 +58,7 @@ from .clock import SystemClock, require_aware
 from .config import Settings, SettingsError, load_settings
 from .db import database_url, redacted_database_url
 from .ledger import BudgetLedger
-from .migration_safety import user_object_count
+from .migration_safety import is_disposable_migration_target, user_object_count
 from .service_urls import LOOPBACK_HOST, service_urls
 from .storage import bucket_name, split_endpoint
 from .temporal import (
@@ -462,9 +462,15 @@ def _unversioned_target_refusal(existing_objects: object) -> str | None:
     return None
 
 
-def _merge_code_only_refusal(head: str, current: str | None) -> str | None:
-    """Hold the 0039 rollout until separately approved, even after code installation."""
-    if head in _CODE_ONLY_HEADS and current != head:
+def _merge_code_only_refusal(
+    head: str, current: str | None, *, disposable: bool = False,
+) -> str | None:
+    """Hold the 0039 rollout until separately approved, even after code installation.
+
+    A disposable target (`is_disposable_migration_target`, the rule raw Alembic
+    already applies) is exempt; every other database stays held.
+    """
+    if head in _CODE_ONLY_HEADS and current != head and not disposable:
         return (
             "0039-0042 revisions are installed in code only; database migration "
             "is NOT approved. Refusing plm migrate until a separately "
@@ -486,6 +492,7 @@ def _migration_preflight(config: Config) -> None:
         raise RuntimeError("checkout has no migration head; reconcile revisions before upgrade")
     settings = load_settings(dotenv_path=REPO_ROOT / ".env")
     engine = _engine(settings, _CONNECT_TIMEOUT_SECONDS)
+    disposable = False
     try:
         with engine.connect() as connection:
             current = MigrationContext.configure(connection).get_current_revision()
@@ -496,6 +503,16 @@ def _migration_preflight(config: Config) -> None:
                 reason = _unversioned_target_refusal(user_object_count(connection))
                 if reason is not None:
                     raise RuntimeError(reason)
+            if head in _CODE_ONLY_HEADS and current != head:
+                url = database_url(settings)
+                disposable = is_disposable_migration_target(
+                    configured_database=url.database,
+                    connected_database=connection.execute(
+                        text("SELECT current_database()")
+                    ).scalar_one(),
+                    host=url.host,
+                    port=url.port,
+                )
     finally:
         engine.dispose()
     if current is not None and current not in known:
@@ -503,7 +520,7 @@ def _migration_preflight(config: Config) -> None:
             f"database revision {current} is not in this checkout's Alembic chain "
             f"(head {head}); refusing migration. Reconcile branch history first."
         )
-    merge_hold = _merge_code_only_refusal(head, current)
+    merge_hold = _merge_code_only_refusal(head, current, disposable=disposable)
     if merge_hold is not None:
         raise RuntimeError(merge_hold)
 

@@ -11,7 +11,7 @@ x-plm-app: &plm-app
   environment:
     # Compose services reach each other by service name; these win over .env.
     - TEMPORAL_HOST=temporal:7233
-    - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/plm
+    - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/${PLM_POSTGRES_DB:-plm}
     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     - MINIO_ENDPOINT=minio:9000
     - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -46,16 +46,18 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: plm
+      # PLM_POSTGRES_DB / PLM_POSTGRES_HOST_PORT default to the development values; CI sets
+      # a disposable name and port (see .github/workflows/ci.yml and migration_safety.py).
+      POSTGRES_DB: ${PLM_POSTGRES_DB:-plm}
       POSTGRES_USER: plm
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     # Host port for alembic / psql runs from the dev venv (DATABASE_URL uses localhost).
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${PLM_POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U plm -d plm"]
+      test: ["CMD-SHELL", "pg_isready -U plm -d ${PLM_POSTGRES_DB:-plm}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -153,7 +155,7 @@ services:
       # Compose services reach each other by service name; the localhost values in
       # .env are for tools on the host, and these explicit values win over .env.
       - TEMPORAL_HOST=temporal:7233
-      - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/plm
+      - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/${PLM_POSTGRES_DB:-plm}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}

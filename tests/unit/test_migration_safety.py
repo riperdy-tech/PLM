@@ -66,6 +66,7 @@ def test_destructive_migration_target_rejects_nonempty_or_unverified_db(
 
 def test_preconnection_migration_name_check_requires_explicit_disposable_optin() -> None:
     assert destructive_migration_name_refusal("plm", "plm") is not None
+    assert destructive_migration_name_refusal("plm_r5_ci", "plm_r5_ci") is None
     assert destructive_migration_name_refusal(
         "plm_migration_disposable_run42", "plm_migration_disposable_run42"
     ) is None
@@ -128,6 +129,10 @@ def test_shared_read_only_object_count_propagates_failed_catalog_inspection() ->
          "localhost", True),
         ("plm_migration_disposable_trial", "plm_migration_disposable_trial",
          "localhost", None),
+        ("plm_r5_ci", "plm_r5_ci", "127.0.0.1", 5432),
+        ("plm_r5_", "plm_r5_", "127.0.0.1", 55432),
+        ("plm_r5_ci", "plm", "127.0.0.1", 55432),
+        ("plm_r5_ci", "plm_r5_ci", "::1", 55432),
     ],
 )
 def test_code_only_0039_direct_alembic_guard_rejects_unsafe_targets(
@@ -148,8 +153,10 @@ def test_code_only_0039_direct_alembic_guard_rejects_unsafe_targets(
     assert "password" not in refusal.lower()
 
 
-def test_code_only_0039_direct_alembic_guard_allows_only_isolated_test_target() -> None:
-    target = "plm_migration_disposable_rehearsal1"
+@pytest.mark.parametrize("target", ["plm_migration_disposable_rehearsal1", "plm_r5_ci"])
+def test_code_only_0039_direct_alembic_guard_allows_only_isolated_test_target(
+    target: str,
+) -> None:
     assert code_only_0039_alembic_refusal(
         known_revisions=frozenset({"0039_merge_0038_branches"}),
         configured_database=target,
