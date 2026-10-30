@@ -240,6 +240,14 @@ Isolated local double run (2026-10-30, owner-approved, `54c74eb`):
 This meets A03's listed criteria and re-verifies Gate R5 for mock providers. It is no
 evidence for real providers, production data or R6, and R6 stays unapproved.
 
+**Owner decisions D5–D8 (2026-10-30)**, recorded in
+[`reviews/2026-10-30-owner-decisions-d5-d8.md`](reviews/2026-10-30-owner-decisions-d5-d8.md):
+D5 — A02 closed by the owner. D6 — X02 and RC2 approved by the owner without a
+separate review. D7 — `review/r6-live-adapters` fast-forwarded into `main`.
+D8 — **R6 approved as a stage**: step 1 (recorded-response conformance, no
+credentials) may proceed; every live call, paid generation, upload or publish
+still needs its own explicit authorization through `ExternalWriteGuard`.
+
 A02 intake: on branch `review/r6-live-adapters` at HEAD `4a35ce2`,
 the inherited working tree had **62 tracked modified paths and 134
 untracked paths**; many changes precede this task. Existing `.bridge/`
