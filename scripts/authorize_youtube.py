@@ -17,6 +17,7 @@ REDIRECT_URI = f"http://127.0.0.1:{PORT}/"
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
 ]
 
 
