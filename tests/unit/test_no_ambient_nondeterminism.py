@@ -35,6 +35,9 @@ EDGE_MODULES = {
     # Connectors stamp when an external fact was observed; the stamp is the input.
     "services/market_intelligence/connectors/youtube.py",
     "services/market_intelligence/connectors/trends.py",
+    # Compares the provider's JWT `exp` claim with now to decide a session refresh;
+    # an HTTP edge, never replayed.
+    "services/music_factory/providers/suno_client.py",
 }
 
 AMBIENT_TIME = {("datetime", "now"), ("datetime", "utcnow"), ("datetime", "today"),

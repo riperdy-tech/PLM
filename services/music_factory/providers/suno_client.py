@@ -9,6 +9,7 @@ import os
 import subprocess
 import tempfile
 import time
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -56,6 +57,7 @@ class SunoClient:
         base_url: str = SUNO_API_BASE,
         timeout_seconds: float = 30.0,
         clock: Clock | None = None,
+        http_client: httpx.Client | None = None,
     ) -> None:
 
         if token is None:
@@ -73,8 +75,15 @@ class SunoClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
         self._clock = clock
+        # Injected by tests and the R6 recorder; the caller owns its lifetime.
+        self._http_client = http_client
         self._token_expires_at: float | None = None
         self._compute_token_expiry()
+
+    def _http(self) -> AbstractContextManager[httpx.Client]:
+        if self._http_client is not None:
+            return nullcontext(self._http_client)
+        return httpx.Client(timeout=self._timeout)
 
     @property
     def is_configured(self) -> bool:
@@ -89,8 +98,9 @@ class SunoClient:
             if len(parts) >= 2:
                 payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
                 exp = float(payload.get("exp", 0))
-                iat = float(payload.get("iat", 0))
-                ttl = (exp - iat) if (exp > 0 and iat > 0 and exp > iat) else 3600.0
+                # Time left on the token now, not its issued lifetime: a token saved in
+                # .env days ago must count as expired so the session refresh runs.
+                ttl = (exp - time.time()) if exp > 0 else 3600.0
                 self._token_expires_at = time.monotonic() + ttl
         except (ValueError, json.JSONDecodeError):
             self._token_expires_at = None
@@ -124,7 +134,7 @@ class SunoClient:
             "Origin": "https://suno.com",
             "Cookie": client_cookie if "=" in client_cookie else f"__client={client_cookie}",
         }
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             resp = client.get("https://auth.suno.com/v1/client", headers=headers)
             if resp.status_code != 200:
                 raise SunoClientError(f"Clerk client fetch failed (HTTP {resp.status_code}): {resp.text[:200]}")
@@ -178,7 +188,7 @@ class SunoClient:
     def get_billing_info(self) -> dict[str, Any]:
         """Fetch billing / credit quota info from Suno."""
         url = f"{self._base_url}/billing/info/"
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             resp = client.get(url, headers=self._headers())
             if resp.status_code != 200:
                 raise SunoClientError(
@@ -219,7 +229,7 @@ class SunoClient:
             "model": model,
             "wait_audio": False,
         }
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             resp = client.post(url, headers=self._headers(), json=payload)
             if resp.status_code not in (200, 201):
                 raise SunoClientError(
@@ -243,7 +253,7 @@ class SunoClient:
         url = f"{self._base_url}/feed/?ids={clip_id}"
         deadline = time.monotonic() + max_wait_seconds
 
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             while time.monotonic() < deadline:
                 resp = client.get(url, headers=self._headers())
                 if resp.status_code == 200:
@@ -285,7 +295,7 @@ class SunoClient:
         download allowance (P4 / R6 quota preservation).
         """
         video_url: str | None = None
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             # 1. Check existing clip for video_url
             feed_resp = client.get(f"{self._base_url}/feed/?ids={clip_id}", headers=self._headers())
             if feed_resp.status_code == 200:
@@ -407,7 +417,7 @@ class SunoClient:
                     exc,
                 )
 
-        with httpx.Client(timeout=self._timeout) as client:
+        with self._http() as client:
             # 1. Check if download is already unlocked; if not, authorize it
             feed_resp = client.get(f"{self._base_url}/feed/?ids={clip_id}", headers=self._headers())
             if feed_resp.status_code == 200:

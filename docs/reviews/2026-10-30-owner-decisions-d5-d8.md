@@ -52,3 +52,16 @@ Limits of this decision:
   before the first live call.
 - D1's retroactive record is unchanged: the earlier live work is not R6
   evidence.
+
+## D9 — one live Suno read (later on 2026-10-30)
+
+Owner's words: "Record one real read", answering the session's offer to record
+one real read-only Suno billing/credits reply, with no generation. Done once, through a
+transport that refused any request other than `GET /api/billing/info/` (and a
+Clerk session refresh, which did not run). Suno answered **401 Unauthorized**:
+the `.env` session JWT had expired on 2026-10-19 and the client did not refresh
+it, because it measured token lifetime from process start instead of the
+token's `exp`. That bug is fixed; the 401 is kept as a `recorded-live` fixture.
+No successful billing reply has been recorded. A retry would need a Clerk
+session refresh (`auth.suno.com`) plus a second billing read, which this
+decision did not cover.

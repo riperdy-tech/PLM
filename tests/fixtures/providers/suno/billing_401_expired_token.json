@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "recorded-live",
+    "reference": "GET https://studio-api-prod.suno.com/api/billing/info/",
+    "captured": "2026-10-30",
+    "notes": "One owner-authorized read-only call (D9). The .env session JWT had expired on 2026-10-19 and the client did not refresh it, so Suno answered 401. Body and Content-Type are verbatim; nothing was redacted."
+  },
+  "status": 401,
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+  },
+  "json": {
+    "detail": "Unauthorized"
+  }
+}
