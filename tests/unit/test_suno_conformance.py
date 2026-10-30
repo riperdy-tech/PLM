@@ -10,6 +10,7 @@ import json
 import time
 
 import pytest
+from music_factory.providers.adapters import SunoAdapter
 from music_factory.providers.suno_client import SunoClient, SunoClientError
 
 from tests.support.http import MockHTTP
@@ -38,6 +39,28 @@ def test_recorded_401_fails_closed(mock_http: MockHTTP) -> None:
 def test_recorded_401_is_unhealthy(mock_http: MockHTTP) -> None:
     enqueue(mock_http, "suno", "billing_401_expired_token")
     assert _client(mock_http).check_health() is False
+
+
+def test_recorded_billing_reply_is_healthy(mock_http: MockHTTP) -> None:
+    enqueue(mock_http, "suno", "billing_info")
+    assert _client(mock_http).check_health() is True
+
+
+def test_recorded_billing_reply_gives_an_observed_quota(mock_http: MockHTTP) -> None:
+    """The recorded reply carries `total_credits_left` (an int), not `credits_left`."""
+    enqueue(mock_http, "suno", "billing_info")
+    adapter = SunoAdapter(api_key="configured")
+    adapter._client = _client(mock_http)
+    status = adapter.get_quota_status()
+    assert (status["quota_status"], status["credits_remaining"],
+            status["quota_exhausted"]) == ("observed", 50, False)
+
+
+def test_recorded_401_leaves_the_quota_unknown(mock_http: MockHTTP) -> None:
+    enqueue(mock_http, "suno", "billing_401_expired_token")
+    adapter = SunoAdapter(api_key="configured")
+    adapter._client = _client(mock_http)
+    assert adapter.get_quota_status()["quota_status"] == "unknown"
 
 
 def test_a_token_saved_after_its_expiry_counts_as_expired() -> None:

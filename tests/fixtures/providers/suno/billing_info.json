@@ -1,0 +1,206 @@
+{
+  "_provenance": {
+    "source": "recorded-live",
+    "reference": "GET https://studio-api-prod.suno.com/api/billing/info/",
+    "captured": "2026-10-30",
+    "notes": "Owner-authorized read-only call after a Clerk session refresh (D9 retry). Key names, nesting and value types are verbatim; every value is replaced (strings '<redacted>', numbers 0, booleans false, lists cut to one item) because the reply describes the owner's account. total_credits_left=50 is a placeholder."
+  },
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/json; charset=utf-8"
+  },
+  "json": {
+    "subscription_platform": "<redacted>",
+    "is_active": false,
+    "is_past_due": false,
+    "credits": 0,
+    "subscription_type": false,
+    "subscription_anchor": "<redacted>",
+    "subscription_id": "<redacted>",
+    "renews_on": "<redacted>",
+    "period": "<redacted>",
+    "monthly_usage": 0,
+    "monthly_limit": 0,
+    "credit_packs": [
+      {
+        "id": "<redacted>",
+        "amount": 0,
+        "price_usd": 0,
+        "price_amount": "<redacted>",
+        "price_currency_code": "<redacted>"
+      }
+    ],
+    "download_credit_packs": [
+      {
+        "id": "<redacted>",
+        "amount": 0,
+        "price_usd": 0,
+        "price_amount": "<redacted>",
+        "price_currency_code": "<redacted>"
+      }
+    ],
+    "plan": {
+      "id": "<redacted>",
+      "level": 0,
+      "plan_key": "<redacted>",
+      "name": "<redacted>",
+      "features": "<redacted>",
+      "monthly_price_usd": 0.0,
+      "annual_price_usd": 0.0,
+      "usage_plan_features": [
+        {
+          "name": "<redacted>"
+        }
+      ],
+      "prices": [
+        {
+          "period_type": "<redacted>",
+          "currency": "<redacted>",
+          "price": 0.0
+        }
+      ]
+    },
+    "models": [
+      {
+        "can_use": false,
+        "max_lengths": {
+          "title": 0,
+          "prompt": 0,
+          "tags": 0,
+          "negative_tags": 0,
+          "gpt_description_prompt": 0
+        },
+        "name": "<redacted>",
+        "external_key": "<redacted>",
+        "major_version": 0,
+        "description": "<redacted>",
+        "is_default_free_model": false,
+        "is_default_model": false,
+        "badges": [
+          "<redacted>"
+        ],
+        "model_badges": [
+          {
+            "display_name": "<redacted>",
+            "light": {
+              "text_color": "<redacted>",
+              "background_color": "<redacted>",
+              "border_color": "<redacted>"
+            },
+            "dark": {
+              "text_color": "<redacted>",
+              "background_color": "<redacted>",
+              "border_color": "<redacted>"
+            }
+          }
+        ],
+        "style": {
+          "light": {
+            "text_color": "<redacted>"
+          },
+          "dark": {
+            "text_color": "<redacted>"
+          }
+        },
+        "capabilities": [
+          "<redacted>"
+        ],
+        "features": [
+          "<redacted>"
+        ],
+        "allowed_condition_combinations": [
+          [
+            "<redacted>"
+          ]
+        ],
+        "id": "<redacted>"
+      }
+    ],
+    "max_active_custom_models": 0,
+    "max_custom_model_clips": 0,
+    "plan_price": 0.0,
+    "plan_currency": "<redacted>",
+    "plan_currency_price": 0.0,
+    "default_currency": "<redacted>",
+    "eligible_currencies": [
+      "<redacted>"
+    ],
+    "country_code": "<redacted>",
+    "payment_method_type": "<redacted>",
+    "can_upgrade_immediately": false,
+    "plans": [
+      {
+        "id": "<redacted>",
+        "level": 0,
+        "plan_key": "<redacted>",
+        "name": "<redacted>",
+        "features": "<redacted>",
+        "monthly_price_usd": 0.0,
+        "annual_price_usd": 0.0,
+        "usage_plan_features": [
+          {
+            "name": "<redacted>"
+          }
+        ],
+        "prices": []
+      }
+    ],
+    "accessible_features": [
+      {
+        "name": "<redacted>"
+      }
+    ],
+    "revcat_subscriptions_offering_id": "<redacted>",
+    "total_credits_left": 50,
+    "visuals_credits_left": 0,
+    "free_persona_clips_remaining": 0,
+    "free_cover_clips_remaining": 0,
+    "free_remasters_remaining": 0,
+    "free_mobile_remasters_remaining": 0,
+    "free_mobile_v4_gens_remaining": 0,
+    "free_web_v4_gens_remaining": 0,
+    "free_vox_gens_remaining": 0,
+    "has_been_subscriber_before": false,
+    "last_subscription_period_end": "<redacted>",
+    "has_valid_school_email": false,
+    "has_been_student_subscriber_before": false,
+    "day0_boost": 0,
+    "promotions": [],
+    "audio_upload_limits": {
+      "min": 0,
+      "max": 0
+    },
+    "voice_upload_limits": {
+      "min": 0,
+      "max": 0
+    },
+    "voice_record_limits": {
+      "min": 0,
+      "max": 0
+    },
+    "agentic_limits": {
+      "max_atoms": 0,
+      "max_images": 0,
+      "max_audio_refs": 0
+    },
+    "period_end": "<redacted>",
+    "remaster_model_types": [
+      {
+        "name": "<redacted>",
+        "external_key": "<redacted>",
+        "is_default_model": false,
+        "can_use": false
+      }
+    ],
+    "download_usage": {
+      "current_period_downloads_used": 0,
+      "current_period_downloads_limit": 0,
+      "additional_download_remaining": 0,
+      "current_period_download_top_ups_purchased": 0,
+      "current_period_download_top_up_purchase_limit": 0
+    },
+    "is_pause_scheduled": false,
+    "is_paused": false,
+    "is_gifted": false
+  }
+}

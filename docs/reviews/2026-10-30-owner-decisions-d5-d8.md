@@ -65,3 +65,9 @@ token's `exp`. That bug is fixed; the 401 is kept as a `recorded-live` fixture.
 No successful billing reply has been recorded. A retry would need a Clerk
 session refresh (`auth.suno.com`) plus a second billing read, which this
 decision did not cover.
+
+**D9 retry (owner: "Refresh and retry").** With the expiry fix, the client
+refreshed the Clerk session from `SUNO_COOKIE` and one more billing read
+returned 200. Nothing else was called and no generation was made. The reply's
+key structure is committed with every value redacted (the repository is public);
+the refreshed token was not written back to `.env`.
