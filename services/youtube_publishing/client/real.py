@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ class RealYouTubeClient:
         client_secret: str | None = None,
         refresh_token: str | None = None,
         timeout_seconds: float = 60.0,
+        http_client: httpx.Client | None = None,
     ) -> None:
         dotenv = load_env_file(Path(".env"))
         if client_id is None:
@@ -52,9 +54,16 @@ class RealYouTubeClient:
             refresh_token = os.getenv("YOUTUBE_OAUTH_REFRESH_TOKEN") or dotenv.get("YOUTUBE_OAUTH_REFRESH_TOKEN", "")
         self.refresh_token = refresh_token
         self.timeout = timeout_seconds
+        # Injected by tests (R6 conformance); the caller owns its lifetime.
+        self._http_client = http_client
 
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
+
+    def _http(self) -> AbstractContextManager[httpx.Client]:
+        if self._http_client is not None:
+            return nullcontext(self._http_client)
+        return httpx.Client(timeout=self.timeout)
 
     @property
     def is_configured(self) -> bool:
@@ -68,7 +77,7 @@ class RealYouTubeClient:
         if self._access_token and time.monotonic() < self._access_token_expires_at - 60:
             return self._access_token
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(
                 GOOGLE_TOKEN_URL,
                 data={
@@ -127,7 +136,7 @@ class RealYouTubeClient:
         })
         payload = {"snippet": snippet, "status": status}
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 self._handle_error_response(resp, "insert_resumable_session")
@@ -152,10 +161,18 @@ class RealYouTubeClient:
             "Content-Type": "video/mp4",
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.put(session_uri, headers=headers, content=chunk)
             if resp.status_code == 308:
-                # Resume Incomplete: more chunks needed
+                # Resume Incomplete. Range ("bytes=0-N") is what Google holds; no Range
+                # means nothing arrived. The caller advances by the whole chunk, so a
+                # short receipt must stop the upload rather than skip bytes.
+                received = resp.headers.get("Range")
+                if received != f"bytes=0-{end_byte}":
+                    raise YouTubeTransientError(
+                        f"YouTube holds {received or 'no bytes'} after sending up to byte "
+                        f"{end_byte}; resume from the server's offset is not implemented"
+                    )
                 return None
             if resp.status_code in (200, 201):
                 data = resp.json()
@@ -177,7 +194,7 @@ class RealYouTubeClient:
             raise ValueError("max_results must be between 1 and 50")
         if channel_id is not None and not channel_id.strip():
             raise ValueError("channel_id cannot be empty")
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             channels = client.get(
                 f"{YOUTUBE_API_BASE}/channels",
                 headers=self._auth_headers(),
@@ -250,7 +267,7 @@ class RealYouTubeClient:
             "id": video_id,
             "part": "snippet,status,processingDetails,contentDetails",
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.get(url, headers=self._auth_headers(), params=params)
             if resp.status_code == 404:
                 return None
@@ -277,7 +294,7 @@ class RealYouTubeClient:
         headers = self._auth_headers()
         headers["Content-Type"] = content_type
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(url, headers=headers, content=thumbnail_bytes)
             if resp.status_code != 200:
                 self._handle_error_response(resp, "set_thumbnail")
@@ -291,7 +308,7 @@ class RealYouTubeClient:
             "snippet": {"title": title, "description": description},
             "status": {"privacyStatus": privacy},
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(url, headers=self._auth_headers(), json=payload)
             if resp.status_code not in (200, 201):
                 self._handle_error_response(resp, "insert_playlist")
@@ -308,7 +325,7 @@ class RealYouTubeClient:
                 "resourceId": {"kind": "youtube#video", "videoId": video_id},
             }
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(url, headers=self._auth_headers(), json=payload)
             if resp.status_code not in (200, 201):
                 self._handle_error_response(resp, "insert_playlist_item")

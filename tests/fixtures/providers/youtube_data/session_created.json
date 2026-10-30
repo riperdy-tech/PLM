@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol",
+    "captured": "2026-10-30",
+    "notes": "Step 2 example response (200, Location, empty body)."
+  },
+  "status": 200,
+  "headers": {
+    "Location": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=xa298sd_f"
+  },
+  "text": ""
+}

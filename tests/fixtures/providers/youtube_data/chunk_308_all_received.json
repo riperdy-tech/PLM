@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol",
+    "captured": "2026-10-30",
+    "notes": "Step 4.2: 308 with Range bytes=0-N; N is the 500-byte test chunk."
+  },
+  "status": 308,
+  "headers": {
+    "Range": "bytes=0-499"
+  },
+  "text": ""
+}

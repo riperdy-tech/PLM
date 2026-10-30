@@ -1,0 +1,28 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol",
+    "captured": "2026-10-30",
+    "notes": "Step 4: 201 Created, body is the video resource. Values are invented; field names follow the resource reference."
+  },
+  "status": 201,
+  "json": {
+    "kind": "youtube#video",
+    "etag": "etag-video-1",
+    "id": "Ks-_Mh1QhMc",
+    "snippet": {
+      "publishedAt": "2026-10-30T10:00:00Z",
+      "channelId": "UC3Ps0F0z8Mw9ftakIcZ1cWA",
+      "title": "Rhodes & Rain - Night Study",
+      "description": "AI-generated music.",
+      "categoryId": "10"
+    },
+    "status": {
+      "uploadStatus": "uploaded",
+      "privacyStatus": "private",
+      "embeddable": true,
+      "madeForKids": false,
+      "selfDeclaredMadeForKids": false
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/videos/insert",
+    "captured": "2026-10-30",
+    "notes": "uploadLimitExceeded (400) from the videos.insert error table; message is illustrative."
+  },
+  "status": 400,
+  "json": {
+    "error": {
+      "code": 400,
+      "message": "The user has exceeded the number of videos they may upload.",
+      "errors": [
+        {
+          "message": "The user has exceeded the number of videos they may upload.",
+          "domain": "youtube.video",
+          "reason": "uploadLimitExceeded"
+        }
+      ],
+      "status": "INVALID_ARGUMENT"
+    }
+  }
+}

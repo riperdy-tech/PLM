@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/videos/list",
+    "captured": "2026-10-30",
+    "notes": "A video the caller cannot see is an empty items list."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtube#videoListResponse",
+    "etag": "etag-list-2",
+    "items": [],
+    "pageInfo": {
+      "totalResults": 0,
+      "resultsPerPage": 0
+    }
+  }
+}

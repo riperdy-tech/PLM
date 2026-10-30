@@ -1,0 +1,22 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/thumbnails/set",
+    "captured": "2026-10-30",
+    "notes": "Values are invented; field names follow the resource reference."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtube#thumbnailSetResponse",
+    "etag": "etag-thumb-1",
+    "items": [
+      {
+        "default": {
+          "url": "https://i.ytimg.com/vi/Ks-_Mh1QhMc/default.jpg",
+          "width": 120,
+          "height": 90
+        }
+      }
+    ]
+  }
+}

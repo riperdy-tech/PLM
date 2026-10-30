@@ -103,6 +103,7 @@ def test_upload_video_chunk() -> None:
     # 308 Resume Incomplete
     mock_resp_308 = MagicMock(spec=httpx.Response)
     mock_resp_308.status_code = 308
+    mock_resp_308.headers = {"Range": "bytes=0-499"}
 
     with patch("httpx.Client.put", return_value=mock_resp_308):
         res1 = client.upload_video_chunk(

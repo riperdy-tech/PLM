@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/videos/insert",
+    "captured": "2026-10-30",
+    "notes": "forbidden (403) from the videos.insert error table; message is illustrative."
+  },
+  "status": 403,
+  "json": {
+    "error": {
+      "code": 403,
+      "message": "Forbidden",
+      "errors": [
+        {
+          "message": "Forbidden",
+          "domain": "youtube.video",
+          "reason": "forbidden"
+        }
+      ],
+      "status": "PERMISSION_DENIED"
+    }
+  }
+}

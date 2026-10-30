@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/errors",
+    "captured": "2026-10-30",
+    "notes": "Google API error envelope; message is illustrative."
+  },
+  "status": 401,
+  "json": {
+    "error": {
+      "code": 401,
+      "message": "Invalid Credentials",
+      "errors": [
+        {
+          "message": "Invalid Credentials",
+          "domain": "global",
+          "reason": "authError"
+        }
+      ],
+      "status": "UNAUTHENTICATED"
+    }
+  }
+}

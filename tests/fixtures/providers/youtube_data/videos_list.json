@@ -1,0 +1,47 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/videos/list",
+    "captured": "2026-10-30",
+    "notes": "Values are invented; field names follow the resource reference."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtube#videoListResponse",
+    "etag": "etag-list-1",
+    "items": [
+      {
+        "kind": "youtube#video",
+        "etag": "etag-video-1",
+        "id": "Ks-_Mh1QhMc",
+        "snippet": {
+          "publishedAt": "2026-10-30T10:00:00Z",
+          "channelId": "UC3Ps0F0z8Mw9ftakIcZ1cWA",
+          "title": "Rhodes & Rain - Night Study",
+          "description": "AI-generated music.",
+          "categoryId": "10"
+        },
+        "status": {
+          "uploadStatus": "processed",
+          "privacyStatus": "private",
+          "embeddable": true,
+          "madeForKids": false,
+          "selfDeclaredMadeForKids": false
+        },
+        "processingDetails": {
+          "processingStatus": "succeeded"
+        },
+        "contentDetails": {
+          "duration": "PT58M12S",
+          "definition": "hd",
+          "caption": "false",
+          "licensedContent": false
+        }
+      }
+    ],
+    "pageInfo": {
+      "totalResults": 1,
+      "resultsPerPage": 1
+    }
+  }
+}

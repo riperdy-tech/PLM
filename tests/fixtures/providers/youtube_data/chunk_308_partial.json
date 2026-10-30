@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol",
+    "captured": "2026-10-30",
+    "notes": "Step 4.2: Range reports fewer bytes than were sent."
+  },
+  "status": 308,
+  "headers": {
+    "Range": "bytes=0-299"
+  },
+  "text": ""
+}

@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol",
+    "captured": "2026-10-30",
+    "notes": "Step 4.2: no Range header means no bytes were received."
+  },
+  "status": 308,
+  "text": ""
+}
