@@ -53,18 +53,20 @@ class SpotifyConnector:
         if not track_ids:
             raise ConnectorError(ConnectorErrorClass.INVALID_REQUEST,
                                  "fetch_tracks called without ids")
-        response = self._client.get(f"{self._base_url}/tracks",
-                                    params={"ids": ",".join(track_ids)},
-                                    headers=self._credentials.headers())
-        if response.status_code >= 400:
-            raise ConnectorError(ConnectorErrorClass.AUTH_FAILURE,
-                                 f"spotify returned HTTP {response.status_code}")
-        payload = response.json()
+        # February 2026 removed Get Several Tracks (GET /tracks); Get Track remains.
+        tracks = []
+        for track_id in track_ids:
+            response = self._client.get(f"{self._base_url}/tracks/{track_id}",
+                                        headers=self._credentials.headers())
+            if response.status_code >= 400:
+                raise ConnectorError(_error_class(response.status_code),
+                                     f"spotify returned HTTP {response.status_code}")
+            tracks.append(response.json())
         objects = tuple(
             FetchedObject(provider_object_type=ProviderObjectType.TRACK,
                           provider_object_id=str(track["id"]),
                           observed_at=_parse_release(track), payload=track)
-            for track in payload.get("tracks", [])
+            for track in tracks
             if track and track.get("id")
         )
         if any(field in obj.payload for obj in objects for field in _BANNED_FIELDS):
@@ -76,6 +78,18 @@ class SpotifyConnector:
         return FetchResult(objects=objects, quota_units=0,
                            request_context_hash=hash_request_context(
                                self.provider_name.value, "tracks", {"ids": ",".join(track_ids)}))
+
+
+def _error_class(status: int) -> ConnectorErrorClass:
+    if status in (401, 403):
+        return ConnectorErrorClass.AUTH_FAILURE
+    if status == 404:
+        return ConnectorErrorClass.NOT_FOUND
+    if status == 429:
+        return ConnectorErrorClass.RATE_LIMIT
+    if status >= 500:
+        return ConnectorErrorClass.PROVIDER_5XX
+    return ConnectorErrorClass.INVALID_REQUEST
 
 
 def parse_track_stats(fetch: FetchResult) -> tuple[TrackStats, ...]:

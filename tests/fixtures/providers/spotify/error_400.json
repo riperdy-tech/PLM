@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developer.spotify.com/documentation/web-api/concepts/api-calls",
+    "captured": "2026-10-30",
+    "notes": "Regular error object; message text is illustrative."
+  },
+  "status": 400,
+  "json": {
+    "error": {
+      "status": 400,
+      "message": "invalid id"
+    }
+  }
+}

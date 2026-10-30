@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developer.spotify.com/documentation/web-api/concepts/api-calls",
+    "captured": "2026-10-30",
+    "notes": "Regular error object; message text is illustrative; Retry-After is not documented on this page."
+  },
+  "status": 429,
+  "json": {
+    "error": {
+      "status": 429,
+      "message": "API rate limit exceeded"
+    }
+  },
+  "headers": {
+    "Retry-After": "7"
+  }
+}

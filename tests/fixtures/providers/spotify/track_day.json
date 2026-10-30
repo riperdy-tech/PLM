@@ -1,0 +1,68 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developer.spotify.com/documentation/web-api/reference/get-track",
+    "captured": "2026-10-30",
+    "notes": "TrackObject per https://developer.spotify.com/documentation/web-api/reference/get-track, minus the fields https://developer.spotify.com/documentation/web-api/references/changes/february-2026 removed (available_markets, linked_from, popularity; album label/popularity/available_markets/album_group). external_ids was later reverted and is kept. Values are invented."
+  },
+  "status": 200,
+  "json": {
+    "album": {
+      "album_type": "single",
+      "total_tracks": 1,
+      "external_urls": {
+        "spotify": "https://open.spotify.com/album/lNbCNsXJmKlMNAXVhgFd11"
+      },
+      "href": "https://api.spotify.com/v1/albums/lNbCNsXJmKlMNAXVhgFd11",
+      "id": "lNbCNsXJmKlMNAXVhgFd11",
+      "images": [],
+      "name": "2AM Seoul",
+      "release_date": "2026-08-01",
+      "release_date_precision": "day",
+      "type": "album",
+      "uri": "spotify:album:lNbCNsXJmKlMNAXVhgFd11",
+      "artists": [
+        {
+          "external_urls": {
+            "spotify": "https://open.spotify.com/artist/0TnOYISbd1XYRBk9myaseg"
+          },
+          "href": "https://api.spotify.com/v1/artists/0TnOYISbd1XYRBk9myaseg",
+          "id": "0TnOYISbd1XYRBk9myaseg",
+          "name": "NightLoop",
+          "type": "artist",
+          "uri": "spotify:artist:0TnOYISbd1XYRBk9myaseg"
+        }
+      ]
+    },
+    "artists": [
+      {
+        "external_urls": {
+          "spotify": "https://open.spotify.com/artist/0TnOYISbd1XYRBk9myaseg"
+        },
+        "href": "https://api.spotify.com/v1/artists/0TnOYISbd1XYRBk9myaseg",
+        "id": "0TnOYISbd1XYRBk9myaseg",
+        "name": "NightLoop",
+        "type": "artist",
+        "uri": "spotify:artist:0TnOYISbd1XYRBk9myaseg"
+      }
+    ],
+    "disc_number": 1,
+    "duration_ms": 212000,
+    "explicit": false,
+    "external_ids": {
+      "isrc": "QZFZ12600001"
+    },
+    "external_urls": {
+      "spotify": "https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl"
+    },
+    "href": "https://api.spotify.com/v1/tracks/11dFghVXANMlKmJXsNCbNl",
+    "id": "11dFghVXANMlKmJXsNCbNl",
+    "is_playable": true,
+    "name": "2AM Seoul",
+    "preview_url": null,
+    "track_number": 1,
+    "type": "track",
+    "uri": "spotify:track:11dFghVXANMlKmJXsNCbNl",
+    "is_local": false
+  }
+}

@@ -33,7 +33,7 @@ def _track(release_date) -> dict:
 
 @pytest.mark.parametrize("release_date", [None, "", "not-a-date", "2026-13-40"])
 def test_unparseable_release_dates_are_refused_not_faked_as_1970(mock_http, release_date) -> None:
-    mock_http.enqueue_json({"tracks": [_track(release_date)]})
+    mock_http.enqueue_json(_track(release_date))
     with pytest.raises(ConnectorError) as failure:
         connector(mock_http).fetch_tracks(["track-1"])
     assert failure.value.error_class is ConnectorErrorClass.SCHEMA_CHANGE
@@ -47,6 +47,6 @@ def test_unparseable_release_dates_are_refused_not_faked_as_1970(mock_http, rele
 def test_parseable_release_dates_still_become_the_observation_instant(
     mock_http, release_date, expected,
 ) -> None:
-    mock_http.enqueue_json({"tracks": [_track(release_date)]})
+    mock_http.enqueue_json(_track(release_date))
     result = connector(mock_http).fetch_tracks(["track-1"])
     assert result.objects[0].observed_at == expected
