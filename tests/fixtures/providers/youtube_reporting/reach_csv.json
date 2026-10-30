@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reports/channel_reports",
+    "captured": "2026-10-30",
+    "notes": "Columns are the documented dimensions and metrics of channel_reach_basic_a1 in documented order. The docs do not state the date format or the CTR unit: YYYYMMDD dates and a ratio CTR are assumed and must be confirmed by a step-2 recording. Row values are invented."
+  },
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/octet-stream"
+  },
+  "text": "date,channel_id,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr\n20261001,UC3Ps0F0z8Mw9ftakIcZ1cWA,lPYmaPHPQr4,1520,0.0441\n20261001,UC3Ps0F0z8Mw9ftakIcZ1cWA,aqTf6gzjsNI,0,0\n"
+}

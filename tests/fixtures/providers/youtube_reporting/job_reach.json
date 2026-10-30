@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs",
+    "captured": "2026-10-30"
+  },
+  "status": 200,
+  "json": {
+    "id": "6a3c9f1e-2b7d-4c8a-9e1f-0d5b7a3c2e10",
+    "reportTypeId": "channel_reach_basic_a1",
+    "name": "System-Managed Job channel_reach_basic_a1",
+    "createTime": "2026-09-01T07:00:00.000000Z",
+    "systemManaged": true
+  }
+}

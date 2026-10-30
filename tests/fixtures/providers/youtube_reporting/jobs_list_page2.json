@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs/list",
+    "captured": "2026-10-30"
+  },
+  "status": 200,
+  "json": {
+    "jobs": [
+      {
+        "id": "c0ffee00-1111-4222-8333-944455556666",
+        "reportTypeId": "channel_reach_basic_a1",
+        "name": "Owner-created reach job",
+        "createTime": "2026-09-20T08:00:00.123456Z",
+        "expireTime": "2027-09-20T08:00:00Z",
+        "systemManaged": false
+      }
+    ]
+  }
+}

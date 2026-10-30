@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs",
+    "captured": "2026-10-30"
+  },
+  "status": 200,
+  "json": {
+    "id": "b7e2d4c1-9f3a-4e6b-8c2d-1a0f9e8d7c65",
+    "reportTypeId": "channel_basic_a3",
+    "name": "My channel basic job",
+    "createTime": "2026-08-15T10:11:12.345678Z",
+    "systemManaged": false
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs",
+    "captured": "2026-10-30",
+    "notes": "Google API error envelope; message text is illustrative."
+  },
+  "status": 401,
+  "json": {
+    "error": {
+      "code": 401,
+      "message": "Request had invalid authentication credentials.",
+      "errors": [
+        {
+          "message": "Request had invalid authentication credentials.",
+          "domain": "global",
+          "reason": "authError"
+        }
+      ],
+      "status": "UNAUTHENTICATED"
+    }
+  }
+}

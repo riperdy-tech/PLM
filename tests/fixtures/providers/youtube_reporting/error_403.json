@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs",
+    "captured": "2026-10-30",
+    "notes": "Google API error envelope; message text is illustrative."
+  },
+  "status": 403,
+  "json": {
+    "error": {
+      "code": 403,
+      "message": "The caller does not have permission",
+      "errors": [
+        {
+          "message": "The caller does not have permission",
+          "domain": "global",
+          "reason": "forbidden"
+        }
+      ],
+      "status": "PERMISSION_DENIED"
+    }
+  }
+}

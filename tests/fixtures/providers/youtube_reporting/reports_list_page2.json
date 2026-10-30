@@ -1,0 +1,22 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/reporting/v1/reference/rest/v1/jobs.reports/list",
+    "captured": "2026-10-30",
+    "notes": "Google documents downloadUrl as a string but publishes no example value; the /v1/media/<id>?alt=media form is assumed and must be confirmed by a step-2 recording."
+  },
+  "status": 200,
+  "json": {
+    "reports": [
+      {
+        "id": "9180799901",
+        "jobId": "6a3c9f1e-2b7d-4c8a-9e1f-0d5b7a3c2e10",
+        "startTime": "2026-10-01T07:00:00Z",
+        "endTime": "2026-10-02T07:00:00Z",
+        "createTime": "2026-10-12T04:02:11.900001Z",
+        "jobExpireTime": "2027-09-01T07:00:00Z",
+        "downloadUrl": "https://youtubereporting.googleapis.com/v1/media/9180799901?alt=media"
+      }
+    ]
+  }
+}
