@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/identity/protocols/oauth2/web-server",
+    "captured": "2026-10-30",
+    "notes": "Refresh response shape from Google's example; scope values are the Analytics read-only scopes."
+  },
+  "status": 200,
+  "json": {
+    "access_token": "1/fFAGRNJru1FTz70BzhT3Zg",
+    "expires_in": 3920,
+    "scope": "https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/youtube.readonly",
+    "token_type": "Bearer"
+  }
+}

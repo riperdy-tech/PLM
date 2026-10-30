@@ -1,0 +1,51 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/analytics/reference/reports/query",
+    "captured": "2026-10-30",
+    "notes": "Row values are invented; dataType per metric is assumed from the metric definitions. Real curves have up to 100 points; four are kept."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtubeAnalytics#resultTable",
+    "columnHeaders": [
+      {
+        "name": "elapsedVideoTimeRatio",
+        "columnType": "DIMENSION",
+        "dataType": "FLOAT"
+      },
+      {
+        "name": "audienceWatchRatio",
+        "columnType": "METRIC",
+        "dataType": "FLOAT"
+      },
+      {
+        "name": "relativeRetentionPerformance",
+        "columnType": "METRIC",
+        "dataType": "FLOAT"
+      }
+    ],
+    "rows": [
+      [
+        0.01,
+        1.0,
+        0.62
+      ],
+      [
+        0.25,
+        0.58,
+        0.55
+      ],
+      [
+        0.5,
+        0.41,
+        0.51
+      ],
+      [
+        1.0,
+        0.12,
+        0.47
+      ]
+    ]
+  }
+}

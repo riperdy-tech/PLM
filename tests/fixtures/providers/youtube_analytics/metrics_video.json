@@ -1,0 +1,54 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/analytics/reference/reports/query",
+    "captured": "2026-10-30",
+    "notes": "Row values are invented; dataType per metric is assumed from the metric definitions."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtubeAnalytics#resultTable",
+    "columnHeaders": [
+      {
+        "name": "views",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      },
+      {
+        "name": "estimatedMinutesWatched",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      },
+      {
+        "name": "averageViewDuration",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      },
+      {
+        "name": "averageViewPercentage",
+        "columnType": "METRIC",
+        "dataType": "FLOAT"
+      },
+      {
+        "name": "subscribersGained",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      },
+      {
+        "name": "subscribersLost",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      }
+    ],
+    "rows": [
+      [
+        1520,
+        3410,
+        134,
+        41.7,
+        12,
+        1
+      ]
+    ]
+  }
+}

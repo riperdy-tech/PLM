@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/identity/protocols/oauth2/web-server",
+    "captured": "2026-10-30",
+    "notes": "Same response without the optional scope field."
+  },
+  "status": 200,
+  "json": {
+    "access_token": "1/fFAGRNJru1FTz70BzhT3Zg",
+    "expires_in": 3920,
+    "token_type": "Bearer"
+  }
+}

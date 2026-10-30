@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/identity/protocols/oauth2/web-server",
+    "captured": "2026-10-30",
+    "notes": "invalid_grant is documented for an expired or revoked refresh token; description text is illustrative."
+  },
+  "status": 400,
+  "json": {
+    "error": "invalid_grant",
+    "error_description": "Token has been expired or revoked."
+  }
+}

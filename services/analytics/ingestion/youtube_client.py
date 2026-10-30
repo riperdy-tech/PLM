@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import time
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -92,6 +93,7 @@ class RealYouTubeAnalyticsClient:
         refresh_token: str | None = None,
         timeout_seconds: float = 30.0,
         clock: Clock | None = None,
+        http_client: httpx.Client | None = None,
     ) -> None:
         dotenv = load_env_file(Path(".env"))
         if client_id is None:
@@ -108,12 +110,19 @@ class RealYouTubeAnalyticsClient:
 
         self.timeout = timeout_seconds
         self._clock = clock
+        # Injected by tests (R6 conformance); the caller owns its lifetime.
+        self._http_client = http_client
 
 
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
         # The refresh response may omit scope; absence is never proof of permission.
         self._reported_oauth_scopes: frozenset[str] | None = None
+
+    def _http(self) -> AbstractContextManager[httpx.Client]:
+        if self._http_client is not None:
+            return nullcontext(self._http_client)
+        return httpx.Client(timeout=self.timeout)
 
     @property
     def is_configured(self) -> bool:
@@ -141,7 +150,7 @@ class RealYouTubeAnalyticsClient:
         if self._access_token and time.monotonic() < self._access_token_expires_at - 60:
             return self._access_token
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.post(
                 GOOGLE_TOKEN_URL,
                 data={
@@ -204,7 +213,7 @@ class RealYouTubeAnalyticsClient:
             "filters": f"video=={video_id}",
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             resp = client.get(YOUTUBE_ANALYTICS_API_BASE, headers=self._auth_headers(), params=params)
             if resp.status_code != 200:
                 raise YouTubeAnalyticsError(
@@ -280,7 +289,7 @@ class RealYouTubeAnalyticsClient:
             "filters": f"video=={video_id}",
             "sort": "-views",
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             response = client.get(
                 YOUTUBE_ANALYTICS_API_BASE,
                 headers=self._auth_headers(),
@@ -355,7 +364,7 @@ class RealYouTubeAnalyticsClient:
             "filters": f"video=={video_id}",
             "sort": "elapsedVideoTimeRatio",
         }
-        with httpx.Client(timeout=self.timeout) as client:
+        with self._http() as client:
             response = client.get(
                 YOUTUBE_ANALYTICS_API_BASE,
                 headers=self._auth_headers(),

@@ -1,0 +1,46 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/analytics/reference/reports/query",
+    "captured": "2026-10-30",
+    "notes": "Row values are invented; dataType per metric is assumed from the metric definitions."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtubeAnalytics#resultTable",
+    "columnHeaders": [
+      {
+        "name": "insightTrafficSourceType",
+        "columnType": "DIMENSION",
+        "dataType": "STRING"
+      },
+      {
+        "name": "views",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      },
+      {
+        "name": "estimatedMinutesWatched",
+        "columnType": "METRIC",
+        "dataType": "INTEGER"
+      }
+    ],
+    "rows": [
+      [
+        "YT_SEARCH",
+        820,
+        1900
+      ],
+      [
+        "SUBSCRIBER",
+        410,
+        1010
+      ],
+      [
+        "RELATED_VIDEO",
+        290,
+        500
+      ]
+    ]
+  }
+}

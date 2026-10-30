@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://cloud.google.com/apis/design/errors",
+    "captured": "2026-10-30",
+    "notes": "Google API error envelope; reason and message are illustrative."
+  },
+  "status": 400,
+  "json": {
+    "error": {
+      "code": 400,
+      "message": "Could not parse content (N/A) of field parameters.metrics.",
+      "errors": [
+        {
+          "message": "Could not parse content (N/A) of field parameters.metrics.",
+          "domain": "global",
+          "reason": "badRequest"
+        }
+      ],
+      "status": "INVALID_ARGUMENT"
+    }
+  }
+}

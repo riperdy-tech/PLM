@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://cloud.google.com/apis/design/errors",
+    "captured": "2026-10-30",
+    "notes": "Google API error envelope for an exhausted daily quota; reason and message are illustrative."
+  },
+  "status": 403,
+  "json": {
+    "error": {
+      "code": 403,
+      "message": "The request cannot be completed because you have exceeded your quota.",
+      "errors": [
+        {
+          "message": "The request cannot be completed because you have exceeded your quota.",
+          "domain": "global",
+          "reason": "quotaExceeded"
+        }
+      ],
+      "status": "PERMISSION_DENIED"
+    }
+  }
+}
