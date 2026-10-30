@@ -223,6 +223,23 @@ on one revision and one stack. It does not show that every compose service used
 `plm_r5_ci`, and it is no evidence for real providers. Not repeated on the
 local compose stack. A03 and the R5 gate stay open.
 
+Isolated local double run (2026-10-30, owner-approved, `54c74eb`):
+- Setup: the development stack was stopped, not removed. A separate compose project
+  `plm-r5-local` ran the worktree's code with `.env.example` values (no real provider
+  credentials) on database `plm_r5_local` at `127.0.0.1:55432`. All 11 app containers
+  were checked: each had `DATABASE_URL` on `plm_r5_local`, and that PostgreSQL held
+  only `plm_r5_local` and Temporal's databases.
+- Result: after `plm migrate` to `0042`, the full chain ran twice on the same stack with
+  no reset between runs, and **8 passed** both times (2,290.03 s and 2,232.82 s),
+  none skipped.
+- The rest of A03's same-revision list is green in CI run 40896746202 on `54c74eb`:
+  Ruff, mypy, unit/contract, FFmpeg media and compose integration.
+- Afterwards the isolated project and its volumes were removed, and the development
+  stack was restarted unchanged (database still at `0039`).
+
+This meets A03's listed criteria and re-verifies Gate R5 for mock providers. It is no
+evidence for real providers, production data or R6, and R6 stays unapproved.
+
 A02 intake: on branch `review/r6-live-adapters` at HEAD `4a35ce2`,
 the inherited working tree had **62 tracked modified paths and 134
 untracked paths**; many changes precede this task. Existing `.bridge/`
