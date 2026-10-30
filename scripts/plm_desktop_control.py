@@ -505,6 +505,17 @@ class PlmControlDeckApp:
         self._log(f">>> {step_text}")
 
     def _run_cycle_steps(self) -> None:
+        """Refuse the prototype cycle; it produces nothing real.
+
+        Steps 3-5 only sleep, step 7 reports the old hardcoded video `lPYmaPHPQr4`
+        as a new upload, and step 8 posts a fabricated MATURE 28-day reward to P2.
+        Step 2 also opens a live AUTONOMOUS P2 cycle. Kept for reference until the
+        guarded phase pipeline replaces it.
+        """
+        raise RuntimeError(
+            "Control Deck cycle disabled: no music is generated, no video is rendered or "
+            "uploaded, and its reward for the old video would poison P2 learning"
+        )
         self._update_progress("Step 1/8: Ingesting P1 Market Intelligence...", 12.5)
         from scripts.autonomous_loop_worker import (
             DEFAULT_ARM_ID,
