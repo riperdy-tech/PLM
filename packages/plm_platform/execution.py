@@ -9,7 +9,8 @@ independent conditions; all must hold before a real write proceeds:
    is ``DRY_RUN``, so an unconfigured capability can never write.
 2. **An explicit authorization record** for that capability exists and has not expired.
    Authorizations are granted programmatically by an operator-facing path, never
-   inferred from configuration or from ``ProviderMode.REAL``. (R3 persists them.)
+   inferred from configuration or from ``ProviderMode.REAL``; the owner's time-limited
+   grants file is read by :func:`load_write_authorizations`. (R3 persists them.)
 3. **A budget reservation** succeeds. Without a ledger the default
    :class:`NoBudgetLedger` refuses every live write: fail closed. With one
    (:class:`plm_platform.ledger.PersistentBudgetGate`) the cost is reserved against the
@@ -28,6 +29,7 @@ missing optional integrations degrade with a logged warning.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Iterable, Mapping
@@ -47,6 +49,7 @@ from .config import SettingsError
 from .dotenv import load_env_file
 
 __all__ = [
+    "AUTHORIZATIONS_FILE_VAR",
     "BUDGET_LEDGER_CURRENCY_VAR",
     "EXECUTION_POLICY_PREFIX",
     "PROVIDER_MODE_PREFIX",
@@ -64,6 +67,7 @@ __all__ = [
     "WriteAuthorization",
     "WriteDecision",
     "load_execution_settings",
+    "load_write_authorizations",
     "provider_mode_of",
     "validate_integrations",
 ]
@@ -79,6 +83,9 @@ EXECUTION_POLICY_PREFIX: Final[str] = "PLM_EXECUTION_POLICY__"
 BUDGET_LEDGER_CURRENCY_VAR: Final[str] = "PLM_BUDGET_LEDGER_CURRENCY"
 """``PLM_BUDGET_LEDGER_CURRENCY=USD`` turns on the persisted budget ledger in that currency.
 Unset, live writes meet :class:`NoBudgetLedger` and are refused."""
+
+AUTHORIZATIONS_FILE_VAR: Final[str] = "PLM_WRITE_AUTHORIZATIONS_FILE"
+"""Path to the owner's JSON list of time-limited :class:`WriteAuthorization` grants."""
 
 DEFAULT_PROVIDER_MODE: Final[ProviderMode] = ProviderMode.MOCK
 DEFAULT_EXECUTION_POLICY: Final[ExecutionPolicy] = ExecutionPolicy.DRY_RUN
@@ -238,6 +245,57 @@ def load_execution_settings(
     return ExecutionSettings(
         provider_modes=modes, policies=policies, budget_currency=budget_currency
     )
+
+
+def load_write_authorizations(
+    env: Mapping[str, str] | None = None,
+    dotenv_path: str | Path | None = None,
+) -> tuple[WriteAuthorization, ...]:
+    """Read the owner's grants from the JSON file named by ``PLM_WRITE_AUTHORIZATIONS_FILE``.
+
+    The file is a list of ``{capability, granted_by, granted_at, expires_at, reference?}``
+    objects with timezone-aware ISO 8601 times. ``expires_at`` is required: an operator
+    grant is always time-limited. Unset means no grants (every LIVE write is refused);
+    an unreadable file or invalid entry raises :class:`SettingsError`.
+    """
+    process_env: Mapping[str, str] = os.environ if env is None else env
+    dotenv_values = load_env_file(Path(".env") if dotenv_path is None else dotenv_path)
+    raw_path = (process_env.get(AUTHORIZATIONS_FILE_VAR, "").strip()
+                or dotenv_values.get(AUTHORIZATIONS_FILE_VAR, "").strip())
+    if not raw_path:
+        return ()
+    try:
+        entries = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SettingsError(f"{AUTHORIZATIONS_FILE_VAR}: cannot read {raw_path!r}: {exc}") from None
+    if not isinstance(entries, list):
+        raise SettingsError(f"{AUTHORIZATIONS_FILE_VAR}: expected a JSON list of grants")
+    grants: list[WriteAuthorization] = []
+    for index, entry in enumerate(entries):
+        where = f"{AUTHORIZATIONS_FILE_VAR}[{index}]"
+        if not isinstance(entry, dict):
+            raise SettingsError(f"{where}: expected an object")
+        unknown = set(entry) - {"capability", "granted_by", "granted_at", "expires_at", "reference"}
+        if unknown:
+            raise SettingsError(f"{where}: unknown fields {sorted(unknown)}")
+        try:
+            capability, granted_by = str(entry["capability"]).strip(), str(entry["granted_by"]).strip()
+            granted_at = require_aware(datetime.fromisoformat(entry["granted_at"]))
+            expires_at = require_aware(datetime.fromisoformat(entry["expires_at"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SettingsError(f"{where}: invalid or missing field ({exc})") from None
+        if not capability or not granted_by:
+            raise SettingsError(f"{where}: capability and granted_by must not be empty")
+        if expires_at <= granted_at:
+            raise SettingsError(f"{where}: expires_at must be after granted_at")
+        reference = entry.get("reference")
+        grants.append(WriteAuthorization(
+            capability=capability, granted_by=granted_by, granted_at=granted_at,
+            expires_at=expires_at, reference=None if reference is None else str(reference),
+        ))
+    if len({g.capability for g in grants}) != len(grants):
+        raise SettingsError(f"{AUTHORIZATIONS_FILE_VAR}: one grant per capability")
+    return tuple(grants)
 
 
 def _parse[E: StrEnum](name: str, raw: str, enum: type[E]) -> E:

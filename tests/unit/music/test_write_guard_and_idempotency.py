@@ -11,6 +11,7 @@ re-executing a plan never pays twice, and that ``Idempotency-Key`` replays plan 
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -32,7 +33,7 @@ from plm_platform.execution import (
 from plm_platform.ledger import BudgetLedger, PersistentBudgetGate
 
 from services.music_factory.api.app import create_app
-from services.music_factory.config import load_music_factory_settings
+from services.music_factory.config import default_provider_for, load_music_factory_settings
 from services.music_factory.domain.enums import AttemptStatus, CandidateStatus, PlanStatus
 from services.music_factory.domain.models import (
     GeneratedCandidate,
@@ -1129,6 +1130,54 @@ def test_api_refuses_an_unfunded_real_call_with_409_and_never_calls(
     assert resp.status_code == 409
     assert resp.json()["detail"]["reason"] == "policy_dry_run"
 
+
+
+def test_provider_mode_music_real_selects_suno_and_nothing_else_does() -> None:
+    assert default_provider_for(ExecutionSettings()) == "mock"
+    assert default_provider_for(
+        ExecutionSettings(provider_modes={"music": ProviderMode.REAL})) == "suno"
+    assert default_provider_for(
+        ExecutionSettings(provider_modes={"youtube": ProviderMode.REAL})) == "mock"
+
+
+@pytest.mark.parametrize(("granted", "reason"), [
+    (False, "no_authorization"),
+    (True, "budget_ledger_unavailable"),
+])
+def test_service_guard_reads_the_owner_grants_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, granted: bool, reason: str,
+) -> None:
+    """Without an injected guard the service loads ``PLM_WRITE_AUTHORIZATIONS_FILE``: a grant
+    moves the refusal from the missing authorization on to the (absent) budget ledger."""
+    def unreachable(self: SunoAdapter, request: GenerationRequest) -> GenerationResponse:
+        raise AssertionError("the real provider must not be called")
+
+    monkeypatch.setattr(SunoAdapter, "generate", unreachable)
+    grants = tmp_path / "grants.json"
+    grants.write_text(json.dumps([{
+        "capability": "music.generate", "granted_by": "owner",
+        "granted_at": "2026-10-15T00:00:00+00:00", "expires_at": "2026-10-16T00:00:00+00:00",
+    }] if granted else []), encoding="utf-8")
+    monkeypatch.setenv("PLM_WRITE_AUTHORIZATIONS_FILE", str(grants))
+
+    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from tests.support.fake_minio import FakeMinio
+
+    platform = load_settings(env=dict(ENV))
+    engine = create_music_engine(static_pool=True)
+    app = create_app(
+        session_factory=lambda: music_session(engine),
+        settings=load_music_factory_settings(platform=platform, default_provider="suno"),
+        storage=MinioArtifactStorage(platform, client=FakeMinio()),  # type: ignore[arg-type]
+        execution=ExecutionSettings(provider_modes={"music": ProviderMode.REAL},
+                                    policies={"music.generate": ExecutionPolicy.LIVE}),
+        clock=FixedClock(NOW),
+    )
+    client = TestClient(app)
+    plan = client.post("/music/plans", json=_spec(), headers=HEADERS).json()
+    resp = client.post(f"/music/plans/{plan['plan_id']}/execute", json=_spec(), headers=HEADERS)
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["reason"] == reason
 
 def test_api_replays_plan_execute_and_export_by_idempotency_key() -> None:
     """Proves a retried plan / execute / export with the same key returns the first answer

@@ -10,9 +10,10 @@ import uvicorn
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
+from plm_platform.execution import load_execution_settings
 
 from .candidates.bank import list_candidates_by_experiment
-from .config import load_music_factory_settings
+from .config import default_provider_for, load_music_factory_settings
 from .generation.engine import GenerationEngine
 from .generation.planner import plan_generation
 from .ingestion.p3_adapter import adapt_track_spec
@@ -113,10 +114,14 @@ def cli_candidates(
 
 def serve(host: str = "127.0.0.1", port: int = 8004) -> None:
     """Serve the `/music` FastAPI application using uvicorn."""
-    settings = load_music_factory_settings(platform=load_settings(), host=host, port=port)
+    execution = load_execution_settings()
+    settings = load_music_factory_settings(
+        platform=load_settings(), host=host, port=port,
+        default_provider=default_provider_for(execution),
+    )
     factory = platform_session_factory()
 
     from .api.app import create_app
 
-    app = create_app(session_factory=factory, settings=settings)
+    app = create_app(session_factory=factory, settings=settings, execution=execution)
     uvicorn.run(app, host=host, port=port)

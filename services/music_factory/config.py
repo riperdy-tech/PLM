@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from plm_contracts import ProviderMode
 from plm_platform.config import Settings as PlatformSettings
+from plm_platform.execution import ExecutionSettings
 
-__all__ = ["MusicFactorySettings", "load_music_factory_settings"]
+__all__ = ["MusicFactorySettings", "default_provider_for", "load_music_factory_settings"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,3 +32,12 @@ def load_music_factory_settings(
     if unknown:
         raise TypeError(f"unknown music factory settings: {sorted(unknown)}")
     return MusicFactorySettings(platform=platform, **overrides)  # type: ignore[arg-type]
+
+
+def default_provider_for(execution: ExecutionSettings) -> str:
+    """``PLM_PROVIDER_MODE__MUSIC=real`` selects Suno; anything else keeps the mock.
+
+    Selecting Suno does not let it run: each paid call still needs a LIVE policy, an
+    owner grant and a funded budget ceiling (``ExternalWriteGuard``).
+    """
+    return "suno" if execution.provider_mode("music") is ProviderMode.REAL else "mock"

@@ -7,6 +7,7 @@ guard grants a live, authorized, budgeted write.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -27,6 +28,7 @@ from plm_platform.execution import (
     WriteAuthorization,
     WriteDecision,
     load_execution_settings,
+    load_write_authorizations,
     provider_mode_of,
     validate_integrations,
 )
@@ -227,6 +229,55 @@ def test_invalid_setting_names_the_variable() -> None:
             env={"PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD": "yolo"}, dotenv_path=NO_DOTENV
         )
 
+
+
+def _grants_file(tmp_path: Any, entries: object) -> dict[str, str]:
+    path = tmp_path / "grants.json"
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    return {"PLM_WRITE_AUTHORIZATIONS_FILE": str(path)}
+
+
+def test_no_grants_file_means_no_authorizations() -> None:
+    assert load_write_authorizations(env={}, dotenv_path=NO_DOTENV) == ()
+
+
+def test_grants_load_from_the_owner_file(tmp_path: Any) -> None:
+    env = _grants_file(tmp_path, [{
+        "capability": "music.generate", "granted_by": "owner",
+        "granted_at": "2026-10-30T00:00:00+00:00", "expires_at": "2026-10-31T00:00:00+00:00",
+        "reference": "D12",
+    }])
+    (grant,) = load_write_authorizations(env=env, dotenv_path=NO_DOTENV)
+    assert (grant.capability, grant.granted_by, grant.reference) == ("music.generate", "owner", "D12")
+    assert grant.is_valid_at(datetime(2026, 10, 30, 12, tzinfo=UTC))
+    assert not grant.is_valid_at(datetime(2026, 10, 31, tzinfo=UTC))
+
+
+@pytest.mark.parametrize(("entries", "match"), [
+    ({"capability": "music.generate"}, "JSON list"),
+    ([{"capability": "music.generate", "granted_by": "owner",
+       "granted_at": "2026-10-30T00:00:00+00:00"}], "expires_at"),
+    ([{"capability": "music.generate", "granted_by": "owner",
+       "granted_at": "2026-10-30T00:00:00", "expires_at": "2026-10-31T00:00:00"}], "invalid"),
+    ([{"capability": "music.generate", "granted_by": "owner",
+       "granted_at": "2026-10-31T00:00:00+00:00", "expires_at": "2026-10-30T00:00:00+00:00"}],
+     "after granted_at"),
+    ([{"capability": "music.generate", "granted_by": "owner", "max_calls": 3,
+       "granted_at": "2026-10-30T00:00:00+00:00", "expires_at": "2026-10-31T00:00:00+00:00"}],
+     "unknown fields"),
+    ([{"capability": "music.generate", "granted_by": "owner",
+       "granted_at": "2026-10-30T00:00:00+00:00", "expires_at": "2026-10-31T00:00:00+00:00"}] * 2,
+     "one grant per capability"),
+])
+def test_invalid_grants_file_refuses_to_load(tmp_path: Any, entries: object, match: str) -> None:
+    with pytest.raises(SettingsError, match=match):
+        load_write_authorizations(env=_grants_file(tmp_path, entries), dotenv_path=NO_DOTENV)
+
+
+def test_unreadable_grants_file_refuses_to_load(tmp_path: Any) -> None:
+    env = {"PLM_WRITE_AUTHORIZATIONS_FILE": str(tmp_path / "missing.json")}
+    with pytest.raises(SettingsError, match="cannot read"):
+        load_write_authorizations(env=env, dotenv_path=NO_DOTENV)
 
 # --- boot validation --------------------------------------------------------------------
 

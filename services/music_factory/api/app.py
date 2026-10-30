@@ -9,7 +9,12 @@ from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.correlation import CorrelationIdMiddleware
-from plm_platform.execution import ExecutionSettings, ExternalWriteGuard, load_execution_settings
+from plm_platform.execution import (
+    ExecutionSettings,
+    ExternalWriteGuard,
+    load_execution_settings,
+    load_write_authorizations,
+)
 from plm_platform.health import health_router
 from plm_platform.ledger import budget_gate_for
 from sqlalchemy.orm import Session
@@ -39,13 +44,16 @@ def create_app(
     Paid generation goes through ``write_guard`` (R5). Unless one is injected, the guard
     uses the configured execution policies (``PLM_EXECUTION_POLICY__MUSIC_GENERATE``) and
     the persisted budget ledger when ``PLM_BUDGET_LEDGER_CURRENCY`` is set, else
-    ``NoBudgetLedger`` (every live call refused). A mock provider needs neither.
+    ``NoBudgetLedger`` (every live call refused), and the owner's time-limited grants from
+    ``PLM_WRITE_AUTHORIZATIONS_FILE`` (none: every live call refused). A mock provider
+    needs none of them.
     """
     service_clock = SystemClock() if clock is None else clock
     if write_guard is None:
         execution_settings = load_execution_settings() if execution is None else execution
         write_guard = ExternalWriteGuard(
             execution_settings,
+            authorizations=load_write_authorizations(),
             budget=(budget_gate_for(execution_settings, session_factory, clock=service_clock)
                     if session_factory is not None else None),
         )

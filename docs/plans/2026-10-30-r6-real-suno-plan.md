@@ -28,6 +28,15 @@ authorizes nothing.
 4. **Generate, poll and download are untested against Suno itself.** Only billing was
    recorded. The first authorized generation doubles as the recording.
 
+## Progress (2026-10-30)
+
+- Gap 1 done: `PLM_PROVIDER_MODE__MUSIC=real` selects Suno in `serve`.
+- Gap 2 done: `PLM_WRITE_AUTHORIZATIONS_FILE` grants reach the P4 guard; `expires_at` is
+  required. The number of calls is capped by the budget ceiling, not by the grant.
+- Gap 3 needs no code: the price and ceiling are ledger data, set at run time with
+  `plm budget set-rate --capability music.generate ...` and `plm budget set-ceiling ...`.
+- Gap 4 stays open until the first authorized call (D12).
+
 ## Owner decisions
 
 - **D10 — Suno terms and plan tier.** The client uses Suno's private web endpoints
