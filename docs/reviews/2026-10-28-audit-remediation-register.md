@@ -76,7 +76,7 @@ Each row corresponds to **one original bullet** in Part 2 (including multiple su
 | QA-LEGACY | Eight local READY P6 packages have missing persisted texture and stream QA | Only dry-run/source metadata verified; approve/backfill or hold, B06–B07 |
 | QA-REUSE | Measured spectral near-copy misses transformed recordings (time/speed/pitch) | Blinded human labelled positives/negatives and calibration, B05–B06 |
 | QA-LISTEN | Source-verified listening workflow exists, no human-reviewed labels | Independently reviewed real audio with provenance, B06 |
-| QA-CHAPTER | Description timestamps are not evidence of player-visible chapters | Real watch-page/channel eligibility check, B07/R6 |
+| QA-CHAPTER | Description timestamps are not evidence of player-visible chapters | Real watch-page/channel eligibility check, B07/R6. **2026-10-30 watch-page read: no player chapters** on `lPYmaPHPQr4` or `aqTf6gzjsNI` despite 16 rule-valid description timestamps each (control video `rfscVS0vtbw` showed them); cause not established |
 | QA-OLD-MP4 | Two historical local MP4s have measured video-only tail ~18–19s | Fix or hold archive; independent full decode, B07 |
 
 ## A01–B07 work package tracker
