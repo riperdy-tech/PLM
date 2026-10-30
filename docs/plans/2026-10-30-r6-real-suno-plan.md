@@ -50,3 +50,24 @@ authorizes nothing.
 
 Gaps 1–3 in code with tests (no live call) → D10/D11 → D12 single song → review →
 album-sized run → guarded upload (separate authorization).
+
+## D10 findings (2026-10-30)
+
+Owner: "sudo plan, the 20 dollar one" (a paid Suno plan). suno.com/pricing lists Pro
+($8/month billed annually, 2,500 credits) and Premier ($24, 10,000 credits); both
+include commercial use rights. Which of the two is unconfirmed.
+
+suno.com/terms, read the same day (not legal advice):
+
+- *User Conduct* bars obtaining content "through any means not intentionally made
+  available or provided for through the Service" and any "robots, scraping, or similar
+  data gathering". The P4 client drives Suno's private web endpoints with the owner's
+  session cookie, which these clauses appear to cover. Risk: account suspension.
+- *Permitted Commercial Use* grants commercial rights only for Output that follows
+  the conduct rules **and** was obtained through a permitted Download, within the
+  tier's monthly download allowance. Songs fetched by the automated client may
+  therefore not carry commercial rights even on a paid plan.
+
+So D10 is open: the owner must choose between accepting that risk, or making songs
+in Suno's own interface and having PLM import the downloaded files (no import path
+exists yet).
