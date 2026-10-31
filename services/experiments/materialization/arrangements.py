@@ -6,18 +6,23 @@ listening/embedding QA remains necessary.
 
 * **Lead.** The foreground lead is always a melodic instrument. Textures and drums
   (vinyl crackle, a kick) stay in the palette but are never named as the lead.
-* **Genre palette (v3, owner 2026-10-31).** A genre listed in :data:`_GENRE_PALETTES`
-  also varies each track's key and adds a lead, a bass and a colour instrument, while the album's
-  own instruments stay on every track, so 23 tracks are not one key and three
-  instruments. A genre without a palette keeps its genome's key and instruments.
+* **Genre palette (v4, owner 2026-10-31).** The 2026-10-23 content audit traced the
+  sameness of the first albums to one sonic universe on every track (warm tape texture,
+  Rhodes, rain, a riff over a chord loop) and asked for an album-level style budget and
+  time-varying energy. A genre listed in :data:`_GENRE_PALETTES` therefore varies, per
+  track and in rotation, the key, lead, bass, drums, colour instrument, production,
+  hook, structure and energy. Only the album texture (the genome's non-melodic,
+  non-drum instruments, e.g. vinyl crackle) stays on every track. A dimension the
+  experiment is testing (``held``) is never varied, so a treatment stays clean.
+  A genre without a palette keeps its genome's values.
 """
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v3"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v4"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -31,37 +36,70 @@ _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
 
 
 _NON_MELODIC: Final[tuple[str, ...]] = (
-    "crackle", "hiss", "noise", "rain", "ambience", "field_recording", "texture",
-    "kick", "snare", "hat", "drum", "perc", "808", "clap",
+    "crackle", "hiss", "noise", "rain", "ambience", "field_recording", "room_tone",
+    "texture", "kick", "snare", "hat", "drum", "perc", "808", "clap", "rimshot",
 )
 """Name fragments of instruments that cannot carry a melody (never the lead)."""
 
+_DRUMS: Final[tuple[str, ...]] = (
+    "kick", "snare", "hat", "drum", "perc", "808", "clap", "rimshot")
+
 _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
+    # No rain and no Rhodes-on-every-track: those were the first albums' shared sound.
     "lofi": {
-        "leads": ("dusty_rhodes", "felt_piano", "nylon_guitar", "clean_jazz_guitar",
-                  "vibraphone", "muted_trumpet"),
+        "lead": ("dusty_rhodes", "felt_piano", "nylon_guitar", "clean_jazz_guitar",
+                 "vibraphone", "muted_trumpet"),
         "bass": ("upright_bass", "warm_sub_bass", "muted_electric_bass"),
-        "color": ("soft_analog_pad", "brushed_drums", "dusty_boom_bap_drums", "tape_hiss",
-                  "rain_ambience", "warm_string_pad"),
-        "keys": ("F_major", "D_minor", "Bb_major", "G_minor", "Eb_major", "C_minor",
-                 "A_minor", "C_major"),
+        # "" is a track without drums (an interlude)
+        "drums": ("sidechain_kick", "dusty_boom_bap_drums", "brushed_drums",
+                  "soft_rimshot_kit", ""),
+        "color": ("soft_analog_pad", "warm_string_pad", "tape_hiss", "glockenspiel",
+                  "cafe_room_tone", "music_box"),
+        "key_profile": ("F_major", "D_minor", "Bb_major", "G_minor", "Eb_major", "C_minor",
+                        "A_minor", "C_major"),
+        "production_style": ("tape_saturated", "lofi_textured", "analog_warm"),
+        "hook_profile": ("instrumental_riff", "atmospheric", "slow_burn"),
+        "song_structure": ("loop_progression", "ambient_evolving", "loop_progression"),
+        "energy": ("low", "medium", "low"),
     },
 }
-"""Per-genre leads, one bass, one colour instrument and keys a track draws from (v3)."""
+"""Per-genre values each track rotates through (v4)."""
+
+# (step, lag) per dimension: a different stride and a per-cycle shift each, so no two
+# dimensions move in lockstep and a lead never always meets the same bass or key.
+_ROTATION: Final[dict[str, tuple[int, int]]] = {
+    "lead": (1, 0), "bass": (2, 6), "drums": (3, 6), "color": (1, 3),
+    "key_profile": (5, 0), "production_style": (1, 4), "hook_profile": (2, 5),
+    "song_structure": (2, 7), "energy": (1, 7),
+}
+
+STYLE_DIMENSIONS: Final[tuple[str, ...]] = (
+    "key_profile", "production_style", "hook_profile", "song_structure", "energy")
+"""Genome dimensions a palette varies; the builder applies them to the track."""
 
 
 def is_melodic(instrument: str) -> bool:
     return not any(fragment in instrument.lower() for fragment in _NON_MELODIC)
 
 
+def _is_drum(instrument: str) -> bool:
+    return any(fragment in instrument.lower() for fragment in _DRUMS)
+
+
+def _pick(values: tuple[str, ...], dimension: str, turn: int) -> str:
+    step, lag = _ROTATION[dimension]
+    return values[(step * turn + (turn // lag if lag else 0)) % len(values)]
+
+
 def arrangement_direction(
     package_id: str, position: int, instrumentation: Sequence[str],
-    *, genre: str | None = None,
+    *, genre: str | None = None, held: Collection[str] = (),
 ) -> dict[str, Any]:
     """Return reproducible, index-distinct track instructions from declared instruments.
 
-    With a ``genre`` palette the result also carries ``key_profile`` and
-    ``added_instruments`` for the builder to apply to the track.
+    With a ``genre`` palette the result also carries the track's ``instrumentation``,
+    its ``album_instruments`` (to rebuild extensions from) and every
+    :data:`STYLE_DIMENSIONS` value not in ``held``, for the builder to apply.
     """
     if position < 0:
         raise ValueError("track position must be nonnegative")
@@ -90,14 +128,21 @@ def arrangement_direction(
         melodic = [item for item in instruments if is_melodic(item)]
         direction["lead_instrument"] = melodic[turn % len(melodic)] if melodic else ""
         return direction
-    # Independent strides, so lead, key and support do not move in lockstep.
-    leads, basses, colors = palette["leads"], palette["bass"], palette["color"]
-    lead = leads[turn % len(leads)]
-    bass = basses[(2 * turn + turn // len(leads)) % len(basses)]
-    color = colors[(turn + 2 * (turn // len(leads)) + 1) % len(colors)]
-    added = [item for item in (lead, bass, color) if item not in instruments]
+    lead = _pick(palette["lead"], "lead", turn)
+    drums = _pick(palette["drums"], "drums", turn)
+    texture = [item for item in instruments if not is_melodic(item) and not _is_drum(item)]
+    chosen = [lead, _pick(palette["bass"], "bass", turn), drums,
+              _pick(palette["color"], "color", turn), *texture]
     direction["lead_instrument"] = lead
-    direction["added_instruments"] = list(dict.fromkeys(added))
-    keys = palette["keys"]
-    direction["key_profile"] = keys[(5 * turn) % len(keys)]
+    direction["instrumentation"] = list(dict.fromkeys(item for item in chosen if item))
+    direction["album_instruments"] = instruments
+    for dimension in STYLE_DIMENSIONS:
+        if dimension not in held:
+            direction[dimension] = _pick(palette[dimension], dimension, turn)
+    if not drums:
+        direction["rhythmic_feel"] = "no drums, free-time interlude"
+    # A drift or an interlude is calm: lifts in energy go to looped tracks with drums.
+    calm = not drums or direction.get("song_structure") == "ambient_evolving"
+    if calm and direction.get("energy") not in (None, "low") and "energy" not in held:
+        direction["energy"] = "low"
     return direction
