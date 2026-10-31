@@ -40,6 +40,30 @@ fixes below landed; their sheets are under `data/suno-inbox-archive/`. Live run:
 `3f7c2ff7-40e3-5bee-9184-148f0cd70a08`, 23 sheets. Not yet shown: a real WAV through import,
 P5, P6, the hold being cleared on Temporal.
 
+## D10 changed — Google Flow Music (Lyria 3.5) by hand instead of Suno
+
+Owner: Suno allows 20 downloads a month, so manual Suno cannot supply one 23-song album
+("it's a no-go"); the owner makes the songs by hand in Flow Music (Google AI Pro includes
+Flow Music's Plus plan: about 2,000 songs a month, free WAV/MP3/M4A downloads, "Commercial
+use rights" per support.google.com/googleone/answer/14534406). Flow Music has no official
+API; the only automated route to the same model is the paid Gemini API (`lyria-3.5`,
+$0.08 a song), not chosen. A third-party wrapper of the owner's account (useapi.net) was
+rejected as unofficial.
+
+Evidence for the choice, one brief (`trk_02fc8adf5c275c54`) on three services, files in
+`output_media/` (owner-downloaded): Suno 198 s, Lyria 169 s, Stable Audio 360 s.
+`scripts/probe_song_repetition.py` (P5 plan §24, `6d1ae5b`, 30 s windows): Stable Audio's
+most alike windows are all 120 s apart (rhythm and pitch-motion up to 0.99), a repeating
+2-minute cycle; Suno and Lyria show no such cycle. Uncalibrated proxies; the owner's
+listening is the quality judgement.
+
+`554602a`: `FlowMusicManualAdapter` (`services/music_factory/providers/flow_music_manual.py`)
+imports owner-made songs exactly like manual Suno, as provider `lyria`, model
+`flow-music-web-manual`, with Google's terms (only a declared `google_ai_pro` plan and an
+account yield terms; Flow Music's own terms page was not found). `PLM_FLOW_MUSIC_MANUAL_INBOX`
+selects it over the Suno inbox; P3 allows `lyria`. Not yet shown: the live run switched to
+Flow Music sheets, a real Flow Music WAV through import, P5, P6.
+
 ## U7 / B06 and audit "creative quality and differentiation"
 
 The 2026-10-23 audit traced the sameness of the first albums to one sonic universe (warm
