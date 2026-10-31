@@ -29,7 +29,7 @@ def test_baseline_fraction_cannot_exceed_the_exploit_slice() -> None:
 
 def test_ar_settings_defaults_match_the_frozen_version_strings() -> None:
     settings = load_ar_settings()
-    assert settings.policy_version == "p2-v1" and settings.model_version == "p2-nn-v1"
+    assert settings.policy_version == "p2-v2" and settings.model_version == "p2-nn-v1"
     assert settings.default_activation_state is ChannelActivationState.SHADOW
     assert settings.market_base_url == "http://127.0.0.1:8081"
     assert settings.directive_version == "p2-directive-v1"

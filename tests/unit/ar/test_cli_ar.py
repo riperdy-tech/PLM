@@ -45,4 +45,4 @@ def test_show_and_explain_read_the_stored_rows_through_the_injected_factory(
     with ar_factory() as session:
         decision_id = repositories.load_decisions(session, summary["cycle_id"])[0]["id"]
     text = explain(decision_id, session_factory=ar_factory)
-    assert "radical_explore" in text and "p2-v1" in text
+    assert "radical_explore" in text and "p2-v2" in text

@@ -26,7 +26,7 @@ from services.autonomous_ar.api.app import create_app
 from services.autonomous_ar.config import load_ar_settings
 from services.autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
 from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
+from services.autonomous_ar.domain.policy import DEFAULT_POLICY, SINGLE_IDENTITY_POLICY
 from services.autonomous_ar.storage import repositories
 from tests.support.ar_db import create_ar_engine
 
@@ -76,7 +76,10 @@ def ar_factory(ar_engine: sa.Engine) -> sessionmaker[Session]:
     with factory() as session:
         repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
                                    created_at=NOW)
-        repositories.activate_policy(session, DEFAULT_POLICY.version)
+        # p2-v2 is the settings default (ADR-0044's one-identity channel); both stored
+        repositories.insert_policy(session, SINGLE_IDENTITY_POLICY, brand_id="neon_seoul",
+                                   created_at=NOW)
+        repositories.activate_policy(session, SINGLE_IDENTITY_POLICY.version)
         session.commit()
     return factory
 

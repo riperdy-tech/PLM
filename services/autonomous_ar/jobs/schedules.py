@@ -29,7 +29,7 @@ async def ensure_schedules(client: Client) -> list[str]:
                 action=ScheduleActionStartWorkflow(
                     AllocationCycleWorkflow.run,
                     {"brand_id": "neon_seoul", "slot_count": 10, "budget": 10.0,
-                     "policy_version": "p2-v1"},
+                     "policy_version": "p2-v2"},
                     id=job_name, task_queue=TaskQueue.AR.value),
                 spec=ScheduleSpec(cron_expressions=["0 6 * * 1"]),
             ),

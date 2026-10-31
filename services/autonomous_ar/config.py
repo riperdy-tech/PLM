@@ -20,7 +20,7 @@ __all__ = ["ARSettings", "load_ar_settings", "production_settings"]
 @dataclass(frozen=True, slots=True)
 class ARSettings:
     platform: Settings | None = None
-    policy_version: str = "p2-v1"
+    policy_version: str = "p2-v2"
     model_version: str = "p2-nn-v1"
     prior_version: str = "p2-prior-v1"
     feature_version: str = "p2-features-v1"

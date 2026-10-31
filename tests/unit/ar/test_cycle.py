@@ -279,7 +279,7 @@ def test_the_same_request_in_two_fresh_stores_produces_the_identical_portfolio()
     assert portfolios[0] == portfolios[1], "same inputs, different store, identical portfolio"
     first = portfolios[0][0]
     assert first["directive_version"] == SETTINGS.directive_version == "p2-directive-v1"
-    assert first["policy_version"] == SETTINGS.policy_version == "p2-v1"
+    assert first["policy_version"] == "p2-v1"  # the request names p2-v1 explicitly
     assert first["value_model"] == SETTINGS.value_model == "early-stage-proxy-v1"
     assert len(first) == 19, (
         "schema_version + the 17 frozen C2 fields + outcome_horizon (2.0), from the real cycle"
