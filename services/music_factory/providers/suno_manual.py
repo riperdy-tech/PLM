@@ -101,6 +101,51 @@ def load_suno_manual_settings(
     )
 
 
+_STYLE_PHRASES = {
+    # prompt label -> how the value reads in Suno's Styles box ({} is the value)
+    "mood": "{} mood",
+    "harmonic key": "key of {}",
+    "production approach": "{} production",
+    "instrument palette": "{}",
+    "hook character": "{} hook",
+    "section structure": "{} structure",
+    "energy": "{} energy",
+    "foreground lead": "{} lead",
+    "groove": "groove: {}",
+    "melodic character": "melody: {}",
+    "harmonic motion": "harmony: {}",
+    "arrangement progression": "arrangement: {}",
+    "vocal character": "{} vocals",
+    "lyric density": "{} lyric density",
+}
+
+
+def suno_styles(request: GenerationRequest) -> str:
+    """Every descriptor of P4's prompt, phrased for Suno's Styles box.
+
+    The owner pastes this one text into Styles (Advanced mode has no description box),
+    so nothing in the prompt may be dropped: each ``label: value`` sentence becomes a
+    phrase, ``snake_case`` values become words, and any sentence without a known label
+    (a candidate's variation instruction) is kept as written.
+    """
+    phrases: list[str] = []
+    for sentence in (s.strip() for s in request.prompt.split(". ")):
+        sentence = sentence.rstrip(".").strip()
+        if not sentence:
+            continue
+        label, sep, value = sentence.partition(": ")
+        if sep and label.lower() in _STYLE_PHRASES:
+            phrase = _STYLE_PHRASES[label.lower()].format(value.replace("_", " "))
+        elif sentence.lower().endswith(" track") and " " not in sentence[:-6]:
+            phrase = sentence[:-6].lower()  # "LOFI track" -> "lofi"
+        elif sentence.startswith("for "):
+            phrase = sentence.replace("_", " ") + " music"
+        else:
+            phrase = sentence.replace("_", " ")
+        phrases.append(phrase)
+    return ", ".join(dict.fromkeys(phrases))
+
+
 def _wav_problem(data: bytes) -> str | None:
     """Why ``data`` is not a usable PCM WAV, or ``None``."""
     if not (data.startswith(b"RIFF") and b"WAVE" in data[:16]):
@@ -217,15 +262,14 @@ class SunoManualAdapter:
         for track_spec_id, wanted in by_track.items():
             lines = [
                 f"PLM songs to make on suno.com for track {track_spec_id}",
-                f"Use model {model}. Download each song as WAV and save it in this folder",
-                "under the name given. Pick the better of Suno's two clips.",
+                f"Suno Advanced mode, model {model}. Paste the Styles text into Styles and",
+                "the Exclude styles into Exclude. Pick the better of Suno's two clips,",
+                "download it as WAV and save it in this folder under the name given.",
                 "",
             ]
             for n, request in enumerate(wanted, start=1):
                 instrumental = request.vocal_mode == "instrumental"
-                styles = " ".join(dict.fromkeys(  # the tags often repeat genre and bpm
-                    [request.genre, *request.style_tags]
-                    + ([f"{request.bpm}bpm"] if request.bpm else [])))
+                styles = suno_styles(request)
                 lines += [
                     f"--- Song {n} ---",
                     f"Save as: {self.file_stem(request)}.wav",
@@ -233,12 +277,12 @@ class SunoManualAdapter:
                         f"Lyrics:  save the lyrics as sung in {self.file_stem(request)}.lyrics.txt",
                     ]),
                     f"Instrumental: {'yes' if instrumental else 'no'}",
-                    f"Length: about {request.duration_seconds} seconds",
-                    f"Styles: {styles}",
+                    (f"Length: about {request.duration_seconds} seconds "
+                     "(any length the track accepts is fine)"),
+                    f"Styles ({len(styles)} characters; paste all of it into Styles):",
+                    styles,
                     *([f"Exclude styles: {request.negative_prompt}"]
                       if request.negative_prompt else []),
-                    "Prompt:",
-                    request.prompt,
                     "",
                 ]
             name = re.sub(r"[^A-Za-z0-9_-]", "_", track_spec_id)

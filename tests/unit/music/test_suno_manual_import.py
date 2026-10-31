@@ -172,7 +172,7 @@ def test_an_empty_inbox_writes_the_prompt_sheet_and_attempts_nothing(tmp_path: P
         [f"{s}.wav is missing" for s in stems]
         + [f"{s}.lyrics.txt is missing (the lyrics as sung)" for s in stems])
     sheet = (tmp_path / "trk_manual_01.prompts.txt").read_text(encoding="utf-8")
-    assert "Use model v4.5" in sheet and "Instrumental: no" in sheet
+    assert "model v4.5" in sheet and "Instrumental: no" in sheet
     assert "Length: about 20 seconds" in sheet
 
 
@@ -327,3 +327,35 @@ def test_pipeline_runs_every_plan_then_holds_for_the_owners_files() -> None:
     assert raised.value.hold_reason_code == MANUAL_AUDIO_HOLD_REASON
     classified = load_hold_class_policy().classify(MANUAL_AUDIO_HOLD_REASON)
     assert classified.mapped and classified.rule.hold_class.value == "REVIEWABLE_QUARANTINE"
+
+
+def test_styles_text_keeps_every_descriptor_of_the_prompt() -> None:
+    from services.music_factory.domain.models import GenerationRequest
+    from services.music_factory.providers.suno_manual import suno_styles
+
+    prompt = (
+        "LOFI track. mood: calm, nostalgic, reflective. for study_focus. 75 BPM. "
+        "instrumental, no vocals. harmonic key: F_major. production approach: tape_saturated. "
+        "instrument palette: dusty_rhodes, vinyl_crackle, sidechain_kick. hook character: "
+        "instrumental_riff. section structure: loop_progression. energy: low. foreground "
+        "lead: dusty_rhodes. groove: restrained pulse with brief fills. melodic character: "
+        "answering melody in a contrasting register. harmonic motion: open intervals and "
+        "delayed resolutions. arrangement progression: gradual thinning toward the ending. "
+        "Within the declared groove, leave space around the melody."
+    )
+    styles = suno_styles(GenerationRequest(
+        track_spec_id="trk", experiment_id="exp", prompt=prompt, vocal_mode="instrumental"))
+
+    assert styles.startswith("lofi, calm, nostalgic, reflective mood, for study focus music")
+    for phrase in (
+        "75 BPM", "instrumental, no vocals", "key of F major", "tape saturated production",
+        "dusty rhodes, vinyl crackle, sidechain kick", "instrumental riff hook",
+        "loop progression structure", "low energy", "dusty rhodes lead",
+        "groove: restrained pulse with brief fills",
+        "melody: answering melody in a contrasting register",
+        "harmony: open intervals and delayed resolutions",
+        "arrangement: gradual thinning toward the ending",
+        "Within the declared groove, leave space around the melody",
+    ):
+        assert phrase in styles
+    assert "_" not in styles
