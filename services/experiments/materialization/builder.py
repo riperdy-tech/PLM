@@ -119,8 +119,9 @@ def materialize_package(
     ``budget_envelope`` may lower the directive's ``budget_limit`` but never raise it;
     ``None`` means the ceiling itself. ``candidate_target`` is how many candidates P4
     produces per track (1 under manual supply). ``track_duration_range`` replaces the
-    genome's per-track range P5 enforces (manual supply: Suno sets each song's length);
-    the planned length and the track count still come from the genome. The track count is not a parameter: it is planned
+    genome's per-track range P5 enforces (manual supply: the owner's tool sets each song's
+    length); the planned length and the track count still come from the genome, the
+    length brought inside that range when the genome's target lies outside it. The track count is not a parameter: it is planned
     from the genome's declared playlist range and the planned track length
     (:func:`.supply.plan_supply`), and the budget is split over every spec the package
     may ever hold, extensions included.
@@ -143,6 +144,9 @@ def materialize_package(
     now = created_at
     effective_genome = _apply_genome_delta(base_genome, treatment.genome_delta)
     duration = derived_duration_seconds(effective_genome.track_duration)
+    if track_duration_range is not None:  # e.g. an ambient 330 s target under manual 90-300 s
+        duration = min(max(duration, track_duration_range.min_seconds),
+                       track_duration_range.max_seconds)
     supply = plan_supply(
         effective_genome.playlist_duration, duration, supply_policy or default_supply_policy()
     )

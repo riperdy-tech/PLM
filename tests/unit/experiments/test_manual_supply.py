@@ -83,3 +83,22 @@ def test_manual_supply_package_widens_the_per_song_range_only() -> None:
     # The plan is unchanged: same requested length, same track count.
     assert [s.requested_duration for s in manual.track_specs] == [
         s.requested_duration for s in default.track_specs]
+
+
+def test_a_target_outside_the_manual_range_is_brought_inside_it() -> None:
+    # The first Flow Music run failed: an ambient arm's 330 s target under 90-300 s.
+    from plm_contracts.seams.c3 import DurationRangeSeconds
+
+    directive, genome = _setup()
+    exp = design_experiment(directive, genome, seed=7, created_at=FIXED_NOW, control_only=True)
+    validated = promote_to_validated(exp, validate_experiment(exp, genome))
+    default = materialize_package(validated, validated.treatments[0], genome,
+                                  created_at=FIXED_NOW)
+    target = default.track_specs[0].requested_duration
+    narrow = DurationRangeSeconds(min_seconds=60, max_seconds=target - 10)
+
+    manual = materialize_package(validated, validated.treatments[0], genome,
+                                 track_duration_range=narrow, created_at=FIXED_NOW)
+
+    assert {s.requested_duration for s in manual.track_specs} == {target - 10}
+    assert len(manual.track_specs) >= len(default.track_specs)  # shorter songs, more of them
