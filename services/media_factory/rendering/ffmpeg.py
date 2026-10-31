@@ -18,6 +18,10 @@ command string. The steps:
 * **Probe.** ``ffprobe -show_format -show_streams`` as JSON.
 * **Loudness.** The ``ebur128`` meter (BS.1770, true peak on) over the produced file's
   audio: a separate meter from the ``loudnorm`` normaliser, run on what was produced.
+
+Each step's timeout is ``timeout_seconds`` or 2.5 times the programme length it
+processes, whichever is longer, so a 120-minute render (ADR-0044) is not cut off by a
+limit sized for short ones.
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ __all__ = ["TOOLCHAIN_UNAVAILABLE", "FFmpegToolchain"]
 
 TOOLCHAIN_UNAVAILABLE: Final[str] = "render_toolchain_unavailable"
 _STDERR_TAIL: Final[int] = 2000
+_TIMEOUT_PER_PROGRAMME_SECOND: Final[float] = 2.5
 _HEX_COLOUR: Final = re.compile(r"\A#[0-9A-Fa-f]{6}\Z")
 _INTEGRATED: Final = re.compile(r"Integrated loudness:\s*\n\s*I:\s*(\S+)\s*LUFS")
 _TRUE_PEAK: Final = re.compile(r"True peak:\s*\n\s*Peak:\s*(\S+)\s*dBFS")
@@ -89,15 +94,23 @@ class FFmpegToolchain:
                 TOOLCHAIN_UNAVAILABLE, f"{name} is not on PATH (the dev image provides FFmpeg 7)")
         return path
 
-    def _run(self, tool: str, args: Sequence[str], *, step: str) -> subprocess.CompletedProcess[str]:
+    def _timeout_for(self, programme_seconds: float | None) -> float:
+        """The step's timeout for a programme of ``programme_seconds`` (unknown: the base)."""
+        if programme_seconds is None:
+            return self._timeout
+        return max(self._timeout, _TIMEOUT_PER_PROGRAMME_SECOND * programme_seconds)
+
+    def _run(self, tool: str, args: Sequence[str], *, step: str,
+             programme_seconds: float | None = None) -> subprocess.CompletedProcess[str]:
         argv = [self._resolve(tool), *args]
+        timeout = self._timeout_for(programme_seconds)
         try:
             done = subprocess.run(
                 argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=self._timeout, check=False, stdin=subprocess.DEVNULL,
+                timeout=timeout, check=False, stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as exc:
-            raise MediaToolError("render_timeout", f"{step} exceeded {self._timeout}s") from exc
+            raise MediaToolError("render_timeout", f"{step} exceeded {timeout}s") from exc
         if done.returncode != 0:
             raise MediaToolError(
                 "render_failed", f"{step} exited {done.returncode}: {done.stderr[-_STDERR_TAIL:]}")
@@ -144,13 +157,14 @@ class FFmpegToolchain:
     def render_audio_master(self, spec: AudioMasterSpec, profile: RenderProfile,
                             out: Path) -> dict[str, Any]:
         inputs, graph = self._mix_graph(spec, profile)
+        programme = sum(segment.duration_seconds for segment in spec.segments)
         target = (f"I={profile.loudness_target_lufs}:TP={profile.true_peak_dbtp}:"
                   f"LRA={profile.loudness_range_lu}")
         first = self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", *inputs,
             "-filter_complex", f"{graph};[mix]loudnorm={target}:print_format=json[out]",
             "-map", "[out]", "-f", "null", "-",
-        ], step="loudnorm pass 1")
+        ], step="loudnorm pass 1", programme_seconds=programme)
         measured = self._loudnorm_json(first.stderr)
         values = {k: measured.get(k) for k in
                   ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")}
@@ -167,7 +181,7 @@ class FFmpegToolchain:
             "-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(profile.sample_rate),
             "-ac", str(profile.channels), "-map_metadata", "-1", "-fflags", "+bitexact",
             "-flags:a", "+bitexact", str(out),
-        ], step="loudnorm pass 2")
+        ], step="loudnorm pass 2", programme_seconds=programme)
         applied = self._loudnorm_json(second.stderr)
         return {"filter": "loudnorm", "target": target, "pass1": measured, "pass2": applied}
 
@@ -193,6 +207,7 @@ class FFmpegToolchain:
             raise MediaToolError("render_failed", f"not a #RRGGBB colour: {visual.wave_color!r}")
         wave_height = max(2, int(profile.height * profile.waveform_height_ratio) // 2 * 2)
         colour = "0x" + visual.wave_color[1:]
+        programme = self.probe(audio_master).duration_seconds
         graph = (
             f"[1:a]showwaves=s={profile.width}x{wave_height}:mode=cline:rate={profile.fps}:"
             f"colors={colour}:scale=sqrt,format=rgba[w];"
@@ -210,7 +225,7 @@ class FFmpegToolchain:
             "-ac", str(profile.channels), "-shortest", "-movflags", "+faststart",
             "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
             "-flags:a", "+bitexact", "-f", profile.container, str(out),
-        ], step="video encode")
+        ], step="video encode", programme_seconds=programme)
 
     # -- measurement -----------------------------------------------------------------------
 
@@ -249,7 +264,7 @@ class FFmpegToolchain:
         done = self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", "-i", str(path), "-map", "0:a:0",
             "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-",
-        ], step="ebur128")
+        ], step="ebur128", programme_seconds=self.probe(path).duration_seconds)
         integrated = _INTEGRATED.findall(done.stderr)
         peak = _TRUE_PEAK.findall(done.stderr)
         return LoudnessMeasurement(

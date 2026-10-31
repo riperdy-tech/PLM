@@ -8,9 +8,10 @@ from plm_platform.clock import FixedClock
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.enums import OperatingMode, PrivacyStatus, PublishState
 from youtube_publishing.domain.ids import build_idempotency_key, build_manifest_id
-from youtube_publishing.domain.models import PublishManifest
+from youtube_publishing.domain.models import ChannelProfile, PublishManifest
 from youtube_publishing.engine import YouTubePublishingEngine
 from youtube_publishing.storage.repositories import (
+    insert_channel_profile,
     insert_publish_manifest,
 )
 
@@ -237,3 +238,41 @@ def test_a_manifest_without_its_tracklist_is_never_cleared() -> None:
     result, client = _blocked(p5_clearing_test_track(), legacy)
     assert result.attempt.error_code == "release_not_cleared"  # type: ignore[attr-defined]
     assert client.recorded_calls == []
+
+
+def _upload_body(client: MockYouTubeClient) -> tuple[dict[str, object], dict[str, object]]:
+    (session,) = client.sessions.values()
+    return session["snippet"], session["status"]
+
+
+def test_upload_body_uses_the_writable_kids_field_and_the_channel_language() -> None:
+    manifest = _sample_manifest()
+    client = MockYouTubeClient()
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0), chunk_size=1024,
+                                     clearance=p5_clearing_test_track())
+    with youtube_db_session() as session:
+        insert_channel_profile(session, ChannelProfile(
+            id="prof_neon", channel_id=manifest.channel_id, channel_name="Longform Signal",
+            brand_id="brand_neon", oauth_credential_ref="sec_oauth", default_language="de",
+            created_at=T0, updated_at=T0))
+        insert_publish_manifest(session, manifest)
+        assert engine.execute_publish(session, manifest, video_data=b"0" * 1024).is_success
+    snippet, status = _upload_body(client)
+    # videos.insert writes selfDeclaredMadeForKids; madeForKids is read-only.
+    assert status["selfDeclaredMadeForKids"] is False
+    assert "madeForKids" not in status
+    assert status["containsSyntheticMedia"] is True
+    assert snippet["defaultLanguage"] == "de"
+    assert snippet["defaultAudioLanguage"] == "de"
+
+
+def test_upload_body_defaults_to_english_without_a_stored_channel_profile() -> None:
+    manifest = _sample_manifest()
+    client = MockYouTubeClient()
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0), chunk_size=1024,
+                                     clearance=p5_clearing_test_track())
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        assert engine.execute_publish(session, manifest, video_data=b"0" * 1024).is_success
+    snippet, _ = _upload_body(client)
+    assert (snippet["defaultLanguage"], snippet["defaultAudioLanguage"]) == ("en", "en")

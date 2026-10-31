@@ -96,3 +96,9 @@ def test_track_numbering_gap_detected() -> None:
     bad_gap_pkg = pkg.model_copy(update={"tracks": [t1, t3]})
     errors = validate_canonical_package(bad_gap_pkg)
     assert any("sequential from 1 without gaps" in e for e in errors)
+
+
+def test_label_defaults_name_the_brand_not_neon() -> None:
+    pkg = _build_valid_package()
+    assert (pkg.label_name, pkg.copyright_line, pkg.publisher_line) == (
+        "Longform Signal", "2026 Longform Signal", "2026 Longform Signal Publishing")

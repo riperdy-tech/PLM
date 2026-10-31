@@ -7,8 +7,9 @@ Hop 2: P7's real ``youtube_video_published`` event → P8's real release submiss
 All three services read ``plm_contracts.seams.c6``.
 
 What this proves: the lineage P6 received from P5 reaches P7's event and P8's stored
-release unchanged; P7 takes title, assets, checksums and the disclosure flag from the
-package rather than defaults; P8 refuses a publication event that belongs to another
+release unchanged; P7 takes title, assets and checksums from the package rather than
+defaults, and the AI disclosure is on at every hop (ADR-0044); P8's release title is
+P6's first title; P8 refuses a publication event that belongs to another
 package; every consumer refuses incomplete, placeholder or future payloads.
 
 P6 reads the track audio from an in-memory artifact store and renders with the stand-in
@@ -121,7 +122,8 @@ def test_hop1_p7_takes_every_fact_from_the_package(hop1: dict[str, Any]) -> None
     assert manifest.title == hop1["metadata_candidates"][0]["title"]
     assert manifest.video_checksum == hop1["video"]["checksum"]
     assert manifest.thumbnail_checksum == hop1["thumbnails"][0]["checksum"]
-    assert manifest.contains_synthetic_media is hop1["ai_disclosure_required"]
+    assert hop1["ai_disclosure_required"] is True
+    assert manifest.contains_synthetic_media is True
     assert manifest.playlist_id is None  # no invented playlist
 
 
@@ -129,7 +131,7 @@ def test_hop2_event_carries_the_lineage(hop1: dict[str, Any], hop2: dict[str, An
     assert tuple(hop2) == tuple(YouTubePublicationPayload.model_fields)
     assert hop2["lineage"] == hop1["lineage"]
     assert hop2["media_package_id"] == hop1["media_package_id"]
-    assert hop2["contains_synthetic_media"] is hop1["ai_disclosure_required"]
+    assert hop2["contains_synthetic_media"] is True
 
 
 def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str, Any]) -> None:
@@ -145,6 +147,7 @@ def test_hop2_p8_release_stores_the_lineage(hop1: dict[str, Any], hop2: dict[str
     assert package_id == hop1["media_package_id"]
     assert result.payload is not None
     assert result.payload.lineage.content_arm_id == hop1["lineage"]["content_arm_id"]
+    assert result.release.release_title == hop1["metadata_candidates"][0]["title"]
 
 
 def test_p8_refuses_a_publication_from_another_package(

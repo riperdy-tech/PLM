@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,12 +20,20 @@ from unittest.mock import MagicMock
 
 import pytest
 from media_factory.artifacts import MinioArtifactStore
-from media_factory.domain.enums import PackageStatus, RenderJobStatus
+from media_factory.domain.enums import PackageStatus, RenderJobStatus, TransitionType
 from media_factory.errors import MediaAssemblyError
+from media_factory.rendering import ffmpeg as ffmpeg_module
 from media_factory.rendering.assembler import AssemblyPipelineResult, assemble_media_package
+from media_factory.rendering.ffmpeg import FFmpegToolchain
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.rendering.qa import post_render_qa
-from media_factory.rendering.toolchain import LoudnessMeasurement, ProbeReport, StreamInfo
+from media_factory.rendering.toolchain import (
+    AudioMasterSpec,
+    AudioSegment,
+    LoudnessMeasurement,
+    ProbeReport,
+    StreamInfo,
+)
 from media_factory.visuals.planner import BrandProfile
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c3 import DurationRangeSeconds
@@ -384,3 +393,41 @@ def test_the_minio_store_verifies_what_it_reads() -> None:
     with pytest.raises(MediaAssemblyError) as raised:
         _minio_store(data).fetch_verified("music/test/x.wav", digest)
     assert raised.value.code == "source_uri_invalid"
+
+
+def test_ffmpeg_step_timeouts_scale_with_the_programme_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 120-minute master gets 2.5x its length per step, not a flat hour (ADR-0044)."""
+    timeouts: list[float] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeouts.append(float(kwargs["timeout"]))  # type: ignore[arg-type]
+        stderr = ('{"input_i": "-20", "input_tp": "-2", "input_lra": "5", '
+                  '"input_thresh": "-30", "target_offset": "0"}')
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(ffmpeg_module.shutil, "which", lambda name: name)
+    tool = FFmpegToolchain()
+    segments = tuple(AudioSegment(Path(f"t{n}.wav"), 180.0) for n in range(40))  # 120 min
+    spec = AudioMasterSpec(segments, TransitionType.HARD_CUT, 0.0)
+    tool.render_audio_master(spec, RENDER_PROFILES["yt_longform_1080p_v1"], Path("out.wav"))
+    assert timeouts == [2.5 * 7200.0, 2.5 * 7200.0]
+    # A short programme keeps the base timeout as its floor.
+    timeouts.clear()
+    tool.render_audio_master(AudioMasterSpec(segments[:1], TransitionType.HARD_CUT, 0.0),
+                             RENDER_PROFILES["yt_longform_1080p_v1"], Path("out.wav"))
+    assert timeouts == [3600.0, 3600.0]
+
+
+def test_the_ai_disclosure_is_on_even_when_p5_declares_none() -> None:
+    store = InMemoryArtifactStore()
+    manifests = [stored_manifest(store, f"cand_{n}", measured_duration_seconds=60.0, synth=s,
+                                 ai_disclosure_required=False)
+                 for n, s in enumerate(synth_specs())]
+    pkg = _assemble(store, StandInToolchain(), track_manifests=manifests).media_package
+    assert pkg.to_c6_payload()["ai_disclosure_required"] is True
+    for meta in pkg.metadata_candidates:
+        assert meta["contains_synthetic_media"] is True
+        assert "Notice: Sound recording" in meta["description"]

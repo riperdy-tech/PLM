@@ -37,6 +37,7 @@ from .domain.models import (
     YouTubeVideoPublishedEvent,
 )
 from .storage.repositories import (
+    get_channel_profile_by_channel_id,
     get_publication_record_by_package_id,
     get_publish_attempt_by_id,
     get_publish_attempt_by_idempotency_key,
@@ -338,16 +339,24 @@ class YouTubePublishingEngine:
                     )
                     session.commit()
 
+                    # The channel's language for the title, description and audio; a
+                    # channel without a stored profile keeps the English-first default.
+                    channel = get_channel_profile_by_channel_id(session, manifest.channel_id)
+                    language = channel.default_language if channel is not None else "en"
                     snippet: dict[str, Any] = {
                         "title": manifest.title,
                         "description": manifest.description,
                         "tags": manifest.tags,
                         "categoryId": manifest.category_id,
+                        "defaultLanguage": language,
+                        "defaultAudioLanguage": language,
                     }
+                    # videos.insert writes selfDeclaredMadeForKids; madeForKids is the
+                    # read-only effective value YouTube derives from it.
                     status: dict[str, Any] = {
                         "privacyStatus": manifest.privacy_status.value,
                         "containsSyntheticMedia": manifest.contains_synthetic_media,
-                        "madeForKids": manifest.made_for_kids,
+                        "selfDeclaredMadeForKids": manifest.made_for_kids,
                     }
                     if manifest.publish_at:
                         status["publishAt"] = manifest.publish_at.isoformat()

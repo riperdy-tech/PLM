@@ -32,14 +32,16 @@ class BrandProfile:
     brand_id: str
     brand_name: str
     version: str = "v1"
-    palette: list[str] = field(default_factory=lambda: ["#0B0E14", "#1F2937", "#60A5FA", "#EC4899"])
+    palette: list[str] = field(default_factory=lambda: ["#15171C", "#2B2F36", "#F2A23C", "#E9EEF2"])
     primary_font: str = "Inter"
     secondary_font: str = "Roboto Mono"
-    visual_theme: str = "cyberpunk_ambient"
+    visual_theme: str = "architectural_workspace"
     camera_language: list[str] = field(
         default_factory=lambda: ["cinematic", "slow_pan", "static_medium"]
     )
-    motifs: list[str] = field(default_factory=lambda: ["neon", "rain", "cityscape", "analog_glow"])
+    motifs: list[str] = field(
+        default_factory=lambda: ["workspace", "architecture", "technical_grid", "warm_lamp"]
+    )
 
 
 class VisualPlannerResult:

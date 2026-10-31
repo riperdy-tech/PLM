@@ -6,6 +6,11 @@ always drew rain. A world here sets the video background (sky gradient), the wav
 colour, and thumbnail A's scene: sky, light, weather and skyline. The brand still owns
 the text, the accent and variants B and C. A world without an entry keeps the brand
 look, and the visual plan records ``visual_world_known: false`` instead of guessing.
+
+The worlds from ``architect_studio_night`` on are the focus-music identity's
+(ADR-0044): stylized architectural workspaces and abstract technical environments in
+charcoal and graphite, warm amber, cool white and muted electric accents. The older
+worlds stay because recorded packages name them.
 """
 
 from __future__ import annotations
@@ -15,10 +20,11 @@ from typing import Final, Literal
 
 __all__ = ["WORLDS", "WORLDS_VERSION", "VisualWorld", "visual_world"]
 
-WORLDS_VERSION: Final[str] = "p6-worlds-v1"
+WORLDS_VERSION: Final[str] = "p6-worlds-v2"
 
 Weather = Literal["rain", "snow", "stars", "mist", "none"]
-Skyline = Literal["city", "hills", "waves", "trees", "room", "road"]
+Skyline = Literal["city", "hills", "waves", "trees", "room", "road",
+                  "workspace", "grid", "racks"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +60,20 @@ WORLDS: Final[dict[str, VisualWorld]] = {
     "night_rooftop": VisualWorld("#0C1328", "#2C2350", "#F7B267", "#FFE7B3", "stars", "city"),
     "midnight_diner": VisualWorld("#130F1F", "#33233A", "#FF6B6B", "#FFE3A3", "none", "room"),
     "luxury_hotel": VisualWorld("#1B1410", "#4A3726", "#D4AF37", "#FFF1CC", "none", "room"),
+    # The focus-music identity (ADR-0044).
+    "architect_studio_night": VisualWorld("#14171D", "#2A2F38", "#F2A23C", "#FFE3B0", "none",
+                                          "workspace"),
+    "drafting_table_dawn": VisualWorld("#2E3440", "#5E636E", "#F6F8FA", "#FFC98A", "none",
+                                       "workspace"),
+    "minimal_desk_monolith": VisualWorld("#101114", "#22252B", "#E9EEF2", "#F2A23C", "none",
+                                         "workspace"),
+    "observatory_workspace": VisualWorld("#0B0D12", "#1E222A", "#C9D6E3", "#F5E6C8", "stars",
+                                         "workspace"),
+    "server_hall_glow": VisualWorld("#0E1116", "#1C2129", "#7FD1E0", "#F2A23C", "none",
+                                    "racks"),
+    "circuit_grid_abstract": VisualWorld("#0F1115", "#23262D", "#8FB8C9", "#F2A23C", "none",
+                                         "grid"),
+    "blueprint_hall": VisualWorld("#121821", "#26303C", "#E9EEF2", "#F2A23C", "none", "grid"),
 }
 """Every visual world the P3 templates name (default and alternatives)."""
 

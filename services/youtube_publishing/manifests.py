@@ -5,7 +5,8 @@ comes from the parsed package or from the operator-configured channel profile:
 
 * candidate assignment is deterministic and frozen: a caller may name explicit
   C6 candidate IDs, otherwise the first declared candidate is retained for compatibility;
-* ``containsSyntheticMedia`` is the package's ``ai_disclosure_required`` (ARCH-P18);
+* ``containsSyntheticMedia`` is always true: every recording this pipeline publishes
+  is AI-generated (ADR-0044), whatever a package declares (ARCH-P18);
 * privacy and made-for-kids are the channel's configured defaults;
 * no playlist is attached unless one is configured (none is configurable yet).
 """
@@ -142,7 +143,7 @@ def build_publish_manifest(
         category_id=meta.category_id,
         privacy_status=profile.default_privacy_mode,
         publish_at=publish_at,
-        contains_synthetic_media=pkg.ai_disclosure_required,
+        contains_synthetic_media=True,
         made_for_kids=profile.default_made_for_kids,
         playlist_id=None,
         playlist_title=None,

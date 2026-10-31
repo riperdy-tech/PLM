@@ -70,9 +70,9 @@ class CanonicalReleasePackage(BaseModel):
     brand_id: str
     release_type: ReleaseType = ReleaseType.SINGLE
     title: str
-    label_name: str = "Neon Records"
-    copyright_line: str = "2026 Neon Records"
-    publisher_line: str = "2026 Neon Music Publishing"
+    label_name: str = "Longform Signal"
+    copyright_line: str = "2026 Longform Signal"
+    publisher_line: str = "2026 Longform Signal Publishing"
     release_date: str  # YYYY-MM-DD
     tracks: list[DistributionTrack]
     artwork_asset_uri: str

@@ -2,6 +2,11 @@
 
 Assembles YouTube-compliant chapter markers, tracklist arrays, and metadata
 candidates with synthetic media disclosure.
+
+Titles are functional, for the focus-music identity (ADR-0044): what the video is for
+and how long it runs, e.g. ``Deep Work Signal — 2 Hours of Instrumental Electronic
+Music for Coding & Focus``. They never use a numbered-volume, "Official Mix", "Full
+Album" or lo-fi formula, and never exceed YouTube's 100 characters.
 """
 
 from __future__ import annotations
@@ -10,7 +15,29 @@ from typing import Any
 
 from ..domain.models import Chapter, PlaylistTrack
 
-__all__ = ["MetadataCompilationResult", "compile_metadata_and_chapters"]
+__all__ = ["TITLE_MAX_CHARS", "MetadataCompilationResult", "compile_metadata_and_chapters",
+           "duration_phrase", "functional_title"]
+
+TITLE_MAX_CHARS = 100
+"""YouTube's title limit."""
+
+
+def duration_phrase(seconds: float) -> str:
+    """``2 Hours``, ``1 Hour`` or ``90 Minutes``: the length a listener plans around."""
+    minutes = max(1, round(seconds / 60))
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return f"{hours} Hour" if hours == 1 else f"{hours} Hours"
+    return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minutes"
+
+
+def functional_title(concept: str, suffix: str) -> str:
+    """``concept`` + ``suffix``, the concept shortened (never the suffix) to fit 100."""
+    room = TITLE_MAX_CHARS - len(suffix)
+    concept = concept.strip()
+    if len(concept) > room:
+        concept = concept[:room - 1].rstrip() + "…"
+    return f"{concept}{suffix}"
 
 
 class MetadataCompilationResult:
@@ -90,31 +117,43 @@ def compile_metadata_and_chapters(
         else ""
     )
 
-    # 5. Metadata Candidates
+    # 5. Metadata Candidates: functional titles, focus-identity tags (ADR-0044).
+    length = duration_phrase(tracks[-1].end_offset_seconds if tracks else 0.0)
+    brand_slug = brand_name.lower().replace(" ", "")
+    curation = f"Curated by {brand_name}: tracks chosen and sequenced for long focus sessions."
     metadata_candidates = [
         {
             "variant_id": "meta_a_concept_focused",
-            "title": f"{playlist_concept} | {brand_name} Official Mix",
+            "title": functional_title(
+                playlist_concept,
+                f" — {length} of Instrumental Electronic Music for Coding & Focus"),
             "description": (
-                f"Enjoy this curated mix of {playlist_concept}.\n\n"
+                f"{length} of instrumental electronic music for coding, programming and "
+                f"deep work: {playlist_concept}. No vocals, a steady pulse, one long "
+                "session.\n\n"
                 f"Tracklist:\n{chapter_block}\n\n"
                 f"{disclosure_statement}\n\n"
-                f"Curated by {brand_name}."
+                f"{curation}"
             ).strip(),
-            "tags": ["music", "lofi", "ambient", brand_name.lower().replace(" ", "")],
+            "tags": ["deep focus", "coding music", "programming music", "instrumental music",
+                     "electronic music", "study music", "deep work", brand_slug],
             "category_id": "10",  # Music
             "contains_synthetic_media": ai_disclosure_required,
         },
         {
             "variant_id": "meta_b_mood_focused",
-            "title": f"Relaxing {playlist_concept} [Full Album Mix]",
+            "title": functional_title(
+                playlist_concept,
+                f" — {length} Deep Focus Electronic Music for Programming & Work"),
             "description": (
-                f"Immerse yourself in {playlist_concept}.\n\n"
+                f"Deep focus music for programming and concentrated work: {length} of "
+                f"{playlist_concept}, instrumental electronic and free of vocals.\n\n"
                 f"Timestamps:\n{chapter_block}\n\n"
                 f"{disclosure_statement}\n\n"
-                f"Brought to you by {brand_name}."
+                f"{curation}"
             ).strip(),
-            "tags": ["relaxing", "study music", "beats", brand_name.lower().replace(" ", "")],
+            "tags": ["focus music", "music for coding", "programming music", "instrumental",
+                     "electronic", "study", "work", brand_slug],
             "category_id": "10",
             "contains_synthetic_media": ai_disclosure_required,
         },

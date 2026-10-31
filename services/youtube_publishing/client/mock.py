@@ -107,7 +107,9 @@ class MockYouTubeClient:
                     "privacyStatus": session["status"].get("privacyStatus", "private"),
                     "publishAt": session["status"].get("publishAt"),
                     "containsSyntheticMedia": session["status"].get("containsSyntheticMedia", True),
-                    "madeForKids": session["status"].get("madeForKids", False),
+                    "madeForKids": session["status"].get("selfDeclaredMadeForKids", False),
+                    "selfDeclaredMadeForKids": session["status"].get(
+                        "selfDeclaredMadeForKids", False),
                 },
                 "processingDetails": {
                     "processingStatus": "succeeded",

@@ -1,8 +1,8 @@
 """Unit tests for the playlist assembler, the Seam C5 consumer (Rulings R7, R8, ADR-0028).
 
 Proves the refusals (uncleared track, mixed lineage, empty playlist, a track without
-measured features), that track facts are P5's recorded facts, and that the timeline
-follows the declared transition: a crossfade overlaps tracks, a silence gap separates
+measured features), that track facts are P5's recorded facts, that tracks get
+distinct deterministic names, and that the timeline follows the declared transition: a crossfade overlaps tracks, a silence gap separates
 them, a hard cut does neither.
 """
 
@@ -14,6 +14,7 @@ import pytest
 from media_factory.audio.features import TrackFeatures
 from media_factory.domain.enums import PlaylistStatus, TransitionType
 from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
+from media_factory.playlist.track_names import track_names
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 
@@ -148,3 +149,30 @@ def test_a_crossfade_longer_than_half_a_selected_track_is_refused() -> None:
                               brand_id="b", duration_range=DurationRangeSeconds(min_seconds=3, max_seconds=3),
                               transition_duration_seconds=2.0, now=NOW)
     assert len(alone.tracks) == 1
+
+
+def test_tracks_get_distinct_deterministic_names_not_positions() -> None:
+    manifests = [_manifest(f"cand_{n:02d}", measured_duration_seconds=120.0)
+                 for n in range(1, 4)]
+
+    def titles() -> dict[str, str]:
+        res = assemble_playlist(
+            manifests=manifests, features=_features(manifests), brand_id="brand_focus",
+            duration_range=DurationRangeSeconds(min_seconds=340, max_seconds=370),
+            transition_type=TransitionType.SHORT_CROSSFADE, transition_duration_seconds=2.0,
+            now=NOW,
+        )
+        return {t.song_id: t.title for t in res.tracks}
+
+    names = titles()
+    assert len(names) == 3
+    assert len(set(names.values())) == 3
+    assert not any(title.startswith("Track ") for title in names.values())
+    assert titles() == names  # same tracks, same names
+
+
+def test_track_names_never_repeat_within_a_playlist() -> None:
+    ids = [f"cand_{n:03d}" for n in range(120)]
+    names = track_names(ids)
+    assert len(set(names)) == len(ids)
+    assert track_names(ids) == names

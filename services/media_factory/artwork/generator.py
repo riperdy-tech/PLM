@@ -9,15 +9,17 @@ carries the sha256 of the bytes stored.
 Thumbnail designs, all 1280x720 (YouTube's recommended size, 16:9), PNG, under 2 MB:
 
 * **A, ``thumb_a_hero``**: a window onto the package's visual world (its sky, light,
-  weather and skyline from :mod:`..visuals.worlds`; a world P6 does not know keeps the
-  original night-city scene) with prominent album typography plus a Full Album label.
+  weather and skyline from :mod:`..visuals.worlds`; a world P6 does not know is drawn
+  as a neutral workspace in the brand palette) with prominent title typography plus a
+  short functional label from the concept (``DEEP WORK``, ``CODING``...).
 * **B, ``thumb_b_bold_text``**: the brand gradient with the playlist concept in large
   type on the left, over an accent bar, and the brand name above it.
 * **C, ``thumb_c_minimal``**: a flat dark field with a thin accent rule and the concept
   in small type centred.
 
-The variants change presentation only (P6 §18): every one states the same concept.
-The video background is the visual plan's gradient (the world's sky, or the brand's).
+The variants change presentation only (P6 §18): every one states the same concept,
+and every one carries the brand's small logo mark (its initials, drawn here; no
+external asset) in the top-right corner. The video background is the visual plan's gradient (the world's sky, or the brand's).
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ __all__ = [
     "THUMBNAIL_MAX_BYTES",
     "THUMBNAIL_VARIANTS",
     "THUMBNAIL_WIDTH",
+    "functional_label",
     "generate_thumbnails",
     "render_background",
     "render_thumbnail",
@@ -54,7 +57,7 @@ THUMBNAIL_HEIGHT: Final[int] = 720
 THUMBNAIL_MAX_BYTES: Final[int] = 2 * 1024 * 1024
 THUMBNAIL_VARIANTS: Final[tuple[str, ...]] = ("thumb_a_hero", "thumb_b_bold_text",
                                               "thumb_c_minimal")
-LAYOUT_VERSION: Final[str] = "thumb-layout-v4"
+LAYOUT_VERSION: Final[str] = "thumb-layout-v5"
 _HEX: Final = re.compile(r"\A#[0-9A-Fa-f]{6}\Z")
 
 RGB = tuple[int, int, int]
@@ -150,6 +153,47 @@ def _scene(draw: ImageDraw.ImageDraw, world: VisualWorld, seed: str,
         for i in range(5):
             y = bottom - 30 - i * 40
             draw.rectangle((mid - 3, y, mid + 3, y + 18), fill=glow)
+    elif world.skyline == "workspace":
+        # Architectural mullions, a desk, a monitor whose screen glows and a lamp arm.
+        for i in range(1, 4):
+            x = left + i * width // 4
+            draw.rectangle((x - 3, top, x + 3, bottom - 150), fill=ground)
+        draw.rectangle((left, bottom - 150, right, bottom - 138), fill=ground)
+        draw.rectangle((left, bottom - 70, right, bottom), fill=ground)
+        draw.rectangle((left + 60, bottom - 230, left + 250, bottom - 110), fill=ground)
+        draw.rectangle((left + 72, bottom - 218, left + 238, bottom - 122), outline=glow,
+                       width=3)
+        for i, amount in enumerate(shapes[:5]):
+            y = bottom - 205 + i * 16
+            draw.line((left + 86, y, left + 86 + int(amount * 130), y), fill=glow, width=3)
+        draw.rectangle((left + 145, bottom - 110, left + 165, bottom - 70), fill=ground)
+        draw.line((right - 90, bottom - 70, right - 150, bottom - 190), fill=ground, width=8)
+        draw.line((right - 150, bottom - 190, right - 80, bottom - 240), fill=ground, width=8)
+        draw.ellipse((right - 100, bottom - 255, right - 60, bottom - 215), fill=glow)
+    elif world.skyline == "grid":
+        # A technical floor in perspective under a few wireframe monoliths.
+        horizon = bottom - 220
+        mid = (left + right) // 2
+        draw.rectangle((left, horizon, right, bottom), fill=ground)
+        for i in range(-6, 7):
+            draw.line((mid + i * 8, horizon, mid + i * (width // 2 - 8) // 6, bottom),
+                      fill=glow, width=2)
+        for row in range(1, 7):
+            y = horizon + int(220 * (row / 6) ** 2)
+            draw.line((left, y, right, y), fill=glow, width=2)
+        for i, amount in enumerate(shapes[:4]):
+            x = left + 40 + i * (width - 80) // 4
+            draw.rectangle((x, int(horizon - amount * 170), x + 52, horizon), outline=glow,
+                           width=3)
+    elif world.skyline == "racks":
+        # Rows of server racks with small status lights.
+        rack = (width - 28) // 6
+        for i in range(6):
+            x = left + 14 + i * rack
+            draw.rectangle((x, top + 140, x + rack - 14, bottom), fill=ground)
+            for j, amount in enumerate(shapes[i * 4:i * 4 + 4]):
+                y = top + 170 + j * 70 + int(amount * 30)
+                draw.rectangle((x + 10, y, x + 22, y + 6), fill=glow)
     else:  # room: a sill and a lamp in front of the window
         draw.rectangle((left, bottom - 70, right, bottom), fill=ground)
         draw.ellipse((right - 150, bottom - 120, right - 70, bottom - 70), fill=glow)
@@ -247,6 +291,40 @@ def _contrast_ink(background: RGB) -> RGB:
     return (0, 0, 0) if luminance > 0.179 else (255, 255, 255)
 
 
+_FUNCTIONAL_LABELS: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
+    (("deep work",), "DEEP WORK"),
+    (("coding", "code", "programming", "programmer", "developer"), "CODING"),
+    (("study", "studying"), "STUDY FOCUS"),
+    (("focus", "concentration"), "DEEP FOCUS"),
+)
+"""Thumbnail A's label: the first phrase whose keyword the concept names."""
+
+
+def functional_label(concept: str) -> str:
+    """A short functional phrase for the concept; ``DEEP WORK`` when it names none."""
+    words = " ".join(re.findall(r"[a-z]+", concept.lower()))
+    for keywords, label in _FUNCTIONAL_LABELS:
+        if any(re.search(rf"\b{k}\b", words) for k in keywords):
+            return label
+    return "DEEP WORK"
+
+
+def _initials(brand: BrandProfile) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", brand.brand_name) or re.findall(
+        r"[A-Za-z0-9]+", brand.brand_id)
+    return "".join(word[0] for word in words[:2]).upper()
+
+
+def _logo_mark(draw: ImageDraw.ImageDraw, brand: BrandProfile, palette: _Palette) -> None:
+    """The brand's small persistent mark: its initials on an accent tile, top right."""
+    box = (THUMBNAIL_WIDTH - 108, 8, THUMBNAIL_WIDTH - 56, 60)
+    draw.rounded_rectangle(box, radius=10, fill=palette.accent)
+    font = _font(24)
+    text = _initials(brand)
+    x = box[0] + (box[2] - box[0] - draw.textlength(text, font=font)) / 2
+    draw.text((x, box[1] + 13), text, font=font, fill=_contrast_ink(palette.accent))
+
+
 def _motif(seed: bytes, count: int) -> Sequence[float]:
     digest = hashlib.sha256(seed).digest()
     while len(digest) < count:
@@ -257,41 +335,30 @@ def _motif(seed: bytes, count: int) -> Sequence[float]:
 def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
                      world_name: str | None = None) -> bytes:
     """One thumbnail variant as PNG bytes (deterministic); A draws ``world_name``'s scene."""
-    world = visual_world(world_name)
     if not concept.strip():
         raise MediaAssemblyError("playlist_concept_missing", "a thumbnail needs the concept",
                                  ["playlist_concept"])
     palette = _palette(brand)
+    # A world P6 does not know is drawn as the identity's neutral workspace in the
+    # brand's own colours, never as a scene the brand did not choose.
+    world = visual_world(world_name) or VisualWorld(
+        sky_top=brand.palette[1], sky_bottom=brand.palette[0], glow=brand.palette[2],
+        light=brand.palette[3], weather="none", skyline="workspace")
     w, h = THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT
     if variant == "thumb_a_hero":
-        # Editorial cover rather than a waveform: a night-window scene, one clear
-        # focal subject and large readable album words in the left safe area.
+        # Editorial cover rather than a waveform: one focal environment seen through a
+        # window and large readable title words in the left safe area.
         image = _gradient(w, h, palette.shade, palette.base)
         draw = ImageDraw.Draw(image)
         # A dedicated title plate is legible even when all brand colors are pale.
         draw.rounded_rectangle((46, 66, 664, 690), radius=30, fill=(12, 19, 38))
         draw.rounded_rectangle((688, 65, 1214, 633), radius=32, fill=(12, 19, 39),
                                outline=palette.accent, width=9)
-        if world is not None:
-            image.paste(_gradient(496, 533, _rgb(world.sky_top), _rgb(world.sky_bottom)),
-                        (703, 80))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((968, 135, 1084, 251), fill=_rgb(world.light))
-            _scene(draw, world, f"{brand.brand_id}|{concept}", (703, 80, 1199, 612))
-        else:
-            image.paste(_gradient(496, 533, (28, 49, 89), (8, 17, 37)), (703, 80))
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((968, 135, 1084, 251), fill=(255, 216, 150))
-            heights = _motif(f"{brand.brand_id}|{concept}".encode(), 22)
-            for i, height in enumerate(heights):
-                x = 703 + i * 23
-                top = int(490 - height * 135)
-                draw.rectangle((x, top, x + 24, 612), fill=(17, 30, 53))
-            rain = _motif(f"rain|{concept}".encode(), 64)
-            for i, amount in enumerate(rain):
-                x = 721 + (i * 71) % 468
-                y = 96 + int((i * 67 + amount * 47) % 310)
-                draw.line((x, y, x - 14, y + 27), fill=(93, 139, 177), width=2)
+        image.paste(_gradient(496, 533, _rgb(world.sky_top), _rgb(world.sky_bottom)),
+                    (703, 80))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((968, 135, 1084, 251), fill=_rgb(world.light))
+        _scene(draw, world, f"{brand.brand_id}|{concept}", (703, 80, 1199, 612))
         draw.rectangle((944, 80, 957, 633), fill=(21, 28, 49))
         draw.rectangle((703, 335, 1200, 349), fill=(21, 28, 49))
         draw.rounded_rectangle((675, 596, 1230, 670), radius=15, fill=(36, 39, 54))
@@ -307,9 +374,11 @@ def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
             draw.text((72, y), line, font=font, fill=(252, 246, 226),
                       stroke_width=2, stroke_fill=(6, 12, 25))
             y += int(getattr(font, "size", 60) * 1.23)
-        draw.rounded_rectangle((72, 612, 335, 668), radius=16, fill=palette.accent)
-        draw.text((91, 622), "FULL ALBUM", font=_font(31),
-                  fill=_contrast_ink(palette.accent))
+        label_font = _font(31)
+        phrase = functional_label(concept)
+        draw.rounded_rectangle((72, 612, 110 + int(draw.textlength(phrase, font=label_font)),
+                                668), radius=16, fill=palette.accent)
+        draw.text((91, 622), phrase, font=label_font, fill=_contrast_ink(palette.accent))
     elif variant == "thumb_b_bold_text":
         image = _gradient(w, h, palette.shade, palette.base)
         draw = ImageDraw.Draw(image)
@@ -342,6 +411,7 @@ def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
             y += step
     else:
         raise MediaAssemblyError("thumbnail_variant_unknown", f"unknown variant {variant!r}")
+    _logo_mark(draw, brand, palette)
     data = _png(image)
     if len(data) > THUMBNAIL_MAX_BYTES:
         raise MediaAssemblyError(

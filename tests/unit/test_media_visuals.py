@@ -4,7 +4,8 @@ Proves: the visual plan states exactly what the renderer draws and records no as
 has not produced; thumbnails A/B/C are real 1280x720 PNGs, deterministic (same inputs,
 same bytes), distinct per variant, stored content-addressed with the sha256 of the
 stored bytes; an invalid brand palette is refused; chapters come from the final
-timeline without being moved.
+timeline without being moved; titles, labels and tags are functional focus-music ones
+(ADR-0044) and every thumbnail carries the brand's logo mark.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from media_factory.artwork.generator import (
     THUMBNAIL_VARIANTS,
     _contrast_ink,
     _fit,
+    functional_label,
     generate_thumbnails,
     render_thumbnail,
 )
@@ -70,7 +72,7 @@ def test_thumbnails_are_stored_with_the_checksum_of_the_stored_bytes() -> None:
         assert hashlib.sha256(store.get(variant.uri)).hexdigest() == variant.checksum
         assert variant.uri.endswith(variant.checksum)
         assert variant.text_payload == "Focus"
-        assert variant.layout_version.startswith("thumb-layout-v4+")
+        assert variant.layout_version.startswith("thumb-layout-v5+")
 
 
 @pytest.mark.parametrize(("width", "start", "minimum"), [
@@ -153,3 +155,70 @@ def test_chapters_come_from_the_final_timeline() -> None:
     for meta in res.metadata_candidates:
         assert meta["contains_synthetic_media"] is True
         assert "Notice: Sound recording" in meta["description"]
+
+
+def _tracks(*spans: tuple[float, float]) -> list[PlaylistTrack]:
+    return [
+        PlaylistTrack.create(session_id="ps_01", song_id=f"s{n}", source_artifact_id=f"a{n}",
+                             position=n, start_offset_seconds=start, end_offset_seconds=end,
+                             title=name, now=NOW)
+        for n, ((start, end), name) in enumerate(
+            zip(spans, ("Amber Circuit", "Quiet Lattice", "Linear Draft"), strict=False))
+    ]
+
+
+def test_titles_are_functional_and_state_the_length() -> None:
+    tracks = _tracks((0.0, 2400.0), (2398.0, 4800.0), (4798.0, 7200.0))
+    res = compile_metadata_and_chapters(tracks=tracks, brand_name="Longform Signal",
+                                        playlist_concept="Deep Work Signal")
+    a, b = res.metadata_candidates
+    assert a["title"] == (
+        "Deep Work Signal — 2 Hours of Instrumental Electronic Music for Coding & Focus")
+    assert b["title"].startswith("Deep Work Signal — 2 Hours ")
+    for meta in res.metadata_candidates:
+        title = meta["title"]
+        assert len(title) <= 100
+        for banned in ("Official Mix", "Full Album", "Vol.", "lofi", "Lofi", "Relaxing"):
+            assert banned not in title
+        assert not {"lofi", "beats", "relaxing", "music"} & set(meta["tags"])
+        assert "longformsignal" in meta["tags"]
+        assert meta["category_id"] == "10"
+        assert "Curated by Longform Signal" in meta["description"]
+        assert "00:00 - Amber Circuit" in meta["description"]
+        assert "Notice: Sound recording" in meta["description"]
+    assert {"deep focus", "coding music", "programming music"} <= set(a["tags"])
+    assert [c["title"] for c in res.chapters] == ["Amber Circuit", "Quiet Lattice",
+                                                  "Linear Draft"]
+    assert [t["title"] for t in res.tracklist] == [c["title"] for c in res.chapters]
+
+
+def test_a_long_concept_is_shortened_so_the_title_fits() -> None:
+    tracks = _tracks((0.0, 2700.0), (2698.0, 5400.0))
+    res = compile_metadata_and_chapters(tracks=tracks, brand_name="Longform Signal",
+                                        playlist_concept="Graphite Studio Night " * 8)
+    for meta in res.metadata_candidates:
+        assert 95 <= len(meta["title"]) <= 100
+        assert meta["title"].startswith("Graphite Studio Night")
+        assert "… — 90 Minutes " in meta["title"]  # the concept is cut, never the length
+
+
+@pytest.mark.parametrize(("concept", "label"), [
+    ("Deep Work Signal", "DEEP WORK"),
+    ("Late Night Coding Session", "CODING"),
+    ("Programming Flow", "CODING"),
+    ("Exam Study Block", "STUDY FOCUS"),
+    ("Graphite Focus", "DEEP FOCUS"),
+    ("Amber Atrium", "DEEP WORK"),
+    ("Decoder Ring", "DEEP WORK"),  # a keyword inside another word is not the keyword
+])
+def test_thumbnail_label_is_a_short_functional_phrase(concept: str, label: str) -> None:
+    assert functional_label(concept) == label
+
+
+def test_every_thumbnail_carries_the_brand_logo_mark() -> None:
+    accent = (0x33, 0xAA, 0xFF)
+    for variant in THUMBNAIL_VARIANTS:
+        image = Image.open(io.BytesIO(render_thumbnail(variant, BRAND, "Deep Work")))
+        assert image.convert("RGB").getpixel((1180, 14)) == accent, variant
+    hero = Image.open(io.BytesIO(render_thumbnail("thumb_a_hero", BRAND, "Deep Work")))
+    assert hero.convert("RGB").getpixel((80, 616)) == accent  # the label's tile

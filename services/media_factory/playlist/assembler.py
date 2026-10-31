@@ -12,8 +12,9 @@ rules, each of which refuses the assembly with a reason code instead of guessing
 The order and the selection are the beam search of :mod:`.sequencer` over the features
 P6 measured from the verified audio; the timeline follows the declared transition
 (a crossfade overlaps consecutive tracks, a silence gap separates them, a hard cut
-does neither). Track titles are P6's own output: ``Track <n>`` by position until the
-metadata stage supplies real titles.
+does neither). Track titles are P6's own output: no title reaches P6 (C5 carries
+none), so each track gets a distinct, deterministic name from its id
+(:mod:`.track_names`), which the chapters and tracklist use.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from .sequencer import (
     SequencingPolicy,
     sequence_tracks,
 )
+from .track_names import track_names
 
 __all__ = [
     "PlaylistAssemblerResult",
@@ -187,6 +189,7 @@ def assemble_playlist(
         else transition_duration_seconds
     playlist_tracks: list[PlaylistTrack] = []
     cursor = 0.0
+    names = track_names([m.candidate_id for m in ordered])
     for pos, manifest in enumerate(ordered):
         start = cursor + (offset if pos else 0.0)
         end = start + manifest.measured_duration_seconds
@@ -201,7 +204,7 @@ def assemble_playlist(
                 transition_type=transition_type,
                 transition_duration_seconds=recorded_duration,
                 sequence_reason=f"{policy.version}:beam_search",
-                title=f"Track {pos + 1}",
+                title=names[pos],
                 audio_uri=manifest.artifact_uri,
                 audio_checksum=manifest.artifact_sha256,
                 now=now,

@@ -169,12 +169,13 @@ def assemble_media_package(
             raise PackageAlreadyAssembled(found)
 
     # 5. Chapters from the final timeline, validated before any render cost is spent.
-    ai_disclosure = any(m.ai_disclosure_required for m in playlist_res.manifests)
     meta_res = compile_metadata_and_chapters(
         tracks=tracks,
         brand_name=brand_profile.brand_name,
         playlist_concept=playlist_concept,
-        ai_disclosure_required=ai_disclosure,
+        # Every recording in this pipeline is AI-generated, so the disclosure is always
+        # on (ADR-0044), whatever a P5 manifest declares.
+        ai_disclosure_required=True,
     )
     require_valid_chapters(meta_res.chapter_objects, playlist_res.total_duration_seconds)
 

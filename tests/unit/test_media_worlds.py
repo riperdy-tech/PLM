@@ -1,7 +1,9 @@
 """P6 draws each package's visual world (owner decision 2026-10-31).
 
 Before this, every video background and waveform came from the brand palette and
-thumbnail A always drew rain, whatever world P3 had sent.
+thumbnail A always drew rain, whatever world P3 had sent. The focus-music identity
+(ADR-0044) adds workspace and technical worlds; an unknown world is drawn as a
+neutral workspace in the brand's colours, and the default brand is Longform Signal.
 """
 
 from __future__ import annotations
@@ -10,7 +12,9 @@ import io
 import json
 from datetime import UTC, datetime
 
+import pytest
 from media_factory.artwork.generator import render_background, render_thumbnail
+from media_factory.brands.registry import DEFAULT_BRANDS
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
 from media_factory.visuals.worlds import WORLDS, WORLDS_VERSION
@@ -21,6 +25,9 @@ from services.experiments.genome.engine import TEMPLATES_PATH
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
 BRAND = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats",
                      palette=["#111111", "#222222", "#33AAFF", "#FF44AA"])
+IDENTITY_WORLDS = ("architect_studio_night", "drafting_table_dawn", "minimal_desk_monolith",
+                   "observatory_workspace", "server_hall_glow", "circuit_grid_abstract",
+                   "blueprint_hall")
 
 
 def _luminance(hex_colour: str) -> float:
@@ -97,3 +104,39 @@ def test_thumbnail_a_and_the_background_differ_by_world() -> None:
         BRAND, 64, 32, colors=(world.sky_top, world.sky_bottom)))).convert("RGB")
     assert background.getpixel((0, 0)) == tuple(
         int(world.sky_top[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def test_the_identity_worlds_draw_workspaces_and_technical_scenes() -> None:
+    concept = "Deep Work Signal"
+    assert {WORLDS[name].skyline for name in IDENTITY_WORLDS} == {"workspace", "grid", "racks"}
+    heroes = {name: render_thumbnail("thumb_a_hero", BRAND, concept, name)
+              for name in IDENTITY_WORLDS}
+    assert len(set(heroes.values())) == len(heroes)
+    for name, data in heroes.items():
+        assert render_thumbnail("thumb_a_hero", BRAND, concept, name) == data, name
+        assert Image.open(io.BytesIO(data)).size == (1280, 720)
+
+
+def test_an_unknown_world_is_a_neutral_workspace_in_the_brand_colours() -> None:
+    hero = Image.open(io.BytesIO(render_thumbnail("thumb_a_hero", BRAND, "Late Night",
+                                                  "neon_v1"))).convert("RGB")
+    # The window's sky starts at the brand's shade, not the old night-city blue.
+    assert hero.getpixel((720, 90)) == (0x22, 0x22, 0x22)
+
+
+def test_the_default_brand_is_the_focus_identity() -> None:
+    brand = DEFAULT_BRANDS.get("neon_seoul")
+    assert brand.brand_name == "Longform Signal"
+    base, shade, accent, highlight = brand.palette
+    for ink, floor in ((accent, 3.0), (highlight, 4.5)):
+        assert _contrast(ink, base) >= floor
+        assert _contrast(ink, shade) >= floor
+    assert not {"neon", "rain", "cityscape"} & set(brand.motifs)
+    assert "cyberpunk" not in brand.visual_theme
+
+
+@pytest.mark.parametrize("variant", ["thumb_a_hero", "thumb_b_bold_text", "thumb_c_minimal"])
+def test_the_default_brand_renders_every_variant(variant: str) -> None:
+    data = render_thumbnail(variant, DEFAULT_BRANDS.get("neon_seoul"), "Deep Work Signal",
+                            "architect_studio_night")
+    assert Image.open(io.BytesIO(data)).size == (1280, 720)
