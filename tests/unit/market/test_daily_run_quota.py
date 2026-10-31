@@ -168,6 +168,8 @@ def test_a_day_with_room_runs_and_charges_the_ledger(market_session, memory_obje
                                  connector=_connector(mock, units=SETTINGS.quota_units_per_run))
 
     assert result["status"] == "succeeded"
+    # ADR-0044's English-first market reaches the search request from settings
+    mock.assert_query_params(0, regionCode="US", relevanceLanguage="en")
     run = repositories.load_run(market_session, result["run_id"])
     assert run is not None
     # one 100-unit search + 1-unit videos.list + 1-unit channels.list, charged to the day

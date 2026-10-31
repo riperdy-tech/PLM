@@ -35,3 +35,20 @@ def test_profile_from_dimensions_keeps_multi_valued_dimensions_as_tuples() -> No
     assert profile.genre == "rnb"
     assert profile.mood == ("melancholic", "dreamy")
     assert profile.bpm_range is None
+
+
+def test_the_focus_identity_vocabulary_is_controlled_and_old_values_survive() -> None:
+    from services.market_intelligence.taxonomy.ontology import (
+        FOCUS_SUBGENRES,
+        SUBGENRE_PARENT_GENRE,
+    )
+
+    assert is_controlled_value(TaxonomyDimension.GENRE, "focus_electronic")
+    assert len(FOCUS_SUBGENRES) == 9
+    for subgenre in FOCUS_SUBGENRES:
+        assert is_controlled_value(TaxonomyDimension.SUBGENRE, subgenre)
+        assert SUBGENRE_PARENT_GENRE[subgenre] == "focus_electronic"
+    # historic classifications must still validate (§14.3: values never silently shrink)
+    for genre in ("rnb", "lofi", "city_pop", "synthwave"):
+        assert is_controlled_value(TaxonomyDimension.GENRE, genre)
+    assert is_controlled_value(TaxonomyDimension.SUBGENRE, "alt_rnb")

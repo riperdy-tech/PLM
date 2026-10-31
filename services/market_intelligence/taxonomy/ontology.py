@@ -17,11 +17,24 @@ from ..normalization.canonical import normalize_text
 from .synonym_map import lookup_synonym
 
 __all__ = [
-    "DIMENSION_SPECS", "OTHER_CANDIDATE", "DimensionSpec", "controlled_values",
-    "is_controlled_value", "normalize_dimension_value", "profile_from_dimensions",
+    "DIMENSION_SPECS", "FOCUS_SUBGENRES", "OTHER_CANDIDATE", "SUBGENRE_PARENT_GENRE",
+    "DimensionSpec", "controlled_values", "is_controlled_value", "normalize_dimension_value",
+    "profile_from_dimensions",
 ]
 
 OTHER_CANDIDATE: Final[str] = "other_candidate"
+
+# ADR-0044: the channel's nine sub-styles, all inside the `focus_electronic` genre.
+FOCUS_SUBGENRES: Final[tuple[str, ...]] = (
+    "future_garage_focus", "soft_cyber_electronica", "minimal_pulse", "ambient_breakbeat",
+    "downtempo_synth", "deep_work_chillstep", "restrained_retro_future", "organic_electronic",
+    "piano_synth_concentration",
+)
+SUBGENRE_PARENT_GENRE: Final[Mapping[str, str]] = {
+    subgenre: "focus_electronic" for subgenre in FOCUS_SUBGENRES
+}
+"""A subgenre's genre, where the vocabulary fixes it; the classifier fills an absent
+genre from it, and never overrides a genre the text names."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +52,11 @@ def _spec(dimension: D, *values: str, multi: bool = False) -> DimensionSpec:
 
 DIMENSION_SPECS: Final[Mapping[D, DimensionSpec]] = {
     D.GENRE: _spec(D.GENRE, "rnb", "pop", "indie", "city_pop", "synthwave", "lofi", "ambient",
-                   "house", "deep_house", "jazz", "acoustic", "classical", "hip_hop", "rock"),
+                   "house", "deep_house", "jazz", "acoustic", "classical", "hip_hop", "rock",
+                   "focus_electronic"),
     D.SUBGENRE: _spec(D.SUBGENRE, "alt_rnb", "bedroom_pop", "dream_pop", "neo_soul",
-                      "lofi_hip_hop", "chillhop", "deep_house", "progressive_house"),
+                      "lofi_hip_hop", "chillhop", "deep_house", "progressive_house",
+                      *FOCUS_SUBGENRES),
     D.MOOD: _spec(D.MOOD, "melancholic", "dreamy", "romantic", "calm", "nostalgic", "hopeful",
                   "dark", "uplifting", "sensual", "lonely", multi=True),
     D.USE_CASE: _spec(D.USE_CASE, "late_night_drive", "study_focus", "sleep", "cafe_background",

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..config import MarketSettings
 from ..domain.enums import QueryType
 from ..normalization.canonical import text_fingerprint
-from ..storage.repositories import upsert_query
+from ..storage.repositories import sync_seed_group_active, upsert_query
 
 __all__ = [
     "SeedCandidate", "SeedDecision", "SeedSpec", "install_bootstrap_seeds",
@@ -79,9 +79,12 @@ def install_bootstrap_seeds(
     """Insert every seed that is not already present; returns the number of new rows.
 
     Idempotent: rerunning installs nothing and reports 0, so a scheduler retry cannot
-    duplicate the seed pool.
+    duplicate the seed pool. The pack is the truth for its seed groups: a stored seed
+    a newer pack dropped (ADR-0044 retired the lofi/R&B pack) is deactivated, so it
+    stops being collected while its evidence stays.
     """
     created = 0
+    kept: dict[str, set[str]] = {}
     for spec in load_bootstrap_seeds():
         _, was_created = upsert_query(
             session, source_id=source_id, query_text=spec.term, query_type=spec.query_type,
@@ -89,6 +92,10 @@ def install_bootstrap_seeds(
             seed_group=spec.seed_group, priority=spec.priority, query_version=query_version,
         )
         created += 1 if was_created else 0
+        kept.setdefault(spec.seed_group, set()).add(text_fingerprint(spec.term))
+    for seed_group, fingerprints in kept.items():
+        sync_seed_group_active(session, source_id=source_id, seed_group=seed_group,
+                               keep_fingerprints=frozenset(fingerprints))
     return created
 
 

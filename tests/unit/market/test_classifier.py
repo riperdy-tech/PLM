@@ -148,3 +148,77 @@ def test_classification_is_cached_by_content_fingerprint_and_taxonomy_version(ma
     )
     assert (first_created, second_created, third_created) == (True, False, True)
     assert first_id == second_id != third_id  # §29: a new taxonomy version is a new row
+
+
+def _classify(title: str, description: str = "") -> dict:
+    return dict(RuleBasedClassifier().classify(
+        ClassificationInput(title=title, description=description)
+    ).dimensions)
+
+
+def test_phrases_match_whole_words_only() -> None:
+    # Substring matching read `chill` inside `chillstep` and `sleep` inside `sleepless`.
+    dims = _classify("Chillstep for sleepless coders")
+    assert D.ENERGY not in dims
+    assert "sleep" not in dims.get(D.USE_CASE, ())
+    assert dims[D.SUBGENRE] == ("deep_work_chillstep",)
+    assert _classify("lofi beats")[D.GENRE] == ("lofi",)  # a plural `s` still matches
+
+
+@pytest.mark.parametrize("phrase", [
+    "No Vocals", "without vocals", "vocal-free", "non-vocal", "no lyrics", "Instrumental",
+])
+def test_negated_vocals_read_as_instrumental(phrase: str) -> None:
+    assert _classify(f"Deep Focus Music | {phrase}")[D.VOCAL_MODE] == ("instrumental",)
+
+
+def test_vocal_phrases_still_read_as_vocal() -> None:
+    dims = _classify("R&B with female vocals")
+    assert dims[D.VOCAL_MODE] == ("vocal",)
+    assert dims[D.VOCAL_GENDER] == ("female",)
+
+
+def test_focus_electronic_titles_classify_into_the_channel_identity() -> None:
+    dims = _classify("Future Garage Mix for Deep Work | Coding Music", "no vocals")
+    assert dims[D.GENRE] == ("focus_electronic",)
+    assert dims[D.SUBGENRE] == ("future_garage_focus",)
+    assert dims[D.USE_CASE] == ("study_focus",)
+    assert dims[D.VOCAL_MODE] == ("instrumental",)
+    assert _classify("Programming Music — ambient techno")[D.GENRE] == ("focus_electronic",)
+    assert _classify("electronic workout").get(D.GENRE) is None  # bare "electronic" is EDM too
+
+
+@pytest.mark.parametrize(("phrase", "subgenre"), [
+    ("future garage", "future_garage_focus"),
+    ("atmospheric electronica", "soft_cyber_electronica"),
+    ("minimal electronic", "minimal_pulse"),
+    ("soft breakbeat", "ambient_breakbeat"),
+    ("downtempo", "downtempo_synth"),
+    ("chillstep", "deep_work_chillstep"),
+    ("retro-future", "restrained_retro_future"),
+    ("organic electronica", "organic_electronic"),
+    ("piano and synth", "piano_synth_concentration"),
+])
+def test_every_focus_sub_style_is_reachable_and_implies_its_genre(
+    phrase: str, subgenre: str,
+) -> None:
+    dims = _classify(f"{phrase} for focus")
+    assert dims[D.SUBGENRE] == (subgenre,)
+    assert dims[D.GENRE] == ("focus_electronic",)
+
+
+def test_a_named_genre_is_never_overridden_by_a_sub_style() -> None:
+    dims = _classify("Synthwave focus — retro future night")
+    assert dims[D.GENRE] == ("synthwave",)
+    assert dims[D.SUBGENRE] == ("restrained_retro_future",)
+
+
+def test_two_genres_resolve_deterministically_and_record_the_dropped_value() -> None:
+    # Before, a single-valued dimension naming two values failed validation and the
+    # whole video went unclassified.
+    draft = RuleBasedClassifier().classify(ClassificationInput(title="Lofi x R&B", description=""))
+    assert draft.dimensions[D.GENRE] == ("lofi",)  # the longer phrase wins
+    assert "conflict:genre:rnb" in draft.unmapped_terms
+    title_first = _classify("R&B Night Mix", "lofi beats and synthwave")
+    assert title_first[D.GENRE] == ("rnb",)  # the title outranks the description
+    assert _classify("synthwave lofi")[D.GENRE] == ("synthwave",)  # then the longer phrase

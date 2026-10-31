@@ -74,7 +74,11 @@ def collect_query(
     quarantined = 0
     error_classes: list[str] = []
     try:
-        page = connector.search_videos(query_text, max_results=settings.max_results_per_search)
+        page = connector.search_videos(
+            query_text, max_results=settings.max_results_per_search,
+            region_code=settings.search_region_code,
+            relevance_language=settings.search_relevance_language,
+        )
     except ConnectorError as exc:
         return CollectionRunSummary(run_id=run_id, raw_count=0, normalized_count=0,
                                     quarantined_count=0, error_classes=(exc.error_class.value,),

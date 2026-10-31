@@ -43,6 +43,10 @@ class MarketSettings:
     requests_per_second: float = 5.0
     max_pages_per_search: int = 2
     max_results_per_search: int = 10
+    # ADR-0044: English-first audience; search.list is biased to it. `None` omits the
+    # parameter, so an operator can widen the market without a code change.
+    search_region_code: str | None = "US"
+    search_relevance_language: str | None = "en"
     refresh_high_velocity_hours: float = 24.0
     refresh_normal_hours: float = 72.0
     freshness_fresh_hours: float = 48.0

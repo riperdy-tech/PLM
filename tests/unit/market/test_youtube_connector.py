@@ -57,6 +57,17 @@ def test_search_sends_the_documented_request_and_returns_raw_objects(mock_http) 
     assert hits[1].channel_title == "StudyLoops"
 
 
+def test_search_sends_region_and_language_only_when_given(mock_http) -> None:
+    mock_http.enqueue_json(load("search_lofi_p1.json")).enqueue_json(load("search_lofi_p1.json"))
+    active = connector(mock_http)
+    biased = active.search_videos("coding music", region_code="US", relevance_language="en")
+    plain = active.search_videos("coding music")
+    mock_http.assert_query_params(0, regionCode="US", relevanceLanguage="en")
+    assert mock_http.requests[1].param("regionCode") is None
+    assert mock_http.requests[1].param("relevanceLanguage") is None
+    assert biased.request_context_hash != plain.request_context_hash
+
+
 def test_pagination_follows_next_page_token_and_respects_max_pages(mock_http) -> None:
     mock_http.enqueue_json(load("search_lofi_p1.json")).enqueue_json(load("search_lofi_p2.json"))
     pages = list(connector(mock_http).iter_search_videos("lofi", max_results=2, max_pages=2))

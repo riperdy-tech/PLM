@@ -73,8 +73,8 @@ __all__ = [
     "load_queries", "load_run", "load_seed_evidence", "load_snapshot",
     "observation_classification_inputs", "observations_for_entities", "previous_snapshot",
     "quarantine_record", "resolve_entity", "scores_for_arm", "start_collection_run",
-    "sum_run_quota_units", "update_query_schedule", "upsert_arm", "upsert_query",
-    "upsert_source",
+    "sum_run_quota_units", "sync_seed_group_active", "update_query_schedule", "upsert_arm",
+    "upsert_query", "upsert_source",
 ]
 
 _ID_NAMESPACE: Final[UUID] = uuid5(NAMESPACE_URL, "plm:market:p1")
@@ -564,6 +564,34 @@ def upsert_query(
         proposal_confidence=getattr(proposal, "confidence", None),
     ))
     return query_id, True
+
+
+def sync_seed_group_active(
+    session: Session, *, source_id: str, seed_group: str, keep_fingerprints: frozenset[str],
+) -> int:
+    """Make one seed group's `active` flag follow its pack; returns how many were retired.
+
+    Rows of the group outside `keep_fingerprints` are deactivated, never deleted (their
+    observations stay evidence); rows inside it are active again if a past pack retired
+    them. Other groups (Stage B's `expanded`) are untouched.
+    """
+    in_group = (queries.c.source_id == source_id) & (queries.c.seed_group == seed_group)
+    retired = list(session.execute(
+        sa.select(queries.c.id).where(
+            in_group, queries.c.active.is_(True),
+            queries.c.query_fingerprint.not_in(keep_fingerprints),
+        )
+    ).scalars())
+    if retired:
+        session.execute(sa.update(queries).where(queries.c.id.in_(retired))
+                        .values(active=False, updated_at=sa.func.now()))
+    session.execute(
+        sa.update(queries)
+        .where(in_group, queries.c.active.is_(False),
+               queries.c.query_fingerprint.in_(keep_fingerprints))
+        .values(active=True, updated_at=sa.func.now())
+    )
+    return len(retired)
 
 
 def load_queries(

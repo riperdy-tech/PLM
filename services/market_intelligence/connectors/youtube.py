@@ -173,10 +173,14 @@ class YouTubeDataAPIConnector:
         max_results: int = 10,
         published_after: datetime | None = None,
         page_token: str | None = None,
+        region_code: str | None = None,
+        relevance_language: str | None = None,
     ) -> FetchResult:
+        # `regionCode`/`relevanceLanguage` bias results toward a market; `None` omits them.
         params: dict[str, Any] = {
             "part": "snippet", "type": "video", "q": query, "maxResults": max_results,
-            "pageToken": page_token,
+            "pageToken": page_token, "regionCode": region_code,
+            "relevanceLanguage": relevance_language,
             "publishedAfter": published_after.astimezone(UTC).isoformat()
             if published_after else None,
         }
