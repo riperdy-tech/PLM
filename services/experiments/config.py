@@ -10,7 +10,12 @@ from dataclasses import dataclass
 
 from plm_platform.config import Settings
 
-__all__ = ["MANUAL_SUPPLY_VAR", "ExperimentsSettings", "load_experiments_settings"]
+__all__ = [
+    "MANUAL_SUPPLY_VAR",
+    "MANUAL_TRACK_SECONDS",
+    "ExperimentsSettings",
+    "load_experiments_settings",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +32,11 @@ class ExperimentsSettings:
 
 
 MANUAL_SUPPLY_VAR = "PLM_EXPERIMENTS_MANUAL_SUPPLY"
+
+MANUAL_TRACK_SECONDS = (90, 300)
+"""Per-song range P5 enforces under manual supply. Suno sets each song's length and the
+import is unedited, so the genome's narrow range would reject usable songs; P6 still
+fits the playlist to its declared range by choosing tracks (owner, 2026-10-31)."""
 
 
 def load_experiments_settings(

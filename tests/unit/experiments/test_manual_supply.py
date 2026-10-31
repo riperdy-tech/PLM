@@ -60,3 +60,26 @@ def test_manual_supply_package_asks_one_candidate_per_track() -> None:
     assert {spec.candidate_target for spec in manual.track_specs} == {1}
     assert {spec.candidate_target for spec in default.track_specs} == {2}
     assert len(manual.track_specs) == len(default.track_specs)
+
+
+def test_manual_supply_package_widens_the_per_song_range_only() -> None:
+    from plm_contracts.seams.c3 import DurationRangeSeconds
+
+    from services.experiments.config import MANUAL_TRACK_SECONDS
+
+    directive, genome = _setup()
+    exp = design_experiment(directive, genome, seed=7, created_at=FIXED_NOW, control_only=True)
+    validated = promote_to_validated(exp, validate_experiment(exp, genome))
+    wide = DurationRangeSeconds(min_seconds=MANUAL_TRACK_SECONDS[0],
+                                max_seconds=MANUAL_TRACK_SECONDS[1])
+
+    manual = materialize_package(validated, validated.treatments[0], genome,
+                                 track_duration_range=wide, created_at=FIXED_NOW)
+    default = materialize_package(validated, validated.treatments[0], genome,
+                                  created_at=FIXED_NOW)
+
+    assert {spec.duration_range for spec in manual.track_specs} == {wide}
+    assert {spec.duration_range for spec in default.track_specs} != {wide}
+    # The plan is unchanged: same requested length, same track count.
+    assert [s.requested_duration for s in manual.track_specs] == [
+        s.requested_duration for s in default.track_specs]

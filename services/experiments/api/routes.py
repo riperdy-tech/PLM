@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.idempotency import (
     IDEMPOTENCY_KEY_HEADER,
@@ -26,7 +27,7 @@ from plm_platform.idempotency import (
 )
 from sqlalchemy.orm import Session
 
-from ..config import ExperimentsSettings
+from ..config import MANUAL_TRACK_SECONDS, ExperimentsSettings
 from ..domain.enums import ExperimentStatus
 from ..domain.errors import (
     ExperimentStateError,
@@ -337,6 +338,9 @@ def build_router(
                     brand_id=req.brand_id,
                     budget_envelope=req.budget_envelope,
                     candidate_target=1 if settings.manual_supply else 2,
+                    track_duration_range=(DurationRangeSeconds(
+                        min_seconds=MANUAL_TRACK_SECONDS[0], max_seconds=MANUAL_TRACK_SECONDS[1])
+                        if settings.manual_supply else None),
                 )
             except ExperimentStateError as err:
                 raise HTTPException(status_code=409, detail=err.error.model_dump()) from err
