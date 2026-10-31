@@ -42,6 +42,7 @@ from .config import PipelineConfig
 from .http_outcome import OutcomeSteps
 from .http_release import ReleaseSteps
 from .phase_client import (
+    MANUAL_AUDIO_HOLD_REASON,
     ExternalWriteRefused,
     PhaseClient,
     PhaseRequestFailed,
@@ -247,7 +248,9 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         P4's guard decides each generation (``music.generate``); its receipts come back
         on the execute answer as ``external_writes`` and are tagged with the P3 package.
         An execute answer without them is recorded as an ``unreported`` write, whose
-        cost is then unknown (never zero).
+        cost is then unknown (never zero). A plan waiting for the owner's Suno files does
+        not stop the others: every plan is executed (so every prompt sheet is written),
+        then the first wait is raised and holds the run as ``MANUAL_AUDIO_AWAITED``.
         """
         key = request.idempotency_key
         policy = require(request.inputs, "policy_check", "generate inputs")
@@ -264,6 +267,7 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         # completion. A partial plan may retain useful audio in P4, but must
         # not be mistaken for successful completion of the generating step.
         pending_exports: list[str] = []
+        awaiting: list[ExternalWriteRefused] = []
         for package_id in package_ids:
             package = p3.get(f"/experiments/v1/packages/{package_id}", idempotency_key=key)
             for spec in require(package, "track_specs", f"P3 package {package_id}"):
@@ -275,8 +279,14 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 plan_id = str(require(plan, "plan_id", "P4 plan"))
                 plans.append(plan_id)
                 execute_key = request_key(key, "execute", plan_id)
-                run = p4.post(f"/music/plans/{plan_id}/execute", idempotency_key=execute_key,
-                              body=spec)
+                try:
+                    run = p4.post(f"/music/plans/{plan_id}/execute",
+                                  idempotency_key=execute_key, body=spec)
+                except ExternalWriteRefused as refusal:
+                    if refusal.hold_reason_code != MANUAL_AUDIO_HOLD_REASON:
+                        raise
+                    awaiting.append(refusal)
+                    continue
                 writes = run.get("external_writes")
                 missing_receipt = not isinstance(writes, list) or not writes
                 receipt_keys: set[tuple[str, str]] = set()
@@ -362,6 +372,8 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     pending_exports.append(candidate_id)
                     candidates.append(candidate_id)
                     by_package.setdefault(str(package_id), []).append(candidate_id)
+        if awaiting:
+            raise awaiting[0]
         for n, plan_id in enumerate(plans):
             provider_ids[f"plan.{n}"] = plan_id
         for n, candidate_id in enumerate(candidates):

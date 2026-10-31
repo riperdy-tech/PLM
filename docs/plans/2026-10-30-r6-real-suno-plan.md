@@ -71,3 +71,27 @@ suno.com/terms, read the same day (not legal advice):
 So D10 is open: the owner must choose between accepting that risk, or making songs
 in Suno's own interface and having PLM import the downloaded files (no import path
 exists yet).
+
+## D10 decision and import path (2026-10-31)
+
+Owner: make the songs on Suno, with PLM giving the prompts ("PLM gives me prompts"), so
+P3's choice of what to make and the learning loop stay intact. Built
+(`services/music_factory/providers/suno_manual.py`):
+
+- `PLM_SUNO_MANUAL_INBOX` plus `PLM_PROVIDER_MODE__MUSIC=real` selects `suno_manual`;
+  the automated client is not used.
+- Executing a plan writes `<inbox>/<track_spec_id>.prompts.txt` (file name, styles,
+  length, instrumental or not, prompt) and waits until every song still needed is in the
+  inbox as a PCM WAV, plus `<name>.lyrics.txt` for vocal tracks. Nothing is imported
+  while any is missing, unreadable, or a duplicate of another.
+- The wait answers 409 `manual_audio_awaited` (not stored under the idempotency key);
+  the pipeline executes every plan first, then holds as `MANUAL_AUDIO_AWAITED`
+  (production owner, evidence `manual_audio_inbox_ref`). Clearing it retries the step.
+- An import is a guarded write, `music.import`: LIVE policy, an owner grant and a ledger
+  rate (0 is fine). It is recorded as provider `suno`, model `suno-web-manual`, job id
+  `manual:<sha256>`, model version `PLM_SUNO_MODEL_VERSION`, and rights from
+  `PLM_SUNO_PLAN_TIER` + `PLM_SUNO_ACCOUNT_REF` (none without both). P28
+  `human_contribution` states the owner made and chose the song.
+
+Not yet proven: a real Suno WAV download through P5, and the hold on a real Temporal
+run. The owner's tier (Pro or Premier) is still to be declared.

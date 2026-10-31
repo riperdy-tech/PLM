@@ -42,6 +42,7 @@ __all__ = [
     "AUTHORIZATION_HOLD_REASON",
     "BUDGET_HOLD_REASON",
     "EXTERNAL_WRITE_CODE_PREFIX",
+    "MANUAL_AUDIO_HOLD_REASON",
     "UNCLASSIFIED_WRITE_HOLD_REASON",
     "ExternalWriteRefused",
     "PhaseClient",
@@ -61,6 +62,8 @@ EXTERNAL_WRITE_CODE_PREFIX: Final[str] = "external_write_"
 
 BUDGET_HOLD_REASON: Final[str] = "BUDGET_RESERVATION_REFUSED"
 AUTHORIZATION_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_NOT_AUTHORIZED"
+MANUAL_AUDIO_HOLD_REASON: Final[str] = "MANUAL_AUDIO_AWAITED"
+"""P4 waits for songs the owner makes on suno.com (reason ``manual_audio_awaited``)."""
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 """Not in the hold policy on purpose: a guard reason nobody declared holds as an
 unmapped hard stop (fail closed, ``policy_mapped = False``)."""
@@ -133,6 +136,8 @@ class ExternalWriteRefused(PhaseRequestRefused):
             self.hold_reason_code = BUDGET_HOLD_REASON
         elif self.guard_reason in _AUTHORIZATION_REASONS:
             self.hold_reason_code = AUTHORIZATION_HOLD_REASON
+        elif self.guard_reason == "manual_audio_awaited":
+            self.hold_reason_code = MANUAL_AUDIO_HOLD_REASON
         else:
             self.hold_reason_code = UNCLASSIFIED_WRITE_HOLD_REASON
 

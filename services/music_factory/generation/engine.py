@@ -17,6 +17,11 @@ verified REAL-provider job ID cannot become an exportable candidate.
 already succeeded: its stored candidate is reused, attempt numbering continues after the
 stored attempts, and the plan's attempt budget counts them.
 
+**An adapter can wait for input (D10).** An adapter with ``awaiting_audio`` (the owner's
+Suno imports) is asked first what every variant still to run is missing; while anything is,
+no attempt is made, no guard is asked, and the result lists it in ``awaiting_audio``. Its
+``write_capability`` replaces ``music.generate`` in the guard.
+
 **A paid call stays on record (B03/B04).** With a ``checkpoint`` (the API and CLI pass the
 session's commit), a REAL call's SUBMITTED attempt is made durable before the call and its
 outcome, with the provider job ID, right after it. A later failure in the same request can
@@ -118,6 +123,26 @@ def _record_outcome(session: Session, attempt: GenerationAttempt,
         raise
 
 
+def _request(plan: GenerationPlan, spec: AdaptedTrackSpec, prompt_obj: Any,
+             adapter: MusicProviderProtocol, *, seed: int) -> GenerationRequest:
+    """The provider request for one variant's prompt."""
+    return GenerationRequest(
+        experiment_id=plan.experiment_id,
+        track_spec_id=plan.track_spec_id,
+        prompt=prompt_obj.prompt,
+        negative_prompt=prompt_obj.negative_prompt,
+        duration_seconds=spec.requested_duration,
+        bpm=prompt_obj.effective_bpm,
+        vocal_mode=spec.vocal_mode,
+        language=spec.language,
+        genre=prompt_obj.effective_genre,
+        style_tags=prompt_obj.style_tags,
+        seed=seed,
+        provider_id=adapter.provider_id,
+        model_id=adapter.model_id,
+    )
+
+
 def _prior_paid_credit_refusal(
     attempts: list[GenerationAttempt], credit_limit: float,
 ) -> str | None:
@@ -160,6 +185,8 @@ class GenerationEngineResult:
     stopped_decision: GuardDecision | None = None
     write_decisions: list[GuardDecision] = field(default_factory=list)
     """Every write-guard decision this run made, one per provider call considered."""
+    awaiting_audio: list[str] = field(default_factory=list)
+    """What an input-waiting adapter still needs; non-empty means nothing was attempted."""
 
 
 class GenerationEngine:
@@ -327,6 +354,30 @@ class GenerationEngine:
         )
         if unresolved_live_job:
             errors.append("provider_job_reconciliation_required")
+        capability = getattr(adapter, "write_capability", GENERATE_CAPABILITY)
+
+        awaiting_audio = getattr(adapter, "awaiting_audio", None)
+        if awaiting_audio is not None and not unresolved_live_job:
+            pending = [
+                v for v in variants
+                if not any(a.creative_variant_id == v.variant_id
+                           and a.status is AttemptStatus.SUCCEEDED
+                           and a.attempt_id in stored_candidates for a in stored_attempts)
+            ][:max(plan.candidate_target - len(stored_candidates), 0)]
+            try:
+                requests = [
+                    _request(plan, spec, build_generation_prompt(
+                        spec, variant_delta=v.prompt_delta), adapter, seed=0)
+                    for v in pending
+                ]
+            except ProtectedArtistPromptRefused:
+                requests = []  # the loop below refuses the plan
+            missing = awaiting_audio(requests)
+            if missing:
+                return GenerationEngineResult(
+                    plan_id=plan.plan_id, status=PlanStatus.RUNNING,
+                    errors=[*errors, "manual_audio_awaited"], awaiting_audio=missing,
+                )
 
         for var_idx, variant in enumerate(variants):
             if (candidate_count >= plan.candidate_target
@@ -383,21 +434,7 @@ class GenerationEngine:
                     submitted_at=self.clock.now(),
                 )
 
-                gen_req = GenerationRequest(
-                    experiment_id=plan.experiment_id,
-                    track_spec_id=plan.track_spec_id,
-                    prompt=prompt_obj.prompt,
-                    negative_prompt=prompt_obj.negative_prompt,
-                    duration_seconds=spec.requested_duration,
-                    bpm=prompt_obj.effective_bpm,
-                    vocal_mode=spec.vocal_mode,
-                    language=spec.language,
-                    genre=prompt_obj.effective_genre,
-                    style_tags=prompt_obj.style_tags,
-                    seed=current_seed,
-                    provider_id=adapter.provider_id,
-                    model_id=adapter.model_id,
-                )
+                gen_req = _request(plan, spec, prompt_obj, adapter, seed=current_seed)
 
                 mode = provider_mode_of(adapter)
                 # The global ledger does not enforce this plan's own ceilings.
@@ -418,12 +455,14 @@ class GenerationEngine:
                         plan_refusal = "plan_money_budget_exhausted"
                     elif plan.credit_limit <= 0:
                         plan_refusal = "plan_credit_budget_exhausted"
-                    else:
+                    elif capability == GENERATE_CAPABILITY:
+                        # An import spends no provider credits through PLM (the owner
+                        # spent them in Suno's interface), so only generation is braked.
                         plan_refusal = _prior_paid_credit_refusal(
                             [*stored_attempts, *attempts], plan.credit_limit,
                         )
                 decision = self.write_guard.authorize_external_write(
-                    GENERATE_CAPABILITY,
+                    capability,
                     provider_mode=mode,
                     idempotency_key=att_id,
                     cost_estimate=None,  # credits are not money: ledger rate card prices it
@@ -434,7 +473,7 @@ class GenerationEngine:
                 if not decision.decision.may_call_provider:
                     stopped = decision
                     errors.append(
-                        f"{GENERATE_CAPABILITY} not performed for {att_id}: "
+                        f"{capability} not performed for {att_id}: "
                         f"{decision.decision.value} ({decision.reason})"
                     )
                     break

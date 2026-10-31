@@ -257,6 +257,10 @@ def get_provider_adapter(
             model_id=model_id or "chirp-v3-5",
             api_key=api_key,
         )
+    elif clean_id == "suno_manual":
+        from .suno_manual import SunoManualAdapter, load_suno_manual_settings
+
+        return SunoManualAdapter(load_suno_manual_settings())
     elif clean_id in ("elevenlabs", "eleven_labs"):
         return ElevenLabsAdapter(
             provider_id="elevenlabs",

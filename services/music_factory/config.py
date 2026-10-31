@@ -34,10 +34,14 @@ def load_music_factory_settings(
     return MusicFactorySettings(platform=platform, **overrides)  # type: ignore[arg-type]
 
 
-def default_provider_for(execution: ExecutionSettings) -> str:
+def default_provider_for(execution: ExecutionSettings, *, manual_inbox: bool = False) -> str:
     """``PLM_PROVIDER_MODE__MUSIC=real`` selects Suno; anything else keeps the mock.
 
-    Selecting Suno does not let it run: each paid call still needs a LIVE policy, an
-    owner grant and a funded budget ceiling (``ExternalWriteGuard``).
+    With a manual inbox (``PLM_SUNO_MANUAL_INBOX``) real Suno means the owner's own
+    downloads (``suno_manual``), never the automated client. Selecting either does not let
+    it run: each call still needs a LIVE policy, an owner grant and a funded budget
+    ceiling (``ExternalWriteGuard``).
     """
-    return "suno" if execution.provider_mode("music") is ProviderMode.REAL else "mock"
+    if execution.provider_mode("music") is not ProviderMode.REAL:
+        return "mock"
+    return "suno_manual" if manual_inbox else "suno"

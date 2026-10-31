@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from ..domain.enums import ArtifactType, AttemptStatus, PlanStatus
 from ..generation.prompts import build_generation_prompt
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
+from ..providers.suno_manual import MANUAL_MODEL_ID
 from ..storage.repositories import (
     get_candidate,
     get_generation_attempt,
@@ -52,6 +53,12 @@ class CandidateExportError(ValueError):
 
 HUMAN_CONTRIBUTION = "none: fully automated generation; no human edits in P4"
 """P28 human_contribution for P4 output today: the pipeline has no human editing step."""
+
+MANUAL_HUMAN_CONTRIBUTION = (
+    "owner made the song on suno.com from the PLM prompt, chose one of Suno's clips and "
+    "downloaded it unedited; no human edits in P4"
+)
+"""P28 human_contribution of an imported owner-made Suno song (model ``suno-web-manual``)."""
 
 def build_candidate_ready_event(session: Session, candidate_id: str) -> CandidateReadyPayload:
     """Assemble the C4 event for one candidate from stored facts, or refuse."""
@@ -214,6 +221,7 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
             # P4 sends providers a prompt and settings only: no samples, stems, voice or
             # melody inputs. That is a declared fact, not a default.
             source_inputs=(),
-            human_contribution=HUMAN_CONTRIBUTION,
+            human_contribution=(MANUAL_HUMAN_CONTRIBUTION if attempt.model_id == MANUAL_MODEL_ID
+                                else HUMAN_CONTRIBUTION),
         ),
     )

@@ -7,7 +7,10 @@ Mutating routes (plan, execute, export) honour the ``Idempotency-Key`` header
 the same key with a different request is a 409 ``idempotency_key_reused``. Execute calls
 paid providers only through the write guard (R5): a guard refusal answers 409 in the
 platform convention, ``external_write_<decision>`` / ``"music.generate not performed:
-<reason>"``, with the guard's ``reason`` and the receipts.
+<reason>"``, with the guard's ``reason`` and the receipts. A plan waiting for the
+owner's Suno files answers 409 ``external_write_awaiting_input`` / ``"music.import not
+performed: manual_audio_awaited"`` with what is ``awaiting``; it is not recorded under the
+key, so the same execute imports once the files are there.
 """
 
 from collections.abc import Callable, Iterator
@@ -39,15 +42,12 @@ from ..candidates.bank import (
 )
 from ..config import MusicFactorySettings
 from ..domain.enums import CandidateStatus
-from ..generation.engine import (
-    GENERATE_CAPABILITY,
-    GenerationEngine,
-    GenerationPlanSpecMismatch,
-)
+from ..generation.engine import GenerationEngine, GenerationPlanSpecMismatch
 from ..generation.planner import GenerationPlanCapacityError, plan_generation
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
 from ..providers.registry import list_providers
+from ..providers.suno_manual import IMPORT_CAPABILITY
 from ..storage.artifacts import ArtifactStorageProtocol, ArtifactStorageUnavailable
 from ..storage.models import idempotency_records_table
 from ..storage.repositories import (
@@ -329,6 +329,19 @@ def build_router(
                 ).model_dump(),
             ) from exc
 
+        if result.awaiting_audio:
+            # Returned, not raised: a non-2xx answer is not recorded under the key.
+            return status.HTTP_409_CONFLICT, jsonable({"detail": {
+                **ErrorShape(
+                    code="external_write_awaiting_input",
+                    field_paths=[IMPORT_CAPABILITY],
+                    message=f"{IMPORT_CAPABILITY} not performed: manual_audio_awaited",
+                ).model_dump(),
+                "reason": "manual_audio_awaited",
+                "plan_id": plan_id,
+                "awaiting": result.awaiting_audio,
+            }})
+
         for attempt in result.attempts:
             metrics.record_attempt(
                 provider_id=attempt.provider_id,
@@ -352,8 +365,8 @@ def build_router(
                 # performed: <reason>" (the pipeline maps the reason to its hold).
                 **ErrorShape(
                     code=f"external_write_{decision.decision.value}",
-                    field_paths=[GENERATE_CAPABILITY],
-                    message=f"{GENERATE_CAPABILITY} not performed: {decision.reason}",
+                    field_paths=[decision.capability],
+                    message=f"{decision.capability} not performed: {decision.reason}",
                 ).model_dump(),
                 "reason": decision.reason,
                 "decision": decision.decision.value,

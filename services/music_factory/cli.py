@@ -19,6 +19,7 @@ from .generation.planner import plan_generation
 from .ingestion.p3_adapter import adapt_track_spec
 from .providers.adapters import get_provider_adapter
 from .providers.registry import list_providers
+from .providers.suno_manual import load_suno_manual_settings
 from .storage.artifacts import ArtifactStorageUnavailable, MinioArtifactStorage
 
 music_cli = typer.Typer(help="Music generation factory CLI commands")
@@ -117,7 +118,8 @@ def serve(host: str = "127.0.0.1", port: int = 8004) -> None:
     execution = load_execution_settings()
     settings = load_music_factory_settings(
         platform=load_settings(), host=host, port=port,
-        default_provider=default_provider_for(execution),
+        default_provider=default_provider_for(
+            execution, manual_inbox=load_suno_manual_settings().inbox is not None),
     )
     factory = platform_session_factory()
 
