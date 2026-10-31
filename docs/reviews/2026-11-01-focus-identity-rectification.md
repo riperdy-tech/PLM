@@ -84,9 +84,26 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | deferred: rename needs a data migration across schemas; done last |
 | B-2 | The real YouTube channel's display name | open: changing it is an external write and needs authorization |
 
+## Found during verification
+
+| ID | Item | Status |
+|---|---|---|
+| V-1 | First focus collection failed: `arm_slug_identity_conflict`, because v2 ids are batch-order slugs | fixed: 53abcdc, taxonomy v3 (digest ids) is the default |
+| V-2 | Old v1/v2 arms kept being served on their last scores | fixed: 83eaf55, recompute retires arms from other taxonomy namespaces |
+| V-3 | A `focus_electronic` arm with no use case was refused | fixed: 00d2b02 |
+| V-4 | All focus arms fall in one similarity cluster, so p2-v2's limit of 2 per cluster gives 2 directives per cycle, with the `ALL_SELECTED_ONE_CLUSTER` alert | not a defect: matches the planned cadence of 2 uploads a week; revisit when sub-style arms carry more evidence |
+
 ## Verification (2026-11-01)
 
-- The unit, contract, e2e and simulation suites pass (3551 passed; the run before the p2-v2 default had 3 failures, all pinned version strings, since updated). Postgres, MinIO and integration tests that need `DATABASE_URL` were not run.
+- Unit, contract, e2e and simulation suites: 3554 passed, 1 skipped. Postgres, MinIO and integration tests that need `DATABASE_URL` were not run.
 - The PLM containers were restarted on the new code and are healthy.
-- One shadow P2 cycle against live P1 data: 6 eligible, 2 selected, status partial. The 6 genre-less focus arms fall in one similarity cluster, and p2-v2 keeps the per-cluster limit of 2. Measured focus arms come from P1 collection with the new seeds.
+- P1 daily run (YouTube read calls only) with the focus seeds: 252 videos classified under v3, 26 of them focus_electronic. They formed 5 focus_electronic arms: deep_work_chillstep ×2, future_garage_focus ×2 and minimal_pulse. 64 v3 arms are served; all v1/v2 arms are retired.
+- Final shadow P2 cycle 65949721: 10 eligible, 2 selected, both genre-less study_focus arms, which P3 builds as focus_electronic. SHADOW, so not actionable.
 - No real album has been made yet. Templates, prompts and visuals are proven on fixtures and mocks only.
+
+## Still open
+
+- P4-2: a Lyria (Gemini API) adapter for 33+ tracks per video; each paid run needs authorization.
+- P5-1: audio detection of vocals, BPM and drops.
+- B-1: internal brand id rename. B-2: the real channel's display name (an external write).
+- P2-3: manual overrides are never read (not an identity conflict).
