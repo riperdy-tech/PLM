@@ -45,6 +45,34 @@ The identity does not change. The report's name ideas, nine sub-styles,
 70–110 BPM range, 90–120 minute format and two-a-week cadence are its
 proposals, not yet confirmed by the owner.
 
+## Amendment 2026-11-01: implementation decisions
+
+The owner ruled that every P1–P9 part conflicting with this identity is to be
+rectified without further approval, and that the open choices are decided by
+how well they serve the project target, not by preference. Decisions:
+
+1. **Sub-styles (P2 arms, P3 subgenres):** the report's nine:
+   `future_garage_focus`, `soft_cyber_electronica`, `minimal_pulse`,
+   `ambient_breakbeat`, `downtempo_synth`, `deep_work_chillstep`,
+   `restrained_retro_future`, `organic_electronic`,
+   `piano_synth_concentration`. They span the IN list without crossing into
+   OUT, and nine is inside the 6–12 the bandit needs.
+2. **Tempo 70–110 BPM on every track.** Below about 70 drifts into sleep and
+   ambient-drone territory (OUT). Above about 110 drifts into dance (OUT). Focus
+   listening wants a steady, subdued pulse.
+3. **Video length 90–120 min, replacing ADR-0036's 45–75 min for this brand.**
+   Focus won the revenue comparison only because awake listeners accept
+   mid-rolls, and ad load per view grows with length. 90–120 min matches one
+   deep-work block (the report's session unit) and builds watch hours toward the
+   8,000-hour bar about twice as fast per view as 45–75 min. Cost: about 33–44
+   tracks per video, so supply by hand is heavier. That is a production problem
+   to solve (API supply, with paid calls authorized per run), not a reason to cut
+   the revenue lever.
+4. **Which P1 arms P2 may pick:** use case `study_focus` or `focus`; genre in
+   the identity's genre set or unset; vocal mode not vocal. Everything else is
+   out of identity. That leaves 13 of today's 77 arms; the other 64 are blocked.
+   An arm with no use case measures a general market, not focus demand.
+
 ## Consequences
 
 - The held live run `b0eb2a4f-4850-5977-9beb-e609e4e11063` (19 vocal R&B
