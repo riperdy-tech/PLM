@@ -131,9 +131,14 @@ def _columns(snapshot: dict[str, Any]) -> dict[str, list[str]]:
     return {name: entry["columns"] for name, entry in snapshot["tables"].items()}
 
 
-def _preserved(before: dict[str, Any], settings: Settings) -> bool:
-    old = _snapshot(settings, _columns(before))
-    return bool(old["tables"] == before["tables"])
+VERSION_TABLE = '"public"."alembic_version"'  # its one row is meant to change
+
+
+def _changed(before: dict[str, Any], settings: Settings) -> list[str]:
+    """Tables whose pre-existing columns no longer hold the same rows."""
+    old = _snapshot(settings, _columns(before))["tables"]
+    return [name for name, entry in before["tables"].items()
+            if name != VERSION_TABLE and old[name] != entry]
 
 
 def _verify_clone(
@@ -166,8 +171,8 @@ def _verify_clone(
             raise RuntimeError("isolated restored backup differs from source baseline")
         print("clone_restore: every table matches the source", flush=True)
         _upgrade(Config(str(ROOT / "alembic.ini")), isolated, START, HEAD)
-        if not _preserved(before, isolated):
-            raise RuntimeError("isolated 0042 upgrade changed pre-existing data")
+        if changed := _changed(before, isolated):
+            raise RuntimeError(f"isolated 0042 upgrade changed pre-existing data: {changed}")
         after = _snapshot(isolated)
         _upgrade(Config(str(ROOT / "alembic.ini")), isolated, HEAD, HEAD)
         if _snapshot(isolated) != after:
@@ -256,7 +261,7 @@ def _apply(identifier: str) -> dict[str, Any]:
     finally:
         engine.dispose()
     observed = _snapshot(settings)
-    if observed != record["upgraded_clone_snapshot"] or not _preserved(before, settings):
+    if observed != record["upgraded_clone_snapshot"] or _changed(before, settings):
         raise RuntimeError("post-upgrade shared DB differs from verified upgraded clone")
     _save_json_once(folder / "post_upgrade_snapshot.json", observed)
     _save_json_once(folder / "applied.json", {
