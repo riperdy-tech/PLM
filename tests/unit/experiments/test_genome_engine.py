@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from plm_contracts.seams.c2 import ProductionDirectivePayload
 
 from services.experiments.domain.enums import VocalGender, VocalMode
 from services.experiments.domain.errors import GenomeBuildError
+from services.experiments.experiments.engine import design_experiment
 from services.experiments.genome.engine import (
     TEMPLATES_PATH,
     CreativeLatitudeEnvelope,
@@ -18,12 +20,15 @@ from services.experiments.genome.engine import (
     TemplateLibrary,
     TemplateLibraryError,
     TemplateNotFoundError,
+    brief_genre,
     build_genome_from_directive,
     default_template_library,
     normalize_dimension_value,
 )
 from services.experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
 from tests.support.seams import directive_fields
+
+FIXED_NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
 
 
 def _directive(brief: dict[str, Any]) -> AdaptedDirective:
@@ -84,10 +89,52 @@ def test_unknown_genre_is_refused_not_given_another_template() -> None:
     assert exc.value.error.field_paths == ["brief.genre"]
 
 
-def test_missing_genre_is_refused_not_defaulted_to_rnb() -> None:
+def _arm_directive(brief: dict[str, Any], directive_id: str) -> AdaptedDirective:
+    return adapt_directive(ProductionDirectivePayload.build(**directive_fields(
+        brief=brief, directive_id=directive_id)).to_wire())
+
+
+def test_missing_genre_is_inferred_from_the_use_case_and_spread() -> None:
+    picks = {build_genome_from_directive(_arm_directive(
+        {"use_case": ["study_focus"]}, f"dir_study_{n}")).genre for n in range(40)}
+    assert picks == {"lofi", "ambient", "jazz"}  # never one fixed default
+    drives = {build_genome_from_directive(_arm_directive(
+        {"use_case": ["late_night_drive"]}, f"dir_drive_{n}")).genre for n in range(40)}
+    assert drives == {"synthwave", "city_pop", "rnb"}
+    same = _arm_directive({"use_case": ["sleep"]}, "dir_same")
+    assert build_genome_from_directive(same).genre == build_genome_from_directive(same).genre
+
+
+def test_inferred_genre_is_recorded_on_the_experiment() -> None:
+    directive = _arm_directive({"mood": ["calm"]}, "dir_open")
+    genre, note = brief_genre(directive)
+    assert note == f"genre_inferred:{genre}:use_case=none"
+    named = _arm_directive({"genre": "lofi"}, "dir_named")
+    assert brief_genre(named) == ("lofi", None)
+    exp = design_experiment(directive, build_genome_from_directive(directive),
+                            created_at=FIXED_NOW)
+    assert note in exp.design_notes
+
+
+def test_a_library_without_inference_still_refuses_a_missing_genre() -> None:
+    raw = _raw_library()
+    del raw["brief_genre_inference"]
     with pytest.raises(GenomeBuildError) as exc:
-        build_genome_from_directive(_directive({"mood": ["calm"]}))
+        build_genome_from_directive(_directive({"mood": ["calm"]}),
+                                    library=TemplateLibrary(raw))
     assert exc.value.code == "genre_unspecified"
+
+
+def test_inference_may_only_name_genres_with_a_template() -> None:
+    raw = _raw_library()
+    raw["brief_genre_inference"]["open_brief"] = ["lofi", "polka"]
+    with pytest.raises(TemplateLibraryError, match="polka"):
+        TemplateLibrary(raw)
+
+
+def test_synthwave_and_deep_house_arms_have_templates() -> None:
+    assert build_genome_from_directive(_directive({"genre": "synthwave"})).genre == "synthwave"
+    assert build_genome_from_directive(_directive({"genre": "deep_house"})).genre == "house"
 
 
 def test_unset_brief_dimensions_use_the_template_not_the_string_none() -> None:

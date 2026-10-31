@@ -1,5 +1,5 @@
 {
-  "templates_version": "p3-genome-templates-v3",
+  "templates_version": "p3-genome-templates-v4",
   "playlist_duration_policy": {
     "default_bucket": "45_75m",
     "basis": "Owner decision 2026-10-15 (ADR-0036): a playlist video is 45-75 min. The default bucket's range is the policy range: a directive that names no duration_bucket gets it, and every template's and directive bucket's range must lie inside it (playlist_duration_outside_policy otherwise)."
@@ -14,7 +14,19 @@
     "city_pop": "city_pop_drive",
     "jazz": "jazz_cafe",
     "ambient": "ambient_drift",
-    "house": "deep_house_night"
+    "house": "deep_house_night",
+    "synthwave": "synthwave_neon"
+  },
+  "brief_genre_inference": {
+    "basis": "Owner decision 2026-10-31: a P1 arm whose brief names no genre is produced, not refused. P3 takes the arm's first use case listed here (with none, the open list), picks a genre from it by a stable hash of the directive id so repeated arms spread across genres, and records the inference on the experiment.",
+    "by_use_case": {
+      "sleep": ["ambient", "lofi", "jazz"],
+      "study_focus": ["lofi", "ambient", "jazz"],
+      "late_night_drive": ["synthwave", "city_pop", "rnb"],
+      "relax": ["lofi", "jazz", "ambient"],
+      "focus": ["ambient", "lofi", "synthwave"]
+    },
+    "open_brief": ["lofi", "ambient", "jazz", "synthwave", "city_pop", "rnb", "house"]
   },
   "templates": {
     "rnb_default": {
@@ -212,6 +224,38 @@
         "hook_profile": ["immediate", "slow_burn", "first_chorus"],
         "production_style": ["clean_modern", "analog_warm"],
         "lyric_density": ["minimal", "sparse"]
+      }
+    },
+    "synthwave_neon": {
+      "genre": "synthwave",
+      "subgenre": "retrowave",
+      "mood": ["dreamy", "nostalgic"],
+      "use_case": ["late_night_drive", "focus"],
+      "language": "instrumental",
+      "vocal_mode": "instrumental",
+      "vocal_gender": "none",
+      "energy": "medium",
+      "bpm": {"min_bpm": 85, "max_bpm": 110, "target_bpm": 96},
+      "key_profile": "A_minor",
+      "lyric_density": "instrumental",
+      "song_structure": "loop_progression",
+      "hook_profile": "instrumental_riff",
+      "instrumentation_profile": ["analog_poly_synth", "arpeggiated_synth_bass", "gated_reverb_drums"],
+      "production_style": "analog_warm",
+      "track_duration": {"min_seconds": 180, "max_seconds": 280, "target_seconds": 230},
+      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "visual_world": "neon_tokyo",
+      "visual_motion_profile": "city_motion",
+      "thumbnail_family": "vehicle_night_scene",
+      "title_archetype": "time_place_mood",
+      "alternatives": {
+        "visual_world": ["neon_tokyo", "night_highway", "neon_shopping_street", "night_rooftop"],
+        "visual_motion_profile": ["city_motion", "slow_parallax", "cinematic_loop"],
+        "thumbnail_family": ["vehicle_night_scene", "cinematic_city_wide", "minimal_typographic"],
+        "title_archetype": ["time_place_mood", "mood_context", "scene_duration"],
+        "hook_profile": ["instrumental_riff", "slow_burn", "atmospheric"],
+        "song_structure": ["loop_progression", "intro_verse_chorus", "ambient_evolving"],
+        "production_style": ["analog_warm", "clean_modern", "tape_saturated"]
       }
     }
   }

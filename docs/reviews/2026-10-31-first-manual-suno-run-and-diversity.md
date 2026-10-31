@@ -82,6 +82,25 @@ songs are measurably distinct (audio embeddings / listening review, QA-LISTEN).
   to fail at P3. This needs an owner decision (filter in P2, map genre-less arms in P3, or
   add templates) before the next album.
 
+## Producible arms (owner: "Map them in P3")
+
+Running P3's genome build over all 77 P1 arms (as P2 briefs them) found only 24 producible:
+23 named no genre (`genre_unspecified`), 13 were synthwave/deep house without a template,
+14 asked for `gt_75m` (unknown bucket) and 3 for `10_45m` (outside the 45–75 min policy).
+
+* Genre (templates v4): a brief with no genre takes it from its first use case
+  (`brief_genre_inference` in `genome_templates.json`; none: an open list of seven genres),
+  picked by a stable hash of the directive id so repeated arms spread across genres; the
+  experiment records `genre_inferred:<genre>:use_case=<case>`. New `synthwave_neon`
+  template; `deep_house` is an alias of `house`. A library without the table still refuses.
+* Result: 41 of 77 arms build (lofi 13, ambient 7, synthwave 7, city pop 7, R&B 5, jazz 2).
+  The other 36 fail only on duration. ADR-0036 and `playlist_duration_for_bucket` say an
+  unknown or out-of-policy bucket is "refused, never mapped or clamped", so mapping them
+  needs a separate owner decision.
+* Still open: only lofi has an album-contrast palette, so an ambient, synthwave, jazz,
+  city pop or R&B album keeps one key and one instrument set on every track; P6 does not
+  read `visual_world`, so an arm's visual world never reaches the video.
+
 ## Verification
 
 Full non-integration suite after the last code change: 3,430 passed, 1 skipped; Ruff and

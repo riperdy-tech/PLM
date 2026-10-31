@@ -24,6 +24,7 @@ is only the planning midpoint). The policy is the single source of a playlist ra
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -53,6 +54,7 @@ __all__ = [
     "TemplateLibraryError",
     "TemplateNotFoundError",
     "UnknownGenreError",
+    "brief_genre",
     "build_genome_from_directive",
     "default_template_library",
     "normalize_dimension_value",
@@ -67,6 +69,9 @@ ALIAS_MAP: Mapping[str, str] = {
     "hip hop": "hip_hop",
     "lo-fi": "lofi",
     "lo fi": "lofi",
+    # P1 names a house subgenre; P3's house template is the deep-house one.
+    "deep_house": "house",
+    "deep house": "house",
 }
 
 ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
@@ -149,6 +154,7 @@ class TemplateLibrary:
             raise TemplateLibraryError(f"template library is missing a section: {exc}") from exc
         if not self.version:
             raise TemplateLibraryError("templates_version must be non-empty")
+        self._inference = self._parse_inference(raw.get("brief_genre_inference"))
         self._buckets = self._parse_buckets(raw.get("playlist_duration_buckets", {}))
         self._policy = self._parse_policy(raw.get("playlist_duration_policy"))
         self._resolved: dict[str, GenreTemplate] = {}
@@ -171,6 +177,43 @@ class TemplateLibrary:
                     f"genre {genre!r} maps to template {name!r} of genre "
                     f"{self._resolved[name].genome.genre!r}"
                 )
+
+        for genres in [*self._inference.values()]:
+            unknown = [genre for genre in genres if genre not in self._genres]
+            if unknown:
+                raise TemplateLibraryError(f"brief_genre_inference names unknown genres {unknown}")
+
+    @staticmethod
+    def _parse_inference(raw: Any) -> dict[str, tuple[str, ...]]:
+        """``{use_case: genres}`` plus ``""`` for an open brief; absent means no inference."""
+        if raw is None:
+            return {}
+        try:
+            table = {str(k): tuple(str(g) for g in v) for k, v in raw["by_use_case"].items()}
+            table[""] = tuple(str(g) for g in raw["open_brief"])
+        except (KeyError, AttributeError, TypeError) as exc:
+            raise TemplateLibraryError(f"brief_genre_inference is malformed: {exc}") from exc
+        if any(not genres for genres in table.values()):
+            raise TemplateLibraryError("brief_genre_inference lists an empty genre set")
+        return table
+
+    def infer_genre(self, use_cases: tuple[str, ...], directive_id: str) -> tuple[str, str]:
+        """A genre for a brief that names none, and the note that records why.
+
+        The first use case with an entry decides the candidates (none: the open list); a
+        stable hash of the directive id picks one, so repeated arms spread across genres.
+        """
+        use_case = next((u for u in use_cases if u in self._inference), "")
+        candidates = self._inference.get(use_case)
+        if candidates is None:
+            raise GenomeBuildError(
+                "genre_unspecified",
+                "The directive brief names no genre and the templates declare no inference",
+                field_paths=["brief.genre"],
+            )
+        digest = hashlib.sha256(directive_id.encode("utf-8")).digest()
+        genre = candidates[int.from_bytes(digest[:4], "big") % len(candidates)]
+        return genre, f"genre_inferred:{genre}:use_case={use_case or 'none'}"
 
     @classmethod
     def from_file(cls, path: Path) -> TemplateLibrary:
@@ -401,28 +444,33 @@ def _token_tuple(dimension: str, value: Any) -> tuple[str, ...]:
     return tuple(normalize_dimension_value(dimension, str(item)) for item in items)
 
 
+def brief_genre(
+    directive: AdaptedDirective, *, library: TemplateLibrary | None = None
+) -> tuple[str, str | None]:
+    """The brief's genre, or one inferred from its use case (with the note recording it)."""
+    lib = library or default_template_library()
+    raw_genre = directive.brief.get("genre")
+    if _present(raw_genre):
+        return normalize_dimension_value("genre", str(raw_genre)), None
+    use_cases = (_token_tuple("use_case", directive.brief["use_case"])
+                 if _present(directive.brief.get("use_case")) else ())
+    return lib.infer_genre(use_cases, directive.directive_id)
+
+
 def build_genome_from_directive(
     directive: AdaptedDirective, *, library: TemplateLibrary | None = None
 ) -> ContentGenome:
     """Build the base genome: the genre's template, overridden where the brief is explicit.
 
-    The genre must be named in the brief and have a template; otherwise the directive is
-    refused (``genre_unspecified`` / ``unknown_genre``). Brief dimensions that are unset
+    A brief that names no genre gets one from its use case (:func:`brief_genre`, owner
+    decision 2026-10-31); a named genre without a template is refused (``unknown_genre``). Brief dimensions that are unset
     are open, so the template's default applies, except the playlist range: a named
     ``duration_bucket`` sets it to the bucket's declared range (inside the policy), and
     an open one to the policy range (ADR-0036).
     """
     lib = library or default_template_library()
     brief = directive.brief
-
-    raw_genre = brief.get("genre")
-    if not _present(raw_genre):
-        raise GenomeBuildError(
-            "genre_unspecified",
-            "The directive brief names no genre; P3 cannot choose a genome template",
-            field_paths=["brief.genre"],
-        )
-    genre = normalize_dimension_value("genre", str(raw_genre))
+    genre, _ = brief_genre(directive, library=lib)
     base = lib.for_genre(genre).genome
 
     updates: dict[str, Any] = {}

@@ -36,7 +36,12 @@ from ..domain.experiment import (
 )
 from ..domain.fingerprint import compute_genome_fingerprint
 from ..domain.measurement import build_default_measurement_plan
-from ..genome.engine import CreativeLatitudeEnvelope, TemplateLibrary, default_template_library
+from ..genome.engine import (
+    CreativeLatitudeEnvelope,
+    TemplateLibrary,
+    brief_genre,
+    default_template_library,
+)
 from ..storage.ids import experiment_id, treatment_id
 from .values import (
     RANDOMIZATION_ALGORITHM,
@@ -201,6 +206,9 @@ def design_experiment(
     else:
         overrides, notes = _one_factor_per_treatment(declared, candidates, variants)
 
+    _, inferred = brief_genre(directive, library=library)
+    if inferred is not None:  # the arm named no genre: record which one P3 chose
+        notes = [*notes, inferred]
     exp_id = experiment_id(
         directive.arm_id,
         directive.directive_id,
