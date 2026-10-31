@@ -18,6 +18,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,6 +27,7 @@ from alembic.config import Config
 from plm_platform.config import Env, Settings, load_settings
 from plm_platform.db import build_engine, database_url
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from tests.support.migration_isolated_rehearsal import (
     ROOT,
@@ -149,7 +151,15 @@ def _verify_clone(
         started = True
         target = "plm_migration_disposable_" + identifier.split("_")[-1]
         isolated = _target_settings(settings, port, password, target)
-        _create_database(isolated, target)
+        # The official image restarts once after initdb, even after pg_isready passed.
+        for attempt in range(20):
+            try:
+                _create_database(isolated, target)
+                break
+            except OperationalError:
+                if attempt == 19:
+                    raise
+                time.sleep(1)
         print("clone_stage: restoring archived database", flush=True)
         _restore(container, user, target, archive)
         if _snapshot(isolated) != before:
