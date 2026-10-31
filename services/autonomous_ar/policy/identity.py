@@ -42,13 +42,22 @@ class BrandIdentity:
     excluded_vocal_modes: frozenset[str]
 
     def admits(self, dims: ArmDimensions) -> bool:
-        """In identity: a focus use case, a focus (or unset) genre, and not excluded vocals."""
-        if not self.use_cases.intersection(dims.use_cases):
-            return False
-        if dims.genre is None or dims.genre in _UNSET:
+        """In identity: a focus use case, a focus (or unset) genre, and not excluded vocals.
+
+        An arm whose genre is one of the identity's own genres may leave its use case
+        unset (its genre already names the use); an unset genre needs the use case.
+        """
+        genre_unset = dims.genre is None or dims.genre in _UNSET
+        if genre_unset:
             if not self.allow_unset_genre:
                 return False
         elif dims.genre not in self.genres:
+            return False
+        use_cases = {u for u in dims.use_cases if u not in _UNSET}
+        if use_cases:
+            if not self.use_cases.intersection(use_cases):
+                return False
+        elif genre_unset:
             return False
         return dims.vocal_mode not in self.excluded_vocal_modes
 

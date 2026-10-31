@@ -52,6 +52,9 @@ def test_identity_admits_only_focus_use_case_focus_genre_and_no_vocals() -> None
     assert not admits(genre="lofi", use_case="study_focus"), "genre outside the identity"
     assert not admits(genre="ambient", use_case="sleep"), "use case outside the identity"
     assert not admits(genre="ambient", use_case="study_focus", vocal_mode="vocal")
+    assert admits(genre="focus_electronic", use_case="none"), "the genre names the use"
+    assert not admits(genre="none", use_case="none"), "no genre and no use case"
+    assert not admits(genre="focus_electronic", use_case="sleep")
     assert not replace(FOCUS, allow_unset_genre=False).admits(
         _arm("a", genre=None, use_case="focus").dimensions)
 
