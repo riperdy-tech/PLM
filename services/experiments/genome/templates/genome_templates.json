@@ -1,12 +1,13 @@
 {
-  "templates_version": "p3-genome-templates-v4",
+  "templates_version": "p3-genome-templates-v5",
   "playlist_duration_policy": {
-    "default_bucket": "45_75m",
-    "basis": "Owner decision 2026-10-15 (ADR-0036): a playlist video is 45-75 min. The default bucket's range is the policy range: a directive that names no duration_bucket gets it, and every template's and directive bucket's range must lie inside it (playlist_duration_outside_policy otherwise)."
+    "default_bucket": "90_120m",
+    "basis": "Owner decision 2026-10-15 (ADR-0036), amended 2026-11-01 (ADR-0044 decision 3): a playlist video is 90-120 min, one deep-work block. The default bucket's range is the policy range: a directive that names no duration_bucket gets it, and every template's and directive bucket's range must lie inside it (playlist_duration_outside_policy otherwise)."
   },
   "playlist_duration_buckets": {
     "10_45m": {"min_seconds": 600, "max_seconds": 2700, "target_seconds": 1650},
-    "45_75m": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600}
+    "45_75m": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+    "90_120m": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300}
   },
   "genre_templates": {
     "rnb": "rnb_late_night",
@@ -15,18 +16,35 @@
     "jazz": "jazz_cafe",
     "ambient": "ambient_drift",
     "house": "deep_house_night",
-    "synthwave": "synthwave_neon"
+    "synthwave": "synthwave_neon",
+    "focus_electronic": "focus_electronic_base"
+  },
+  "subgenre_templates": {
+    "basis": "ADR-0044 amendment 2026-11-01 decision 1: the brand's nine sub-styles. A brief whose subgenre is listed under its genre gets that sub-style's template; a brief with no subgenre, or one not listed, gets the genre's template (recorded on the experiment).",
+    "by_genre": {
+      "focus_electronic": {
+        "future_garage_focus": "focus_future_garage",
+        "soft_cyber_electronica": "focus_soft_cyber_electronica",
+        "minimal_pulse": "focus_minimal_pulse",
+        "ambient_breakbeat": "focus_ambient_breakbeat",
+        "downtempo_synth": "focus_downtempo_synth",
+        "deep_work_chillstep": "focus_deep_work_chillstep",
+        "restrained_retro_future": "focus_restrained_retro_future",
+        "organic_electronic": "focus_organic_electronic",
+        "piano_synth_concentration": "focus_piano_synth_concentration"
+      }
+    }
   },
   "brief_genre_inference": {
-    "basis": "Owner decision 2026-10-31: a P1 arm whose brief names no genre is produced, not refused. P3 takes the arm's first use case listed here (with none, the open list), picks a genre from it by a stable hash of the directive id so repeated arms spread across genres, and records the inference on the experiment.",
+    "basis": "Owner decision 2026-10-31: a P1 arm whose brief names no genre is produced, not refused. P3 takes the arm's first use case listed here (with none, the open list), picks a genre from it by a stable hash of the directive id so repeated arms spread across genres, and records the inference on the experiment. ADR-0044 (2026-11-01): the focus use cases infer only focus_electronic.",
     "by_use_case": {
       "sleep": ["ambient", "lofi", "jazz"],
-      "study_focus": ["lofi", "ambient", "jazz"],
+      "study_focus": ["focus_electronic"],
       "late_night_drive": ["synthwave", "city_pop", "rnb"],
       "relax": ["lofi", "jazz", "ambient"],
-      "focus": ["ambient", "lofi", "synthwave"]
+      "focus": ["focus_electronic"]
     },
-    "open_brief": ["lofi", "ambient", "jazz", "synthwave", "city_pop", "rnb", "house"]
+    "open_brief": ["focus_electronic", "lofi", "ambient", "jazz", "synthwave", "city_pop", "rnb", "house"]
   },
   "templates": {
     "rnb_default": {
@@ -46,7 +64,7 @@
       "instrumentation_profile": ["rhodes", "808_bass", "reverb_guitar"],
       "production_style": "warm_analog",
       "track_duration": {"min_seconds": 160, "max_seconds": 220, "target_seconds": 190},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "rainy_asian_city",
       "visual_motion_profile": "cinematic_drift",
       "thumbnail_family": "illustrated_lofi",
@@ -85,7 +103,7 @@
       "instrumentation_profile": ["dusty_rhodes", "vinyl_crackle", "sidechain_kick"],
       "production_style": "tape_saturated",
       "track_duration": {"min_seconds": 120, "max_seconds": 180, "target_seconds": 150},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "lofi_study_bedroom",
       "visual_motion_profile": "subtle_loop",
       "thumbnail_family": "anime_aesthetic",
@@ -117,7 +135,7 @@
       "instrumentation_profile": ["slap_bass", "synth_brass", "electric_piano"],
       "production_style": "analog_warm",
       "track_duration": {"min_seconds": 200, "max_seconds": 260, "target_seconds": 230},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "coastal_drive",
       "visual_motion_profile": "city_motion",
       "thumbnail_family": "vehicle_night_scene",
@@ -150,7 +168,7 @@
       "instrumentation_profile": ["upright_bass", "brushed_drums", "jazz_piano"],
       "production_style": "clean_modern",
       "track_duration": {"min_seconds": 180, "max_seconds": 280, "target_seconds": 230},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "sunrise_cafe",
       "visual_motion_profile": "static_ambient",
       "thumbnail_family": "interior_lifestyle",
@@ -181,7 +199,7 @@
       "instrumentation_profile": ["pad_layers", "granular_textures", "field_recordings"],
       "production_style": "cinematic",
       "track_duration": {"min_seconds": 240, "max_seconds": 420, "target_seconds": 330},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "misty_forest",
       "visual_motion_profile": "static_ambient",
       "thumbnail_family": "minimal_typographic",
@@ -211,7 +229,7 @@
       "instrumentation_profile": ["four_on_floor_kick", "deep_bass", "warm_synth"],
       "production_style": "clean_modern",
       "track_duration": {"min_seconds": 240, "max_seconds": 360, "target_seconds": 300},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "night_rooftop",
       "visual_motion_profile": "city_motion",
       "thumbnail_family": "cinematic_city_wide",
@@ -243,7 +261,7 @@
       "instrumentation_profile": ["analog_poly_synth", "arpeggiated_synth_bass", "gated_reverb_drums"],
       "production_style": "analog_warm",
       "track_duration": {"min_seconds": 180, "max_seconds": 280, "target_seconds": 230},
-      "playlist_duration": {"min_seconds": 2700, "max_seconds": 4500, "target_seconds": 3600},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
       "visual_world": "neon_tokyo",
       "visual_motion_profile": "city_motion",
       "thumbnail_family": "vehicle_night_scene",
@@ -257,6 +275,147 @@
         "song_structure": ["loop_progression", "intro_verse_chorus", "ambient_evolving"],
         "production_style": ["analog_warm", "clean_modern", "tape_saturated"]
       }
+    },
+    "focus_electronic_base": {
+      "genre": "focus_electronic",
+      "subgenre": null,
+      "mood": ["focused", "calm"],
+      "use_case": ["study_focus", "focus"],
+      "language": "instrumental",
+      "vocal_mode": "instrumental",
+      "vocal_gender": "none",
+      "energy": "low",
+      "bpm": {"min_bpm": 80, "max_bpm": 100, "target_bpm": 90},
+      "bpm_limits": {"min_bpm": 70, "max_bpm": 110},
+      "key_profile": "D_minor",
+      "lyric_density": "instrumental",
+      "song_structure": "loop_progression",
+      "hook_profile": "atmospheric",
+      "instrumentation_profile": ["muted_synth_pluck", "soft_analog_pad", "soft_electronic_drums", "warm_sub_bass"],
+      "production_style": "clean_modern",
+      "track_duration": {"min_seconds": 150, "max_seconds": 270, "target_seconds": 210},
+      "playlist_duration": {"min_seconds": 5400, "max_seconds": 7200, "target_seconds": 6300},
+      "visual_world": "minimal_desk_monolith",
+      "visual_motion_profile": "slow_parallax",
+      "thumbnail_family": "minimal_typographic",
+      "title_archetype": "activity_genre",
+      "alternatives": {
+        "visual_world": ["minimal_desk_monolith", "architect_studio_night", "drafting_table_dawn", "observatory_workspace", "server_hall_glow", "circuit_grid_abstract", "blueprint_hall"],
+        "visual_motion_profile": ["slow_parallax", "static_ambient", "subtle_loop"],
+        "thumbnail_family": ["minimal_typographic", "interior_lifestyle"],
+        "title_archetype": ["activity_genre", "mood_context", "scene_duration"],
+        "hook_profile": ["atmospheric", "instrumental_riff", "slow_burn"],
+        "song_structure": ["loop_progression", "ambient_evolving"],
+        "production_style": ["clean_modern", "analog_warm", "minimalist"]
+      }
+    },
+    "focus_future_garage": {
+      "parent": "focus_electronic_base",
+      "subgenre": "future_garage_focus",
+      "visual_world": "observatory_workspace",
+      "energy": "low",
+      "bpm": {"min_bpm": 84, "max_bpm": 96, "target_bpm": 90},
+      "key_profile": "F_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "atmospheric",
+      "instrumentation_profile": ["airy_synth_pad", "pitched_synth_chops", "shuffled_soft_garage_drums", "reese_sub_bass"],
+      "production_style": "deep_reverb_spacious"
+    },
+    "focus_soft_cyber_electronica": {
+      "parent": "focus_electronic_base",
+      "subgenre": "soft_cyber_electronica",
+      "visual_world": "circuit_grid_abstract",
+      "energy": "medium",
+      "bpm": {"min_bpm": 92, "max_bpm": 104, "target_bpm": 98},
+      "key_profile": "E_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "instrumental_riff",
+      "instrumentation_profile": ["glassy_fm_synth", "digital_pad", "soft_glitch_percussion", "pulsing_sub_bass"],
+      "production_style": "crisp_digital"
+    },
+    "focus_minimal_pulse": {
+      "parent": "focus_electronic_base",
+      "subgenre": "minimal_pulse",
+      "visual_world": "blueprint_hall",
+      "energy": "medium",
+      "bpm": {"min_bpm": 96, "max_bpm": 108, "target_bpm": 102},
+      "key_profile": "A_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "instrumental_riff",
+      "instrumentation_profile": ["sequenced_synth_pluck", "filtered_pad", "muted_kick_pulse", "soft_shaker"],
+      "production_style": "minimalist"
+    },
+    "focus_ambient_breakbeat": {
+      "parent": "focus_electronic_base",
+      "subgenre": "ambient_breakbeat",
+      "visual_world": "architect_studio_night",
+      "energy": "medium",
+      "bpm": {"min_bpm": 86, "max_bpm": 98, "target_bpm": 92},
+      "key_profile": "D_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "atmospheric",
+      "instrumentation_profile": ["echo_electric_guitar", "ambient_synth_pad", "soft_breakbeat_drums", "rolling_sub_bass"],
+      "production_style": "warm_spacious"
+    },
+    "focus_downtempo_synth": {
+      "parent": "focus_electronic_base",
+      "subgenre": "downtempo_synth",
+      "visual_world": "drafting_table_dawn",
+      "energy": "low",
+      "bpm": {"min_bpm": 78, "max_bpm": 90, "target_bpm": 84},
+      "key_profile": "C_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "slow_burn",
+      "instrumentation_profile": ["analog_poly_synth", "string_pad", "downtempo_drums", "round_synth_bass"],
+      "production_style": "analog_warm"
+    },
+    "focus_deep_work_chillstep": {
+      "parent": "focus_electronic_base",
+      "subgenre": "deep_work_chillstep",
+      "visual_world": "observatory_workspace",
+      "energy": "low",
+      "bpm": {"min_bpm": 70, "max_bpm": 80, "target_bpm": 74},
+      "key_profile": "G_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "slow_burn",
+      "instrumentation_profile": ["lush_synth_pad", "felt_piano", "half_time_soft_drums", "smooth_sub_bass"],
+      "production_style": "smooth_wide"
+    },
+    "focus_restrained_retro_future": {
+      "parent": "focus_electronic_base",
+      "subgenre": "restrained_retro_future",
+      "visual_world": "server_hall_glow",
+      "energy": "low",
+      "bpm": {"min_bpm": 88, "max_bpm": 100, "target_bpm": 94},
+      "key_profile": "A_minor",
+      "song_structure": "loop_progression",
+      "hook_profile": "instrumental_riff",
+      "instrumentation_profile": ["warm_analog_arpeggio", "chorus_pad", "soft_gated_drums", "analog_synth_bass"],
+      "production_style": "analog_warm"
+    },
+    "focus_organic_electronic": {
+      "parent": "focus_electronic_base",
+      "subgenre": "organic_electronic",
+      "visual_world": "drafting_table_dawn",
+      "energy": "medium",
+      "bpm": {"min_bpm": 90, "max_bpm": 102, "target_bpm": 96},
+      "key_profile": "G_major",
+      "song_structure": "loop_progression",
+      "hook_profile": "atmospheric",
+      "instrumentation_profile": ["kalimba", "granular_pad", "hand_percussion", "warm_sub_bass"],
+      "production_style": "organic_warm"
+    },
+    "focus_piano_synth_concentration": {
+      "parent": "focus_electronic_base",
+      "subgenre": "piano_synth_concentration",
+      "visual_world": "minimal_desk_monolith",
+      "energy": "low",
+      "bpm": {"min_bpm": 72, "max_bpm": 84, "target_bpm": 78},
+      "key_profile": "Eb_major",
+      "song_structure": "ambient_evolving",
+      "hook_profile": "slow_burn",
+      "instrumentation_profile": ["felt_piano", "soft_synth_pad", "minimal_electronic_drums", "warm_sub_bass"],
+      "production_style": "intimate_clean"
     }
   }
 }

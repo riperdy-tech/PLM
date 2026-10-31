@@ -84,7 +84,8 @@ def build_directives(portfolio: Portfolio, *, cycle_id: str, policy: PolicyConfi
             priority=position,
             quantity=1,
             brief=DirectiveBrief(
-                genre=arm.dimensions.genre, mood=arm.dimensions.moods,
+                genre=arm.dimensions.genre, subgenre=arm.dimensions.subgenre,
+                mood=arm.dimensions.moods,
                 use_case=arm.dimensions.use_cases, language=arm.dimensions.language,
                 vocal_mode=arm.dimensions.vocal_mode,
                 duration_bucket=arm.dimensions.duration_bucket,

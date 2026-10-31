@@ -23,7 +23,7 @@ def test_album_tracks_have_distinct_arrangement_briefs_and_provider_prompts() ->
     directions = [spec.creative_latitude["track_arrangement"] for spec in package.track_specs]
     assert directions == [spec.creative_latitude["track_arrangement"] for spec in replay.track_specs]
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions[:8]}) == 8
-    assert all(d["policy_version"] == "p3-album-contrast-v5" for d in directions)
+    assert all(d["policy_version"] == "p3-album-contrast-v6" for d in directions)
     # Every planned track, not just the first eight, must receive a different
     # rhythmic+melodic pairing. The former eight-pattern cycle reused briefs.
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions}) == len(directions)
@@ -182,3 +182,36 @@ def test_every_template_genre_has_a_palette_that_varies_without_lockstep() -> No
                     assert not d["rhythmic_feel"].startswith(("half-time", "no drums"))
     ambient = [arrangement_direction("pkg_a", i, (), genre="ambient") for i in range(23)]
     assert "very_low" in {d["energy"] for d in ambient}  # calm rule never lifts it to low
+
+
+def test_focus_sub_style_albums_vary_inside_the_identity() -> None:
+    """ADR-0044: each of the nine sub-styles keeps its own instruments, a 23-track album
+    still rotates (>= 6 keys and leads), and nothing out of identity is named."""
+    from services.experiments.genome.engine import default_template_library
+    from services.experiments.materialization.arrangements import (
+        _GENRE_PALETTES,
+        _SUBGENRE_PALETTES,
+        is_melodic,
+    )
+
+    library = default_template_library()
+    banned = ("vinyl", "crackle", "trap", "808", "neon", "vocal", "choir")
+    palettes = [_GENRE_PALETTES["focus_electronic"],
+                *(_SUBGENRE_PALETTES[s] for s in library.subgenres("focus_electronic"))]
+    for palette in palettes:
+        for values in palette.values():
+            assert not any(word in value for value in values for word in banned), values
+    assert set(_GENRE_PALETTES["focus_electronic"]["energy"]) <= {"low", "medium"}
+    lead_sets = set()
+    for sub_style in library.subgenres("focus_electronic"):
+        genome = library.for_subgenre("focus_electronic", sub_style).genome
+        tracks = [arrangement_direction("pkg_focus", i, genome.instrumentation_profile,
+                                        genre="focus_electronic", subgenre=sub_style)
+                  for i in range(23)]
+        assert all(d["subgenre"] == sub_style for d in tracks)
+        assert len({d["key_profile"] for d in tracks}) >= 6, sub_style
+        assert len({d["lead_instrument"] for d in tracks}) >= 6, sub_style
+        assert all(is_melodic(d["lead_instrument"]) for d in tracks), sub_style
+        assert {d["energy"] for d in tracks} <= {"low", "medium"}, sub_style
+        lead_sets.add(frozenset(d["lead_instrument"] for d in tracks))
+    assert len(lead_sets) == 9

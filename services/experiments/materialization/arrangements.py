@@ -15,6 +15,12 @@ listening/embedding QA remains necessary.
   non-drum instruments, e.g. vinyl crackle) stays on every track. A dimension the
   experiment is testing (``held``) is never varied, so a treatment stays clean.
   A genre without a palette keeps its genome's values.
+* **Focus electronic (v6, ADR-0044 amendment 2026-11-01).** The brand's genre gets a
+  palette with no vinyl crackle, trap kit or neon texture, energies no higher than
+  ``medium`` and only subdued grooves. A sub-style in :data:`_SUBGENRE_PALETTES`
+  replaces the genre palette's lead, bass, drums and colour with its own, so the nine
+  sub-styles keep their own sound while the album still rotates; the direction records
+  the ``subgenre`` so top-up tracks rebuild from the same palette.
 """
 from __future__ import annotations
 
@@ -22,7 +28,7 @@ import hashlib
 from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v5"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v6"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -155,8 +161,109 @@ _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
                    "rolling percussive groove", "stripped-back kick and clap",
                    "syncopated bass-led groove"),
     },
+    # ADR-0044: deep-focus electronic; steady, subdued, never a drop or a high-energy lift.
+    "focus_electronic": {
+        "lead": ("muted_synth_pluck", "felt_piano", "glassy_fm_synth", "soft_analog_lead",
+                 "echo_electric_guitar", "marimba_synth"),
+        "bass": ("warm_sub_bass", "round_synth_bass", "rolling_sub_bass"),
+        "drums": ("soft_electronic_drums", "shuffled_soft_garage_drums",
+                  "soft_breakbeat_drums", "minimal_electronic_drums", ""),
+        "color": ("soft_analog_pad", "granular_pad", "filtered_pad", "digital_pad",
+                  "chorus_pad", "airy_synth_pad"),
+        "key_profile": ("D_minor", "A_minor", "F_major", "E_minor", "C_major", "G_minor",
+                        "Bb_major", "B_minor"),
+        "production_style": ("clean_modern", "analog_warm", "minimalist"),
+        "hook_profile": ("atmospheric", "instrumental_riff", "slow_burn"),
+        "song_structure": ("loop_progression", "ambient_evolving", "loop_progression"),
+        "energy": ("low", "medium", "low"),
+        "groove": ("steady spacious groove", "straight laid-back pulse",
+                   "half-time with silent gaps", "restrained pulse with brief fills",
+                   "soft shuffled pulse"),
+    },
 }
-"""Per-genre values each track rotates through (v4: lofi; v5: all seven template genres)."""
+"""Per-genre values each track rotates through (v4: lofi; v5: all seven template genres;
+v6: focus_electronic)."""
+
+_SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
+    "future_garage_focus": {
+        "lead": ("pitched_synth_chops", "airy_synth_lead", "felt_piano", "muted_synth_pluck",
+                 "echo_electric_guitar", "soft_bell_synth"),
+        "bass": ("reese_sub_bass", "warm_sub_bass", "rolling_sub_bass"),
+        "drums": ("shuffled_soft_garage_drums", "swung_soft_garage_drums",
+                  "sparse_garage_percussion", ""),
+        "color": ("airy_synth_pad", "granular_pad", "tape_delay_wash", "soft_string_pad",
+                  "filtered_pad", "distant_room_tone"),
+    },
+    "soft_cyber_electronica": {
+        "lead": ("glassy_fm_synth", "digital_bell_lead", "soft_arp_synth", "crystal_pluck_synth",
+                 "muted_synth_pluck", "fm_electric_piano"),
+        "bass": ("pulsing_sub_bass", "round_synth_bass", "warm_sub_bass"),
+        "drums": ("soft_glitch_percussion", "minimal_electronic_drums", "soft_electronic_drums",
+                  ""),
+        "color": ("digital_pad", "granular_pad", "shimmer_pad", "soft_noise_bed",
+                  "bitcrushed_texture", "glass_pad"),
+    },
+    "minimal_pulse": {
+        "lead": ("sequenced_synth_pluck", "muted_synth_pluck", "marimba_synth", "soft_bell_synth",
+                 "felt_piano", "filtered_arp_synth"),
+        "bass": ("filtered_sub_bass", "warm_sub_bass", "round_synth_bass"),
+        "drums": ("muted_kick_pulse", "minimal_electronic_drums", "soft_shaker_perc",
+                  "soft_rimshot_pulse"),
+        "color": ("filtered_pad", "soft_analog_pad", "dub_chord_echo", "tape_hiss",
+                  "granular_pad", "digital_pad"),
+    },
+    "ambient_breakbeat": {
+        "lead": ("echo_electric_guitar", "felt_piano", "soft_analog_lead",
+                 "ambient_electric_guitar_swells", "muted_synth_pluck", "vibraphone"),
+        "bass": ("rolling_sub_bass", "warm_sub_bass", "round_synth_bass"),
+        "drums": ("soft_breakbeat_drums", "brushed_breakbeat_drums", "filtered_breakbeat_drums",
+                  ""),
+        "color": ("ambient_synth_pad", "shimmer_pad", "granular_pad", "soft_string_pad",
+                  "tape_delay_wash", "airy_synth_pad"),
+    },
+    "downtempo_synth": {
+        "lead": ("analog_poly_synth", "fm_electric_piano", "soft_analog_lead", "felt_piano",
+                 "chorused_electric_guitar", "muted_synth_pluck"),
+        "bass": ("round_synth_bass", "fretless_electric_bass", "warm_sub_bass"),
+        "drums": ("downtempo_drums", "soft_electronic_drums", "brushed_drums", ""),
+        "color": ("string_pad", "soft_analog_pad", "chorus_pad", "tape_hiss", "granular_pad",
+                  "warm_string_pad"),
+    },
+    "deep_work_chillstep": {
+        "lead": ("felt_piano", "lush_synth_lead", "soft_bell_synth",
+                 "ambient_electric_guitar_swells", "airy_synth_lead", "celesta"),
+        "bass": ("smooth_sub_bass", "warm_sub_bass", "round_synth_bass"),
+        "drums": ("half_time_soft_drums", "half_time_brushed_drums", "minimal_electronic_drums",
+                  ""),
+        "color": ("lush_synth_pad", "shimmer_pad", "soft_string_pad", "granular_pad",
+                  "airy_synth_pad", "glass_pad"),
+    },
+    "restrained_retro_future": {
+        "lead": ("warm_analog_arpeggio", "analog_poly_synth", "fm_electric_piano",
+                 "soft_analog_lead", "chorused_electric_guitar", "arpeggiated_pluck_synth"),
+        "bass": ("analog_synth_bass", "octave_synth_bass", "round_synth_bass"),
+        "drums": ("soft_gated_drums", "soft_electronic_drums", "linn_drum_machine", ""),
+        "color": ("chorus_pad", "lush_string_pad", "tape_hiss", "bell_synth", "soft_analog_pad",
+                  "slow_filter_sweep_pad"),
+    },
+    "organic_electronic": {
+        "lead": ("kalimba", "marimba", "nylon_guitar", "soft_flute", "handpan", "felt_piano"),
+        "bass": ("warm_sub_bass", "upright_bass", "round_synth_bass"),
+        "drums": ("hand_percussion", "soft_frame_drum_kit", "shaker_and_rim_perc", ""),
+        "color": ("granular_pad", "wooden_click_texture", "soft_string_pad", "airy_synth_pad",
+                  "glass_pad", "soft_analog_pad"),
+    },
+    "piano_synth_concentration": {
+        "lead": ("felt_piano", "upright_piano", "soft_synth_lead", "celesta",
+                 "felt_piano_with_delay", "music_box_synth"),
+        "bass": ("warm_sub_bass", "soft_synth_bass", "bowed_double_bass"),
+        "drums": ("minimal_electronic_drums", "", "soft_brushed_kit", ""),
+        "color": ("soft_synth_pad", "soft_string_pad", "tape_hiss", "granular_pad",
+                  "shimmer_pad", "felt_piano_resonance"),
+    },
+}
+"""Sub-style instrument sets (v6, ADR-0044 decision 1): each replaces its genre palette's
+lead, bass, drums and colour; the genre palette's other dimensions still rotate."""
 
 # (step, lag) per dimension: a different stride and a per-cycle shift each, so no two
 # dimensions move in lockstep and a lead never always meets the same bass or key.
@@ -200,13 +307,14 @@ def _pick(values: tuple[str, ...], dimension: str, turn: int) -> str:
 
 def arrangement_direction(
     package_id: str, position: int, instrumentation: Sequence[str],
-    *, genre: str | None = None, held: Collection[str] = (),
+    *, genre: str | None = None, subgenre: str | None = None, held: Collection[str] = (),
 ) -> dict[str, Any]:
     """Return reproducible, index-distinct track instructions from declared instruments.
 
     With a ``genre`` palette the result also carries the track's ``instrumentation``,
     its ``album_instruments`` (to rebuild extensions from) and every
-    :data:`STYLE_DIMENSIONS` value not in ``held``, for the builder to apply.
+    :data:`STYLE_DIMENSIONS` value not in ``held``, for the builder to apply. A
+    ``subgenre`` in :data:`_SUBGENRE_PALETTES` swaps in its instruments and is recorded.
     """
     if position < 0:
         raise ValueError("track position must be nonnegative")
@@ -235,6 +343,9 @@ def arrangement_direction(
         melodic = [item for item in instruments if is_melodic(item)]
         direction["lead_instrument"] = melodic[turn % len(melodic)] if melodic else ""
         return direction
+    if subgenre in _SUBGENRE_PALETTES:
+        palette = {**palette, **_SUBGENRE_PALETTES[subgenre]}
+        direction["subgenre"] = subgenre
     if "groove" in palette:  # a genre whose feel the generic grooves would contradict
         direction["rhythmic_feel"] = _pick(palette["groove"], "groove", turn)
     lead = _pick(palette["lead"], "lead", turn)

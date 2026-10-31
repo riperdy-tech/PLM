@@ -40,15 +40,15 @@ def playlist_spec_fields(
     playlist_spec_id: str = "ply_01",
     experiment_id: str = "exp_01",
     brand_id: str = "brand_lofi",
-    min_seconds: int = 2700,
-    max_seconds: int = 4500,
+    min_seconds: int = 5400,
+    max_seconds: int = 7200,
     planned_track_duration_seconds: int = 180,
-    base_track_count: int = 15,
-    spare_track_count: int = 4,
-    max_extension_track_count: int = 10,
+    base_track_count: int = 30,
+    spare_track_count: int = 8,
+    max_extension_track_count: int = 19,
     sequencing_profile: str = "progressive_arc",
 ) -> dict[str, Any]:
-    """Explicit playlist-spec facts for hand-built packages (45–75 min, 3-min tracks)."""
+    """Explicit playlist-spec facts for hand-built packages (90–120 min, 3-min tracks)."""
     return {
         "playlist_spec_id": playlist_spec_id,
         "experiment_id": experiment_id,

@@ -159,9 +159,10 @@ def test_experiment_full_api_lifecycle() -> None:
     pkg_id = pkg["package_id"]
     assert pkg_id.startswith("pkg_")
     assert pkg["treatment_id"] == target_trt_id
-    assert len(pkg["track_specs"]) == pkg["playlist_spec"]["track_count_target"] == 19
+    # 90-120 min policy (ADR-0044): ceil(5400/190) = 29 base + ceil(29 * 0.25) = 8 spares.
+    assert len(pkg["track_specs"]) == pkg["playlist_spec"]["track_count_target"] == 37
     assert pkg["playlist_spec"]["duration_range_seconds"] == {
-        "min_seconds": 2700, "max_seconds": 4500}
+        "min_seconds": 5400, "max_seconds": 7200}
 
     # 7. Get content package
     pkg_resp = client.get(f"/experiments/v1/packages/{pkg_id}", headers=headers)

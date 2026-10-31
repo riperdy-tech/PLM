@@ -184,7 +184,7 @@ def materialize_package(
         )
         direction = arrangement_direction(
             pkg_id, i, effective_genome.instrumentation_profile, genre=effective_genome.genre,
-            held=held,
+            subgenre=effective_genome.subgenre, held=held,
         )
         direction["held"] = held
         bounded_preferences = BoundedPreferences(
@@ -349,11 +349,12 @@ def extend_package(
     base = list(first.get("album_instruments", instruments))
     held = list(first.get("held", []))
     genre = template.hard_constraints.genre
+    subgenre = first.get("subgenre")
 
     def extension_spec(j: int) -> TrackSpec:
         direction = arrangement_direction(
             package.package_id, len(package.track_specs) + used + j, base, genre=genre,
-            held=held)
+            subgenre=subgenre, held=held)
         direction["held"] = held
         return template.model_copy(update={
             "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),

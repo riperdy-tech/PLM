@@ -130,8 +130,9 @@ arm_id
 allocation_type
 priority
 quantity
-brief               {genre, mood, use_case, language, vocal_mode,
-                     duration_bucket, visual_world}
+brief               {genre, subgenre, mood, use_case, language, vocal_mode,
+                     duration_bucket, visual_world}; subgenre optional,
+                     schema 2.1 (ADR-0044 amendment 2026-11-01)
 expected_value
 uncertainty
 budget_limit

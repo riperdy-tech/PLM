@@ -4,7 +4,9 @@ Every experimentable genome dimension has a registered generator that returns th
 *distinct, valid* alternatives to the baseline, in preference order:
 
 * ``bpm``: target shifts within the envelope's ``bpm_variance_pct`` of the baseline
-  target, largest first, alternating up/down; each keeps the baseline range's width.
+  target, largest first, alternating up/down; each keeps the baseline range's width,
+  cut to the template's ``bpm_limits`` (a target outside them is never offered;
+  ADR-0044: focus music stays 70–110 BPM).
 * ``energy``: neighbouring ``EnergyLevel`` steps within ``energy_steps``, nearest first.
 * categorical dimensions (visual world, packaging, hook, structure, production, lyric
   density): the genre ontology's alternatives (the genome template's ``alternatives``),
@@ -31,7 +33,7 @@ from plm_platform.clock import stable_seed
 
 from ..domain.enums import ConstraintType, EnergyLevel
 from ..domain.errors import ExperimentDesignError
-from ..domain.genome import DEFAULT_CONSTRAINT_HIERARCHY, ContentGenome
+from ..domain.genome import DEFAULT_CONSTRAINT_HIERARCHY, BpmRange, ContentGenome
 from ..genome.engine import ALTERNATIVE_DIMENSIONS, CreativeLatitudeEnvelope
 
 __all__ = [
@@ -58,6 +60,7 @@ class GenerationContext:
     envelope: CreativeLatitudeEnvelope
     alternatives: Mapping[str, tuple[str, ...]]
     rng: random.Random
+    bpm_limits: BpmRange | None = None
 
 
 ValueGenerator = Callable[[str, GenerationContext], tuple[Any, ...]]
@@ -77,6 +80,8 @@ def _bpm(variable: str, ctx: GenerationContext) -> tuple[Any, ...]:
     base = ctx.genome.bpm
     centre = base.target_bpm if base.target_bpm is not None else round((base.min_bpm + base.max_bpm) / 2)
     below, above = centre - base.min_bpm, base.max_bpm - centre
+    floor, ceiling = ((ctx.bpm_limits.min_bpm, ctx.bpm_limits.max_bpm)
+                      if ctx.bpm_limits is not None else (_BPM_FLOOR, _BPM_CEILING))
     magnitudes: list[int] = []
     step = int(centre * ctx.envelope.bpm_variance_pct)
     while step >= 1:
@@ -86,12 +91,12 @@ def _bpm(variable: str, ctx: GenerationContext) -> tuple[Any, ...]:
     for magnitude in magnitudes:
         for sign in (1, -1):
             target = centre + sign * magnitude
-            if not _BPM_FLOOR <= target <= _BPM_CEILING:
+            if not floor <= target <= ceiling:
                 continue
             out.append(
                 {
-                    "min_bpm": max(_BPM_FLOOR, target - below),
-                    "max_bpm": min(_BPM_CEILING, target + above),
+                    "min_bpm": max(floor, target - below),
+                    "max_bpm": min(ceiling, target + above),
                     "target_bpm": target,
                 }
             )
@@ -132,6 +137,7 @@ def candidate_values(
     alternatives: Mapping[str, tuple[str, ...]],
     directive_id: str,
     seed: int,
+    bpm_limits: BpmRange | None = None,
 ) -> tuple[Any, ...]:
     """Distinct alternatives to the baseline for ``variable``, or a typed refusal."""
     if DEFAULT_CONSTRAINT_HIERARCHY.get(variable) is ConstraintType.HARD:
@@ -156,7 +162,8 @@ def candidate_values(
             field_paths=[variable],
         )
     rng = random.Random(stable_seed(RANDOMIZATION_NAMESPACE, directive_id, seed, variable))
-    context = GenerationContext(genome=genome, envelope=envelope, alternatives=alternatives, rng=rng)
+    context = GenerationContext(genome=genome, envelope=envelope, alternatives=alternatives,
+                                rng=rng, bpm_limits=bpm_limits)
     baseline = canonical(baseline_value(genome, variable))
     seen = {baseline}
     distinct: list[Any] = []

@@ -266,3 +266,70 @@ def test_a_repeated_candidate_cannot_take_a_second_slot() -> None:
     assert [selection.arm_id for selection in portfolio.selections] == ["arm-00", "arm-01"]
     assert len({selection.arm_id for selection in portfolio.selections}) == \
         len(portfolio.selections)
+
+
+def _one_identity_cycle(policy: PolicyConfig, *, clusters: int = 13,
+                        genre: str | None = "focus_electronic"):
+    """ADR-0044: 13 eligible arms, all `study_focus`, focus_electronic, instrumental."""
+    samples, arms = _ranked(13, genre=genre, use_case="study_focus",
+                            language="instrumental")
+    return apply_portfolio_constraints(
+        samples, classes={arm_id: AllocationType.RADICAL_EXPLORE for arm_id in arms},
+        arms=arms, states={arm_id: ArmLifecycleStatus.ACTIVE for arm_id in arms},
+        policy=policy, slot_count=10,
+        quota={AllocationType.EXPLOIT: 7, AllocationType.ADJACENT_EXPLORE: 2,
+               AllocationType.RADICAL_EXPLORE: 1}, baselines=(),
+        clusters={arm_id: f"c-{index % clusters}" for index, arm_id in enumerate(arms)},
+    )
+
+
+def test_p2_v1_starves_a_one_identity_cycle_at_the_use_case_cap() -> None:
+    portfolio = _one_identity_cycle(DEFAULT_POLICY)
+    assert DEFAULT_POLICY.version == "p2-v1"
+    assert len(portfolio.selections) == 6  # floor(0.60 * 10)
+    assert portfolio.is_partial(10)
+    assert ReasonCode.INSUFFICIENT_ELIGIBLE_ARMS in portfolio.warnings
+    assert {r.detail for r in portfolio.rejections} == {"genre cap 0.6 (genre_share)"}
+    # With the genre cap out of the way (distinct genres) the use-case cap binds alike.
+    distinct = _one_identity_cycle(DEFAULT_POLICY, genre=None)
+    assert len(distinct.selections) == 6
+    assert {r.detail for r in distinct.rejections} == {"use-case cap 0.6 (use_case_share)"}
+
+
+def test_p2_v2_fills_a_one_identity_cycle() -> None:
+    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+
+    assert SINGLE_IDENTITY_POLICY.version == "p2-v2"
+    portfolio = _one_identity_cycle(SINGLE_IDENTITY_POLICY)
+    assert len(portfolio.selections) == 10
+    assert not portfolio.is_partial(10)
+    assert portfolio.warnings == ()
+
+
+def test_p2_v2_keeps_diversity_through_cluster_caps_and_says_why() -> None:
+    """Four sub-style clusters of the same identity: concurrency (2 per cluster) still
+    binds, so the cycle is PARTIAL with every refusal explained, not silently filled."""
+    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+
+    portfolio = _one_identity_cycle(SINGLE_IDENTITY_POLICY, clusters=4)
+    assert len(portfolio.selections) == 8
+    assert portfolio.is_partial(10)
+    assert ReasonCode.INSUFFICIENT_ELIGIBLE_ARMS in portfolio.warnings
+    assert len(portfolio.rejections) == 5
+    assert {r.detail for r in portfolio.rejections} == {
+        "§25 concurrent-experiment limit (cluster_concurrency)"}
+
+
+def test_p2_v1_is_unchanged_by_p2_v2() -> None:
+    """§92: a stored version never changes; p2-v2 differs only in the three share caps."""
+    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+
+    assert DEFAULT_POLICY == PolicyConfig(name="default")
+    assert (DEFAULT_POLICY.max_genre_share, DEFAULT_POLICY.max_use_case_share,
+            DEFAULT_POLICY.max_language_share) == (0.60, 0.60, 0.85)
+    differs = {field for field in PolicyConfig.model_fields
+               if getattr(DEFAULT_POLICY, field) != getattr(SINGLE_IDENTITY_POLICY, field)}
+    assert differs == {"name", "version", "max_genre_share", "max_use_case_share",
+                       "max_language_share"}
+    assert SINGLE_IDENTITY_POLICY.max_cluster_share == 0.60
+    assert SINGLE_IDENTITY_POLICY.max_concurrent_experiments_per_cluster == 2

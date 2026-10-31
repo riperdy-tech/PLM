@@ -86,3 +86,16 @@ that is unknown or lies outside the policy gets the policy range, and the experi
 still sets its own range, and a genre template may still not declare a range outside the
 policy (refused at load). The arm's genre, mood and use case still shape the album; only
 its length request is overridden.
+
+## Amendment 2026-11-01 (ADR-0044)
+
+ADR-0044's amendment (decision 3) sets this brand's video length to **90-120 min**, one
+deep-work block, replacing 45-75 min. `genome_templates.json` (`p3-genome-templates-v5`)
+declares the bucket `90_120m` (5400-7200 s, target 6300) and makes it the
+`playlist_duration_policy.default_bucket`; every template now declares that range, since
+the loader still refuses a template outside the policy. The rules above are unchanged:
+a brief naming `90_120m` or no bucket gets the policy range, and a bucket that is
+unknown (`gt_75m`) or outside the policy (`45_75m`, `10_45m`) is made at the policy
+length with `duration_bucket_mapped:<bucket>->policy` recorded. A focus package (210 s
+planned tracks) now plans 26 base specs plus 7 spares, where a 45-75 min one planned
+about 19 specs in all.

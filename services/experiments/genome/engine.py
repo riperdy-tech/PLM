@@ -8,8 +8,9 @@ categorical dimensions (``alternatives``), which the treatment generator draws f
 
 The same file declares ``playlist_duration_buckets``: the playlist-length range each P2
 ``duration_bucket`` stands for, and ``playlist_duration_policy``: the owner's playlist
-length (decision 2026-10-15, ADR-0036: 45–75 minutes, the ``45_75m`` bucket; the target
-is only the planning midpoint). The policy is the single source of a playlist range:
+length (decision 2026-10-15, ADR-0036, amended 2026-11-01 by ADR-0044: 90–120 minutes,
+the ``90_120m`` bucket; the target is only the planning midpoint). The policy is the single
+source of a playlist range:
 
 * a brief that names a bucket gets that bucket's range, which must lie inside the
   policy (``playlist_duration_outside_policy`` otherwise, never clamped);
@@ -20,6 +21,12 @@ is only the planning midpoint). The policy is the single source of a playlist ra
 * every genre template's ``playlist_duration`` must lie inside the policy, or the
   library refuses to load (R5: lofi and jazz templates declared 60–120 min, ambient
   60–180, and an open brief inherited them).
+
+``subgenre_templates`` maps a genre's sub-styles to their own (child) templates (ADR-0044
+amendment, decision 1): a brief whose ``subgenre`` is listed gets that template; one with
+no subgenre, or an unlisted one, gets the genre's template. A template may declare
+``bpm_limits``, the tempo every treatment of it must stay inside (ADR-0044 decision 2:
+70–110 BPM for focus music); its own ``bpm`` must lie inside them, or it fails to load.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..domain.enums import VocalGender, VocalMode
 from ..domain.errors import GenomeBuildError
-from ..domain.genome import CANONICAL_DIMENSIONS, ContentGenome, DurationRange
+from ..domain.genome import CANONICAL_DIMENSIONS, BpmRange, ContentGenome, DurationRange
 
 if TYPE_CHECKING:
     from ..ingestion.p2_adapter import AdaptedDirective
@@ -56,6 +63,7 @@ __all__ = [
     "UnknownGenreError",
     "brief_genre",
     "brief_playlist_duration",
+    "brief_template",
     "build_genome_from_directive",
     "default_template_library",
     "normalize_dimension_value",
@@ -90,7 +98,7 @@ ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
 )
 """Categorical dimensions a template may give an ontology of alternatives for."""
 
-_TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset({"parent", "alternatives"})
+_TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset({"parent", "alternatives", "bpm_limits"})
 
 PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
 PLAYLIST_DURATION_OUTSIDE_POLICY: Final[str] = "playlist_duration_outside_policy"
@@ -137,6 +145,8 @@ class GenreTemplate(BaseModel):
     template_name: str
     genome: ContentGenome
     alternatives: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    bpm_limits: BpmRange | None = None
+    """The tempo bounds every treatment keeps (none: only the generator's own bounds)."""
 
 
 class TemplateLibrary:
@@ -179,10 +189,38 @@ class TemplateLibrary:
                     f"{self._resolved[name].genome.genre!r}"
                 )
 
+        self._subgenres = self._parse_subgenres(raw.get("subgenre_templates"))
+
         for genres in [*self._inference.values()]:
             unknown = [genre for genre in genres if genre not in self._genres]
             if unknown:
                 raise TemplateLibraryError(f"brief_genre_inference names unknown genres {unknown}")
+
+    def _parse_subgenres(self, raw: Any) -> dict[str, dict[str, str]]:
+        """``{genre: {subgenre: template}}``; absent means no genre has sub-style templates."""
+        if raw is None:
+            return {}
+        try:
+            table = {str(genre): {str(sub): str(name) for sub, name in subs.items()}
+                     for genre, subs in raw["by_genre"].items()}
+        except (KeyError, AttributeError, TypeError) as exc:
+            raise TemplateLibraryError(f"subgenre_templates is malformed: {exc}") from exc
+        for genre, subs in sorted(table.items()):
+            if genre not in self._genres:
+                raise TemplateLibraryError(
+                    f"subgenre_templates names genre {genre!r}, which has no template")
+            for sub, name in sorted(subs.items()):
+                if normalize_dimension_value("subgenre", sub) != sub:
+                    raise TemplateLibraryError(f"subgenre key {sub!r} is not a normalized token")
+                if name not in self._resolved:
+                    raise TemplateLibraryError(
+                        f"subgenre {genre}/{sub} maps to missing template {name!r}")
+                genome = self._resolved[name].genome
+                if (genome.genre, genome.subgenre) != (genre, sub):
+                    raise TemplateLibraryError(
+                        f"subgenre {genre}/{sub} maps to template {name!r} of "
+                        f"{genome.genre}/{genome.subgenre}")
+        return table
 
     @staticmethod
     def _parse_inference(raw: Any) -> dict[str, tuple[str, ...]]:
@@ -332,6 +370,15 @@ class TemplateLibrary:
             raise UnknownGenreError(genre, self.genres)
         return self._resolved[name]
 
+    def subgenres(self, genre: str) -> tuple[str, ...]:
+        """The sub-styles with their own template under ``genre``."""
+        return tuple(sorted(self._subgenres.get(genre, {})))
+
+    def for_subgenre(self, genre: str, subgenre: str | None) -> GenreTemplate:
+        """The sub-style's template when ``genre`` lists it, else the genre's template."""
+        name = self._subgenres.get(genre, {}).get(subgenre or "")
+        return self._resolved[name] if name is not None else self.for_genre(genre)
+
     def _build(self, name: str) -> GenreTemplate:
         unknown = set(self._templates[name]) - set(CANONICAL_DIMENSIONS) - _TEMPLATE_META_KEYS
         if unknown:
@@ -344,6 +391,19 @@ class TemplateLibrary:
             genome = ContentGenome.model_validate({d: resolved[d] for d in CANONICAL_DIMENSIONS})
         except ValidationError as exc:
             raise TemplateLibraryError(f"template {name!r} is not a valid genome: {exc}") from exc
+        bpm_limits: BpmRange | None = None
+        if "bpm_limits" in resolved:
+            try:
+                bpm_limits = BpmRange.model_validate(resolved["bpm_limits"])
+            except ValidationError as exc:
+                raise TemplateLibraryError(
+                    f"template {name!r} bpm_limits is not a valid range: {exc}") from exc
+            if not (bpm_limits.min_bpm <= genome.bpm.min_bpm
+                    and genome.bpm.max_bpm <= bpm_limits.max_bpm):
+                raise TemplateLibraryError(
+                    f"template {name!r} declares bpm {genome.bpm.min_bpm}-"
+                    f"{genome.bpm.max_bpm}, outside its bpm_limits {bpm_limits.min_bpm}-"
+                    f"{bpm_limits.max_bpm}")
         alternatives: dict[str, tuple[str, ...]] = {}
         for dim, values in dict(resolved.get("alternatives", {})).items():
             if dim not in ALTERNATIVE_DIMENSIONS:
@@ -359,7 +419,8 @@ class TemplateLibrary:
             if len(set(tokens)) != len(tokens):
                 raise TemplateLibraryError(f"template {name!r} repeats an alternative for {dim!r}")
             alternatives[dim] = tokens
-        return GenreTemplate(template_name=name, genome=genome, alternatives=alternatives)
+        return GenreTemplate(template_name=name, genome=genome, alternatives=alternatives,
+                             bpm_limits=bpm_limits)
 
 
 @lru_cache(maxsize=1)
@@ -470,6 +531,25 @@ def brief_genre(
     return lib.infer_genre(use_cases, directive.directive_id)
 
 
+def brief_template(
+    directive: AdaptedDirective, *, library: TemplateLibrary | None = None
+) -> tuple[GenreTemplate, str | None]:
+    """The brief's template: its sub-style's when the genre lists it, else the genre's.
+
+    A subgenre the genre does not list gets the genre's template and a note; a genre with
+    no sub-style templates ignores the brief's subgenre, as before.
+    """
+    lib = library or default_template_library()
+    genre, _ = brief_genre(directive, library=lib)
+    raw = directive.brief.get("subgenre")
+    subgenre = normalize_dimension_value("subgenre", str(raw)) if _present(raw) else None
+    template = lib.for_subgenre(genre, subgenre)
+    listed = lib.subgenres(genre)
+    if subgenre is not None and listed and subgenre not in listed:
+        return template, f"subgenre_unmatched:{subgenre}->{template.template_name}"
+    return template, None
+
+
 def brief_playlist_duration(
     directive: AdaptedDirective, *, library: TemplateLibrary | None = None
 ) -> tuple[DurationRange, str | None]:
@@ -484,7 +564,8 @@ def brief_playlist_duration(
 def build_genome_from_directive(
     directive: AdaptedDirective, *, library: TemplateLibrary | None = None
 ) -> ContentGenome:
-    """Build the base genome: the genre's template, overridden where the brief is explicit.
+    """Build the base genome: the brief's template (:func:`brief_template`: the sub-style's,
+    else the genre's), overridden where the brief is explicit.
 
     A brief that names no genre gets one from its use case (:func:`brief_genre`, owner
     decision 2026-10-31); a named genre without a template is refused (``unknown_genre``). Brief dimensions that are unset
@@ -495,8 +576,7 @@ def build_genome_from_directive(
     """
     lib = library or default_template_library()
     brief = directive.brief
-    genre, _ = brief_genre(directive, library=lib)
-    base = lib.for_genre(genre).genome
+    base = brief_template(directive, library=lib)[0].genome
 
     updates: dict[str, Any] = {}
     if _present(brief.get("mood")):

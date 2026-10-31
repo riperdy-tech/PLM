@@ -8,6 +8,10 @@ Every field is required: P3 may not invent ``expected_value``, versions or conte
 Schema 2.0 (ADR-0031) adds ``outcome_horizon``: the one observation window whose mature
 outcome P2 will learn from. P3 records it in the experiment's measurement plan at design
 time, so the horizon is declared before any result exists.
+
+Schema 2.1 (ADR-0044 amendment, 2026-11-01) adds the optional ``brief.subgenre``: the
+arm's sub-style, which selects P3's sub-style template. A minor version only adds an
+optional field (ADR-0025), so a 2.0 payload without it still parses.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ class DirectiveBrief(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     genre: str | None = None
+    subgenre: str | None = None
     mood: tuple[str, ...] = ()
     use_case: tuple[str, ...] = ()
     language: str | None = None
@@ -42,10 +47,12 @@ class DirectiveBrief(BaseModel):
 
 
 class ProductionDirectivePayload(SeamModel):
-    """The seventeen frozen C2 fields, ``outcome_horizon`` (2.0) and ``schema_version``."""
+    """The seventeen frozen C2 fields, ``outcome_horizon`` (2.0) and ``schema_version``.
+
+    2.1 adds only the optional ``brief.subgenre``."""
 
     SEAM: ClassVar[str] = "C2"
-    SCHEMA_VERSION: ClassVar[str] = "2.0"
+    SCHEMA_VERSION: ClassVar[str] = "2.1"
 
     directive_id: str = Field(min_length=1)
     decision_id: str = Field(min_length=1)

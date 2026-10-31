@@ -46,7 +46,7 @@ def test_directive_carries_the_seventeen_frozen_fields_and_forbids_extras() -> N
 def test_brief_is_a_search_region_with_exactly_the_registry_keys() -> None:
     brief = _directive().brief
     assert set(brief.model_dump()) == {
-        "genre", "mood", "use_case", "language", "vocal_mode", "duration_bucket",
+        "genre", "subgenre", "mood", "use_case", "language", "vocal_mode", "duration_bucket",
         "visual_world",
     }
 

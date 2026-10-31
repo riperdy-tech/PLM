@@ -81,7 +81,7 @@ def test_ac_01_basic_materialization(session) -> None:
     retrieved = repositories.get_content_package(session, pkg.package_id)
     assert retrieved is not None
     assert retrieved.package_id == pkg.package_id
-    assert len(retrieved.track_specs) == retrieved.playlist_spec.track_count_target == 19
+    assert len(retrieved.track_specs) == retrieved.playlist_spec.track_count_target == 37
     assert retrieved.playlist_spec is not None
     assert retrieved.visual_spec is not None
     assert retrieved.thumbnail_spec is not None
@@ -308,8 +308,8 @@ def test_ac_12_p4_handoff() -> None:
     assert pkg_resp.status_code == 200
     p4_package = pkg_resp.json()
     assert p4_package["package_id"] == pkg_id
-    assert len(p4_package["track_specs"]) == 19
-    assert p4_package["playlist_spec"]["track_count_target"] == 19
+    assert len(p4_package["track_specs"]) == 37
+    assert p4_package["playlist_spec"]["track_count_target"] == 37
 
 
 def test_ac_13_audit_trail(session) -> None:

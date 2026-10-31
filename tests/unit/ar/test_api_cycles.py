@@ -12,9 +12,10 @@ from plm_contracts.seams.c2 import ProductionDirectivePayload
 
 from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS
 
-BRIEF_WIRE_FIELDS = ("genre", "mood", "use_case", "language", "vocal_mode",
+BRIEF_WIRE_FIELDS = ("genre", "subgenre", "mood", "use_case", "language", "vocal_mode",
                      "duration_bucket", "visual_world")
-"""The frozen C2 brief keys (registry C2); `DirectiveBrief` must not drift from them."""
+"""The frozen C2 brief keys (registry C2; `subgenre` added in schema 2.1, ADR-0044);
+`DirectiveBrief` must not drift from them."""
 
 
 def _cycle_body(**overrides: object) -> dict[str, object]:

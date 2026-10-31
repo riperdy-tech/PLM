@@ -15,8 +15,8 @@ from plm_contracts import ObservationWindow
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
-    "DEFAULT_POLICY", "FatigueConfig", "NonstationarityConfig", "PolicyConfig",
-    "RetirementConfig",
+    "DEFAULT_POLICY", "SINGLE_IDENTITY_POLICY", "FatigueConfig", "NonstationarityConfig",
+    "PolicyConfig", "RetirementConfig",
 ]
 
 
@@ -98,3 +98,19 @@ class PolicyConfig(_Frozen):
 
 
 DEFAULT_POLICY = PolicyConfig(name="default")
+
+SINGLE_IDENTITY_POLICY = PolicyConfig(
+    name="single-identity",
+    version="p2-v2",
+    max_genre_share=1.0,
+    max_use_case_share=1.0,
+    max_language_share=1.0,
+)
+"""`p2-v2`: for a channel with one locked identity (ADR-0044). Every eligible arm shares
+the use case (`study_focus`/`focus`), the genre (`focus_electronic` or unset) and the
+language (instrumental), so `p2-v1`'s 0.60 genre/use-case caps and 0.85 language cap
+would cap a 10-slot cycle at 6 selections however many arms qualify. Those three caps
+are lifted; diversity is kept by the unchanged cluster share (0.60) and the per-cluster
+concurrency limit (2). `p2-v1` is untouched (§92): a stored version never changes. This
+constant is not inserted or activated anywhere; a cycle uses it only once a row for
+`p2-v2` is stored and the cycle asks for that version."""

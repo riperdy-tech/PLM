@@ -41,6 +41,7 @@ from ..genome.engine import (
     TemplateLibrary,
     brief_genre,
     brief_playlist_duration,
+    brief_template,
     default_template_library,
 )
 from ..storage.ids import experiment_id, treatment_id
@@ -184,7 +185,8 @@ def design_experiment(
     exp_type = experiment_type or ExperimentType.SINGLE_FACTOR
     declared, design = _declared_factors(exp_type, target_variable, factors, factor_design)
 
-    template = (library or default_template_library()).for_genre(base_genome.genre)
+    template = (library or default_template_library()).for_subgenre(
+        base_genome.genre, base_genome.subgenre)
     envelope = CreativeLatitudeEnvelope.default_for_exploration(directive.exploration_level)
     candidates = {
         factor: candidate_values(
@@ -194,6 +196,7 @@ def design_experiment(
             alternatives=template.alternatives,
             directive_id=directive.directive_id,
             seed=seed,
+            bpm_limits=template.bpm_limits,
         )
         for factor in declared
     }
@@ -210,7 +213,8 @@ def design_experiment(
     # Record where P3 filled in or overrode the arm's brief (owner decisions 2026-10-31).
     _, inferred = brief_genre(directive, library=library)
     _, mapped = brief_playlist_duration(directive, library=library)
-    notes = [*notes, *(note for note in (inferred, mapped) if note is not None)]
+    _, unmatched = brief_template(directive, library=library)
+    notes = [*notes, *(note for note in (inferred, mapped, unmatched) if note is not None)]
     exp_id = experiment_id(
         directive.arm_id,
         directive.directive_id,

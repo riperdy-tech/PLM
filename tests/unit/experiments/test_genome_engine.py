@@ -97,7 +97,13 @@ def _arm_directive(brief: dict[str, Any], directive_id: str) -> AdaptedDirective
 def test_missing_genre_is_inferred_from_the_use_case_and_spread() -> None:
     picks = {build_genome_from_directive(_arm_directive(
         {"use_case": ["study_focus"]}, f"dir_study_{n}")).genre for n in range(40)}
-    assert picks == {"lofi", "ambient", "jazz"}  # never one fixed default
+    assert picks == {"focus_electronic"}  # ADR-0044: focus arms are the brand's genre
+    focus = {build_genome_from_directive(_arm_directive(
+        {"use_case": ["focus"]}, f"dir_focus_{n}")).genre for n in range(40)}
+    assert focus == {"focus_electronic"}
+    sleeps = {build_genome_from_directive(_arm_directive(
+        {"use_case": ["sleep"]}, f"dir_sleep_{n}")).genre for n in range(40)}
+    assert sleeps == {"ambient", "lofi", "jazz"}  # never one fixed default
     drives = {build_genome_from_directive(_arm_directive(
         {"use_case": ["late_night_drive"]}, f"dir_drive_{n}")).genre for n in range(40)}
     assert drives == {"synthwave", "city_pop", "rnb"}

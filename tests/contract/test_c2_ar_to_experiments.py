@@ -66,6 +66,7 @@ def producer_directive() -> ProductionDirective:
         arm_id="rnb_late_night_drive_english_vocal_45_75m",
         dimensions=ArmDimensions(
             genre="rnb",
+            subgenre="alt_rnb",
             moods=("melancholic", "dreamy"),
             use_cases=("late_night_drive",),
             language="english",
@@ -163,6 +164,23 @@ def test_consumer_refuses_an_unknown_field() -> None:
     )
     assert isinstance(exc, DirectiveValidationError)
     assert exc.error.code == "unknown_field"
+
+
+def test_brief_carries_the_arms_subgenre_schema_2_1() -> None:
+    """2.1 (ADR-0044 amendment): P2 copies the arm's subgenre into the brief."""
+    wire = _wire()
+    assert wire["schema_version"] == "2.1"
+    assert wire["brief"]["subgenre"] == "alt_rnb"
+    assert adapt_directive(wire).brief["subgenre"] == "alt_rnb"
+
+
+def test_consumer_accepts_a_2_0_payload_without_subgenre() -> None:
+    """A minor version only adds an optional field: a 2.0 producer still crosses."""
+    wire = _wire()
+    del wire["brief"]["subgenre"]
+    adapted = adapt_directive(with_value(wire, "schema_version", "2.0"))
+    assert adapted.brief["subgenre"] is None
+    assert "subgenre" not in adapted.recommended_attributes
 
 
 def test_consumer_refuses_a_future_major_version() -> None:
