@@ -32,7 +32,7 @@ class CadenceHours:
 class MarketSettings:
     platform: Settings | None
     score_version: str = "p1-v1"
-    taxonomy_version: str = "p1-taxonomy-v2"
+    taxonomy_version: str = "p1-taxonomy-v3"
     feature_version: str = "p1-features-v1"
     normalization_version: str = "p1-norm-v1"
     default_brand_id: str = "neon_seoul"

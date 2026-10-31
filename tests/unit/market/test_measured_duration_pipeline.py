@@ -78,7 +78,7 @@ def test_measured_duration_pipeline_preserves_all_cached_observation_evidence(
     assert first["arms"] == second["arms"] == 1
     arms = [
         row for row in repositories.load_arms(market_session)
-        if row["arm_id"].startswith("p1_taxonomy_v2_")
+        if row["arm_id"].startswith(SETTINGS.taxonomy_version.replace("-", "_") + "_")
     ]
     assert len(arms) == 1
     assert arms[0]["taxonomy_json"]["duration_bucket"] == "45_75m"

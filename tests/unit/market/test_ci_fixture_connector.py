@@ -64,11 +64,12 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
         taxonomy_version=settings.taxonomy_version,
     )
     assert len(arms) >= 2, [d.dimensions for d in drafts]
-    # R5's synthetic outcomes must name the IDs P1 now actually creates;
-    # v1's historical arm IDs are not reused by taxonomy v2.
-    strong = "p1_taxonomy_v2_lofi_study_focus_45_75m"
-    weak = "p1_taxonomy_v2_rnb_45_75m"
-    assert {strong, weak} <= {arm.arm_id for arm in arms}
+    # R5's synthetic outcomes must name the IDs P1 now actually creates. Taxonomy v3
+    # IDs are digests of the profile, so the two fixture profiles are found by profile.
+    by_profile = {(arm.profile.genre, arm.profile.use_case, arm.profile.duration_bucket):
+                  arm.arm_id for arm in arms}
+    strong = by_profile[("lofi", "study_focus", "45_75m")]
+    weak = by_profile[("rnb", None, "45_75m")]
     model = load_mock_outcome_model(
         Path(__file__).resolve().parents[3] / "config/dev/mock_outcomes.json",
     )
