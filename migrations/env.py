@@ -72,11 +72,21 @@ def run_migrations_online() -> None:
         for revision in ScriptDirectory.from_config(config).walk_revisions()
     )
 
-    # One separately approved local-development rollout can lend an already
-    # inspected Connection. Normal CLI and raw Alembic never set this attribute.
+    # A separately approved local-development rollout can lend an already
+    # inspected Connection. Normal CLI and raw Alembic never set these attributes.
     # This does NOT enable a general shared/production database bypass.
-    approved = config.attributes.get("plm_approved_0039_local_connection")
-    if approved is not None:
+    # attribute -> (revision the step installs, revision the database must be at)
+    approved_steps = {
+        "plm_approved_0039_local_connection": (
+            "0039_merge_0038_branches", "0038_release_reviews"),
+        # Owner-approved 2026-10-31 (D10 import needs 0040/0041).
+        "plm_approved_0042_local_connection": (
+            "0042_media_render_evidence", "0039_merge_0038_branches"),
+    }
+    for attribute, (step_head, step_start) in approved_steps.items():
+        approved = config.attributes.get(attribute)
+        if approved is None:
+            continue
         if (
             type(approved) is not Connection
             or settings.env != "local"
@@ -84,16 +94,17 @@ def run_migrations_online() -> None:
             or url.host not in ("127.0.0.1", "localhost")
             or url.port != 5432
             or approved.engine.url != url
-            or "0039_merge_0038_branches" not in known
+            or step_head not in known
             or approved.execute(text("SELECT current_database()")).scalar_one() != "plm"
             or approved.execute(text(
                 "SELECT version_num FROM public.alembic_version"
-            )).scalars().all() != ["0038_release_reviews"]
+            )).scalars().all() != [step_start]
             or int(approved.execute(text(
                 "SELECT current_setting('server_version_num')"
             )).scalar_one()) // 10000 != 16
         ):
-            raise RuntimeError("approved local 0039 migration connection identity refused")
+            raise RuntimeError(f"approved local {step_head[:4]} migration connection "
+                               "identity refused")
         context.configure(connection=approved, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
