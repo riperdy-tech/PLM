@@ -257,7 +257,8 @@ def materialize_package(
         experiment_id=experiment.experiment_id,
         visual_world=effective_genome.visual_world,
         motion_profile=effective_genome.visual_motion_profile,
-        palette_guide=("deep_indigo", "neon_cyan", "rain_sheen"),
+        # No palette_guide: it was the same indigo/cyan/rain triple for every album and
+        # nothing read it; P6 draws each visual_world itself (media_factory.visuals.worlds).
         aspect_ratio="16:9",
     )
 

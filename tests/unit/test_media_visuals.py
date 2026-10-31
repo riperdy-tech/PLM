@@ -70,7 +70,7 @@ def test_thumbnails_are_stored_with_the_checksum_of_the_stored_bytes() -> None:
         assert hashlib.sha256(store.get(variant.uri)).hexdigest() == variant.checksum
         assert variant.uri.endswith(variant.checksum)
         assert variant.text_payload == "Focus"
-        assert variant.layout_version.startswith("thumb-layout-v3+")
+        assert variant.layout_version.startswith("thumb-layout-v4+")
 
 
 @pytest.mark.parametrize(("width", "start", "minimum"), [

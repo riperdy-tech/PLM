@@ -197,7 +197,9 @@ class MediaRenderer:
                     path=path,
                     duration_seconds=track.end_offset_seconds - track.start_offset_seconds))
 
-            background_png = render_background(brand, profile.width, profile.height)
+            background_png = render_background(
+                brand, profile.width, profile.height,
+                colors=tuple(visual_session.visual_plan_json["background"]["colors"][:2]))
             (work / "background.png").write_bytes(background_png)
             background = self._store(f"{root}/background.png", background_png, "image/png")
 

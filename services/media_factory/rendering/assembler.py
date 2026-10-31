@@ -250,6 +250,7 @@ def assemble_media_package(
         playlist_concept=playlist_concept,
         store=store,
         claim_namespace=claim_namespace,
+        visual_world=visual_profile,
         now=packaged_at,
     )
 

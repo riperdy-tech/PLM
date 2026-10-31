@@ -104,8 +104,16 @@ Running P3's genome build over all 77 P1 arms (as P2 briefs them) found only 24 
   and its own grooves; ambient stays drumless or soft and keeps `very_low` energy; synthwave
   ambient tracks get soft drums. A test checks every genre for six or more keys, melodic
   leads, no two dimensions in lockstep and no lifted calm track.
-* Still open: P6 does not read `visual_world`, so an arm's visual world never reaches the
-  video. Plan-level only: whether Suno follows these briefs is unproven.
+* P6 visual worlds (owner: "fix P6"): P3 sent each package's `visual_world` but P6 drew
+  every background and waveform from the brand palette and thumbnail A always drew rain;
+  P3 also stored the same indigo/cyan/rain `palette_guide` for every album (read by
+  nothing; now dropped). `media_factory/visuals/worlds.py` (`p6-worlds-v1`) gives all 22
+  worlds the templates name a sky gradient, waveform colour (>= 3:1 contrast on its sky),
+  light, weather (rain only for rainy worlds; snow, stars, mist) and skyline (city, hills,
+  waves, trees, room, road). The visual plan records `visual_world.known`; an unknown world
+  keeps the brand look. Thumbnail layout `thumb-layout-v4`. Checked by eye on six worlds.
+* Plan-level only: whether Suno follows these briefs is unproven; no video has been
+  rendered with the new worlds on the compose stack yet.
 
 ## Verification
 
