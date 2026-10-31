@@ -197,6 +197,7 @@ def design_experiment(
             directive_id=directive.directive_id,
             seed=seed,
             bpm_limits=template.bpm_limits,
+            energy_limits=template.energy_limits,
         )
         for factor in declared
     }

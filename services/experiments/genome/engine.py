@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Any, Final
 from plm_contracts import AllocationType
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..domain.enums import VocalGender, VocalMode
+from ..domain.enums import EnergyLevel, VocalGender, VocalMode
 from ..domain.errors import GenomeBuildError
 from ..domain.genome import CANONICAL_DIMENSIONS, BpmRange, ContentGenome, DurationRange
 
@@ -98,7 +98,8 @@ ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
 )
 """Categorical dimensions a template may give an ontology of alternatives for."""
 
-_TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset({"parent", "alternatives", "bpm_limits"})
+_TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset(
+    {"parent", "alternatives", "bpm_limits", "energy_limits"})
 
 PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
 PLAYLIST_DURATION_OUTSIDE_POLICY: Final[str] = "playlist_duration_outside_policy"
@@ -147,6 +148,8 @@ class GenreTemplate(BaseModel):
     alternatives: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     bpm_limits: BpmRange | None = None
     """The tempo bounds every treatment keeps (none: only the generator's own bounds)."""
+    energy_limits: tuple[EnergyLevel, ...] | None = None
+    """The energy levels every treatment keeps (none: the whole ladder)."""
 
 
 class TemplateLibrary:
@@ -404,6 +407,17 @@ class TemplateLibrary:
                     f"template {name!r} declares bpm {genome.bpm.min_bpm}-"
                     f"{genome.bpm.max_bpm}, outside its bpm_limits {bpm_limits.min_bpm}-"
                     f"{bpm_limits.max_bpm}")
+        energy_limits: tuple[EnergyLevel, ...] | None = None
+        if "energy_limits" in resolved:
+            try:
+                energy_limits = tuple(EnergyLevel(v) for v in resolved["energy_limits"])
+            except ValueError as exc:
+                raise TemplateLibraryError(
+                    f"template {name!r} energy_limits names an unknown level: {exc}") from exc
+            if genome.energy not in energy_limits:
+                raise TemplateLibraryError(
+                    f"template {name!r} declares energy {genome.energy.value}, outside its "
+                    f"energy_limits {[level.value for level in energy_limits]}")
         alternatives: dict[str, tuple[str, ...]] = {}
         for dim, values in dict(resolved.get("alternatives", {})).items():
             if dim not in ALTERNATIVE_DIMENSIONS:
@@ -420,7 +434,7 @@ class TemplateLibrary:
                 raise TemplateLibraryError(f"template {name!r} repeats an alternative for {dim!r}")
             alternatives[dim] = tokens
         return GenreTemplate(template_name=name, genome=genome, alternatives=alternatives,
-                             bpm_limits=bpm_limits)
+                             bpm_limits=bpm_limits, energy_limits=energy_limits)
 
 
 @lru_cache(maxsize=1)

@@ -7,7 +7,8 @@ Every experimentable genome dimension has a registered generator that returns th
   target, largest first, alternating up/down; each keeps the baseline range's width,
   cut to the template's ``bpm_limits`` (a target outside them is never offered;
   ADR-0044: focus music stays 70–110 BPM).
-* ``energy``: neighbouring ``EnergyLevel`` steps within ``energy_steps``, nearest first.
+* ``energy``: neighbouring ``EnergyLevel`` steps within ``energy_steps``, nearest first,
+  kept inside the template's ``energy_limits`` when it declares them.
 * categorical dimensions (visual world, packaging, hook, structure, production, lyric
   density): the genre ontology's alternatives (the genome template's ``alternatives``),
   minus the baseline, in a seeded order.
@@ -61,6 +62,7 @@ class GenerationContext:
     alternatives: Mapping[str, tuple[str, ...]]
     rng: random.Random
     bpm_limits: BpmRange | None = None
+    energy_limits: tuple[EnergyLevel, ...] | None = None
 
 
 ValueGenerator = Callable[[str, GenerationContext], tuple[Any, ...]]
@@ -110,7 +112,8 @@ def _energy(variable: str, ctx: GenerationContext) -> tuple[Any, ...]:
     for distance in range(1, ctx.envelope.energy_steps + 1):
         for direction in (1, -1):
             position = index + direction * distance
-            if 0 <= position < len(ladder):
+            if 0 <= position < len(ladder) and (
+                    ctx.energy_limits is None or ladder[position] in ctx.energy_limits):
                 out.append(ladder[position].value)
     return tuple(out)
 
@@ -138,6 +141,7 @@ def candidate_values(
     directive_id: str,
     seed: int,
     bpm_limits: BpmRange | None = None,
+    energy_limits: tuple[EnergyLevel, ...] | None = None,
 ) -> tuple[Any, ...]:
     """Distinct alternatives to the baseline for ``variable``, or a typed refusal."""
     if DEFAULT_CONSTRAINT_HIERARCHY.get(variable) is ConstraintType.HARD:
@@ -163,7 +167,7 @@ def candidate_values(
         )
     rng = random.Random(stable_seed(RANDOMIZATION_NAMESPACE, directive_id, seed, variable))
     context = GenerationContext(genome=genome, envelope=envelope, alternatives=alternatives,
-                                rng=rng, bpm_limits=bpm_limits)
+                                rng=rng, bpm_limits=bpm_limits, energy_limits=energy_limits)
     baseline = canonical(baseline_value(genome, variable))
     seen = {baseline}
     distinct: list[Any] = []

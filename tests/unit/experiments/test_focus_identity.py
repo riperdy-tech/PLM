@@ -196,3 +196,20 @@ def test_a_sub_style_package_keeps_its_sound_through_a_top_up() -> None:
         assert spec.creative_latitude["energy"] in ("low", "medium")
         assert spec.bounded_preferences.bpm == 96
         assert spec.vocal_spec == {"vocal_mode": "instrumental", "vocal_gender": "none"}
+
+
+@pytest.mark.parametrize("sub_style", SUB_STYLES)
+def test_energy_treatments_never_leave_low_or_medium(sub_style: str) -> None:
+    """A radical energy step is two ladder steps; focus music stays low or medium."""
+    directive = _focus({"subgenre": sub_style}, allocation_type="radical_explore", quantity=12)
+    genome = build_genome_from_directive(directive)
+    exp = design_experiment(directive, genome, target_variable="energy", created_at=FIXED_NOW)
+    energies = {t.variable_assignments["energy"] for t in exp.treatments}
+    assert energies <= {"low", "medium"}, (sub_style, energies)
+
+
+def test_template_energy_outside_its_limits_is_refused_at_load() -> None:
+    raw = _raw_library()
+    raw["templates"]["focus_minimal_pulse"]["energy"] = "high"
+    with pytest.raises(TemplateLibraryError, match="energy_limits"):
+        TemplateLibrary(raw)

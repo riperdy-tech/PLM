@@ -68,10 +68,14 @@ how well they serve the project target, not by preference. Decisions:
    tracks per video, so supply by hand is heavier. That is a production problem
    to solve (API supply, with paid calls authorized per run), not a reason to cut
    the revenue lever.
-4. **Which P1 arms P2 may pick:** use case `study_focus` or `focus`; genre in
-   the identity's genre set or unset; vocal mode not vocal. Everything else is
-   out of identity. That leaves 13 of today's 77 arms; the other 64 are blocked.
-   An arm with no use case measures a general market, not focus demand.
+4. **Which P1 arms P2 may pick:** use case `study_focus` or `focus`; genre
+   `focus_electronic` or unset (P3 infers `focus_electronic` for focus use
+   cases); vocal mode not vocal. Everything else is out of identity. An arm with
+   no use case measures a general market, not focus demand. Ambient, synthwave
+   and deep-house arms are out too, because P3 would build them from their own
+   templates (drone, neon, build-and-drop dance). That leaves 6 of today's 77
+   arms; P1's new focus vocabulary (5f87cb8) adds measured focus arms as it
+   collects.
 
 ## Consequences
 

@@ -1,5 +1,5 @@
 {
-  "templates_version": "p3-genome-templates-v5",
+  "templates_version": "p3-genome-templates-v6",
   "playlist_duration_policy": {
     "default_bucket": "90_120m",
     "basis": "Owner decision 2026-10-15 (ADR-0036), amended 2026-11-01 (ADR-0044 decision 3): a playlist video is 90-120 min, one deep-work block. The default bucket's range is the policy range: a directive that names no duration_bucket gets it, and every template's and directive bucket's range must lie inside it (playlist_duration_outside_policy otherwise)."
@@ -287,6 +287,7 @@
       "energy": "low",
       "bpm": {"min_bpm": 80, "max_bpm": 100, "target_bpm": 90},
       "bpm_limits": {"min_bpm": 70, "max_bpm": 110},
+      "energy_limits": ["low", "medium"],
       "key_profile": "D_minor",
       "lyric_density": "instrumental",
       "song_structure": "loop_progression",
