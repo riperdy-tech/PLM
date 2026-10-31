@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +31,7 @@ from ..domain.enums import (
 from ..domain.posterior import PosteriorState
 from ..modeling.decay import detect_regime_shift
 from ..modeling.evidence import posterior_as_of
+from ..modeling.fatigue import decayed_exposure
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
 from ..observability.logging import emit_alert, evaluate_cycle_alerts, log_cycle
@@ -222,9 +223,13 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                     if status in (ArmLifecycleStatus.CANDIDATE, ArmLifecycleStatus.ACTIVE)}
     selection_recency: dict[str, float] = {}
     for arm_id in states:
+        last = state_rows[arm_id].get("last_selected_at")
+        last = None if last is None else (last if last.tzinfo else last.replace(tzinfo=UTC))
         if repositories.is_in_cooldown_state(session, arm_id=arm_id, now=now):
             eligible_ids.discard(arm_id)
-        selection_recency[arm_id] = repositories.load_exposure_score(session, arm_id)
+        selection_recency[arm_id] = decayed_exposure(
+            repositories.load_exposure_score(session, arm_id), last, now=now,
+            half_life_days=policy.fatigue.decay_half_life_days)
     snapshot_arms = tuple(arm for arm in market.arms if arm.arm_id in eligible_ids)
     regime_shift = False
     for arm in snapshot_arms:
@@ -294,6 +299,12 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
             feature_snapshot_id=snapshot_ids[sample.arm_id], created_at=now,
         )
     samples = {sample.arm_id: sample for sample in prepared.ranked}
+    # §26: an actionable selection starts the policy's cooldown (it used to record None,
+    # so the declared 72 h never applied). SHADOW/DRY_RUN picks have no production effect.
+    cooldown_until = (now + timedelta(hours=policy.fatigue.cooldown_hours)
+                      if activation is ChannelActivationState.AUTONOMOUS
+                      and policy.fatigue.enabled and policy.fatigue.cooldown_hours > 0
+                      else None)
     for directive in directives:
         repositories.insert_directive(session, directive, brand_id=request.brand_id,
                                       status=DirectiveStatus.QUEUED, created_at=now)
@@ -303,7 +314,7 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                         snapshot_id=snapshot_ids[directive.arm_id], arm=arms[directive.arm_id],
                         settings=settings, now=now)
         repositories.record_selection(
-            session, arm_id=directive.arm_id, now=now, cooldown_until=None,
+            session, arm_id=directive.arm_id, now=now, cooldown_until=cooldown_until,
             recent_exposure_score=selection_recency.get(directive.arm_id, 0.0) + 1.0,
         )
     status = (AllocationCycleStatus.PARTIAL

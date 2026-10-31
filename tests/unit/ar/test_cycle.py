@@ -334,3 +334,36 @@ def test_every_directive_is_recorded_in_the_decision_log() -> None:
             assert entry.input_data["feature_snapshot_id"]
             assert entry.model_version == SETTINGS.model_version
             assert entry.confidence is None and entry.result is None
+
+
+def test_an_actionable_pick_cools_its_arm_for_the_policy_cooldown() -> None:
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        repositories.set_channel_state(session, brand_id="neon_seoul",
+                                       activation_state="AUTONOMOUS", now=NOW,
+                                       reason="operator go", updated_by="operator")
+        market = _snapshot(_arm("rnb-1", score=95.0), _arm("rnb-2", score=20.0))
+
+        def pick(at: datetime) -> list[str]:
+            before = {r["arm_id"]: r["selection_count"]
+                      for r in repositories.load_arm_states(session)}
+            run_allocation_cycle(session, _request(slot_count=1, as_of=at), settings=SETTINGS,
+                                 market=market, now=at)
+            return [r["arm_id"] for r in repositories.load_arm_states(session)
+                    if r["selection_count"] > before.get(r["arm_id"], 0)]
+
+        first = pick(NOW)
+        state = {row["arm_id"]: row for row in repositories.load_arm_states(session)}
+        until = state[first[0]]["cooldown_until"]
+        assert until is not None  # it used to be recorded as None
+        second = pick(NOW + timedelta(hours=1))
+        assert second and second[0] != first[0], "a cooling arm is not picked again"
+
+
+def test_exposure_decays_from_the_last_selection() -> None:
+    from services.autonomous_ar.modeling.fatigue import decayed_exposure
+
+    assert decayed_exposure(4.0, NOW, now=NOW + timedelta(days=14), half_life_days=14.0) == 2.0
+    assert decayed_exposure(4.0, None, now=NOW, half_life_days=14.0) == 4.0
+    assert decayed_exposure(4.0, NOW + timedelta(days=1), now=NOW, half_life_days=14.0) == 4.0

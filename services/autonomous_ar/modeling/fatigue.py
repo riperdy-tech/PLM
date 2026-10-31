@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 from ..domain.policy import FatigueConfig
 
-__all__ = ["exposure_score", "fatigue_penalty", "is_in_cooldown"]
+__all__ = ["decayed_exposure", "exposure_score", "fatigue_penalty", "is_in_cooldown"]
 
 SCORE_AT_MAX_PENALTY = 4.0
 """Exposure score at which the configured maximum penalty binds (invented constant, flagged
@@ -34,6 +34,19 @@ def exposure_score(selection_instants: Sequence[datetime], *, now: datetime,
         age_days = max(0.0, (now - instant).total_seconds() / 86400.0)
         score += 0.5 ** (age_days / half_life_days)
     return score
+
+
+def decayed_exposure(stored: float, last_selected_at: datetime | None, *, now: datetime,
+                     half_life_days: float) -> float:
+    """The stored score decayed from the arm's last selection to ``now``.
+
+    The state row keeps the score as of its last selection; without this a score only
+    ever grew, so one early run of picks pinned the penalty at its maximum for good.
+    """
+    if last_selected_at is None or stored <= 0.0:
+        return max(stored, 0.0)
+    age_days = max(0.0, (now - last_selected_at).total_seconds() / 86400.0)
+    return float(stored * 0.5 ** (age_days / half_life_days))
 
 
 def fatigue_penalty(score: float, *, config: FatigueConfig) -> float:
