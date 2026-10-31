@@ -44,6 +44,15 @@ CHUNK_SIZE = 1024 * 1024  # 1MB chunk size for upload
 
 
 def main() -> None:
+    """Refuse: a direct resumable upload of a fixed preview file, outside P5 and P7.
+
+    It skips release clearance, the P7 preflight gates and the external-write guard.
+    Use ``plm youtube publish`` for the authorized path.
+    """
+    raise RuntimeError(
+        "publish_test_video prototype disabled: direct YouTube upload bypasses the "
+        "P5 clearance, P7 preflight gates and the external-write guard"
+    )
     if not VIDEO_PATH.is_file():
         print(f"Error: Video file {VIDEO_PATH} not found.")
         sys.exit(1)

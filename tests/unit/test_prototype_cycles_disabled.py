@@ -33,6 +33,13 @@ def test_p9_closed_loop_runner_refuses(no_network: None) -> None:
         main()
 
 
+def test_direct_test_video_upload_refuses(no_network: None) -> None:
+    from scripts.publish_test_video import main
+
+    with pytest.raises(RuntimeError, match="prototype disabled"):
+        main()
+
+
 def test_control_deck_cycle_refuses_before_any_step(no_network: None) -> None:
     pytest.importorskip("tkinter")
     pytest.importorskip("PIL.ImageTk")
