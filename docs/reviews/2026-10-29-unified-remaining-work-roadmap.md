@@ -16,6 +16,7 @@ This is **one** view of what is still required to finish and verify PLM. It maps
 | `origin/main` (`abe603b`, 2026-10-13) is far behind: 517 files differ from `4a35ce2`. | `git diff --stat 4a35ce2 abe603b` |
 | A second worktree `claude/program-interface-dashboard-9c6dc4` (`4d4e210`) carries a separate dashboard line and `docs/reviews/2026-10-22-system-audit.md`, which does **not** exist in the main checkout. | `git worktree list`, inventory |
 | The compose dev stack (15 containers) is running and healthy; its PostgreSQL is the shared dev DB at Alembic `0039`. Code-only migrations 0040/0041 are **not** applied there. | `docker ps`; STATUS B03 entries |
+| **2026-10-31:** the local dev DB `plm` was migrated 0039 → 0042 with owner approval, retained backup and clone proof; see `2026-10-31-first-manual-suno-run-and-diversity.md`. | that record |
 | `.env` in the main checkout holds real YouTube OAuth refresh token and Suno credentials. | key names only were read |
 
 **Handling in this session.** The user's rule was to preserve and not stage/commit inherited work. This session therefore mirrored the exact 267-entry state into its own worktree (`.claude/worktrees/plm-handover-audit-277422`, byte-identical by `cmp`, baseline tree object `cd56903473d2ef89f595348714f789859e8a15df`), did all edits there, and never touched the main checkout's files, index or branch. Diff of this session's own work: `git diff cd56903473d2ef89f595348714f789859e8a15df` inside that worktree. The worktree has no `.env`, so no test there can reach a real provider.
@@ -164,6 +165,15 @@ Each item merges every plan that describes the same underlying issue. "Tested" n
 The 27 "implemented—reverify" register rows are not separate work: they close through **U1 + U2** (same-SHA unit/contract/integration and R5 evidence), plus the row-specific checks in the register's "remaining verification" column.
 
 ---
+
+### 5.1 Update 2026-10-31
+
+See `2026-10-31-first-manual-suno-run-and-diversity.md`. **U3/U4:** 0040–0042 applied to the
+local dev DB only (clone-verified, backup retained). **U7/B06:** album contrast v4 and full-brief
+Suno sheets (plan-level only; audio distinctness unproven). **P2-01/RC3:** P2 cooldown and
+exposure decay fixed; two fabricated lofi rewards removed. **New open item:** 36 of 77 P1 arms
+cannot be produced by P3 (no genre or no template), which P2 does not know; needs an owner
+decision before the next album.
 
 ## 6. Recommended order
 

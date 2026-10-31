@@ -1606,6 +1606,13 @@ PART X (weekly multi-agent review / LLM router), XII (Shorts engine), XIII (comm
 XXIII (multi-brand beyond a `brand_id` column), and P10 recursive allocation. These are
 deferred and tracked here; they are not scheduled before the economics gate.
 
+## First manual-Suno run and diversity fixes (2026-10-31)
+
+Recorded in `docs/reviews/2026-10-31-first-manual-suno-run-and-diversity.md`: local dev DB
+migrated to 0042 (backup + clone proof), D10 manual-Suno run held awaiting 23 owner-made
+songs, album contrast v4, P2 cooldown/decay fix, two fabricated lofi rewards removed, and the
+open finding that 36 of 77 P1 arms cannot be produced by P3. No song imported or published yet.
+
 ## Focused content-quality remediation evidence (2026-10-23)
 
 - Static analysis (historical legacy audio-backfill snapshot): `.\\.venv\\Scripts\\python.exe -m ruff check .` — clean; `.\\.venv\\Scripts\\python.exe -m mypy packages services` — no issues in 449 source files.
