@@ -120,6 +120,10 @@ def test_lofi_tracks_vary_every_style_dimension_with_one_album_texture() -> None
             assert drummed and spec.lyric_spec["song_structure"] == "loop_progression"
     for spec in specs:
         profile = spec.instrumentation_spec["instrumentation_profile"]
+        if spec.lyric_spec["song_structure"] == "ambient_evolving":  # a drift stays calm
+            groove = spec.creative_latitude["track_arrangement"]["rhythmic_feel"]
+            assert groove not in ("percussive interlocking rhythm", "syncopated offbeat accents")
+            assert "sidechain_kick" not in profile and "dusty_boom_bap_drums" not in profile
         assert profile[-1] == "vinyl_crackle"  # the album texture
         assert "rain_ambience" not in profile
         assert spec.creative_latitude["track_arrangement"]["lead_instrument"] == profile[0]

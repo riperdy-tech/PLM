@@ -78,6 +78,15 @@ STYLE_DIMENSIONS: Final[tuple[str, ...]] = (
 """Genome dimensions a palette varies; the builder applies them to the track."""
 
 
+_BUSY_GROOVES: Final[frozenset[str]] = frozenset({
+    "syncopated offbeat accents", "percussive interlocking rhythm",
+    "broken rhythm with unexpected rests", "gentle swung subdivisions"})
+_CALM_GROOVES: Final[tuple[str, ...]] = (
+    "steady spacious groove", "half-time with silent gaps", "straight laid-back pulse")
+_SOFT_DRUMS: Final[dict[str, str]] = {
+    "sidechain_kick": "brushed_drums", "dusty_boom_bap_drums": "soft_rimshot_kit"}
+
+
 def is_melodic(instrument: str) -> bool:
     return not any(fragment in instrument.lower() for fragment in _NON_MELODIC)
 
@@ -130,6 +139,12 @@ def arrangement_direction(
         return direction
     lead = _pick(palette["lead"], "lead", turn)
     drums = _pick(palette["drums"], "drums", turn)
+    ambient = ("song_structure" not in held
+               and _pick(palette["song_structure"], "song_structure", turn) == "ambient_evolving")
+    if ambient:  # a drift gets a soft kit or none, and a calm groove, never a busy one
+        drums = _SOFT_DRUMS.get(drums, drums)
+        if direction["rhythmic_feel"] in _BUSY_GROOVES:
+            direction["rhythmic_feel"] = _CALM_GROOVES[turn % len(_CALM_GROOVES)]
     texture = [item for item in instruments if not is_melodic(item) and not _is_drum(item)]
     chosen = [lead, _pick(palette["bass"], "bass", turn), drums,
               _pick(palette["color"], "color", turn), *texture]
