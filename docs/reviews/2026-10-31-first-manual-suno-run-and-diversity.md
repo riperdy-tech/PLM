@@ -98,9 +98,14 @@ Running P3's genome build over all 77 P1 arms (as P2 briefs them) found only 24 
   `duration_bucket_mapped:<bucket>->policy`.
 * Result: all 77 arms build (lofi 25, synthwave 14, ambient 13, R&B 10, city pop 10,
   jazz 3, house 2), up from 24.
-* Still open: only lofi has an album-contrast palette, so an ambient, synthwave, jazz,
-  city pop or R&B album keeps one key and one instrument set on every track; P6 does not
-  read `visual_world`, so an arm's visual world never reaches the video.
+* Album contrast v5 (owner: "add palettes"): every template genre (lofi, ambient,
+  synthwave, jazz, city pop, R&B, house) has a palette; production, hook and structure
+  values come from the genre's template alternatives. House keeps a four-on-the-floor kick
+  and its own grooves; ambient stays drumless or soft and keeps `very_low` energy; synthwave
+  ambient tracks get soft drums. A test checks every genre for six or more keys, melodic
+  leads, no two dimensions in lockstep and no lifted calm track.
+* Still open: P6 does not read `visual_world`, so an arm's visual world never reaches the
+  video. Plan-level only: whether Suno follows these briefs is unproven.
 
 ## Verification
 

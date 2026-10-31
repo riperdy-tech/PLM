@@ -113,7 +113,10 @@ def test_documented_derivation_rules_replace_invented_defaults() -> None:
     assert wire["requested_duration"] == round((160 + 221) / 2)
     # ADR-0032: the genome's range itself travels, so P5 never invents a tolerance.
     assert wire["duration_range"] == {"min_seconds": 160, "max_seconds": 221}
-    assert wire["bounded_preferences"]["key_profile"] is None  # open, not "C_minor"
+    # An open genome key is never a fixed default: the album-contrast plan picks each
+    # track's key and records it on the track (v5 palettes; a genre without one stays open).
+    direction = wire["creative_latitude"]["track_arrangement"]
+    assert wire["bounded_preferences"]["key_profile"] == direction.get("key_profile")
 
 
 def test_real_producer_spec_reaches_the_p4_plan_with_its_lineage() -> None:

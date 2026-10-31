@@ -23,7 +23,7 @@ def test_album_tracks_have_distinct_arrangement_briefs_and_provider_prompts() ->
     directions = [spec.creative_latitude["track_arrangement"] for spec in package.track_specs]
     assert directions == [spec.creative_latitude["track_arrangement"] for spec in replay.track_specs]
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions[:8]}) == 8
-    assert all(d["policy_version"] == "p3-album-contrast-v4" for d in directions)
+    assert all(d["policy_version"] == "p3-album-contrast-v5" for d in directions)
     # Every planned track, not just the first eight, must receive a different
     # rhythmic+melodic pairing. The former eight-pattern cycle reused briefs.
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions}) == len(directions)
@@ -149,3 +149,36 @@ def test_a_dimension_the_experiment_tests_is_never_varied_by_the_palette() -> No
     specs = _lofi_package(held_variable="hook_profile").track_specs
     assert {spec.instrumentation_spec["hook_profile"] for spec in specs} == {genome.hook_profile}
     assert len({spec.production_style for spec in specs}) == 3
+
+
+def test_every_template_genre_has_a_palette_that_varies_without_lockstep() -> None:
+    from itertools import combinations
+
+    from services.experiments.genome.engine import default_template_library
+    from services.experiments.materialization.arrangements import _GENRE_PALETTES, is_melodic
+
+    library = default_template_library()
+    assert set(library.genres) <= set(_GENRE_PALETTES)
+    dims = ("lead_instrument", "production_style", "hook_profile", "song_structure",
+            "energy", "key_profile")
+    for genre in library.genres:
+        genome = library.for_genre(genre).genome
+        for package in ("pkg_a", "pkg_b", "pkg_c"):
+            tracks = [arrangement_direction(package, i, genome.instrumentation_profile,
+                                            genre=genre) for i in range(23)]
+            assert len({d["key_profile"] for d in tracks}) >= 6, genre
+            assert all(is_melodic(d["lead_instrument"]) for d in tracks), genre
+            for x, y in combinations(dims, 2):
+                xs, ys = {d[x] for d in tracks}, {d[y] for d in tracks}
+                if len(xs) > 1 and len(ys) > 1:
+                    assert len({(d[x], d[y]) for d in tracks}) > max(len(xs), len(ys)), (
+                        genre, x, y)
+            for d in tracks:
+                calm = (d.get("song_structure") == "ambient_evolving"
+                        or d["rhythmic_feel"].startswith("no drums"))
+                assert not (calm and d.get("energy") in ("medium", "high")), genre
+                if genre == "house":
+                    assert any("kick" in item for item in d["instrumentation"])
+                    assert not d["rhythmic_feel"].startswith(("half-time", "no drums"))
+    ambient = [arrangement_direction("pkg_a", i, (), genre="ambient") for i in range(23)]
+    assert "very_low" in {d["energy"] for d in ambient}  # calm rule never lifts it to low

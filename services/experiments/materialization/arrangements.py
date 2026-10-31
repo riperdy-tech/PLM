@@ -22,7 +22,7 @@ import hashlib
 from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v4"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v5"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -62,15 +62,108 @@ _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "song_structure": ("loop_progression", "ambient_evolving", "loop_progression"),
         "energy": ("low", "medium", "low"),
     },
+    # Values for production, hook and structure come from each genre's template
+    # alternatives; instruments and keys are the genre's common vocabulary.
+    "ambient": {
+        "lead": ("felt_piano", "bowed_cello", "ambient_electric_guitar_swells", "soft_flute",
+                 "celesta", "glass_harmonica"),
+        "bass": ("sub_drone", "bowed_double_bass", "low_analog_drone"),
+        "drums": ("", "", "distant_frame_drum", ""),
+        "color": ("shimmer_pad", "choir_pad", "wind_chimes", "tape_loop", "string_drone",
+                  "water_ambience"),
+        "key_profile": ("D_major", "A_minor", "F_major", "E_minor", "C_major", "G_major",
+                        "B_minor", "Eb_major"),
+        "production_style": ("cinematic", "minimalist"),
+        "hook_profile": ("atmospheric", "slow_burn", "atmospheric"),
+        "song_structure": ("ambient_evolving",),
+        "energy": ("very_low", "low", "very_low"),
+    },
+    "synthwave": {
+        "lead": ("analog_poly_synth", "saw_lead_synth", "fm_electric_piano", "synth_brass",
+                 "chorused_electric_guitar", "arpeggiated_pluck_synth"),
+        "bass": ("arpeggiated_synth_bass", "octave_synth_bass", "fretless_electric_bass"),
+        "drums": ("gated_reverb_drums", "linn_drum_machine", "electronic_tom_kit", "",
+                  "808_kit"),
+        "color": ("lush_string_pad", "choir_pad", "tape_hiss", "neon_city_ambience",
+                  "bell_synth", "noise_sweep"),
+        "key_profile": ("A_minor", "E_minor", "D_minor", "F#_minor", "C_minor", "G_minor",
+                        "Bb_major", "F_major"),
+        "production_style": ("analog_warm", "clean_modern", "tape_saturated"),
+        "hook_profile": ("instrumental_riff", "slow_burn", "atmospheric"),
+        "song_structure": ("loop_progression", "intro_verse_chorus", "ambient_evolving"),
+        "energy": ("medium", "low", "high"),
+    },
+    "jazz": {
+        "lead": ("jazz_piano", "tenor_saxophone", "muted_trumpet", "vibraphone",
+                 "hollow_body_guitar", "flugelhorn"),
+        "bass": ("upright_bass", "walking_upright_bass", "fretless_electric_bass"),
+        "drums": ("brushed_drums", "ride_cymbal_kit", "soft_rimshot_kit", ""),
+        "color": ("hammond_organ", "string_section", "rhodes_comping", "flute_doubling",
+                  "cafe_room_tone", "vinyl_crackle"),
+        "key_profile": ("Bb_major", "F_major", "Eb_major", "C_minor", "D_minor", "G_minor",
+                        "Ab_major", "C_major"),
+        "production_style": ("clean_modern", "analog_warm"),
+        "hook_profile": ("instrumental_hook", "slow_burn", "atmospheric"),
+        "song_structure": ("head_solos_head", "ballad_aaba", "head_solos_head"),
+        "energy": ("low", "medium", "low"),
+    },
+    "city_pop": {
+        "lead": ("electric_piano", "synth_brass", "clean_funk_guitar", "alto_saxophone",
+                 "fm_electric_piano", "glossy_poly_synth"),
+        "bass": ("slap_bass", "fingerstyle_electric_bass", "synth_bass"),
+        "drums": ("tight_funk_kit", "linn_drum_machine", "disco_kit", "live_pop_kit"),
+        "color": ("string_section", "horn_section", "glossy_pad", "congas", "chorus_guitar",
+                  "bell_synth"),
+        "key_profile": ("Eb_major", "F_major", "Ab_major", "Bb_major", "D_major", "E_major",
+                        "C_major", "G_major"),
+        "production_style": ("analog_warm", "clean_modern"),
+        "hook_profile": ("immediate", "first_chorus", "slow_burn"),
+        "song_structure": ("verse_chorus_bridge", "intro_verse_chorus", "hook_forward"),
+        "energy": ("medium", "high", "medium", "low"),
+    },
+    "rnb": {
+        "lead": ("rhodes", "reverb_guitar", "wurlitzer", "nylon_guitar", "felt_piano",
+                 "synth_pluck"),
+        "bass": ("808_bass", "warm_sub_bass", "fingerstyle_electric_bass"),
+        "drums": ("trap_hat_808_kit", "laid_back_live_kit", "snap_and_rim_kit",
+                  "boom_bap_drums"),
+        "color": ("string_pad", "vocal_chop_texture", "airy_synth_pad", "finger_snaps",
+                  "vinyl_crackle", "choir_pad"),
+        "key_profile": ("C_minor", "Eb_major", "F_minor", "Bb_minor", "Ab_major", "G_minor",
+                        "Db_major", "D_minor"),
+        "production_style": ("warm_analog", "clean_modern", "cinematic"),
+        "hook_profile": ("vocal_refrain", "slow_burn", "first_chorus", "immediate"),
+        "song_structure": ("verse_chorus_bridge", "intro_verse_chorus", "hook_forward"),
+        "energy": ("medium", "low", "medium"),
+    },
+    "house": {
+        "lead": ("warm_synth_stabs", "piano_chords", "rhodes", "plucked_synth",
+                 "vocal_chop_lead", "organ_stabs"),
+        "bass": ("deep_bass", "rolling_sub_bass", "acid_bassline"),
+        # house keeps its four-on-the-floor kick on every track
+        "drums": ("four_on_floor_kick", "four_on_floor_kick_with_shuffled_hats",
+                  "four_on_floor_kick_with_congas", "minimal_four_on_floor_kick"),
+        "color": ("lush_pad", "string_stabs", "filtered_noise_riser", "shaker_percussion",
+                  "dub_chords", "choir_pad"),
+        "key_profile": ("A_minor", "F_minor", "D_minor", "G_minor", "C_minor", "E_minor",
+                        "Bb_minor", "F#_minor"),
+        "production_style": ("clean_modern", "analog_warm"),
+        "hook_profile": ("immediate", "slow_burn", "first_chorus"),
+        "song_structure": ("build_drop_breakdown", "extended_groove", "build_drop_breakdown"),
+        "energy": ("high", "medium", "high"),
+        "groove": ("steady four-on-the-floor pulse", "shuffled offbeat hats",
+                   "rolling percussive groove", "stripped-back kick and clap",
+                   "syncopated bass-led groove"),
+    },
 }
-"""Per-genre values each track rotates through (v4)."""
+"""Per-genre values each track rotates through (v4: lofi; v5: all seven template genres)."""
 
 # (step, lag) per dimension: a different stride and a per-cycle shift each, so no two
 # dimensions move in lockstep and a lead never always meets the same bass or key.
 _ROTATION: Final[dict[str, tuple[int, int]]] = {
     "lead": (1, 0), "bass": (2, 6), "drums": (3, 6), "color": (1, 3),
-    "key_profile": (5, 0), "production_style": (1, 4), "hook_profile": (2, 5),
-    "song_structure": (2, 7), "energy": (1, 7),
+    "key_profile": (5, 0), "production_style": (1, 5), "hook_profile": (2, 5),
+    "song_structure": (2, 7), "energy": (1, 7), "groove": (2, 3),
 }
 
 STYLE_DIMENSIONS: Final[tuple[str, ...]] = (
@@ -83,8 +176,13 @@ _BUSY_GROOVES: Final[frozenset[str]] = frozenset({
     "broken rhythm with unexpected rests", "gentle swung subdivisions"})
 _CALM_GROOVES: Final[tuple[str, ...]] = (
     "steady spacious groove", "half-time with silent gaps", "straight laid-back pulse")
+_LIFTED: Final[frozenset[str]] = frozenset({"medium", "high", "very_high"})
+"""Energies a calm track is brought down from; very_low stays very_low."""
+
 _SOFT_DRUMS: Final[dict[str, str]] = {
-    "sidechain_kick": "brushed_drums", "dusty_boom_bap_drums": "soft_rimshot_kit"}
+    "sidechain_kick": "brushed_drums", "dusty_boom_bap_drums": "soft_rimshot_kit",
+    "gated_reverb_drums": "soft_electronic_drums", "linn_drum_machine": "soft_electronic_drums",
+    "electronic_tom_kit": "soft_electronic_drums", "808_kit": "soft_electronic_drums"}
 
 
 def is_melodic(instrument: str) -> bool:
@@ -137,6 +235,8 @@ def arrangement_direction(
         melodic = [item for item in instruments if is_melodic(item)]
         direction["lead_instrument"] = melodic[turn % len(melodic)] if melodic else ""
         return direction
+    if "groove" in palette:  # a genre whose feel the generic grooves would contradict
+        direction["rhythmic_feel"] = _pick(palette["groove"], "groove", turn)
     lead = _pick(palette["lead"], "lead", turn)
     drums = _pick(palette["drums"], "drums", turn)
     ambient = ("song_structure" not in held
@@ -158,6 +258,6 @@ def arrangement_direction(
         direction["rhythmic_feel"] = "no drums, free-time interlude"
     # A drift or an interlude is calm: lifts in energy go to looped tracks with drums.
     calm = not drums or direction.get("song_structure") == "ambient_evolving"
-    if calm and direction.get("energy") not in (None, "low") and "energy" not in held:
+    if calm and direction.get("energy") in _LIFTED and "energy" not in held:
         direction["energy"] = "low"
     return direction
