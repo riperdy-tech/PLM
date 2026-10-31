@@ -29,10 +29,11 @@ from sqlalchemy import text
 
 from tests.support.migration_isolated_rehearsal import (
     ROOT,
+    SOURCE_CONTAINER,
     _create_database,
+    _inspect,
     _new_cluster,
     _restore,
-    _source_guard,
     _target_settings,
     _upgrade,
 )
@@ -54,12 +55,36 @@ BACKUP_ID = re.compile(r"0042_local_plm_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{12}\Z")
 
 
 def _source() -> Settings:
+    """The local ``plm`` database in ``plm-postgres-1`` on loopback 5432, PostgreSQL 16."""
     settings = load_settings(dotenv_path=ROOT / ".env")
     if settings.env != Env.LOCAL:
         raise RuntimeError("only ENV=local eligible")
-    user, _ = _source_guard(settings)
-    if user != database_url(settings).username:
-        raise RuntimeError("source role identity changed")
+    url = database_url(settings)
+    if (
+        url.database != "plm" or url.host not in ("127.0.0.1", "localhost")
+        or url.port != 5432 or not url.username
+    ):
+        raise RuntimeError("source identity differs from known local development DB")
+    source = _inspect(SOURCE_CONTAINER)
+    bindings = source["HostConfig"]["PortBindings"]["5432/tcp"]
+    if (
+        source["State"]["Running"] is not True
+        or not source["Config"]["Image"].startswith("postgres:16")
+        or len(bindings) != 1 or bindings[0]["HostIp"] != "127.0.0.1"
+        or bindings[0]["HostPort"] != "5432"
+    ):
+        raise RuntimeError("source PostgreSQL container differs from known development DB")
+    engine = build_engine(settings)
+    try:
+        with engine.connect() as conn:
+            if (
+                conn.execute(text("SELECT current_database()")).scalar_one() != "plm"
+                or int(conn.execute(text(
+                    "SELECT current_setting('server_version_num')")).scalar_one()) // 10000 != 16
+            ):
+                raise RuntimeError("source database or server version unexpected")
+    finally:
+        engine.dispose()
     return settings
 
 
