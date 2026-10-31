@@ -40,6 +40,7 @@ from ..genome.engine import (
     CreativeLatitudeEnvelope,
     TemplateLibrary,
     brief_genre,
+    brief_playlist_duration,
     default_template_library,
 )
 from ..storage.ids import experiment_id, treatment_id
@@ -206,9 +207,10 @@ def design_experiment(
     else:
         overrides, notes = _one_factor_per_treatment(declared, candidates, variants)
 
+    # Record where P3 filled in or overrode the arm's brief (owner decisions 2026-10-31).
     _, inferred = brief_genre(directive, library=library)
-    if inferred is not None:  # the arm named no genre: record which one P3 chose
-        notes = [*notes, inferred]
+    _, mapped = brief_playlist_duration(directive, library=library)
+    notes = [*notes, *(note for note in (inferred, mapped) if note is not None)]
     exp_id = experiment_id(
         directive.arm_id,
         directive.directive_id,

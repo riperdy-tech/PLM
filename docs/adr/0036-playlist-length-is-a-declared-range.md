@@ -75,3 +75,14 @@ the planning midpoint.
 - *Plan to the midpoint instead of the minimum.* Rejected for the base count: the range
   minimum is the requirement; spares and top-ups absorb rejections, and the sequencer's
   midpoint preference uses whatever extra supply clears.
+
+## Amendment 2026-10-31 (owner decision)
+
+P1 forms arms for every observed length (`gt_75m`, `10_45m`, `3_10m`, `60_180s`, `lt_60s`),
+and refusing them made 36 of 77 arms unproducible while P2 still picked them. The owner
+decided they are **made at the policy length (45-75 min), not refused**: a `duration_bucket`
+that is unknown or lies outside the policy gets the policy range, and the experiment's
+`design_notes` records `duration_bucket_mapped:<bucket>->policy`. A bucket inside the policy
+still sets its own range, and a genre template may still not declare a range outside the
+policy (refused at load). The arm's genre, mood and use case still shape the album; only
+its length request is overridden.

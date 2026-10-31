@@ -22,12 +22,12 @@ from sqlalchemy.orm import sessionmaker
 
 from services.experiments.api.app import create_app
 from services.experiments.config import load_experiments_settings
-from services.experiments.domain.errors import GenomeBuildError
 from services.experiments.domain.genome import DurationRange
 from services.experiments.genome.engine import (
     TEMPLATES_PATH,
     TemplateLibrary,
     TemplateLibraryError,
+    brief_playlist_duration,
     build_genome_from_directive,
 )
 from services.experiments.ingestion.p2_adapter import adapt_directive
@@ -133,17 +133,20 @@ def test_without_a_bucket_the_policy_range_applies() -> None:
                 genome.playlist_duration.target_seconds) == (2700, 4500, 3600), genre
 
 
-def test_a_bucket_outside_the_policy_is_refused_not_clamped() -> None:
-    """Proves a declared bucket whose range lies outside the policy (``10_45m``) is
-    refused with ``playlist_duration_outside_policy``, through the engine and over HTTP."""
-    with pytest.raises(GenomeBuildError) as raised:
-        build_genome_from_directive(adapt_directive(_directive(duration_bucket="10_45m")))
-    assert raised.value.code == "playlist_duration_outside_policy"
+def test_a_bucket_outside_the_policy_is_made_at_the_policy_length() -> None:
+    """Owner decision 2026-10-31 (amends ADR-0036): an arm whose bucket (``10_45m``) lies
+    outside the policy is produced at the policy range, and the experiment records it."""
+    directive = adapt_directive(_directive(duration_bucket="10_45m"))
+    genome = build_genome_from_directive(directive)
+    assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds) == (
+        2700, 4500)
+    assert brief_playlist_duration(directive)[1] == "duration_bucket_mapped:10_45m->policy"
 
     response = _client().post("/experiments/v1/experiments", headers=HEADERS,
                               json={"directive": _directive(duration_bucket="10_45m")})
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "playlist_duration_outside_policy"
+    assert response.status_code == 200
+    assert "duration_bucket_mapped:10_45m->policy" in response.json()["experiment"][
+        "design_notes"]
 
 
 def test_a_template_range_outside_the_policy_is_refused_at_load() -> None:
@@ -169,17 +172,17 @@ def test_the_policy_must_be_declared() -> None:
         TemplateLibrary(raw)
 
 
-def test_undeclared_bucket_is_refused_not_mapped() -> None:
-    """Proves a bucket without a declared playlist range (``gt_75m`` has no maximum) is
-    refused, through the engine and over HTTP, rather than given a nearby range."""
-    with pytest.raises(GenomeBuildError) as raised:
-        build_genome_from_directive(adapt_directive(_directive(duration_bucket="gt_75m")))
-    assert raised.value.code == "playlist_duration_bucket_unknown"
-
+def test_undeclared_bucket_is_made_at_the_policy_length() -> None:
+    """``gt_75m`` declares no range; the arm is produced at the policy range (45-75 min)
+    with the mapping recorded, through the engine and over HTTP."""
+    genome = build_genome_from_directive(adapt_directive(_directive(duration_bucket="gt_75m")))
+    assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds) == (
+        2700, 4500)
     response = _client().post("/experiments/v1/experiments", headers=HEADERS,
                               json={"directive": _directive(duration_bucket="gt_75m")})
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "playlist_duration_bucket_unknown"
+    assert response.status_code == 200
+    assert "duration_bucket_mapped:gt_75m->policy" in response.json()["experiment"][
+        "design_notes"]
 
 
 def test_a_template_without_a_playlist_range_is_refused_at_load() -> None:

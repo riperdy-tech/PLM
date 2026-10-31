@@ -93,10 +93,11 @@ Running P3's genome build over all 77 P1 arms (as P2 briefs them) found only 24 
   picked by a stable hash of the directive id so repeated arms spread across genres; the
   experiment records `genre_inferred:<genre>:use_case=<case>`. New `synthwave_neon`
   template; `deep_house` is an alias of `house`. A library without the table still refuses.
-* Result: 41 of 77 arms build (lofi 13, ambient 7, synthwave 7, city pop 7, R&B 5, jazz 2).
-  The other 36 fail only on duration. ADR-0036 and `playlist_duration_for_bucket` say an
-  unknown or out-of-policy bucket is "refused, never mapped or clamped", so mapping them
-  needs a separate owner decision.
+* Duration (owner: "Make at 45-75 min", ADR-0036 amended): an unknown or out-of-policy
+  bucket gets the policy range and the experiment records
+  `duration_bucket_mapped:<bucket>->policy`.
+* Result: all 77 arms build (lofi 25, synthwave 14, ambient 13, R&B 10, city pop 10,
+  jazz 3, house 2), up from 24.
 * Still open: only lofi has an album-contrast palette, so an ambient, synthwave, jazz,
   city pop or R&B album keeps one key and one instrument set on every track; P6 does not
   read `visual_world`, so an arm's visual world never reaches the video.

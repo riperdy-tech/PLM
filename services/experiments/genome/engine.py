@@ -55,6 +55,7 @@ __all__ = [
     "TemplateNotFoundError",
     "UnknownGenreError",
     "brief_genre",
+    "brief_playlist_duration",
     "build_genome_from_directive",
     "default_template_library",
     "normalize_dimension_value",
@@ -253,6 +254,18 @@ class TemplateLibrary:
                 field_paths=["brief.duration_bucket"],
             )
         return found
+
+    def playlist_duration_or_policy(self, bucket: str) -> tuple[DurationRange, str | None]:
+        """The bucket's range, or the policy range with a note when the bucket is unknown or
+        lies outside the policy (owner decision 2026-10-31, amending ADR-0036: such an arm
+        is produced at the policy length, not refused)."""
+        try:
+            return self.playlist_duration_for_bucket(bucket), None
+        except GenomeBuildError as exc:
+            if exc.code not in (PLAYLIST_DURATION_BUCKET_UNKNOWN,
+                                PLAYLIST_DURATION_OUTSIDE_POLICY):
+                raise
+            return self._policy, f"duration_bucket_mapped:{bucket}->policy"
 
     def _inside_policy(self, declared: DurationRange) -> bool:
         return (self._policy.min_seconds <= declared.min_seconds
@@ -457,6 +470,17 @@ def brief_genre(
     return lib.infer_genre(use_cases, directive.directive_id)
 
 
+def brief_playlist_duration(
+    directive: AdaptedDirective, *, library: TemplateLibrary | None = None
+) -> tuple[DurationRange, str | None]:
+    """The brief's playlist range: its bucket's, else the policy (with a note if mapped)."""
+    lib = library or default_template_library()
+    if not _present(directive.brief.get("duration_bucket")):
+        return lib.playlist_duration_policy, None
+    bucket = normalize_dimension_value("duration_bucket", str(directive.brief["duration_bucket"]))
+    return lib.playlist_duration_or_policy(bucket)
+
+
 def build_genome_from_directive(
     directive: AdaptedDirective, *, library: TemplateLibrary | None = None
 ) -> ContentGenome:
@@ -465,8 +489,9 @@ def build_genome_from_directive(
     A brief that names no genre gets one from its use case (:func:`brief_genre`, owner
     decision 2026-10-31); a named genre without a template is refused (``unknown_genre``). Brief dimensions that are unset
     are open, so the template's default applies, except the playlist range: a named
-    ``duration_bucket`` sets it to the bucket's declared range (inside the policy), and
-    an open one to the policy range (ADR-0036).
+    ``duration_bucket`` sets it to the bucket's declared range when that lies inside the
+    policy; an open, unknown or out-of-policy one gets the policy range (ADR-0036 as
+    amended 2026-10-31, recorded on the experiment).
     """
     lib = library or default_template_library()
     brief = directive.brief
@@ -497,11 +522,7 @@ def build_genome_from_directive(
         updates["vocal_mode"] = vocal_mode
         if vocal_mode is VocalMode.INSTRUMENTAL:
             updates["vocal_gender"] = VocalGender.NONE
-    if _present(brief.get("duration_bucket")):
-        bucket = normalize_dimension_value("duration_bucket", str(brief["duration_bucket"]))
-        updates["playlist_duration"] = lib.playlist_duration_for_bucket(bucket)
-    else:
-        updates["playlist_duration"] = lib.playlist_duration_policy
+    updates["playlist_duration"], _ = brief_playlist_duration(directive, library=lib)
 
     dumped = base.model_dump()
     dumped.update(updates)
