@@ -23,7 +23,7 @@ CYCLE_BODY = {
 }
 
 RESULT_BODY = {
-    "schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "rnb-0", "content_id": "c-1",
+    "schema_version": "1.0", "experiment_id": "exp-1", "arm_id": "focus_electronic-0", "content_id": "c-1",
     "observation_window": "28d", "status": "mature",
     "observed_at": "2026-10-01T00:00:00+00:00", "raw_metrics": unmeasured_raw_metrics(),
     "normalized_reward": 0.8, "reward_version": "p9-reward-v1",
@@ -42,7 +42,7 @@ def test_results_are_accepted_once_and_updates_apply(client: TestClient) -> None
     update = client.post("/ar/update", params={"brand_id": "neon_seoul"})
     assert update.status_code == 200, update.text
     assert update.json()["applied"] == 1
-    state = client.get("/ar/arms/rnb-0/state").json()
+    state = client.get("/ar/arms/focus_electronic-0/state").json()
     assert state["observation_count"] == 1
     assert client.post("/ar/results", json={**RESULT_BODY, "arm_id": "ghost"}).status_code == 422
 

@@ -1,0 +1,12 @@
+{
+  "identity_version": "brand-identity-v1",
+  "basis": "ADR-0044 (2026-11-01): the channel is instrumental deep-focus electronic music for coding and deep work. An arm is in identity only when its use case is a focus use case, its genre is one of the focus genres or unset, and it is not vocal. Unset genres are admitted because P3 infers a focus genre for them.",
+  "brands": {
+    "neon_seoul": {
+      "use_cases": ["study_focus", "focus"],
+      "genres": ["focus_electronic", "ambient", "synthwave", "deep_house"],
+      "allow_unset_genre": true,
+      "excluded_vocal_modes": ["vocal"]
+    }
+  }
+}

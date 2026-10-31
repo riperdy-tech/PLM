@@ -89,6 +89,7 @@ class ReasonCode(StrEnum):
     MANUAL_OVERRIDE = "MANUAL_OVERRIDE"              # §107
     FATIGUE_COOLDOWN = "FATIGUE_COOLDOWN"            # §26
     WEAK_POSTERIOR = "WEAK_POSTERIOR"                # §38 retirement evidence
+    IDENTITY_UNDECLARED = "IDENTITY_UNDECLARED"      # ADR-0044: brand has no identity spec
 
 
 class OverrideAction(StrEnum):

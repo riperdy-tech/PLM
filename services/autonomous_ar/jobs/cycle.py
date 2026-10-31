@@ -36,11 +36,11 @@ def _run_cycle(payload: dict[str, Any]) -> dict[str, Any]:
     from plm_platform.config import load_settings
     from plm_platform.db import scoped_session
 
-    from ..config import load_ar_settings
+    from ..config import production_settings
     from ..decisioning.cycle import CycleRequest, MarketSnapshot, run_allocation_cycle
     from ..ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
 
-    settings = load_ar_settings(platform=load_settings(env=None))
+    settings = production_settings(platform=load_settings(env=None))
     platform = settings.platform
     if platform is None:  # pragma: no cover - load_ar_settings above always sets it
         raise RuntimeError("AR settings without platform settings cannot run the job")

@@ -38,6 +38,7 @@ from ..observability.logging import emit_alert, evaluate_cycle_alerts, log_cycle
 from ..observability.metrics import CONSTRAINT_REJECTIONS, CYCLE_FAILURES, record_cycle
 from ..policy.constraints import directive_budget_share
 from ..policy.exploration import effective_fractions, quota_from_fractions
+from ..policy.identity import apply_brand_identity
 from ..policy.lifecycle import evaluate_retirements, reopen_reason
 from ..storage import repositories
 from ..storage.ids import deterministic_id
@@ -190,6 +191,14 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         posteriors[arm.arm_id] = posterior_as_of(session, existing, model=resolved_model,
                                                  policy=policy, as_of=now)
     # 5 — freshness gate; 6 — blocked/policy constraints; 7 — cooldown/fatigue
+    # 6a — ADR-0044: an arm outside the brand's identity is blocked before eligibility
+    identity = settings.brand_identities.get(request.brand_id)
+    if identity is None:
+        warnings.append(ReasonCode.IDENTITY_UNDECLARED.value)
+    else:
+        apply_brand_identity(
+            session, identity, market.arms,
+            {row["arm_id"]: row for row in repositories.load_arm_states(session)}, now=now)
     state_rows = {row["arm_id"]: row for row in repositories.load_arm_states(session)}
     states = {arm_id: ArmLifecycleStatus(row["status"]) for arm_id, row in state_rows.items()}
     # 5b — §38 retirement and §39 reopening, decided before eligibility is computed

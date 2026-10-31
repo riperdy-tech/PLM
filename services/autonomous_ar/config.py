@@ -6,12 +6,15 @@ Version strings live here once and are copied onto every decision row (§76).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from plm_contracts import ChannelActivationState
 from plm_platform.config import Settings
 
-__all__ = ["ARSettings", "load_ar_settings"]
+from .policy.identity import BrandIdentity, load_brand_identities
+
+__all__ = ["ARSettings", "load_ar_settings", "production_settings"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +39,9 @@ class ARSettings:
     default_budget: float = 10.0
     cycle_cadence_hours: float = 168.0
     simulation_reward_version: str = "p2-sim-v1"
+    brand_identities: Mapping[str, BrandIdentity] = field(default_factory=dict)
+    """ADR-0044: per-brand identity; an undeclared brand is not filtered (warned).
+    Production entry points pass `load_brand_identities()`; see `production_settings`."""
 
 
 def load_ar_settings(*, platform: Settings | None = None, **overrides: object) -> ARSettings:
@@ -48,3 +54,9 @@ def load_ar_settings(*, platform: Settings | None = None, **overrides: object) -
     if unknown:
         raise TypeError(f"unknown ar settings: {sorted(unknown)}")
     return ARSettings(platform=platform, **overrides)  # type: ignore[arg-type]
+
+
+def production_settings(*, platform: Settings | None, **overrides: object) -> ARSettings:
+    """Settings for a real entry point (CLI, jobs, smoke): the brand identities are loaded."""
+    return load_ar_settings(platform=platform, brand_identities=load_brand_identities(),
+                            **overrides)

@@ -1,7 +1,7 @@
 # services/autonomous_ar/cli.py
 """Implementations behind the `plm ar …` commands (declared in `plm_platform.cli`).
 
-Every command builds `load_ar_settings(platform=load_settings())` and — unless a factory
+Every command builds `production_settings(platform=load_settings())` and — unless a factory
 is injected — sessions over the platform database; the service never reads `os.environ`.
 Determinism: `run_cycle_once` stamps the cycle instant once when the caller supplies none
 (the same boundary rule the scheduled activity follows — re-running with the same `as_of`
@@ -21,7 +21,7 @@ from plm_platform.service_urls import service_url
 from plm_platform.temporal import Phase
 from sqlalchemy.orm import Session
 
-from .config import ARSettings, load_ar_settings
+from .config import ARSettings, production_settings
 from .decisioning.cycle import CycleRequest, MarketSnapshot, run_allocation_cycle
 from .ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
 from .observability.explanation import explain_decision
@@ -58,7 +58,7 @@ def run_cycle_once(*, session_factory: SessionFactory | None = None,
     snapshot comes from `/market/v1` with §102's stored fallback, so an operator can run a
     degraded cycle offline; when neither live nor stored data exists the refusal propagates.
     """
-    settings = load_ar_settings(platform=load_settings())
+    settings = production_settings(platform=load_settings())
     moment = _parse_instant(as_of)
     request = CycleRequest(
         brand_id=brand_id or DEFAULT_BRAND_ID, as_of=moment,
@@ -131,7 +131,7 @@ def explain(decision_id: str, *, session_factory: SessionFactory | None = None) 
 
 def simulate(scenario: str = "clear_winner", cycles: int = 80, seed: int = 1) -> str:
     """One §69 scenario over the real policy functions; §99's metrics, units named."""
-    settings = load_ar_settings(platform=load_settings())
+    settings = production_settings(platform=load_settings())
     factories = {factory().name: factory for factory in ALL_SCENARIOS}
     if scenario not in factories:
         raise LookupError(f"unknown scenario {scenario!r}: expected one of {sorted(factories)}")
@@ -162,8 +162,8 @@ def serve(host: str = "127.0.0.1", port: int = 8082) -> None:
 
     from .api.app import create_app
 
-    settings = load_ar_settings(platform=load_settings(),
-                                market_base_url=service_url(Phase.MARKET))
+    settings = production_settings(platform=load_settings(),
+                                  market_base_url=service_url(Phase.MARKET))
     app = create_app(session_factory=platform_session_factory(), settings=settings)
     uvicorn.run(app, host=host, port=port)
 

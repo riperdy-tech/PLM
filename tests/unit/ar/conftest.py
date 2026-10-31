@@ -45,17 +45,20 @@ _COMPONENTS = {name: 60.0 for name in
 
 
 def _market_source(request: CycleRequest) -> MarketSnapshot:
-    """Four P1 arms, one per genre, each with its own use case and language."""
+    """Four in-identity P1 arms (ADR-0044), one per genre, each with its own language.
+
+    Each also carries its own use case first, so the portfolio caps see four use cases."""
     arms = tuple(
         ContentArm(
             arm_id=f"{genre}-{index}",
-            dimensions=ArmDimensions(genre=genre, use_cases=(f"use-case-{index}",),
-                                     language=f"language-{index}", vocal_mode="vocal"),
+            dimensions=ArmDimensions(genre=genre,
+                                     use_cases=(f"use-case-{index}", "study_focus"),
+                                     language=f"language-{index}", vocal_mode="instrumental"),
             p1_score=80.0 - index * 5.0, p1_confidence=0.7,
             component_scores=dict(_COMPONENTS), observation_count=2, source_count=1,
             as_of=request.as_of, score_version="p1-v1", freshness_seconds=0.0,
         )
-        for index, genre in enumerate(("rnb", "city_pop", "house", "jazz"))
+        for index, genre in enumerate(("focus_electronic", "ambient", "synthwave", "deep_house"))
     )
     return MarketSnapshot(arms=arms, as_of=request.as_of, source="live", score_version="p1-v1")
 

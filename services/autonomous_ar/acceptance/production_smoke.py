@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 
 from plm_contracts import ChannelActivationState
 
-from ..config import load_ar_settings
+from ..config import production_settings
 from ..decisioning.cycle import CycleRequest, MarketSnapshot, run_allocation_cycle
 from ..ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
 from ..storage import repositories
@@ -42,7 +42,7 @@ def run_production_smoke(*, base_url: str | None = None,
     platform = load_settings()
     if platform.service_token is None:
         return _TOKEN_REASON
-    settings = load_ar_settings(platform=platform)
+    settings = production_settings(platform=platform)
     brand = brand_id or "neon_seoul"
     client = P1Client(base_url or settings.market_base_url,
                       platform.service_token.get_secret_value(),
