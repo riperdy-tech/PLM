@@ -812,11 +812,27 @@ def insert_score(
     return score_id
 
 
+def retire_arms_outside_namespace(session: Session, *, prefix: str) -> int:
+    """Retire every arm whose id is not in the current taxonomy namespace.
+
+    An older taxonomy's arms keep their last scores; without this, the read path keeps
+    serving them beside the current ones until they age out. Rows and scores stay (evidence);
+    only the lifecycle field moves (§16, P1 owns it). Returns the number retired.
+    """
+    result = session.execute(
+        sa.update(arms)
+        .where(~arms.c.arm_id.startswith(prefix, autoescape=True),
+               arms.c.status != ArmStatus.RETIRED.value)
+        .values(status=ArmStatus.RETIRED.value, updated_at=sa.func.now())
+    )
+    return int(result.rowcount or 0)
+
+
 def latest_scores(
     session: Session, *, limit: int = 100, min_score: float | None = None,
     min_confidence: float | None = None, min_basis_weight: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Newest score per arm, ranked — the API's read path (§25).
+    """Newest score per arm, ranked — the API's read path (§25). Retired arms are left out.
 
     Review ruling: with `min_basis_weight` set, arms whose measured basis falls
     below the floor are **flagged** (`insufficient_coverage`) and ordered after
@@ -834,6 +850,7 @@ def latest_scores(
         .join(newest, sa.and_(scores.c.arm_id == newest.c.arm_id,
                               scores.c.computed_at == newest.c.computed_at))
         .join(arms, arms.c.arm_id == scores.c.arm_id)
+        .where(arms.c.status != ArmStatus.RETIRED.value)
     )
     if min_score is not None:
         statement = statement.where(scores.c.market_opportunity_score >= min_score)

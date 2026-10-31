@@ -47,7 +47,7 @@ from .domain.enums import (
     ProviderName,
     TaxonomyDimension,
 )
-from .domain.value_objects import fingerprint
+from .domain.value_objects import fingerprint, slug_token
 from .features.arm_features import compute_arm_features
 from .observability.logging import log_run_summary
 from .observability.metrics import record_run_metrics
@@ -571,6 +571,9 @@ def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> 
             refuse_slug_collision=True,
         )
         arm_ids[arm.fingerprint] = stored_id
+    # An older taxonomy's arms would otherwise keep being served on their last scores.
+    repositories.retire_arms_outside_namespace(
+        session, prefix=f"{slug_token(settings.taxonomy_version, max_length=20)}_")
     grouped: dict[str, list[Any]] = {}
     for arm in arms:
         group = [by_observation_id[oid] for oid in arm.source_observation_ids
