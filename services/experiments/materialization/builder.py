@@ -208,7 +208,7 @@ def materialize_package(
             "hook_profile": direction.get("hook_profile", effective_genome.hook_profile),
         }
         provider_policy = ProviderPolicy(
-            allowed_providers=("elevenlabs", "suno", "stable_audio"),
+            allowed_providers=("elevenlabs", "suno", "stable_audio", "lyria"),
         )
 
         track_specs.append(

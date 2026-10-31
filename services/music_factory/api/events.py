@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from ..domain.enums import ArtifactType, AttemptStatus, PlanStatus
 from ..generation.prompts import build_generation_prompt
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
+from ..providers.flow_music_manual import MANUAL_MODEL_ID as FLOW_MUSIC_MODEL_ID
 from ..providers.suno_manual import MANUAL_MODEL_ID
 from ..storage.repositories import (
     get_candidate,
@@ -59,6 +60,17 @@ MANUAL_HUMAN_CONTRIBUTION = (
     "downloaded it unedited; no human edits in P4"
 )
 """P28 human_contribution of an imported owner-made Suno song (model ``suno-web-manual``)."""
+
+FLOW_MUSIC_HUMAN_CONTRIBUTION = (
+    "owner made the song in Google Flow Music from the PLM prompt, chose one of its "
+    "songs and downloaded it unedited; no human edits in P4"
+)
+"""P28 human_contribution of an imported owner-made Flow Music song."""
+
+_MANUAL_CONTRIBUTIONS = {
+    MANUAL_MODEL_ID: MANUAL_HUMAN_CONTRIBUTION,
+    FLOW_MUSIC_MODEL_ID: FLOW_MUSIC_HUMAN_CONTRIBUTION,
+}
 
 def build_candidate_ready_event(session: Session, candidate_id: str) -> CandidateReadyPayload:
     """Assemble the C4 event for one candidate from stored facts, or refuse."""
@@ -221,7 +233,6 @@ def build_candidate_ready_event(session: Session, candidate_id: str) -> Candidat
             # P4 sends providers a prompt and settings only: no samples, stems, voice or
             # melody inputs. That is a declared fact, not a default.
             source_inputs=(),
-            human_contribution=(MANUAL_HUMAN_CONTRIBUTION if attempt.model_id == MANUAL_MODEL_ID
-                                else HUMAN_CONTRIBUTION),
+            human_contribution=_MANUAL_CONTRIBUTIONS.get(attempt.model_id, HUMAN_CONTRIBUTION),
         ),
     )

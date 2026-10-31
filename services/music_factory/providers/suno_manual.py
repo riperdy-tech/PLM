@@ -46,6 +46,7 @@ __all__ = [
     "MANUAL_MODEL_ID",
     "SunoManualAdapter",
     "SunoManualSettings",
+    "load_manual_settings",
     "load_suno_manual_settings",
 ]
 
@@ -79,11 +80,13 @@ class SunoManualSettings:
     model_version: str | None = None
 
 
-def load_suno_manual_settings(
+def load_manual_settings(
+    names: tuple[str, str, str, str],
     env: Mapping[str, str] | None = None,
     dotenv_path: str | Path | None = None,
 ) -> SunoManualSettings:
-    """Read the ``PLM_SUNO_*`` declarations (env, then ``.env``); unset means unknown."""
+    """Read the inbox, plan tier, account and model version variables ``names`` (env,
+    then ``.env``); unset means unknown."""
     process_env: Mapping[str, str] = os.environ if env is None else env
     dotenv_values = load_env_file(Path(".env") if dotenv_path is None else dotenv_path)
 
@@ -91,14 +94,24 @@ def load_suno_manual_settings(
         raw = process_env.get(name, "").strip() or dotenv_values.get(name, "").strip()
         return raw or None
 
-    inbox = value(INBOX_VAR)
-    tier = value(PLAN_TIER_VAR)
+    inbox_var, tier_var, account_var, model_var = names
+    inbox = value(inbox_var)
+    tier = value(tier_var)
     return SunoManualSettings(
         inbox=None if inbox is None else Path(inbox),
         plan_tier=None if tier is None else tier.lower(),
-        account_ref=value(ACCOUNT_REF_VAR),
-        model_version=value(MODEL_VERSION_VAR),
+        account_ref=value(account_var),
+        model_version=value(model_var),
     )
+
+
+def load_suno_manual_settings(
+    env: Mapping[str, str] | None = None,
+    dotenv_path: str | Path | None = None,
+) -> SunoManualSettings:
+    """Read the ``PLM_SUNO_*`` declarations (env, then ``.env``); unset means unknown."""
+    return load_manual_settings(
+        (INBOX_VAR, PLAN_TIER_VAR, ACCOUNT_REF_VAR, MODEL_VERSION_VAR), env, dotenv_path)
 
 
 _STYLE_PHRASES = {
@@ -149,7 +162,7 @@ def suno_styles(request: GenerationRequest) -> str:
 def _wav_problem(data: bytes) -> str | None:
     """Why ``data`` is not a usable PCM WAV, or ``None``."""
     if not (data.startswith(b"RIFF") and b"WAVE" in data[:16]):
-        return "is not a WAV file (download it from Suno as WAV)"
+        return "is not a WAV file (download it as WAV)"
     try:
         with wave.open(io.BytesIO(data), "rb") as wf:
             if wf.getnframes() <= 0 or wf.getframerate() < 8000:
@@ -164,6 +177,12 @@ class SunoManualAdapter:
 
     provider_mode = ProviderMode.REAL
     write_capability = IMPORT_CAPABILITY
+    paid_tiers: frozenset[str] = PAID_TIERS
+    terms_version = TERMS_VERSION
+    license_reference = LICENSE_REFERENCE
+    basis = BASIS
+    inbox_var = INBOX_VAR
+    model_version_var = MODEL_VERSION_VAR
 
     def __init__(self, settings: SunoManualSettings, *, model_id: str = MANUAL_MODEL_ID) -> None:
         self._settings = settings
@@ -183,7 +202,7 @@ class SunoManualAdapter:
     def get_quota_status(self) -> dict[str, Any]:
         """The owner spends Suno credits in Suno's interface; PLM never sees the balance."""
         return {
-            "provider_id": "suno",
+            "provider_id": self.provider_id,
             "configured": self.check_health(),
             "credits_remaining": None,
             "quota_exhausted": None,
@@ -194,15 +213,15 @@ class SunoManualAdapter:
     def license_terms(self) -> ProviderLicenseTerms | None:
         """The owner's declared paid tier and account, or ``None`` (commercially unknown)."""
         tier, account = self._settings.plan_tier, self._settings.account_ref
-        if tier not in PAID_TIERS or not account:
+        if tier not in self.paid_tiers or not account:
             return None
         return ProviderLicenseTerms(
             commercial_use_status=CommercialUseEligibility.ELIGIBLE,
-            basis=BASIS,
-            license_reference=LICENSE_REFERENCE,
+            basis=self.basis,
+            license_reference=self.license_reference,
             plan_or_tier=tier,
             account_identity_ref=account,
-            terms_version=TERMS_VERSION,
+            terms_version=self.terms_version,
         )
 
     # -- files -----------------------------------------------------------------------
@@ -216,7 +235,7 @@ class SunoManualAdapter:
 
     def _inbox(self) -> Path:
         if self._settings.inbox is None:
-            raise RuntimeError(f"{INBOX_VAR} is not set: there is no inbox to import from")
+            raise RuntimeError(f"{self.inbox_var} is not set: there is no inbox to import from")
         return self._settings.inbox
 
     def awaiting_audio(self, requests: Sequence[GenerationRequest]) -> list[str]:
@@ -254,22 +273,32 @@ class SunoManualAdapter:
             self._write_sheet(inbox, awaited)
         return problems
 
+    def _sheet_header(self, track_spec_id: str) -> list[str]:
+        model = self._settings.model_version or f"(not declared: set {self.model_version_var})"
+        return [
+            f"PLM songs to make on suno.com for track {track_spec_id}",
+            f"Suno Advanced mode, model {model}. Paste the Styles text into Styles and",
+            "the Exclude styles into Exclude. Pick the better of Suno's two clips,",
+            "download it as WAV and save it in this folder under the name given.",
+            "",
+        ]
+
+    def _prompt_lines(self, request: GenerationRequest) -> list[str]:
+        styles = suno_styles(request)
+        return [
+            f"Styles ({len(styles)} characters; paste all of it into Styles):",
+            styles,
+            *([f"Exclude styles: {request.negative_prompt}"] if request.negative_prompt else []),
+        ]
+
     def _write_sheet(self, inbox: Path, requests: Sequence[GenerationRequest]) -> None:
-        model = self._settings.model_version or f"(not declared: set {MODEL_VERSION_VAR})"
         by_track: dict[str, list[GenerationRequest]] = {}
         for request in requests:
             by_track.setdefault(request.track_spec_id, []).append(request)
         for track_spec_id, wanted in by_track.items():
-            lines = [
-                f"PLM songs to make on suno.com for track {track_spec_id}",
-                f"Suno Advanced mode, model {model}. Paste the Styles text into Styles and",
-                "the Exclude styles into Exclude. Pick the better of Suno's two clips,",
-                "download it as WAV and save it in this folder under the name given.",
-                "",
-            ]
+            lines = self._sheet_header(track_spec_id)
             for n, request in enumerate(wanted, start=1):
                 instrumental = request.vocal_mode == "instrumental"
-                styles = suno_styles(request)
                 lines += [
                     f"--- Song {n} ---",
                     f"Save as: {self.file_stem(request)}.wav",
@@ -279,10 +308,7 @@ class SunoManualAdapter:
                     f"Instrumental: {'yes' if instrumental else 'no'}",
                     (f"Length: about {request.duration_seconds} seconds "
                      "(any length the track accepts is fine)"),
-                    f"Styles ({len(styles)} characters; paste all of it into Styles):",
-                    styles,
-                    *([f"Exclude styles: {request.negative_prompt}"]
-                      if request.negative_prompt else []),
+                    *self._prompt_lines(request),
                     "",
                 ]
             name = re.sub(r"[^A-Za-z0-9_-]", "_", track_spec_id)

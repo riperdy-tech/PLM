@@ -34,14 +34,20 @@ def load_music_factory_settings(
     return MusicFactorySettings(platform=platform, **overrides)  # type: ignore[arg-type]
 
 
-def default_provider_for(execution: ExecutionSettings, *, manual_inbox: bool = False) -> str:
+def default_provider_for(
+    execution: ExecutionSettings, *, manual_inbox: bool = False, flow_music_inbox: bool = False,
+) -> str:
     """``PLM_PROVIDER_MODE__MUSIC=real`` selects Suno; anything else keeps the mock.
 
     With a manual inbox (``PLM_SUNO_MANUAL_INBOX``) real Suno means the owner's own
-    downloads (``suno_manual``), never the automated client. Selecting either does not let
+    downloads (``suno_manual``), never the automated client. A Flow Music inbox
+    (``PLM_FLOW_MUSIC_MANUAL_INBOX``, D10 as changed 2026-10-31) takes precedence:
+    owner-made Lyria songs (``flow_music_manual``). Selecting any of them does not let
     it run: each call still needs a LIVE policy, an owner grant and a funded budget
     ceiling (``ExternalWriteGuard``).
     """
     if execution.provider_mode("music") is not ProviderMode.REAL:
         return "mock"
+    if flow_music_inbox:
+        return "flow_music_manual"
     return "suno_manual" if manual_inbox else "suno"

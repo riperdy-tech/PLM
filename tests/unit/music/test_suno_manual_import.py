@@ -195,7 +195,7 @@ def test_nothing_is_imported_until_every_song_is_usable(tmp_path: Path, problem:
     assert result.write_decisions == [] and budget.reserved == []
     expected = {
         "one_missing": f"{second}.wav is missing",
-        "not_wav": f"{second}.wav is not a WAV file (download it from Suno as WAV)",
+        "not_wav": f"{second}.wav is not a WAV file (download it as WAV)",
         "same_audio": f"{second}.wav is the same audio as {first}.wav",
         "no_lyrics": f"{second}.lyrics.txt is missing (the lyrics as sung)",
     }[problem]

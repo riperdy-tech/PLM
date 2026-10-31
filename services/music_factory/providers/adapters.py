@@ -261,6 +261,10 @@ def get_provider_adapter(
         from .suno_manual import SunoManualAdapter, load_suno_manual_settings
 
         return SunoManualAdapter(load_suno_manual_settings())
+    elif clean_id == "flow_music_manual":
+        from .flow_music_manual import FlowMusicManualAdapter, load_flow_music_manual_settings
+
+        return FlowMusicManualAdapter(load_flow_music_manual_settings())
     elif clean_id in ("elevenlabs", "eleven_labs"):
         return ElevenLabsAdapter(
             provider_id="elevenlabs",
