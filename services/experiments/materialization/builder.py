@@ -175,18 +175,19 @@ def materialize_package(
             language=effective_genome.language,
             vocal_mode=effective_genome.vocal_mode.value,
         )
+        direction = arrangement_direction(
+            pkg_id, i, effective_genome.instrumentation_profile, genre=effective_genome.genre
+        )
         bounded_preferences = BoundedPreferences(
             bpm=derived_bpm(effective_genome.bpm),
-            key_profile=effective_genome.key_profile,
+            key_profile=direction.get("key_profile", effective_genome.key_profile),
             mood=tuple(effective_genome.mood),
             use_case=tuple(effective_genome.use_case),
         )
         creative_latitude = {
             "energy": effective_genome.energy.value,
             "visual_motion": effective_genome.visual_motion_profile,
-            "track_arrangement": arrangement_direction(
-                pkg_id, i, effective_genome.instrumentation_profile
-            ),
+            "track_arrangement": direction,
         }
         lyric_spec = {
             "lyric_density": effective_genome.lyric_density,
@@ -197,7 +198,8 @@ def materialize_package(
             "vocal_gender": effective_genome.vocal_gender.value,
         }
         instrumentation_spec = {
-            "instrumentation_profile": list(effective_genome.instrumentation_profile),
+            "instrumentation_profile": [*effective_genome.instrumentation_profile,
+                                        *direction.get("added_instruments", [])],
             "hook_profile": effective_genome.hook_profile,
         }
         provider_policy = ProviderPolicy(
@@ -331,19 +333,28 @@ def extend_package(
     instruments = template.instrumentation_spec.get("instrumentation_profile", [])
     if not isinstance(instruments, list):
         instruments = []
-    specs = tuple(
-        template.model_copy(update={
+    # The album's own instruments: the first track's minus what its direction added.
+    added = template.creative_latitude.get("track_arrangement", {}).get("added_instruments", [])
+    base = [item for item in instruments if item not in added]
+    genre = template.hard_constraints.genre
+
+    def extension_spec(j: int) -> TrackSpec:
+        direction = arrangement_direction(
+            package.package_id, len(package.track_specs) + used + j, base, genre=genre)
+        return template.model_copy(update={
             "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),
             "track_role": TrackRole.SECONDARY,
-            "creative_latitude": {
-                **template.creative_latitude,
-                "track_arrangement": arrangement_direction(
-                    package.package_id, len(package.track_specs) + used + j, instruments
-                ),
+            "bounded_preferences": template.bounded_preferences.model_copy(update={
+                "key_profile": direction.get(
+                    "key_profile", template.bounded_preferences.key_profile)}),
+            "creative_latitude": {**template.creative_latitude, "track_arrangement": direction},
+            "instrumentation_spec": {
+                **template.instrumentation_spec,
+                "instrumentation_profile": [*base, *direction.get("added_instruments", [])],
             },
         })
-        for j in range(count)
-    )
+
+    specs = tuple(extension_spec(j) for j in range(count))
     extension = PackageExtension(
         extension_id=ext_id,
         package_id=package.package_id,
