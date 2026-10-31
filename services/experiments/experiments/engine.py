@@ -168,8 +168,13 @@ def design_experiment(
     seed: int = 0,
     created_at: datetime,
     library: TemplateLibrary | None = None,
+    control_only: bool = False,
 ) -> Experiment:
-    """Design a reproducible DRAFT experiment from an adapted P2 directive."""
+    """Design a reproducible DRAFT experiment from an adapted P2 directive.
+
+    ``control_only`` designs no treatments (manual supply): the run produces the control
+    package alone, and ``design_notes`` records why.
+    """
     exp_type = experiment_type or ExperimentType.SINGLE_FACTOR
     declared, design = _declared_factors(exp_type, target_variable, factors, factor_design)
 
@@ -188,7 +193,10 @@ def design_experiment(
     }
 
     variants = max(1, directive.requested_experiment_count - 1)
-    if design is FactorDesign.FULL_FACTORIAL:
+    overrides: list[dict[str, Any]]
+    if control_only:
+        overrides, notes = [], ["control_only:manual_supply"]
+    elif design is FactorDesign.FULL_FACTORIAL:
         overrides, notes = _full_factorial(declared, candidates, variants)
     else:
         overrides, notes = _one_factor_per_treatment(declared, candidates, variants)

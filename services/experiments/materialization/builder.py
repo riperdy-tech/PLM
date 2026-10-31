@@ -110,12 +110,14 @@ def materialize_package(
     brand_id: str = "neon_seoul",
     budget_envelope: float | None = None,
     supply_policy: SupplyPolicy | None = None,
+    candidate_target: int = 2,
     created_at: datetime,
 ) -> ContentPackage:
     """Compile a validated experiment's treatment into an immutable ContentPackage.
 
     ``budget_envelope`` may lower the directive's ``budget_limit`` but never raise it;
-    ``None`` means the ceiling itself. The track count is not a parameter: it is planned
+    ``None`` means the ceiling itself. ``candidate_target`` is how many candidates P4
+    produces per track (1 under manual supply). The track count is not a parameter: it is planned
     from the genome's declared playlist range and the planned track length
     (:func:`.supply.plan_supply`), and the budget is split over every spec the package
     may ever hold, extensions included.
@@ -215,7 +217,7 @@ def materialize_package(
                 track_role=role,
                 requested_duration=duration,
                 duration_range=duration_range_seconds(effective_genome.track_duration),
-                candidate_target=2,
+                candidate_target=candidate_target,
                 priority=1,
                 budget_limit=track_budget,
                 provider_policy=provider_policy,

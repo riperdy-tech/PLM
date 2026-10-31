@@ -124,6 +124,7 @@ def build_router(
                     factors=req.factors,
                     factor_design=req.factor_design,
                     seed=req.seed,
+                    control_only=settings.manual_supply,
                 )
             except P3RefusalError as err:
                 raise HTTPException(status_code=422, detail=err.error.model_dump()) from err
@@ -335,6 +336,7 @@ def build_router(
                     created_at=service_clock.now(),
                     brand_id=req.brand_id,
                     budget_envelope=req.budget_envelope,
+                    candidate_target=1 if settings.manual_supply else 2,
                 )
             except ExperimentStateError as err:
                 raise HTTPException(status_code=409, detail=err.error.model_dump()) from err

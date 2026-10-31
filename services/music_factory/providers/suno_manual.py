@@ -223,8 +223,9 @@ class SunoManualAdapter:
             ]
             for n, request in enumerate(wanted, start=1):
                 instrumental = request.vocal_mode == "instrumental"
-                styles = " ".join([request.genre, *request.style_tags]
-                                  + ([f"{request.bpm}bpm"] if request.bpm else []))
+                styles = " ".join(dict.fromkeys(  # the tags often repeat genre and bpm
+                    [request.genre, *request.style_tags]
+                    + ([f"{request.bpm}bpm"] if request.bpm else [])))
                 lines += [
                     f"--- Song {n} ---",
                     f"Save as: {self.file_stem(request)}.wav",

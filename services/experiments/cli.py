@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Final
 
 import uvicorn
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
+from plm_platform.dotenv import load_env_file
 from sqlalchemy.orm import Session
 
 from .api.app import create_app
-from .config import load_experiments_settings
+from .config import MANUAL_SUPPLY_VAR, load_experiments_settings
 from .domain.enums import ExperimentStatus
 from .materialization.builder import materialize_package
 from .observability.metrics import (
@@ -188,7 +191,11 @@ def materialize_treatment_cli(
 
 def serve(host: str = "127.0.0.1", port: int = 8083) -> None:
     """Run uvicorn dev server for the /experiments API."""
-    settings = load_experiments_settings(platform=load_settings())
+    process_env, dotenv_values = os.environ, load_env_file(Path(".env"))
+    flag = (process_env.get(MANUAL_SUPPLY_VAR, "").strip()
+            or dotenv_values.get(MANUAL_SUPPLY_VAR, "").strip())
+    settings = load_experiments_settings(
+        platform=load_settings(), manual_supply=flag.lower() in {"1", "true", "yes"})
     factory = platform_session_factory()
     app = create_app(session_factory=factory, settings=settings)
     uvicorn.run(app, host=host, port=port)

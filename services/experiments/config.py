@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from plm_platform.config import Settings
 
-__all__ = ["ExperimentsSettings", "load_experiments_settings"]
+__all__ = ["MANUAL_SUPPLY_VAR", "ExperimentsSettings", "load_experiments_settings"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +20,13 @@ class ExperimentsSettings:
     genome_version: str = "p3-genome-v1"
     experiment_version: str = "p3-exp-v1"
     materializer_version: str = "p3-mat-v1"
+    manual_supply: bool = False
+    """The owner makes every song by hand (D10, 2026-10-31): design the control package
+    only (no treatments) and ask for one candidate per track, so a run needs one song
+    per track instead of four."""
+
+
+MANUAL_SUPPLY_VAR = "PLM_EXPERIMENTS_MANUAL_SUPPLY"
 
 
 def load_experiments_settings(
