@@ -44,6 +44,16 @@ BRAND_ID = "neon_seoul"
 
 
 def main() -> None:
+    """Refuse: this runner wrote the fabricated P2 rewards cleared on 2026-10-31.
+
+    It reports the hardcoded old upload as new work, books zero views and watch time
+    when Analytics fails, and posts the result to P2 as a reward. Use
+    ``plm analytics ingest`` / ``plm analytics dispatch`` for the verified C7 path.
+    """
+    raise RuntimeError(
+        "run_phase_p9_closed_loop prototype disabled: hardcoded video identity and "
+        "zero-filled metrics would post fabricated rewards into P2"
+    )
     logger.info("======================================================================")
     logger.info("       PLM PHASE P9: CLOSED-LOOP ATTRIBUTION & BAYESIAN UPDATE        ")
     logger.info("======================================================================")

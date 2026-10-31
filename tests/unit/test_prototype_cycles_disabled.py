@@ -1,7 +1,7 @@
 """The prototype operator cycles refuse to run before any provider or P2 call.
 
-Both scripts report the old hardcoded upload `lPYmaPHPQr4` as new work and would
-post a fabricated reward into P2; neither generates music or renders a video.
+These scripts report the old hardcoded upload `lPYmaPHPQr4` as new work and would
+post a fabricated reward into P2; none generates music or renders a video.
 """
 from __future__ import annotations
 
@@ -24,6 +24,13 @@ def test_loop_worker_cycle_refuses(no_network: None) -> None:
 
     with pytest.raises(RuntimeError, match="prototype disabled"):
         run_cycle(auto_approve=True)
+
+
+def test_p9_closed_loop_runner_refuses(no_network: None) -> None:
+    from scripts.run_phase_p9_closed_loop import main
+
+    with pytest.raises(RuntimeError, match="prototype disabled"):
+        main()
 
 
 def test_control_deck_cycle_refuses_before_any_step(no_network: None) -> None:

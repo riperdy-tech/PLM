@@ -74,7 +74,9 @@ songs are measurably distinct (audio embeddings / listening review, QA-LISTEN).
   approval they, their two results and two update-log rows were deleted and lofi's
   posterior reset to its prior (backup of schema `ar`:
   `data/backups/ar_before_clear_20261031T053134Z/ar.pgdump`, sha256 `b6a813b1…`). No arm
-  now holds learned evidence. The scripts that wrote them are not yet fixed or disabled.
+  now holds learned evidence. `scripts/autonomous_loop_worker.py` was already disabled;
+  `scripts/run_phase_p9_closed_loop.py` was still runnable and is now disabled too (it
+  refuses before any call; `tests/unit/test_prototype_cycles_disabled.py`).
 * **Open: 36 of P1's 77 arms cannot be produced.** 23 have no genre (P3 refuses
   `genre_unspecified`), including P1's nine highest-scoring arms; 12 synthwave and 1
   deep-house arms have no P3 template; P3's house and jazz templates have no P1 arm. P2 does
