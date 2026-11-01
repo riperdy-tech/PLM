@@ -31,8 +31,13 @@ from services.music_factory.providers.flow_music_manual import (
     FlowMusicManualAdapter,
     load_flow_music_manual_settings,
 )
-from services.music_factory.providers.suno_manual import IMPORT_CAPABILITY, SunoManualSettings
+from services.music_factory.providers.suno_manual import (
+    IMPORT_CAPABILITY,
+    SunoManualAdapter,
+    SunoManualSettings,
+)
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
+from services.music_factory.storage.models import rights_snapshots_table
 from services.music_factory.storage.repositories import list_generation_attempts
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
@@ -126,3 +131,19 @@ def test_the_flow_music_inbox_selects_it_over_suno(tmp_path: Path) -> None:
     adapter = get_provider_adapter("flow_music_manual")
     assert isinstance(adapter, FlowMusicManualAdapter)
     assert adapter.provider_id == "lyria" and adapter.model_id == MANUAL_MODEL_ID
+
+
+@pytest.mark.parametrize("make", [
+    lambda inbox: _adapter(inbox),
+    lambda inbox: SunoManualAdapter(SunoManualSettings(
+        inbox=inbox, plan_tier="pro", account_ref="suno-account:owner", model_version="v6")),
+], ids=["flow_music", "suno"])
+def test_the_rights_texts_fit_the_rights_table(tmp_path: Path, make: Any) -> None:
+    # SQLite ignores VARCHAR lengths; PostgreSQL refused the first real Flow Music
+    # import (2026-11-01) because basis and terms_version were longer than their columns.
+    terms = make(tmp_path).license_terms()
+    assert terms is not None
+    for field in ("basis", "license_reference", "plan_or_tier", "account_identity_ref",
+                  "terms_version"):
+        limit = rights_snapshots_table.c[field].type.length
+        assert len(getattr(terms, field)) <= limit, (field, limit)

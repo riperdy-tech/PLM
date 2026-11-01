@@ -53,13 +53,12 @@ class FlowMusicManualAdapter(SunoManualAdapter):
     """Imports owner-made Flow Music songs from the inbox (no call to Google)."""
 
     paid_tiers = frozenset({"google_ai_pro"})
-    terms_version = ("Google Terms of Service effective 2026-07-30; Google AI Pro "
-                     "benefits as read 2026-10-31")
+    # basis fits rights_snapshots.basis (128), terms_version its terms_version (64).
+    terms_version = "Google ToS 2026-07-30; Google AI Pro benefits read 2026-10-31"
     license_reference = ("https://support.google.com/googleone/answer/14534406 "
                          "(Google AI Pro: Flow Music Plus plan, Commercial use rights)")
-    basis = ("owner-declared Google AI Pro plan (Flow Music Plus, commercial use rights); "
-             "song made by the account owner in Flow Music's interface and downloaded; "
-             "Google does not claim ownership of generated content")
+    basis = ("owner-declared Google AI Pro plan (Flow Music Plus commercial use); "
+             "owner made and downloaded the song in Flow Music")
     inbox_var = INBOX_VAR
     model_version_var = MODEL_VERSION_VAR
 
