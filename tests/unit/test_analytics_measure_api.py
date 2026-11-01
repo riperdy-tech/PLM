@@ -90,8 +90,8 @@ def _seed(client: TestClient, *, link: bool = True, snapshot: bool = True,
             "source": "synthetic"})
     if statement:
         post("/analytics/ingest/distributor", {
-            "provider": "mock_distributor", "period": f"{PUBLISHED.isoformat()}/"
-                                                      f"{OBSERVED.isoformat()}",
+            # A distributor reports per month, as the pipeline sends it ("YYYY-MM").
+            "provider": "mock_distributor", "period": PUBLISHED.strftime("%Y-%m"),
             "currency": "USD", "raw_content": "isrc,streams,revenue\n...",
             "source_reference": "mock", "received_at": OBSERVED.isoformat(),
             "rows": [{"isrc": ISRCS[0], "streams": 1120, "revenue": "3.92"},

@@ -359,3 +359,16 @@ def test_styles_text_keeps_every_descriptor_of_the_prompt() -> None:
     ):
         assert phrase in styles
     assert "_" not in styles
+
+
+def test_a_value_that_already_names_its_kind_is_not_doubled() -> None:
+    from services.music_factory.domain.models import GenerationRequest
+    from services.music_factory.providers.suno_manual import suno_styles
+
+    styles = suno_styles(GenerationRequest(
+        track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
+        prompt="instrument palette: airy_synth_lead, glass_pad. foreground lead: "
+               "airy_synth_lead. hook character: atmospheric_hook. energy: low"))
+    assert styles == "airy synth lead, glass pad, airy synth lead, atmospheric hook, low energy" \
+        or styles == "airy synth lead, glass pad, atmospheric hook, low energy"
+    assert "lead lead" not in styles and "hook hook" not in styles

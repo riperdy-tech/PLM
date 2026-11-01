@@ -94,6 +94,11 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | V-4 | All focus arms fall in one similarity cluster, so p2-v2's limit of 2 per cluster gives 2 directives per cycle, with the `ALL_SELECTED_ONE_CLUSTER` alert | not a defect: matches the planned cadence of 2 uploads a week; revisit when sub-style arms carry more evidence |
 | V-5 | Genre-less focus arms always got the plain base template, so their videos all sounded alike | fixed: P3 picks a sub-style not used by the latest experiments |
 | V-6 | Inside the api-ar container P2 asked P1 at 127.0.0.1 (itself), so container cycles always fell back to the stored snapshot (MARKET_UNAVAILABLE); `plm ar cycle` defaulted to p2-v1 | fixed: PLM_SERVICE_URL__MARKET in compose; CLI defaults to p2-v2; container cycle e6a8fd6a live, 10 eligible, no warning |
+| V-7 | First real focus run `pipeline.1d4447ac…`: the owner saved the 8 Flow Music songs under Flow Music's titles, not the sheet names | handled: each title was matched to its sheet through the prompt shown in the owner's Flow Music session (read only), then the files were renamed. Measured keys disagreed with several prompt keys, so the key estimator alone could not have matched them |
+| V-8 | Resuming the held run was refused (`reviewer_not_authorized`): no container had a reviewer directory, so no hold could ever be cleared | fixed: compose passes `PLM_PIPELINE_REVIEWERS_FILE`; local `data/pipeline-reviewers.json` grants `owner` the `production_owner` role (git-ignored) |
+| V-9 | The first real Flow Music import crashed on PostgreSQL: the rights basis (190 chars) and terms version (87) exceed `rights_snapshots.basis` (128) and `terms_version` (64). P4 recorded the plan as failed, the pipeline treated it as a non-retryable `CreativeRejection`, and run 1d4447ac ended FAILED | fixed: shorter texts plus a column-length test; all SQLite test engines now refuse strings longer than their VARCHAR (`tests/support/sqlite_lengths.py`), which found no other code path over its limit. The failed run cannot be retried (workflow id reuse is REJECT_DUPLICATE; P3 would design a different genome for the same directive), so its 8 songs are archived in `data/flow-music-inbox-archive/run-1d4447ac` and a new run was started |
+| V-10 | Sheets repeated the kind word ("airy synth lead lead") when the lead value already names it | fixed for future sheets; harmless to Lyria |
+| V-11 | Local stack rendered at 360p preview by default, unfit for a real upload | `.env` sets `PLM_MEDIA_RENDER_PROFILE=yt_longform_1080p_v1` |
 
 ## Verification (2026-11-01)
 
@@ -107,6 +112,8 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 - Session compilations are built (`plm media compile-session`) but none has been rendered from real released albums yet; publishing one needs authorization.
 - The drop warning is uncalibrated against real EDM drops.
-- First real focus video: run `pipeline.1d4447ac-ee68-502c-bae1-dda29ac23006` (AUTONOMOUS cycle 4227dbf9, arm study_focus, P3 chose organic_electronic, 96 BPM) is HELD at GENERATING with 8 Flow Music sheets in `data/flow-music-inbox`.
+- First real focus video: run `pipeline.c1f32e48-1e16-5271-ae43-0aed12f107e9` (AUTONOMOUS cycle 37ebfbb6, arm study_focus, 90 BPM) is HELD at GENERATING with 8 Flow Music sheets in `data/flow-music-inbox`. The earlier run 1d4447ac FAILED (V-9).
+- A failed run cannot be retried for the same directive, so a platform defect after the owner made songs costs those songs. A retry path (P3 returning the directive's existing experiment, P4 re-importing a crashed manual import, a retry workflow id) is not built.
+- P4 reports a crashed import as a failed plan, which the pipeline treats as a creative rejection; a platform error there should hold or retry instead.
 - B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).

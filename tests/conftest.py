@@ -16,6 +16,9 @@ from tests.support.fixtures import (
     seeded_rng,
 )
 from tests.support.platform_env import isolate_platform_env, platform_env
+from tests.support.sqlite_lengths import enforce_varchar_lengths
+
+enforce_varchar_lengths()
 
 __all__ = [
     "contract_registry", "frozen_clock", "isolate_platform_env", "mock_http",

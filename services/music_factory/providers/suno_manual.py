@@ -148,7 +148,11 @@ def suno_styles(request: GenerationRequest) -> str:
             continue
         label, sep, value = sentence.partition(": ")
         if sep and label.lower() in _STYLE_PHRASES:
-            phrase = _STYLE_PHRASES[label.lower()].format(value.replace("_", " "))
+            words = value.replace("_", " ")
+            template = _STYLE_PHRASES[label.lower()]
+            # "airy_synth_lead" is already a lead: "airy synth lead", not "... lead lead"
+            phrase = (words if template.startswith("{} ") and words.endswith(template[2:])
+                      else template.format(words))
         elif sentence.lower().endswith(" track") and " " not in sentence[:-6]:
             phrase = sentence[:-6].lower()  # "LOFI track" -> "lofi"
         elif sentence.startswith("for "):
