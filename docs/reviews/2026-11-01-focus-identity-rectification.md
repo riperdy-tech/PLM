@@ -81,7 +81,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 | ID | Item | Status |
 |---|---|---|
-| B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | not renamed (2026-11-01), on evidence: the id is an opaque key that no viewer sees (titles, thumbnails, descriptions and the channel use the display name "Longform Signal"; the YouTube channel profile in the dev DB is a mock). Renaming would rewrite 1,024 rows in 15 tables across 8 schemas through a governed cross-schema migration, and would change ids derived from it (P8 artist ids, render and thumbnail storage paths, artwork seeds), for no revenue effect. Nothing creative is derived from the word |
+| B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | fixed at the owner's request (40dc6f2): code, config and tests use `longform_signal`; dev DB renamed by `scripts/rename_brand_id.py` (1,024 rows in 15 identifier columns; backup `data/backups/plm_before_brand_rename_20261101T095129Z.dump`, sha256 bf6a82a4…). JSON snapshots, idempotency responses and storage URIs keep the old id on purpose (records of what was sent, real object paths) |
 | B-2 | The real YouTube channel's display name | open: changing it is an external write and needs authorization |
 
 ## Found during verification
@@ -93,6 +93,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | V-3 | A `focus_electronic` arm with no use case was refused | fixed: 00d2b02 |
 | V-4 | All focus arms fall in one similarity cluster, so p2-v2's limit of 2 per cluster gives 2 directives per cycle, with the `ALL_SELECTED_ONE_CLUSTER` alert | not a defect: matches the planned cadence of 2 uploads a week; revisit when sub-style arms carry more evidence |
 | V-5 | Genre-less focus arms always got the plain base template, so their videos all sounded alike | fixed: P3 picks a sub-style not used by the latest experiments |
+| V-6 | Inside the api-ar container P2 asked P1 at 127.0.0.1 (itself), so container cycles always fell back to the stored snapshot (MARKET_UNAVAILABLE); `plm ar cycle` defaulted to p2-v1 | fixed: PLM_SERVICE_URL__MARKET in compose; CLI defaults to p2-v2; container cycle e6a8fd6a live, 10 eligible, no warning |
 
 ## Verification (2026-11-01)
 

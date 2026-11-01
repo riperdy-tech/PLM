@@ -103,6 +103,12 @@ Variety: when an arm's brief names no sub-style (or one not listed), P3 picks on
 of the nine that was not used by the genre's most recent experiments, so
 consecutive videos differ. A sub-style the arm names is kept.
 
+## Brand id 2026-11-01
+
+The internal brand id `neon_seoul` is renamed `longform_signal` (display name
+"Longform Signal"), in code and in the dev DB's identifier columns. Historical JSON
+snapshots and storage URIs keep the old id.
+
 ## Consequences
 
 - The held live run `b0eb2a4f-4850-5977-9beb-e609e4e11063` (19 vocal R&B
