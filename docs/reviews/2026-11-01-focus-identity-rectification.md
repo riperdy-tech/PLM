@@ -53,7 +53,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 |---|---|---|
 | P4-1 | Default request genre is `rnb` (`music_factory/domain/models.py:79`); the provider registry is not used at runtime | not a conflict: the only production caller (`generation/engine.py:129`) always sets genre and vocal mode from the C3 spec, so the defaults never reach a provider |
 | P4-2 | Hand-making 33–44 tracks per 90–120 min video by hand is a heavy owner workload; there is no Lyria (Gemini API) adapter | resolved by the 20–30 min revision: about 6–9 tracks per video by hand on free Gemini credit; no paid adapter |
-| P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | partly fixed: tempo outside 70–110 BPM (half/double counted) rejects, a sudden level rise warns (p5-identity-audio-v1, calibrated on 40 real tracks: 0 findings). Vocals: open, no vocal detector (needs an ML model); lyrics on an instrumental are already caught |
+| P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | partly fixed: tempo outside 70–110 BPM (half/double counted) rejects, a sudden level rise warns (p5-identity-audio-v1, calibrated on 40 real tracks: 0 findings). Vocals: won't do (owner, 2026-11-01): no detector; the owner hears every hand-made track, and lyrics on an instrumental are already caught |
 
 ## P6 media
 
@@ -82,7 +82,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | ID | Item | Status |
 |---|---|---|
 | B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | fixed at the owner's request (40dc6f2): code, config and tests use `longform_signal`; dev DB renamed by `scripts/rename_brand_id.py` (1,024 rows in 15 identifier columns; backup `data/backups/plm_before_brand_rename_20261101T095129Z.dump`, sha256 bf6a82a4…). JSON snapshots, idempotency responses and storage URIs keep the old id on purpose (records of what was sent, real object paths) |
-| B-2 | The real YouTube channel's display name | open: changing it is an external write and needs authorization |
+| B-2 | The real YouTube channel's display name | approved by the owner 2026-11-01: rename "Rhodes & Rain Records" (UC3Ps0F0z8Mw9ftakIcZ1cWA, @riperdsz1446) to "Longform Signal". Not done: the Chrome profile is signed in to a different Google account, so the owner renames it in YouTube Studio |
 
 ## Found during verification
 
@@ -106,6 +106,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 ## Still open
 
 - Session compilations are built (`plm media compile-session`) but none has been rendered from real released albums yet; publishing one needs authorization.
-- P5-1 rest: sung-vocal detection (no detector; needs an ML model such as source separation). The drop warning is uncalibrated against real EDM drops.
+- The drop warning is uncalibrated against real EDM drops.
+- First real focus video: run `pipeline.1d4447ac-ee68-502c-bae1-dda29ac23006` (AUTONOMOUS cycle 4227dbf9, arm study_focus, P3 chose organic_electronic, 96 BPM) is HELD at GENERATING with 8 Flow Music sheets in `data/flow-music-inbox`.
 - B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).
