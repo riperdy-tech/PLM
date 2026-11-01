@@ -630,7 +630,7 @@ def smoke_live() -> None:
 
 @ar_app.command()
 def cycle(
-    slot_count: int = 10, budget: float = 10.0, policy_version: str = "p2-v1", as_of: str = ""
+    slot_count: int = 10, budget: float = 10.0, policy_version: str = "p2-v2", as_of: str = ""
 ) -> None:
     """Run one allocation cycle (P2)."""
     from autonomous_ar.cli import run_cycle_once

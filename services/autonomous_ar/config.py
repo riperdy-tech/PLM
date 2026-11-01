@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 
 from plm_contracts import ChannelActivationState
 from plm_platform.config import Settings
+from plm_platform.service_urls import LOOPBACK_HOST, service_url
+from plm_platform.temporal import Phase
 
 from .policy.identity import BrandIdentity, load_brand_identities
 
@@ -57,6 +59,9 @@ def load_ar_settings(*, platform: Settings | None = None, **overrides: object) -
 
 
 def production_settings(*, platform: Settings | None, **overrides: object) -> ARSettings:
-    """Settings for a real entry point (CLI, jobs, smoke): the brand identities are loaded."""
+    """Settings for a real entry point (CLI, jobs, smoke): the brand identities are loaded,
+    and P1's base URL is ``PLM_SERVICE_URL__MARKET`` (compose sets the service name; on
+    the host it defaults to the published loopback port)."""
+    overrides.setdefault("market_base_url", service_url(Phase.MARKET, default_host=LOOPBACK_HOST))
     return load_ar_settings(platform=platform, brand_identities=load_brand_identities(),
                             **overrides)

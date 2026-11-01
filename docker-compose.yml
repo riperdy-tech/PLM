@@ -18,6 +18,8 @@ x-plm-app: &plm-app
     - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
     - PLM_SERVICE_TOKEN=${PLM_SERVICE_TOKEN:-}
+    # P2 asks P1 for opportunities; inside the network that is the compose service.
+    - PLM_SERVICE_URL__MARKET=http://api-market:8081
     # R5 development configuration (files in the bind-mounted repo; override on the host).
     # The ledger currency lets the pipeline read the run's write costs and the phases'
     # guards fund live writes; mock providers are simulated and never reserve.
