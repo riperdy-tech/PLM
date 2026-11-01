@@ -51,7 +51,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 | ID | Item | Status |
 |---|---|---|
-| P4-1 | Default request genre is `rnb` (`music_factory/domain/models.py:79`); the provider registry is not used at runtime | open (low impact) |
+| P4-1 | Default request genre is `rnb` (`music_factory/domain/models.py:79`); the provider registry is not used at runtime | not a conflict: the only production caller (`generation/engine.py:129`) always sets genre and vocal mode from the C3 spec, so the defaults never reach a provider |
 | P4-2 | Hand-making 33–44 tracks per 90–120 min video by hand is a heavy owner workload; there is no Lyria (Gemini API) adapter | resolved by the 20–30 min revision: about 6–9 tracks per video by hand on free Gemini credit; no paid adapter |
 | P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | partly fixed: tempo outside 70–110 BPM (half/double counted) rejects, a sudden level rise warns (p5-identity-audio-v1, calibrated on 40 real tracks: 0 findings). Vocals: open, no vocal detector (needs an ML model); lyrics on an instrumental are already caught |
 
