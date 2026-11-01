@@ -23,9 +23,9 @@ class _Arm(BrandScoped):
 
 class TestBrandId:
     def test_seeded_brand_style_slug_is_accepted(self) -> None:
-        # P6 example: "brand_id": "neon_seoul"
-        holder = _Holder(brand_id="neon_seoul")
-        assert holder.brand_id == "neon_seoul"
+        # P6 example: "brand_id": "longform_signal"
+        holder = _Holder(brand_id="longform_signal")
+        assert holder.brand_id == "longform_signal"
         assert _Holder(brand_id="brand1").brand_id == "brand1"
 
     def test_invalid_slugs_are_rejected(self) -> None:
@@ -38,7 +38,7 @@ class TestBrandId:
             _Arm(arm_id="arm_1")
 
     def test_brand_scoped_models_round_trip(self) -> None:
-        arm = _Arm(brand_id="neon_seoul", arm_id="arm_1")
+        arm = _Arm(brand_id="longform_signal", arm_id="arm_1")
         assert _Arm.model_validate_json(arm.model_dump_json()) == arm
 
 

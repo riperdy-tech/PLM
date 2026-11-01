@@ -125,7 +125,7 @@ def test_an_unknown_world_is_a_neutral_workspace_in_the_brand_colours() -> None:
 
 
 def test_the_default_brand_is_the_focus_identity() -> None:
-    brand = DEFAULT_BRANDS.get("neon_seoul")
+    brand = DEFAULT_BRANDS.get("longform_signal")
     assert brand.brand_name == "Longform Signal"
     base, shade, accent, highlight = brand.palette
     for ink, floor in ((accent, 3.0), (highlight, 4.5)):
@@ -137,6 +137,6 @@ def test_the_default_brand_is_the_focus_identity() -> None:
 
 @pytest.mark.parametrize("variant", ["thumb_a_hero", "thumb_b_bold_text", "thumb_c_minimal"])
 def test_the_default_brand_renders_every_variant(variant: str) -> None:
-    data = render_thumbnail(variant, DEFAULT_BRANDS.get("neon_seoul"), "Deep Work Signal",
+    data = render_thumbnail(variant, DEFAULT_BRANDS.get("longform_signal"), "Deep Work Signal",
                             "architect_studio_night")
     assert Image.open(io.BytesIO(data)).size == (1280, 720)

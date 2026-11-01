@@ -56,7 +56,7 @@ def run_smoke_test() -> str | None:
                 content_genome_id="gen_smoke_01",
                 production_directive_id=f"dir_smoke_{stamp}",
             ),
-            brand_profile_id="neon_seoul_profile",
+            brand_profile_id="longform_signal_profile",
             hard_constraints={"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
             bounded_preferences={
                 "bpm": 80,

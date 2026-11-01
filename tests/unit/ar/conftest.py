@@ -74,10 +74,10 @@ def ar_factory(ar_engine: sa.Engine) -> sessionmaker[Session]:
     """Sessions bound to `ar_engine`, with the default policy inserted and activated."""
     factory: sessionmaker[Session] = sessionmaker(bind=ar_engine)
     with factory() as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal",
                                    created_at=NOW)
         # p2-v2 is the settings default (ADR-0044's one-identity channel); both stored
-        repositories.insert_policy(session, SINGLE_IDENTITY_POLICY, brand_id="neon_seoul",
+        repositories.insert_policy(session, SINGLE_IDENTITY_POLICY, brand_id="longform_signal",
                                    created_at=NOW)
         repositories.activate_policy(session, SINGLE_IDENTITY_POLICY.version)
         session.commit()

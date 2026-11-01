@@ -86,7 +86,7 @@ def test_opportunity_score_enforces_bounds() -> None:
 def test_market_settings_defaults_are_versioned_and_config_driven() -> None:
     settings = load_market_settings(platform=None, score_version="p1-v2")
     assert settings.score_version == "p1-v2"
-    assert settings.default_brand_id == "neon_seoul"
+    assert settings.default_brand_id == "longform_signal"
     assert settings.freshness_fresh_hours == 48.0
     assert settings.quota_units_per_run > 0
 

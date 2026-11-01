@@ -31,12 +31,12 @@ def test_log_cycle_emits_one_structured_line_with_section_94_fields(caplog) -> N
     result = CycleResult(cycle_id="c-1", status=AllocationCycleStatus.COMPLETED,
                          directives=(), rejected=(), warnings=(), replay=False)
     with caplog.at_level(logging.INFO):
-        log_cycle(result, brand_id="neon_seoul", policy_version="p2-v1",
+        log_cycle(result, brand_id="longform_signal", policy_version="p2-v1",
                   p1_snapshot_time=None, runtime_ms=12)
     record = next(record for record in caplog.records
                   if "allocation cycle" in record.getMessage())
     assert record.cycle_id == "c-1"
-    assert record.brand_id == "neon_seoul"
+    assert record.brand_id == "longform_signal"
     assert record.policy_version == "p2-v1"
     assert record.runtime_ms == 12
     assert record.selected_ids == []
@@ -68,7 +68,7 @@ def test_all_selected_one_cluster_needs_the_cluster_coordinate() -> None:
 
 def test_emit_alert_logs_at_warning_and_carries_the_code(caplog) -> None:
     with caplog.at_level(logging.WARNING):
-        emit_alert("STALE_P1_DATA", brand_id="neon_seoul", detail="cycle c-1")
+        emit_alert("STALE_P1_DATA", brand_id="longform_signal", detail="cycle c-1")
     record = next(record for record in caplog.records if record.levelno == logging.WARNING)
     assert record.alert_code == "STALE_P1_DATA"
     assert "STALE_P1_DATA" in record.getMessage()

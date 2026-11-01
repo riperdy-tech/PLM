@@ -70,7 +70,7 @@ def producer_stub() -> dict[str, Any]:
     the registry's declared JSON types.
     """
     return {
-        "brand_id": "neon_seoul",
+        "brand_id": "longform_signal",
         "experiment_id": "exp_01",
         "content_arm_id": "arm_control",
         "as_of": "2026-01-01T00:00:00+00:00",

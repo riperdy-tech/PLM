@@ -60,13 +60,13 @@ def test_reward_out_of_range_and_unknown_economic_terms_are_refused() -> None:
 def test_storing_twice_is_idempotent_and_an_unknown_arm_is_refused() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.upsert_arm_state(session, brand_id="neon_seoul", arm_id="rnb-1", now=NOW)
-        first = store_result(session, _payload(), brand_id="neon_seoul", now=NOW)
-        second = store_result(session, _payload(), brand_id="neon_seoul", now=NOW)
+        repositories.upsert_arm_state(session, brand_id="longform_signal", arm_id="rnb-1", now=NOW)
+        first = store_result(session, _payload(), brand_id="longform_signal", now=NOW)
+        second = store_result(session, _payload(), brand_id="longform_signal", now=NOW)
         assert first.stored is True and second.stored is False
         assert first.observation_id == second.observation_id
         count = session.execute(sa.select(sa.func.count())
                                 .select_from(ar_reward_observation)).scalar_one()
         assert count == 1, "§73: the same (experiment, window) is stored once"
         with pytest.raises(ResultValidationError, match="unknown arm"):
-            store_result(session, _payload(arm_id="nope"), brand_id="neon_seoul", now=NOW)
+            store_result(session, _payload(arm_id="nope"), brand_id="longform_signal", now=NOW)

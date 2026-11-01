@@ -47,7 +47,7 @@ def _seed_with_an_under_covered_arm(session) -> None:
         session,
         ArmDraft(arm_id=UNDER_COVERED_ARM_ID, fingerprint=UNDER_COVERED_ARM_ID,
                  profile=TaxonomyProfile(), support_count=1),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     observations = tuple(
         replace(observation, observed_at=_as_utc(observation.observed_at),

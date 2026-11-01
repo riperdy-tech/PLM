@@ -180,14 +180,14 @@ def test_postgres_versioned_arm_slug_collision_fails_closed(
     assert first.fingerprint != other.fingerprint
     with Session(disposable_market_db) as session:
         first_id, created = repositories.upsert_arm(
-            session, first, brand_id="neon_seoul", refuse_slug_collision=True,
+            session, first, brand_id="longform_signal", refuse_slug_collision=True,
         )
         assert created
         session.commit()
     with Session(disposable_market_db) as session:
         with pytest.raises(ValueError, match="arm_slug_identity_conflict"):
             repositories.upsert_arm(
-                session, other, brand_id="neon_seoul", refuse_slug_collision=True,
+                session, other, brand_id="longform_signal", refuse_slug_collision=True,
             )
         session.rollback()
     with Session(disposable_market_db) as session:
@@ -226,13 +226,13 @@ def test_postgres_v3_opt_in_distinguishes_profiles_across_independent_batches(
     with Session(disposable_market_db) as session:
         for item in (first, other):
             saved_id, created = repositories.upsert_arm(
-                session, item, brand_id="neon_seoul", refuse_slug_collision=True,
+                session, item, brand_id="longform_signal", refuse_slug_collision=True,
             )
             assert created and saved_id == item.arm_id
         session.commit()
     with Session(disposable_market_db) as session:
         saved_id, created = repositories.upsert_arm(
-            session, first, brand_id="neon_seoul", refuse_slug_collision=True,
+            session, first, brand_id="longform_signal", refuse_slug_collision=True,
         )
         assert not created and saved_id == first.arm_id
         stored = {

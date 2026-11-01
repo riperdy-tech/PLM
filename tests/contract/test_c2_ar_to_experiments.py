@@ -96,11 +96,11 @@ def producer_directive() -> ProductionDirective:
     )
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul", created_at=now)
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal", created_at=now)
         result = run_allocation_cycle(
             session,
             CycleRequest(
-                brand_id="neon_seoul", as_of=now, slot_count=1, budget=1.0, policy_version="p2-v1"
+                brand_id="longform_signal", as_of=now, slot_count=1, budget=1.0, policy_version="p2-v1"
             ),
             settings=load_ar_settings(),
             market=MarketSnapshot(arms=(arm,), as_of=now, source="live", score_version="p1-v1"),

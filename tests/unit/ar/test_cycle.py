@@ -64,14 +64,14 @@ def _snapshot(*arms: ContentArm, source: str = "live") -> MarketSnapshot:
 
 
 def _request(**overrides: object) -> CycleRequest:
-    base: dict[str, object] = {"brand_id": "neon_seoul", "as_of": NOW, "slot_count": 4,
+    base: dict[str, object] = {"brand_id": "longform_signal", "as_of": NOW, "slot_count": 4,
                                "budget": 8.0, "policy_version": "p2-v1"}
     base.update(overrides)
     return CycleRequest(**base)  # type: ignore[arg-type]
 
 
 def _seed_policy(session: object) -> None:
-    repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul", created_at=NOW)
+    repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal", created_at=NOW)
 
 
 def test_full_cycle_persists_decisions_directives_and_every_version() -> None:
@@ -96,7 +96,7 @@ def test_full_cycle_persists_decisions_directives_and_every_version() -> None:
         assert {row["p1_score_version"] for row in decisions} == {"p1-v1"}
         # SHADOW (the settings default): computed and auditable, never actionable
         assert repositories.list_queued_directives(
-            session, brand_id="neon_seoul", activation_states=("AUTONOMOUS",)) == []
+            session, brand_id="longform_signal", activation_states=("AUTONOMOUS",)) == []
         for directive in result.directives:
             assert directive.expires_at == NOW + timedelta(
                 hours=DEFAULT_POLICY.directive_ttl_hours)
@@ -191,11 +191,11 @@ def test_unknown_policy_refuses_the_cycle() -> None:
 def test_seed_is_derived_from_the_cycle_id_and_is_stable() -> None:
     from services.autonomous_ar.storage.ids import deterministic_id
 
-    cycle_id = deterministic_id("cycle", "neon_seoul", NOW.isoformat(), "p2-v1")
+    cycle_id = deterministic_id("cycle", "longform_signal", NOW.isoformat(), "p2-v1")
     assert seed_for_cycle(cycle_id) == seed_for_cycle(cycle_id)
     assert 0 <= seed_for_cycle(cycle_id) < 2**31
     assert seed_for_cycle(cycle_id) != seed_for_cycle(
-        deterministic_id("cycle", "neon_seoul", NOW.isoformat(), "p2-v2"))
+        deterministic_id("cycle", "longform_signal", NOW.isoformat(), "p2-v2"))
 
 
 def test_autonomous_cycles_serve_directives_while_shadow_cycles_do_not() -> None:
@@ -205,15 +205,15 @@ def test_autonomous_cycles_serve_directives_while_shadow_cycles_do_not() -> None
         run_allocation_cycle(session, _request(slot_count=1), settings=SETTINGS,
                              market=_snapshot(_arm("rnb-1", score=80.0)), now=NOW)
         assert repositories.list_queued_directives(
-            session, brand_id="neon_seoul", activation_states=("AUTONOMOUS",)) == []
-        repositories.set_channel_state(session, brand_id="neon_seoul",
+            session, brand_id="longform_signal", activation_states=("AUTONOMOUS",)) == []
+        repositories.set_channel_state(session, brand_id="longform_signal",
                                        activation_state="AUTONOMOUS", now=NOW,
                                        reason="operator go", updated_by="operator")
         run_allocation_cycle(
             session, _request(slot_count=1, as_of=NOW + timedelta(days=1)), settings=SETTINGS,
             market=_snapshot(_arm("rnb-1", score=80.0)), now=NOW + timedelta(days=1))
         served = repositories.list_queued_directives(
-            session, brand_id="neon_seoul", activation_states=("AUTONOMOUS",))
+            session, brand_id="longform_signal", activation_states=("AUTONOMOUS",))
         assert len(served) == 1, "ADR-0024: only AUTONOMOUS cycles are actionable"
 
 
@@ -340,7 +340,7 @@ def test_an_actionable_pick_cools_its_arm_for_the_policy_cooldown() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
         _seed_policy(session)
-        repositories.set_channel_state(session, brand_id="neon_seoul",
+        repositories.set_channel_state(session, brand_id="longform_signal",
                                        activation_state="AUTONOMOUS", now=NOW,
                                        reason="operator go", updated_by="operator")
         market = _snapshot(_arm("rnb-1", score=95.0), _arm("rnb-2", score=20.0))

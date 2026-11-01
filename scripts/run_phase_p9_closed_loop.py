@@ -40,7 +40,7 @@ P2_BASE_URL = "http://127.0.0.1:8082"
 PUBLISHED_VIDEO_ID = "lPYmaPHPQr4"  # Midnight Rain & Rhodes (50m Master V2)
 CONTENT_ARM_ID = "lofi_study_focus"
 EXPERIMENT_ID = "exp_midnight_rhodes_rain_01"
-BRAND_ID = "neon_seoul"
+BRAND_ID = "longform_signal"
 
 
 def main() -> None:

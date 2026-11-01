@@ -40,7 +40,7 @@ __all__ = [
     "simulate",
 ]
 
-DEFAULT_BRAND_ID: Final[str] = "neon_seoul"
+DEFAULT_BRAND_ID: Final[str] = "longform_signal"
 """The deployment's brand coordinate (ADR-0019); the operator commands run for this brand."""
 
 SessionFactory = Callable[[], Session]

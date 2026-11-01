@@ -93,7 +93,7 @@ from tests.support.seams import sample_lineage
 
 pytestmark = pytest.mark.integration
 
-BRAND = "neon_seoul"
+BRAND = "longform_signal"
 TRACKS = ((12.0, {"bpm": 120.0, "tonic": 0}), (13.0, {"bpm": 122.0, "tonic": 7}),
           (12.0, {"bpm": 118.0, "tonic": 9, "minor": True}))
 CONFIG = load_pipeline_config(env={"PLM_PIPELINE_CONFIG_FILE": str(

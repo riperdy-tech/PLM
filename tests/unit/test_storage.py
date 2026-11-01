@@ -34,7 +34,7 @@ ABSENT_DOTENV = Path(__file__).resolve().parent / "no-such.env"
 
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-RESOURCE = "brands/neon_seoul/track-1/master.wav"
+RESOURCE = "brands/longform_signal/track-1/master.wav"
 MEDIA_KEY = f"media/{RESOURCE}/{ABC_SHA256}"
 
 
@@ -113,7 +113,7 @@ class TestDigestFromKey:
 
     def test_key_without_a_digest_segment_refused(self) -> None:
         with pytest.raises(InvalidObjectKeyError, match="does not end in a sha256 digest"):
-            digest_from_key("media/brands/neon_seoul/track-1/master.wav")
+            digest_from_key("media/brands/longform_signal/track-1/master.wav")
 
 
 class TestArtifactUri:

@@ -35,7 +35,7 @@ class MarketSettings:
     taxonomy_version: str = "p1-taxonomy-v3"
     feature_version: str = "p1-features-v1"
     normalization_version: str = "p1-norm-v1"
-    default_brand_id: str = "neon_seoul"
+    default_brand_id: str = "longform_signal"
     cadence: CadenceHours = field(default_factory=CadenceHours)
     quota_units_per_run: int = 1000
     quota_units_per_day: int = 10_000

@@ -107,7 +107,7 @@ def materialize_package(
     treatment: Treatment,
     base_genome: ContentGenome,
     *,
-    brand_id: str = "neon_seoul",
+    brand_id: str = "longform_signal",
     budget_envelope: float | None = None,
     supply_policy: SupplyPolicy | None = None,
     candidate_target: int = 2,

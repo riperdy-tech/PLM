@@ -47,7 +47,7 @@ SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
+    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "longform_signal"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
 
 
@@ -106,7 +106,7 @@ def test_cli_materialize() -> None:
     mat_out = materialize_treatment_cli(
         exp_id,
         trt_id,
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
         budget_envelope=75.0,
         session_factory=factory,
     )
@@ -114,7 +114,7 @@ def test_cli_materialize() -> None:
     # rnb tracks plan 190 s; 20-30 min needs ceil(1200/190) = 7 plus 25 % spares = 2.
     assert "tracks: 9" in mat_out
     assert "playlist range: 1200-1800s" in mat_out
-    assert "neon_seoul" in mat_out
+    assert "longform_signal" in mat_out
 
     # Verify status changed in storage
     with factory() as session:
@@ -124,14 +124,14 @@ def test_cli_materialize() -> None:
 
 
 def test_observability_metrics_and_events() -> None:
-    record_experiment_created(experiment_type="single_factor", brand_id="neon_seoul")
-    assert EXPERIMENTS_CREATED.labels(experiment_type="single_factor", brand_id="neon_seoul")._value.get() >= 1
+    record_experiment_created(experiment_type="single_factor", brand_id="longform_signal")
+    assert EXPERIMENTS_CREATED.labels(experiment_type="single_factor", brand_id="longform_signal")._value.get() >= 1
 
     record_experiment_validated(passed=True)
     assert EXPERIMENTS_VALIDATED.labels(passed="true")._value.get() >= 1
 
-    record_package_materialized(brand_id="neon_seoul")
-    assert EXPERIMENTS_MATERIALIZED.labels(brand_id="neon_seoul")._value.get() >= 1
+    record_package_materialized(brand_id="longform_signal")
+    assert EXPERIMENTS_MATERIALIZED.labels(brand_id="longform_signal")._value.get() >= 1
 
     # Structured audit events
     factory, exp_id, _ = _setup_seeded_db()

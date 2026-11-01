@@ -141,7 +141,7 @@ def test_scores_persist_with_their_versions_and_read_back(market_session) -> Non
     profile = TaxonomyProfile(genre="rnb", use_case="late_night_drive")
     draft = ArmDraft(arm_id="rnb_late_night_drive", fingerprint="b", profile=profile,
                      support_count=3)
-    arm_id, created = repositories.upsert_arm(market_session, draft, brand_id="neon_seoul")
+    arm_id, created = repositories.upsert_arm(market_session, draft, brand_id="longform_signal")
     assert (arm_id, created) == ("rnb_late_night_drive", True)
 
     scores = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
@@ -170,7 +170,7 @@ def test_the_stored_versions_are_the_versions_of_the_computation(market_session)
         market_session,
         ArmDraft(arm_id="rnb_late_night_drive", fingerprint="b", profile=profile,
                  support_count=3),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     components = compute_component_scores(features, settings=SETTINGS)
     score = _score_with(features["b"], components["b"], score_version="p1-v9",
@@ -236,12 +236,12 @@ def test_arm_identity_survives_a_recompute(market_session) -> None:
     first, _ = repositories.upsert_arm(
         market_session, ArmDraft(arm_id="rnb_late_night_drive", fingerprint="f1",
                                  profile=profile, support_count=2),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     again, created = repositories.upsert_arm(
         market_session, ArmDraft(arm_id="rnb_late_night_drive", fingerprint="f1",
                                  profile=profile, support_count=9),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     assert (again, created) == (first, False)  # Review Focus 4: identity is minted once
 
@@ -258,14 +258,14 @@ def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_sess
         market_session,
         ArmDraft(arm_id="lofi_study_focus", fingerprint="f1", profile=profile,
                  support_count=2, source_observation_ids=("o1",)),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     assert first_created is True
     replay_id, replay_created = repositories.upsert_arm(
         market_session,
         ArmDraft(arm_id="lofi_study_focus", fingerprint="f1", profile=profile,
                  support_count=5, source_observation_ids=("o1", "o2")),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     assert (replay_id, replay_created) == (first_id, False)
     rows = repositories.load_arms(market_session)
@@ -276,7 +276,7 @@ def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_sess
         market_session,
         ArmDraft(arm_id="lofi_study_focus", fingerprint="f2", profile=profile,
                  support_count=1, source_observation_ids=()),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     assert (incumbent_id, incumbent_created) == (first_id, False)
     rows = repositories.load_arms(market_session)
@@ -558,7 +558,7 @@ def _registered_arm(session, fingerprint: str, arm_id: str) -> None:
         session,
         ArmDraft(arm_id=arm_id, fingerprint=fingerprint, profile=TaxonomyProfile(),
                  support_count=2),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
 
 

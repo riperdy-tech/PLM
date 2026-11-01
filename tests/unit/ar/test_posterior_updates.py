@@ -26,7 +26,7 @@ COMPONENTS = {name: 50.0 for name in
 
 
 def _seed_arm_and_posterior(session, *, mean: float = 0.5, variance: float = 0.05) -> None:
-    repositories.upsert_arm_state(session, brand_id="neon_seoul", arm_id="rnb-1", now=NOW)
+    repositories.upsert_arm_state(session, brand_id="longform_signal", arm_id="rnb-1", now=NOW)
     arm = ContentArm(arm_id="rnb-1", dimensions=ArmDimensions(genre="rnb"),
                      p1_score=60.0, p1_confidence=0.6, component_scores=dict(COMPONENTS),
                      observation_count=1, source_count=1, as_of=NOW, score_version="p1-v1",
@@ -35,7 +35,7 @@ def _seed_arm_and_posterior(session, *, mean: float = 0.5, variance: float = 0.0
         session,
         MODEL.initialize_prior(arm, PriorParameters(
             mean=mean, variance=variance, confidence=0.6, prior_version="p2-prior-v1")),
-        brand_id="neon_seoul", expected_version=0,
+        brand_id="longform_signal", expected_version=0,
     )
 
 
@@ -52,7 +52,7 @@ def test_one_observation_updates_the_posterior_exactly_once() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
         _seed_arm_and_posterior(session)
-        store_result(session, _payload(), brand_id="neon_seoul", now=NOW)
+        store_result(session, _payload(), brand_id="longform_signal", now=NOW)
         first = apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
         assert first.applied == 1 and first.skipped_duplicate == 0
         after_first = repositories.load_posterior(session, "rnb-1")
@@ -68,7 +68,7 @@ def test_low_attribution_quarantines_instead_of_updating() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
         _seed_arm_and_posterior(session)
-        store_result(session, _payload(attribution=0.2), brand_id="neon_seoul", now=NOW)
+        store_result(session, _payload(attribution=0.2), brand_id="longform_signal", now=NOW)
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert summary.quarantined == 1 and summary.applied == 0
@@ -92,7 +92,7 @@ def test_unmeasured_reward_is_quarantined_and_never_treated_as_zero() -> None:
                 normalized_reward=Tri.not_ready(), reward_version="p9-reward-v1",
                 attribution_confidence=0.99,
             ),
-            brand_id="neon_seoul", received_at=NOW,
+            brand_id="longform_signal", received_at=NOW,
         )
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
@@ -108,13 +108,13 @@ def test_recency_decay_weights_older_observations_less() -> None:
     fresh_engine, old_engine = create_ar_engine(), create_ar_engine()
     with ar_session(fresh_engine) as session:
         _seed_arm_and_posterior(session)
-        store_result(session, _payload(observed_at=NOW), brand_id="neon_seoul", now=NOW)
+        store_result(session, _payload(observed_at=NOW), brand_id="longform_signal", now=NOW)
         apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
         fresh_variance = repositories.load_posterior(session, "rnb-1").posterior_variance
     with ar_session(old_engine) as session:
         _seed_arm_and_posterior(session)
         old = NOW - timedelta(days=45)  # one non-stationarity half-life
-        store_result(session, _payload(observed_at=old), brand_id="neon_seoul", now=NOW)
+        store_result(session, _payload(observed_at=old), brand_id="longform_signal", now=NOW)
         apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
         old_variance = repositories.load_posterior(session, "rnb-1").posterior_variance
     assert old_variance > fresh_variance, "§27: a 45-day-old observation moves the belief less"
@@ -125,7 +125,7 @@ def test_future_observations_and_unknown_arms_never_update() -> None:
     with ar_session(engine) as session:
         _seed_arm_and_posterior(session)
         store_result(session, _payload(observed_at=NOW + timedelta(days=1)),
-                     brand_id="neon_seoul", now=NOW)
+                     brand_id="longform_signal", now=NOW)
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert summary.applied == 0 and summary.failed == 0

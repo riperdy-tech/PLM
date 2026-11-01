@@ -29,7 +29,7 @@ from services.autonomous_ar.storage.models import AR_TABLES
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
-BRAND = "neon_seoul"
+BRAND = "longform_signal"
 ARM = "arm-1"
 
 
@@ -37,7 +37,7 @@ def test_policy_rows_are_immutable_once_created() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
         policy_id = repositories.insert_policy(
-            session, PolicyConfig(name="default"), brand_id="neon_seoul", created_at=NOW
+            session, PolicyConfig(name="default"), brand_id="longform_signal", created_at=NOW
         )
         assert repositories.load_policy(session, "p2-v1").exploit_fraction == 0.70
         # same version, different content: refused (§92 — never mutate a used policy)
@@ -46,11 +46,11 @@ def test_policy_rows_are_immutable_once_created() -> None:
                 session, PolicyConfig(name="default", exploit_fraction=0.5,
                                       adjacent_explore_fraction=0.3,
                                       radical_explore_fraction=0.2),
-                brand_id="neon_seoul", created_at=NOW,
+                brand_id="longform_signal", created_at=NOW,
             )
         # replaying the exact same row is idempotent
         again = repositories.insert_policy(
-            session, PolicyConfig(name="default"), brand_id="neon_seoul", created_at=NOW
+            session, PolicyConfig(name="default"), brand_id="longform_signal", created_at=NOW
         )
         assert again == policy_id
 
@@ -65,18 +65,18 @@ def test_posterior_update_uses_an_optimistic_version_guard() -> None:
         effective_observation_count=0.0, update_version=0, last_update_at=NOW,
     )
     with ar_session(engine) as session:
-        repositories.upsert_posterior(session, state, brand_id="neon_seoul", expected_version=0)
+        repositories.upsert_posterior(session, state, brand_id="longform_signal", expected_version=0)
         updated = PosteriorState(
             arm_id="arm-1", model_type="normal-normal", model_version="p2-nn-v1",
             prior_mean=prior.mean, prior_variance=prior.variance, posterior_mean=0.65,
             posterior_variance=0.04, observation_count=1, effective_observation_count=1.0,
             update_version=1, last_update_at=NOW,
         )
-        repositories.upsert_posterior(session, updated, brand_id="neon_seoul", expected_version=0)
+        repositories.upsert_posterior(session, updated, brand_id="longform_signal", expected_version=0)
         # a second writer still holding version 0 must fail loudly (§75), not overwrite
         with pytest.raises(repositories.PosteriorVersionConflict, match="arm-1"):
             repositories.upsert_posterior(session, replace(updated, posterior_mean=0.9),
-                                          brand_id="neon_seoul", expected_version=0)
+                                          brand_id="longform_signal", expected_version=0)
         loaded = repositories.load_posterior(session, "arm-1")
         assert loaded is not None and loaded.posterior_mean == 0.65 and loaded.update_version == 1
 

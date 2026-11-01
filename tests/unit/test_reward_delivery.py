@@ -106,7 +106,7 @@ def loop() -> Iterator[Loop]:
     p2_engine = create_ar_engine(static_pool=True)
     p2_factory: Callable[[], Session] = sessionmaker(bind=p2_engine)
     with p2_factory() as session:  # P2 only accepts results for arms it knows (§72)
-        ar_repositories.upsert_arm_state(session, brand_id="neon_seoul",
+        ar_repositories.upsert_arm_state(session, brand_id="longform_signal",
                                          arm_id=LINEAGE.content_arm_id, now=NOW)
         session.commit()
     settings = load_ar_settings(platform=load_settings(env=ENV))

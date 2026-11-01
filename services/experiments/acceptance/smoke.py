@@ -36,7 +36,7 @@ def run_smoke_test(*, brand_id: str | None = None) -> str | None:
         return _TOKEN_REASON
 
     _ = load_experiments_settings(platform=platform)
-    brand = brand_id or "neon_seoul"
+    brand = brand_id or "longform_signal"
 
     # Test database connectivity
     engine = build_engine(platform)

@@ -122,7 +122,7 @@ def _stage(settings: Settings, p5: Session, run: str, *,
 
 
 def _request(staged: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"candidate_ids": [s["candidate_id"] for s in staged], "brand_id": "neon_seoul",
+    return {"candidate_ids": [s["candidate_id"] for s in staged], "brand_id": "longform_signal",
             # Only all tracks together land in this declared range.
             "duration_range_seconds": {"min_seconds": int(sum(t[0] for t in TRACKS) - 4.0),
                                        "max_seconds": int(sum(t[0] for t in TRACKS) - 4.0) + 1},

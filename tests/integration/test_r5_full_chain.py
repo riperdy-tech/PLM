@@ -24,7 +24,7 @@ containers.
   the one P1 scores lower, so its posterior has to overturn a lower prior.
 * Namespacing: P2 keys learning state (arm state, posterior, update log, results) by the
   arm id alone, and P1's CI corpus always yields the same arm ids, so the test resets
-  that state for those arms before and after the run. Brand ``neon_seoul`` is the one
+  that state for those arms before and after the run. Brand ``longform_signal`` is the one
   brand P6's development registry declares; the cycle ids are unique (their instant).
   P1 scores written at the simulated maturity instant are removed afterwards.
 
@@ -178,7 +178,7 @@ __all__ = ["factory", "settings"]
 pytestmark = [pytest.mark.integration, pytest.mark.full_chain, pytest.mark.timeout(5400)]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BRAND = "neon_seoul"
+BRAND = "longform_signal"
 """P2's brand coordinate; the one brand P6's development registry declares."""
 TASK_QUEUE = "r5-full-chain"
 TIMEOUT_SECONDS = 3600

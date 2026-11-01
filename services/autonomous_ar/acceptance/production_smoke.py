@@ -43,7 +43,7 @@ def run_production_smoke(*, base_url: str | None = None,
     if platform.service_token is None:
         return _TOKEN_REASON
     settings = production_settings(platform=platform)
-    brand = brand_id or "neon_seoul"
+    brand = brand_id or "longform_signal"
     client = P1Client(base_url or settings.market_base_url,
                       platform.service_token.get_secret_value(),
                       timeout_seconds=settings.market_timeout_seconds)

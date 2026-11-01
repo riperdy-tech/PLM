@@ -29,13 +29,13 @@ def _app(*, with_token: bool) -> object:
 
 def test_unconfigured_token_closes_the_api_and_a_wrong_token_is_rejected() -> None:
     closed = TestClient(_app(with_token=False))
-    blocked = closed.get("/ar/directives", params={"brand_id": "neon_seoul"})
+    blocked = closed.get("/ar/directives", params={"brand_id": "longform_signal"})
     assert blocked.status_code == 503
     assert blocked.json()["detail"]["code"] == "blocked_pending_credentials"
     assert blocked.json()["detail"]["field_paths"] == ["PLM_SERVICE_TOKEN"]
 
     configured = TestClient(_app(with_token=True))
-    wrong = configured.get("/ar/directives", params={"brand_id": "neon_seoul"},
+    wrong = configured.get("/ar/directives", params={"brand_id": "longform_signal"},
                            headers={"X-PLM-Service-Token": "nope"})
     assert wrong.status_code == 401
     assert wrong.json()["detail"]["code"] == "invalid_service_token"

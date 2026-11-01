@@ -27,7 +27,7 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
     **track_spec_fields(
         track_spec_id='trk_api_01',
         playlist_spec_id='ply_01',
-        brand_profile_id='neon_seoul',
+        brand_profile_id='longform_signal',
         hard_constraints={'genre': 'rnb', 'language': 'english', 'vocal_mode': 'vocal'},
         creative_latitude={},
         lyric_spec={},

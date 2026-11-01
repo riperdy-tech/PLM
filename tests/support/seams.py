@@ -54,7 +54,7 @@ def directive_fields(**overrides: Any) -> dict[str, Any]:
         "expected_value": 88.0,
         "uncertainty": 0.12,
         "budget_limit": 100.0,
-        "market_context": {"brand_id": "neon_seoul"},
+        "market_context": {"brand_id": "longform_signal"},
         "selection_reason": ["high_demand_opportunity"],
         "directive_version": "p2-dir-v1",
         "policy_version": "p2-v1",
@@ -89,7 +89,7 @@ def track_spec_fields(**overrides: Any) -> dict[str, Any]:
         "track_spec_id": "trk_test_01",
         "playlist_spec_id": "ply_test_01",
         "lineage": lineage_fields(),
-        "brand_profile_id": "neon_seoul_profile",
+        "brand_profile_id": "longform_signal_profile",
         "hard_constraints": {"genre": "rnb", "language": "english", "vocal_mode": "vocal"},
         "bounded_preferences": {
             "bpm": 88,

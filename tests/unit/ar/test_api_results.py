@@ -18,7 +18,7 @@ ENV_WITH_TOKEN = {
 }
 
 CYCLE_BODY = {
-    "brand_id": "neon_seoul", "slot_count": 2, "budget": 2.0,
+    "brand_id": "longform_signal", "slot_count": 2, "budget": 2.0,
     "as_of": "2026-09-20T06:00:00+00:00", "policy_version": "p2-v1",
 }
 
@@ -39,7 +39,7 @@ def test_results_are_accepted_once_and_updates_apply(client: TestClient) -> None
     assert first.status_code == 200, first.text
     assert first.json()["stored"] is True
     assert client.post("/ar/results", json=RESULT_BODY).json()["stored"] is False
-    update = client.post("/ar/update", params={"brand_id": "neon_seoul"})
+    update = client.post("/ar/update", params={"brand_id": "longform_signal"})
     assert update.status_code == 200, update.text
     assert update.json()["applied"] == 1
     state = client.get("/ar/arms/focus_electronic-0/state").json()
@@ -53,6 +53,6 @@ def test_update_without_an_active_policy_is_409_never_a_silent_default() -> None
     settings = load_ar_settings(platform=load_settings(env=ENV_WITH_TOKEN))
     app = create_app(session_factory=factory, settings=settings)
     with TestClient(app, headers={"X-PLM-Service-Token": "ar-seam-token"}) as client:
-        response = client.post("/ar/update", params={"brand_id": "neon_seoul"})
+        response = client.post("/ar/update", params={"brand_id": "longform_signal"})
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "policy_not_configured"

@@ -116,7 +116,7 @@ def _directive(run: str) -> dict[str, Any]:
                "language": "english", "vocal_mode": "vocal", "duration_bucket": "45_75m",
                "visual_world": "rainy_asian_city"},
         expected_value=1.0, uncertainty=0.2, budget_limit=100.0,
-        market_context={"brand_id": "neon_seoul"}, selection_reason=["r5_integration"],
+        market_context={"brand_id": "longform_signal"}, selection_reason=["r5_integration"],
         directive_version="p2-dir-v1", policy_version="p2-v1",
         expires_at="2027-01-01T00:00:00Z", exploration_fraction=0.2,
         value_model="early-stage-proxy-v1", outcome_horizon="28d",

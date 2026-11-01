@@ -728,7 +728,7 @@ def experiments_validate(experiment_id: str) -> None:
 def experiments_materialize(
     experiment_id: str,
     treatment_id: str,
-    brand_id: str = "neon_seoul",
+    brand_id: str = "longform_signal",
     budget_envelope: float | None = None,
 ) -> None:
     """Materialize an experiment treatment into a ContentPackage (P3).

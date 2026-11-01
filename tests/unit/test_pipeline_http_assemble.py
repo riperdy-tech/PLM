@@ -55,7 +55,7 @@ def test_default_pipeline_timeout_covers_long_p6_render_with_headroom() -> None:
 
 def _package(package_id: str, specs: list[str]) -> dict[str, Any]:
     return {
-        "package_id": package_id, "brand_id": "neon_seoul",
+        "package_id": package_id, "brand_id": "longform_signal",
         "playlist_spec": {"duration_range_seconds": RANGE},
         "visual_spec": {"visual_world": "rainy_coffee_shop"},
         "title_spec": {"formatting_pattern": "{mood} {genre} for {use_case}"},
@@ -134,7 +134,7 @@ def _steps(phases: _Phases) -> HttpPhaseSteps:
 
 def _request(candidates: list[str], packages: list[str] | None = None) -> StepRequest:
     return StepRequest(
-        workflow_id="pipeline.dir-1", directive_id="dir-1", brand_id="neon_seoul",
+        workflow_id="pipeline.dir-1", directive_id="dir-1", brand_id="longform_signal",
         step=Step.ASSEMBLE.value, idempotency_key=STEP_KEY,
         requested_at=datetime(2026, 10, 14, tzinfo=UTC),
         inputs={"policy_check": {"package_ids": packages or ["pkg_1"]},
@@ -147,7 +147,7 @@ def test_cleared_candidates_go_to_p6_by_id_with_the_declared_duration_range() ->
     result = asyncio.run(_steps(phases).assemble(
         _request(["c0", "c1", "c2", "c_rejected", "c_missing", "c_other"])))
     assert phases.p6_bodies == [{
-        "candidate_ids": ["c0", "c1", "c2"], "brand_id": "neon_seoul",
+        "candidate_ids": ["c0", "c1", "c2"], "brand_id": "longform_signal",
         "duration_range_seconds": RANGE, "visual_profile": "rainy_coffee_shop",
         "playlist_concept": "peaceful lofi for study",
     }]

@@ -49,7 +49,7 @@ P2_BASE_URL = "http://127.0.0.1:8082"
 SERVICE_TOKEN = "change-me-dev-service-token"
 DEFAULT_CADENCE_HOURS = 72  # ~2.3 releases per week
 CHANNEL_NAME = "Rhodes & Rain Records"
-DEFAULT_BRAND_ID = "neon_seoul"
+DEFAULT_BRAND_ID = "longform_signal"
 DEFAULT_ARM_ID = "lofi_study_focus"
 
 

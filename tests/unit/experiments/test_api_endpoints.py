@@ -33,7 +33,7 @@ SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
+    }, expected_value=85.0, uncertainty=0.15, budget_limit=100.0, market_context={"brand_id": "longform_signal"}, selection_reason=["high_demand"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-10-01T00:00:00Z", exploration_fraction=0.2, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
 
 
@@ -146,7 +146,7 @@ def test_experiment_full_api_lifecycle() -> None:
     target_trt_id = treatments[1]["treatment_id"]
     mat_payload = {
         "treatment_id": target_trt_id,
-        "brand_id": "neon_seoul",
+        "brand_id": "longform_signal",
         "budget_envelope": 80.0,
     }
     mat_resp = client.post(

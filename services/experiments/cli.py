@@ -35,7 +35,7 @@ __all__ = [
     "validate_experiment_cli",
 ]
 
-DEFAULT_BRAND_ID: Final[str] = "neon_seoul"
+DEFAULT_BRAND_ID: Final[str] = "longform_signal"
 SessionFactory = Callable[[], Session]
 
 

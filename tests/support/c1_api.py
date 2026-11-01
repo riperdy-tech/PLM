@@ -54,7 +54,7 @@ def seed_market(session: Session) -> None:
         session,
         ArmDraft(arm_id=ARM_ID, fingerprint="seam-fixture", profile=profile,
                  source_observation_ids=("raw-1",), support_count=2),
-        brand_id="neon_seoul",
+        brand_id="longform_signal",
     )
     observations = [
         NormalizedObservation(

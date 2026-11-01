@@ -5,8 +5,9 @@ A brand's display name and palette are P6's brand-system data, keyed by the
 (``brand_profile_unknown``), never rendered with a made-up name or palette.
 
 :data:`DEFAULT_BRANDS` is development configuration: it declares the one brand P3
-materializes by default (``neon_seoul``, displayed as "Longform Signal": the
-instrumental deep-focus electronic identity of ADR-0044; the id itself is unchanged).
+materializes by default (``longform_signal``, displayed as "Longform Signal": the
+instrumental deep-focus electronic identity of ADR-0044; renamed from ``neon_seoul`` on
+2026-11-01).
 Operators supply real brands through :meth:`BrandRegistry.from_json_file`
 (``PLM_MEDIA_BRANDS_FILE``).
 """
@@ -55,6 +56,6 @@ class BrandRegistry:
 
 DEFAULT_BRANDS: Final = BrandRegistry([
     # Charcoal base, graphite shade, warm amber accent, cool white highlight.
-    BrandProfile(brand_id="neon_seoul", brand_name="Longform Signal", version="v2",
+    BrandProfile(brand_id="longform_signal", brand_name="Longform Signal", version="v2",
                  palette=["#15171C", "#2B2F36", "#F2A23C", "#E9EEF2"]),
 ])

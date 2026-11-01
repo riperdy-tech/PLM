@@ -61,13 +61,13 @@ def test_identity_admits_only_focus_use_case_focus_genre_and_no_vocals() -> None
 
 def test_identity_file_declares_the_production_brand() -> None:
     identities = load_brand_identities()
-    assert "neon_seoul" in identities
+    assert "longform_signal" in identities
     assert production_settings(platform=None).brand_identities.keys() == identities.keys()
     assert load_ar_settings().brand_identities == {}, "unit settings stay unfiltered"
 
 
 def _cycle(session: object, settings: object, *arms: ContentArm, as_of: datetime = NOW):
-    request = CycleRequest(brand_id="neon_seoul", as_of=as_of, slot_count=2, budget=2.0,
+    request = CycleRequest(brand_id="longform_signal", as_of=as_of, slot_count=2, budget=2.0,
                            policy_version="p2-v1")
     market = MarketSnapshot(arms=arms, as_of=as_of, source="live", score_version="p1-v1")
     return run_allocation_cycle(session, request, settings=settings,  # type: ignore[arg-type]
@@ -75,10 +75,10 @@ def _cycle(session: object, settings: object, *arms: ContentArm, as_of: datetime
 
 
 def test_cycle_blocks_out_of_identity_arms_and_never_selects_them() -> None:
-    settings = load_ar_settings(brand_identities={"neon_seoul": FOCUS})
+    settings = load_ar_settings(brand_identities={"longform_signal": FOCUS})
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal",
                                    created_at=NOW)
         result = _cycle(session, settings,
                         _arm("focus-1", genre="ambient", use_case="study_focus"),
@@ -95,17 +95,17 @@ def test_cycle_blocks_out_of_identity_arms_and_never_selects_them() -> None:
 def test_a_wider_identity_unblocks_only_identity_blocked_arms() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal",
                                    created_at=NOW)
         lofi = _arm("lofi-1", genre="lofi", use_case="study_focus")
         paused = _arm("paused-1", genre="ambient", use_case="study_focus")
-        _cycle(session, load_ar_settings(brand_identities={"neon_seoul": FOCUS}), lofi, paused)
+        _cycle(session, load_ar_settings(brand_identities={"longform_signal": FOCUS}), lofi, paused)
         repositories.set_arm_status(session, arm_id="paused-1",
                                     status=ArmLifecycleStatus.BLOCKED, now=NOW,
                                     reason="owner_block")
         wider = replace(FOCUS, genres=FOCUS.genres | {"lofi"})
         later = datetime(2026, 11, 2, 6, 0, tzinfo=UTC)
-        _cycle(session, load_ar_settings(brand_identities={"neon_seoul": wider}), lofi, paused,
+        _cycle(session, load_ar_settings(brand_identities={"longform_signal": wider}), lofi, paused,
                as_of=later)
         assert repositories.load_arm_state(session, "lofi-1")["status"] != "blocked"  # type: ignore[index]
         assert repositories.load_arm_state(session, "paused-1")["status"] == "blocked"  # type: ignore[index]
@@ -114,7 +114,7 @@ def test_a_wider_identity_unblocks_only_identity_blocked_arms() -> None:
 def test_undeclared_brand_is_not_filtered_but_warned() -> None:
     engine = create_ar_engine()
     with ar_session(engine) as session:
-        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="neon_seoul",
+        repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal",
                                    created_at=NOW)
         result = _cycle(session, load_ar_settings(),
                         _arm("rnb-1", genre="rnb", use_case="late_night_drive"))

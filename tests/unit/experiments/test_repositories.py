@@ -173,7 +173,7 @@ def test_content_package_persistence_and_retrieval() -> None:
         vis = VisualSpec(
             visual_spec_id="vis_01",
             experiment_id="exp_test_02",
-            visual_world="neon_seoul",
+            visual_world="longform_signal",
             motion_profile="slow_pan",
             palette_guide=("blue", "violet"),
         )
@@ -218,7 +218,7 @@ def test_content_package_persistence_and_retrieval() -> None:
         assert loaded_pkg.track_specs[0].track_role == TrackRole.FOCUS
         assert loaded_pkg.playlist_spec.track_count_target == 8
         assert loaded_pkg.playlist_spec == ply  # the declared range round-trips
-        assert loaded_pkg.visual_spec.visual_world == "neon_seoul"
+        assert loaded_pkg.visual_spec.visual_world == "longform_signal"
 
 
 def test_audit_event_recording() -> None:

@@ -32,7 +32,7 @@ async def test_deployed_worker_fails_an_unqueued_directive_closed_over_http(
         pytest.skip("no pipeline-worker polls `pipeline`: docker compose up -d --wait "
                     "pipeline-worker")
     directive_id = f"gate-unqueued-{uuid.uuid4().hex[:12]}"
-    handle = await start_pipeline(client, directive_id=directive_id, brand_id="neon_seoul")
+    handle = await start_pipeline(client, directive_id=directive_id, brand_id="longform_signal")
     workflow_id = handle.id
     outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), 90)
 

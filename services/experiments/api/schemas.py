@@ -52,7 +52,7 @@ class MaterializePackageRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     treatment_id: str
-    brand_id: str = "neon_seoul"
+    brand_id: str = "longform_signal"
     budget_envelope: float | None = Field(default=None, gt=0.0)
     """May lower the directive's ``budget_limit``, never raise it; omitted means the limit.
 

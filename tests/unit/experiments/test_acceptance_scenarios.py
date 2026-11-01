@@ -42,7 +42,7 @@ SAMPLE_WIRE_DIRECTIVE = ProductionDirectivePayload.build(
         "vocal_mode": "vocal",
         "duration_bucket": "45_75m",
         "visual_world": "rainy_asian_city",
-    }, expected_value=88.0, uncertainty=0.12, budget_limit=100.0, market_context={"brand_id": "neon_seoul"}, selection_reason=["high_demand_opportunity"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-11-01T00:00:00Z", exploration_fraction=0.25, value_model="early-stage-proxy-v1", outcome_horizon="28d"
+    }, expected_value=88.0, uncertainty=0.12, budget_limit=100.0, market_context={"brand_id": "longform_signal"}, selection_reason=["high_demand_opportunity"], directive_version="p2-dir-v1", policy_version="p2-v1", expires_at="2026-11-01T00:00:00Z", exploration_fraction=0.25, value_model="early-stage-proxy-v1", outcome_horizon="28d"
 ).to_wire()
 
 
@@ -74,7 +74,7 @@ def test_ac_01_basic_materialization(session) -> None:
     exp = promote_to_validated(exp, report)
 
     treatment = exp.treatments[0]
-    pkg = materialize_package(exp, treatment, genome, brand_id="neon_seoul", budget_envelope=80.0, created_at=FIXED_NOW)
+    pkg = materialize_package(exp, treatment, genome, brand_id="longform_signal", budget_envelope=80.0, created_at=FIXED_NOW)
     repositories.insert_content_package(session, pkg)
     session.commit()
 
@@ -135,7 +135,7 @@ def test_ac_05_creative_freedom() -> None:
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
     exp = _validated(adapted, genome, seed=5)
-    pkg = materialize_package(exp, exp.treatments[0], genome, brand_id="neon_seoul", budget_envelope=90.0, created_at=FIXED_NOW)
+    pkg = materialize_package(exp, exp.treatments[0], genome, brand_id="longform_signal", budget_envelope=90.0, created_at=FIXED_NOW)
 
     # Track specs must contain open creative latitude and bounded preferences
     for trk in pkg.track_specs:
@@ -223,8 +223,8 @@ def test_ac_10_idempotency(session) -> None:
     assert exp1.experiment_id == exp2.experiment_id
 
     # Materializing twice produces identical hash and component spec counts
-    pkg1 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul", created_at=FIXED_NOW)
-    pkg2 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="neon_seoul", created_at=FIXED_NOW)
+    pkg1 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="longform_signal", created_at=FIXED_NOW)
+    pkg2 = materialize_package(exp1, exp1.treatments[0], genome, brand_id="longform_signal", created_at=FIXED_NOW)
     assert pkg1.package_hash == pkg2.package_hash
     assert len(pkg1.track_specs) == len(pkg2.track_specs)
 
@@ -287,7 +287,7 @@ def test_ac_12_p4_handoff() -> None:
     # Not materializable until the validator has promoted it.
     early = client.post(
         f"/experiments/v1/experiments/{exp_id}/materialize",
-        json={"treatment_id": trt_id, "brand_id": "neon_seoul"},
+        json={"treatment_id": trt_id, "brand_id": "longform_signal"},
         headers=headers,
     )
     assert early.status_code == 409
@@ -297,7 +297,7 @@ def test_ac_12_p4_handoff() -> None:
 
     mat_resp = client.post(
         f"/experiments/v1/experiments/{exp_id}/materialize",
-        json={"treatment_id": trt_id, "brand_id": "neon_seoul", "budget_envelope": 100.0},
+        json={"treatment_id": trt_id, "brand_id": "longform_signal", "budget_envelope": 100.0},
         headers=headers,
     )
     assert mat_resp.status_code == 200

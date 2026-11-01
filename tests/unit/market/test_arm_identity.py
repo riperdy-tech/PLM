@@ -61,10 +61,10 @@ def test_v2_measured_duration_arm_cannot_rewrite_same_shaped_v1_arm(
     assert old.arm_id != current.arm_id
     assert current.arm_id.startswith("p1_taxonomy_v2_")
     old_id, old_insert = repositories.upsert_arm(
-        market_session, old, brand_id="neon_seoul",
+        market_session, old, brand_id="longform_signal",
     )
     new_id, new_insert = repositories.upsert_arm(
-        market_session, current, brand_id="neon_seoul",
+        market_session, current, brand_id="longform_signal",
     )
     assert old_insert and new_insert
     assert old_id != new_id
@@ -105,16 +105,16 @@ def test_versioned_arm_slug_collision_refuses_misattributed_score_evidence(
     assert calm.arm_id == dreamy.arm_id
     assert calm.fingerprint != dreamy.fingerprint
     original, created = repositories.upsert_arm(
-        market_session, calm, brand_id="neon_seoul", refuse_slug_collision=True,
+        market_session, calm, brand_id="longform_signal", refuse_slug_collision=True,
     )
     assert created
     replay, created = repositories.upsert_arm(
-        market_session, calm, brand_id="neon_seoul", refuse_slug_collision=True,
+        market_session, calm, brand_id="longform_signal", refuse_slug_collision=True,
     )
     assert (replay, created) == (original, False)
     with pytest.raises(ValueError, match="arm_slug_identity_conflict"):
         repositories.upsert_arm(
-            market_session, dreamy, brand_id="neon_seoul",
+            market_session, dreamy, brand_id="longform_signal",
             refuse_slug_collision=True,
         )
     stored = repositories.load_arms(market_session)
@@ -176,11 +176,11 @@ def test_v3_opt_in_identity_is_stable_across_batch_growth_and_slug_collisions(
     assert len(one.arm_id) <= 64 and len(other.arm_id) <= 64
     for draft in (one, other):
         identity, inserted = repositories.upsert_arm(
-            market_session, draft, brand_id="neon_seoul", refuse_slug_collision=True,
+            market_session, draft, brand_id="longform_signal", refuse_slug_collision=True,
         )
         assert inserted and identity == draft.arm_id
     replay, inserted = repositories.upsert_arm(
-        market_session, one, brand_id="neon_seoul", refuse_slug_collision=True,
+        market_session, one, brand_id="longform_signal", refuse_slug_collision=True,
     )
     assert replay == one.arm_id and not inserted
     records = {record["arm_id"]: record for record in repositories.load_arms(market_session)}

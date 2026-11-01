@@ -20,7 +20,7 @@ BRIEF_WIRE_FIELDS = ("genre", "subgenre", "mood", "use_case", "language", "vocal
 
 def _cycle_body(**overrides: object) -> dict[str, object]:
     body: dict[str, object] = {
-        "brand_id": "neon_seoul", "slot_count": 2, "budget": 2.0,
+        "brand_id": "longform_signal", "slot_count": 2, "budget": 2.0,
         "as_of": "2026-09-20T06:00:00+00:00", "policy_version": "p2-v1",
     }
     body.update(overrides)
@@ -37,7 +37,7 @@ def test_cycle_endpoints_and_the_shadow_directive_rule(client: TestClient) -> No
     decisions = client.get(f"/ar/cycles/{cycle_id}/decisions").json()
     assert {row["policy_version"] for row in decisions} == {"p2-v1"}
     # SHADOW: computed, persisted, auditable — and GET /ar/directives serves nothing
-    assert client.get("/ar/directives", params={"brand_id": "neon_seoul"}).json() == []
+    assert client.get("/ar/directives", params={"brand_id": "longform_signal"}).json() == []
     # §71's `channel_id` is not a wire name (ADR-0019): refusing beats aliasing
     assert client.post("/ar/cycles", json={
         "channel_id": "x", "slot_count": 1, "budget": 1.0,
@@ -48,7 +48,7 @@ def test_cycle_endpoints_and_the_shadow_directive_rule(client: TestClient) -> No
 def test_a_served_directive_is_exactly_the_seventeen_frozen_c2_fields(client: TestClient) -> None:
     created = client.post("/ar/cycles", json=_cycle_body(activation_state="AUTONOMOUS"))
     assert created.status_code == 200, created.text
-    served = client.get("/ar/directives", params={"brand_id": "neon_seoul"}).json()
+    served = client.get("/ar/directives", params={"brand_id": "longform_signal"}).json()
     assert len(served) == 2, "ADR-0024: an AUTONOMOUS cycle's queued directives are actionable"
     for item in served:
         assert tuple(item) == DIRECTIVE_WIRE_FIELDS, "C2 fields, in registry order, no extras"

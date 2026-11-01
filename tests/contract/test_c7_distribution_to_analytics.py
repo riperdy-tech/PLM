@@ -173,9 +173,9 @@ def _store(payload: dict[str, Any]) -> object:
     engine = create_ar_engine()
     with ar_session(engine) as session:
         ar_repositories.upsert_arm_state(
-            session, brand_id="neon_seoul", arm_id=payload.get("arm_id", "x"), now=NOW
+            session, brand_id="longform_signal", arm_id=payload.get("arm_id", "x"), now=NOW
         )
-        return store_result(session, payload, brand_id="neon_seoul", now=NOW)
+        return store_result(session, payload, brand_id="longform_signal", now=NOW)
 
 
 def test_leg2_producer_emits_exactly_the_shared_wire(leg2: dict[str, Any]) -> None:

@@ -32,7 +32,7 @@ COMPONENTS = {name: 50.0 for name in
 
 
 def _seed(session) -> None:  # type: ignore[no-untyped-def]
-    repositories.upsert_arm_state(session, brand_id="neon_seoul", arm_id="rnb-1", now=NOW)
+    repositories.upsert_arm_state(session, brand_id="longform_signal", arm_id="rnb-1", now=NOW)
     arm = ContentArm(arm_id="rnb-1", dimensions=ArmDimensions(genre="rnb"),
                      p1_score=60.0, p1_confidence=0.6, component_scores=dict(COMPONENTS),
                      observation_count=1, source_count=1, as_of=NOW, score_version="p1-v1",
@@ -41,7 +41,7 @@ def _seed(session) -> None:  # type: ignore[no-untyped-def]
         session,
         MODEL.initialize_prior(arm, PriorParameters(
             mean=0.5, variance=0.05, confidence=0.6, prior_version="p2-prior-v1")),
-        brand_id="neon_seoul", expected_version=0,
+        brand_id="longform_signal", expected_version=0,
     )
 
 
@@ -70,7 +70,7 @@ def test_three_windows_of_one_content_give_one_effective_observation() -> None:
                                              ("28d", "provisional", 0.6, 20),
                                              ("28d", "mature", 0.55, 28)):
             store_result(session, _result(window, status, reward, days=days),
-                         brand_id="neon_seoul", now=NOW)
+                         brand_id="longform_signal", now=NOW)
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert (summary.applied, summary.off_horizon, summary.provisional) == (1, 2, 1)
@@ -85,9 +85,9 @@ def test_a_second_mature_outcome_at_the_horizon_is_a_duplicate() -> None:
     with ar_session(create_ar_engine()) as session:
         _seed(session)
         store_result(session, _result("28d", "mature", 0.55, days=28),
-                     brand_id="neon_seoul", now=NOW)
+                     brand_id="longform_signal", now=NOW)
         store_result(session, _result("28d", "closed", 0.95, days=29),
-                     brand_id="neon_seoul", now=NOW)
+                     brand_id="longform_signal", now=NOW)
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert summary.applied == 1 and summary.skipped_duplicate == 1
@@ -101,7 +101,7 @@ def test_two_contents_of_one_experiment_are_two_outcomes() -> None:
         _seed(session)
         for content in ("c-1", "c-2"):
             store_result(session, _result("28d", "mature", 0.6, days=28, content=content),
-                         brand_id="neon_seoul", now=NOW)
+                         brand_id="longform_signal", now=NOW)
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert summary.applied == 2
@@ -111,7 +111,7 @@ def test_decay_is_measured_from_the_draw_not_from_the_update() -> None:
     with ar_session(create_ar_engine()) as session:
         _seed(session)
         store_result(session, _result("28d", "mature", 0.9, days=28),
-                     brand_id="neon_seoul", now=NOW)
+                     brand_id="longform_signal", now=NOW)
         apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
         stored = repositories.load_posterior(session, "rnb-1")
         assert stored is not None
