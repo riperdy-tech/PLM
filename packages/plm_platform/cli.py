@@ -899,6 +899,23 @@ def media_assemble(
     cli_assemble(request_path=request_path)
 
 
+@media_app.command(name="compile-session")
+def media_compile_session(
+    brand_id: str = typer.Option(..., "--brand-id", help="Brand whose released tracks to reuse"),
+    min_minutes: int = typer.Option(60, "--min-minutes", min=10),
+    max_minutes: int = typer.Option(120, "--max-minutes", min=10),
+    visual_profile: str = typer.Option(..., "--visual-profile", help="P6 visual world"),
+    playlist_concept: str = typer.Option("Deep Work Session", "--concept"),
+    albums: int = typer.Option(12, "--albums", min=1, max=100),
+) -> None:
+    """Assemble a long session video from tracks the brand already released (no P2 arm)."""
+    from media_factory.cli import cli_compile_session
+
+    cli_compile_session(brand_id=brand_id, min_minutes=min_minutes, max_minutes=max_minutes,
+                        visual_profile=visual_profile, playlist_concept=playlist_concept,
+                        albums=albums)
+
+
 @media_app.command(name="render-jobs")
 def media_render_jobs(
     package_id: str = typer.Option(
