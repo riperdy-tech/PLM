@@ -28,9 +28,8 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
+from media_factory.audio.features import DEFAULT_FEATURE_POLICY, measure_features
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from services.media_factory.audio.features import DEFAULT_FEATURE_POLICY, measure_features
 
 from ..domain.enums import CheckSeverity, GateCategory
 from ..domain.models import MusicalCheck, RiskFinding
