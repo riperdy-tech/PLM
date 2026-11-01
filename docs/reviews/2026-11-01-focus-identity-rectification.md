@@ -81,7 +81,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 | ID | Item | Status |
 |---|---|---|
-| B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | deferred: rename needs a data migration across schemas; done last |
+| B-1 | The internal brand id `neon_seoul` is the default in about 10 places and on every DB row | not renamed (2026-11-01), on evidence: the id is an opaque key that no viewer sees (titles, thumbnails, descriptions and the channel use the display name "Longform Signal"; the YouTube channel profile in the dev DB is a mock). Renaming would rewrite 1,024 rows in 15 tables across 8 schemas through a governed cross-schema migration, and would change ids derived from it (P8 artist ids, render and thumbnail storage paths, artwork seeds), for no revenue effect. Nothing creative is derived from the word |
 | B-2 | The real YouTube channel's display name | open: changing it is an external write and needs authorization |
 
 ## Found during verification
@@ -106,5 +106,5 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 - Session compilations are built (`plm media compile-session`) but none has been rendered from real released albums yet; publishing one needs authorization.
 - P5-1 rest: sung-vocal detection (no detector; needs an ML model such as source separation). The drop warning is uncalibrated against real EDM drops.
-- B-1: internal brand id rename. B-2: the real channel's display name (an external write).
+- B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).
