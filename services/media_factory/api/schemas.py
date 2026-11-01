@@ -44,6 +44,9 @@ class AssemblePackageRequest(BaseModel):
     """``None``: the deployment's configured profile (``PLM_MEDIA_RENDER_PROFILE``)."""
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE
     transition_duration_seconds: float = Field(default=2.0, ge=0.0)
+    session_compilation: bool = False
+    """A long session video re-assembled from tracks this brand already released, across
+    experiments, under its own lineage that credits no P2 arm (ADR-0044 revision)."""
 
 
 class MediaPackageResponse(BaseModel):

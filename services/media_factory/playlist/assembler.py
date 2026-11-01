@@ -27,6 +27,7 @@ from datetime import datetime
 from plm_contracts.seams import ExperimentLineage
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
+from plm_contracts.seams.lineage import session_compilation_lineage
 
 from ..audio.features import TrackFeatures
 from ..domain.enums import PlaylistStatus, TransitionType
@@ -101,8 +102,13 @@ def common_lineage(manifests: Sequence[ReleaseManifestPayload]) -> ExperimentLin
     return first
 
 
-def check_clearance(manifests: Sequence[ReleaseManifestPayload]) -> ExperimentLineage:
-    """R7/R8 before anything is fetched: every track cleared, one lineage."""
+def check_clearance(manifests: Sequence[ReleaseManifestPayload], *,
+                    session_compilation: bool = False) -> ExperimentLineage:
+    """R7/R8 before anything is fetched: every track cleared, one lineage.
+
+    A session compilation re-assembles released tracks of several experiments, so it
+    takes its own lineage (:func:`session_compilation_lineage`) instead of one shared.
+    """
     blocked = [m.candidate_id for m in manifests if not m.cleared_for_release]
     if blocked:
         raise PlaylistAssemblyError(
@@ -110,6 +116,10 @@ def check_clearance(manifests: Sequence[ReleaseManifestPayload]) -> ExperimentLi
             f"tracks {blocked} were not passed by P5 and carry no audited override (R7, R8)",
             ["track_manifests"],
         )
+    if session_compilation:
+        if not manifests:
+            raise PlaylistAssemblyError("empty_playlist", "no track manifests to assemble")
+        return session_compilation_lineage([m.candidate_id for m in manifests])
     return common_lineage(manifests)
 
 
@@ -137,6 +147,7 @@ def assemble_playlist(
     transition_type: TransitionType = TransitionType.SHORT_CROSSFADE,
     transition_duration_seconds: float = 2.0,
     policy: SequencingPolicy = DEFAULT_SEQUENCING_POLICY,
+    session_compilation: bool = False,
     now: datetime,
 ) -> PlaylistAssemblerResult:
     """Assemble a cleared, sequenced playlist session from P5 manifests.
@@ -146,7 +157,7 @@ def assemble_playlist(
     ``duration_range`` is P3's declared playlist range; the session records its midpoint
     as the requested duration (R5).
     """
-    lineage = check_clearance(manifests)
+    lineage = check_clearance(manifests, session_compilation=session_compilation)
     missing = [m.candidate_id for m in manifests if m.candidate_id not in features]
     if missing:
         raise PlaylistAssemblyError(

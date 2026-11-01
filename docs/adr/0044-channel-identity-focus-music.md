@@ -92,9 +92,12 @@ fits the target:
 - About 6–9 tracks per video instead of 33–44, so two videos a week by hand is
   feasible; more uploads also give P2 more measured results.
 - Cost: watch hours per view are capped at the video length, and 20–30 min
-  videos compete less for "2 hours coding music" searches. A later remedy, not
-  yet built: periodic 1–2 h "session" compilations made from existing tracks,
-  which need no new generation.
+  videos compete less for "2 hours coding music" searches. Remedy: periodic
+  1–2 h "session" compilations made from already released tracks, which need no
+  new generation (`plm media compile-session`). A compilation takes its own
+  lineage (arm `session_compilation`, no P2 arm), may only reuse tracks a ready or
+  published album of the brand released, and P9 sends no reward for it, so it
+  never skews the bandit.
 
 Variety: when an arm's brief names no sub-style (or one not listed), P3 picks one
 of the nine that was not used by the genre's most recent experiments, so

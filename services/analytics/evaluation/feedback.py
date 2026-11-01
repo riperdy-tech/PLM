@@ -27,6 +27,7 @@ from plm_contracts import QualityStatus
 from plm_contracts.measurement import maturity_at
 from plm_contracts.money import CurrencyMismatchError, FxTable, Money
 from plm_contracts.seams import ExperimentLineage
+from plm_contracts.seams.lineage import SESSION_COMPILATION_ARM_ID
 from plm_platform.clock import require_aware
 from sqlalchemy.orm import Session
 
@@ -193,6 +194,9 @@ def record_and_enqueue_reward(
     commit together or not at all; nothing is sent here. A different payload for a fact
     already queued raises `plm_platform.outbox.OutboxConflictError` (P2 keeps the first
     write of a fact, so a silent second version would never be applied).
+
+    A session compilation (arm :data:`SESSION_COMPILATION_ARM_ID`) is no P2 arm: its
+    payload is built and returned but neither queued nor recorded as posted.
     """
     if estimated_revenue is not None and estimated_revenue.currency != outcome.primary_value_currency:
         raise CurrencyMismatchError(
@@ -221,6 +225,8 @@ def record_and_enqueue_reward(
         quality_status=outcome.quality_status,
     )
 
+    if outcome.content_arm_id == SESSION_COMPILATION_ARM_ID:
+        return payload
     enqueue_reward(session, payload, now=enqueued_at)
     insert_posted_reward(session, payload)
     return payload

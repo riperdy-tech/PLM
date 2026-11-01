@@ -205,3 +205,36 @@ def check_catalog_texture(
         "scope": "same_brand_stored_ready_or_published_packages",
         "evidence": current,
     }
+
+
+def check_compilation_sources(
+    selected_ids: Sequence[str],
+    features: Mapping[str, TrackFeatures],
+    checksums: Mapping[str, str],
+    *,
+    history: Sequence[CatalogAlbum],
+    policy: AlbumTexturePolicy = DEFAULT_ALBUM_TEXTURE_POLICY,
+) -> dict[str, object]:
+    """A session compilation reuses released recordings on purpose: instead of the
+    near-copy screen, every track must be one an earlier album of this brand released
+    (same candidate and checksum), so a compilation never introduces an unscreened one."""
+    current = serialize_album_signatures(selected_ids, features, checksums, policy=policy)
+    released: dict[str, str] = {}
+    for album in history:
+        for candidate_id, checksum, _ in validate_catalog_album(album, policy=policy):
+            released.setdefault(candidate_id, checksum)
+    unreleased = [cid for cid in selected_ids if released.get(cid) != checksums.get(cid)]
+    if unreleased:
+        raise MediaAssemblyError(
+            "compilation_track_not_released",
+            f"a session compilation may only reuse released tracks; {unreleased} are not "
+            "in a ready or published album of this brand",
+            ["candidate_ids"],
+        )
+    return {
+        "policy_version": policy.version,
+        "mode": "session_compilation",
+        "compared_packages": len(history),
+        "scope": "same_brand_stored_ready_or_published_packages",
+        "evidence": current,
+    }

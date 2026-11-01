@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import typer
 import uvicorn
+from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_platform.clock import SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import session_factory as platform_session_factory
@@ -26,7 +27,11 @@ from .storage.render_claims import (
     quarantine_stale_render_job,
     record_render_recovery_evidence,
 )
-from .storage.repositories import get_media_package_by_id, get_render_job
+from .storage.repositories import (
+    get_media_package_by_id,
+    get_render_job,
+    list_catalog_albums,
+)
 from .texture_backfill import backfill_package_texture, backfill_packages_texture
 from .texture_inventory import inspect_brand_album_textures
 
@@ -58,6 +63,10 @@ def cli_assemble(
     except ValueError as exc:
         typer.echo(f"Error: invalid request: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+    _run_assembly(req)
+
+
+def _run_assembly(req: AssemblePackageRequest) -> None:
     platform = load_settings()
     factory = platform_session_factory()
     backend = deployed_backend(platform, factory)
@@ -93,6 +102,52 @@ def cli_assemble(
         typer.echo(f"Blocked by post-render QA: {', '.join(codes)}", err=True)
         raise typer.Exit(code=2)
 
+
+@media_cli.command(name="compile-session")
+def cli_compile_session(
+    brand_id: str = typer.Option(..., "--brand-id", help="Brand whose released tracks to reuse"),
+    min_minutes: int = typer.Option(60, "--min-minutes", min=10),
+    max_minutes: int = typer.Option(120, "--max-minutes", min=10),
+    visual_profile: str = typer.Option(
+        ..., "--visual-profile", help="Visual world of the session video (P6 worlds)"),
+    playlist_concept: str = typer.Option(
+        "Deep Work Session", "--concept", help="Concept the title is built from"),
+    albums: int = typer.Option(
+        12, "--albums", min=1, max=100, help="How many recent released albums to draw from"),
+) -> None:
+    """Assemble a long session video from tracks this brand already released (ADR-0044).
+
+    Offers every track of the brand's most recent ready or published albums; P6's
+    sequencer picks and orders them to land inside the range. The video takes its own
+    ``session_compilation`` lineage, so its results credit no P2 arm. Rendering is local;
+    publishing it is a separate, authorised step.
+    """
+    if max_minutes < min_minutes:
+        typer.echo("Error: --max-minutes is below --min-minutes", err=True)
+        raise typer.Exit(code=2)
+    factory = platform_session_factory()
+    with factory() as session:
+        history = list_catalog_albums(session, brand_id)[:albums]
+    candidate_ids: list[str] = []
+    for album in history:
+        rows = album.track_signatures if isinstance(album.track_signatures, list) else []
+        for row in rows:
+            cid = row.get("candidate_id") if isinstance(row, dict) else None
+            if isinstance(cid, str) and cid not in candidate_ids:
+                candidate_ids.append(cid)
+    if not candidate_ids:
+        typer.echo(f"Error: brand {brand_id} has no released tracks to compile", err=True)
+        raise typer.Exit(code=2)
+    typer.echo(f"Offering {len(candidate_ids)} released tracks from {len(history)} albums")
+    _run_assembly(AssemblePackageRequest(
+        candidate_ids=candidate_ids,
+        brand_id=brand_id,
+        duration_range_seconds=DurationRangeSeconds(
+            min_seconds=min_minutes * 60, max_seconds=max_minutes * 60),
+        visual_profile=visual_profile,
+        playlist_concept=playlist_concept,
+        session_compilation=True,
+    ))
 
 
 @media_cli.command(name="inspect-album-textures")

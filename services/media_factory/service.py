@@ -167,6 +167,7 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             catalog_loader=lambda: list_catalog_albums(session, request.brand_id),
             before_render=_before_render if render_session_factory is not None else None,
             render_attempt=recovery_attempt,
+            session_compilation=request.session_compilation,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:

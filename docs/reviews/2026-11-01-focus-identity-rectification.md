@@ -104,7 +104,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 ## Still open
 
-- Long "session" compilations (1–2 h from existing tracks) for long-session searches: not built.
+- Session compilations are built (`plm media compile-session`) but none has been rendered from real released albums yet; publishing one needs authorization.
 - P5-1 rest: sung-vocal detection (no detector; needs an ML model such as source separation). The drop warning is uncalibrated against real EDM drops.
 - B-1: internal brand id rename. B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).

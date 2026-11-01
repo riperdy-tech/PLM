@@ -50,7 +50,11 @@ from ..domain.models import (
 from ..metadata.chapters import require_valid_chapters
 from ..metadata.compiler import compile_metadata_and_chapters
 from ..playlist.assembler import assemble_playlist, check_clearance
-from ..playlist.catalog import CatalogAlbum, check_catalog_texture
+from ..playlist.catalog import (
+    CatalogAlbum,
+    check_catalog_texture,
+    check_compilation_sources,
+)
 from ..playlist.diversity import check_album_texture
 from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
 from ..visuals.planner import BrandProfile, plan_visual_session
@@ -121,6 +125,7 @@ def assemble_media_package(
     catalog_loader: Callable[[], Sequence[CatalogAlbum]] | None = None,
     before_render: Callable[[str, str, str], str] | None = None,
     render_attempt: int = 1,
+    session_compilation: bool = False,
     clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
@@ -130,6 +135,8 @@ def assemble_media_package(
     defaults here. ``existing`` looks
     a package id up: when the request resolves to a package already assembled,
     :class:`PackageAlreadyAssembled` is raised before anything is rendered.
+    ``session_compilation`` re-assembles released tracks of several experiments into one
+    long session video under its own lineage (ADR-0044 revision).
     """
     profile = (render_profile_name if isinstance(render_profile_name, RenderProfile)
                else render_profile(render_profile_name))
@@ -137,7 +144,7 @@ def assemble_media_package(
     planned_at = clock.now()
 
     # 1-2. Clearance first, so nothing uncleared is even fetched; then verified bytes.
-    check_clearance(track_manifests)
+    check_clearance(track_manifests, session_compilation=session_compilation)
     # 3-4. Measured features (one recording in memory at a time), then selection and
     # order. Holding every offered recording at once made memory grow with the supply
     # (R5: about 60 cleared tracks for one long playlist, and the render OOM-killed).
@@ -155,6 +162,7 @@ def assemble_media_package(
         transition_type=transition_type,
         transition_duration_seconds=transition_duration_seconds,
         policy=sequencing_policy,
+        session_compilation=session_compilation,
         now=planned_at,
     )
     playlist_session = playlist_res.session
@@ -189,11 +197,16 @@ def assemble_media_package(
     # Lazy lookup is essential: a replay of an already assembled package must
     # succeed even when unrelated historical albums need remediation.
     recorded = catalog_loader() if catalog_loader is not None else catalog_albums
-    catalog_report = check_catalog_texture(
-        selected_ids, features, checksums,
-        current_release_manifest_id=rel_id,
-        history=recorded if recorded is not None else (),
-    )
+    if session_compilation:
+        catalog_report = check_compilation_sources(
+            selected_ids, features, checksums,
+            history=recorded if recorded is not None else ())
+    else:
+        catalog_report = check_catalog_texture(
+            selected_ids, features, checksums,
+            current_release_manifest_id=rel_id,
+            history=recorded if recorded is not None else (),
+        )
     # The assembly service supplies historical evidence; direct in-process calls
     # without a catalogue are explicitly marked as unverified.
     texture_report["evidence"] = catalog_report.pop("evidence")

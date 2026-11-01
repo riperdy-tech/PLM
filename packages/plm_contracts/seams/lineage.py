@@ -10,11 +10,23 @@ has a default, and an empty or placeholder value is refused.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
 from typing import Annotated, Final
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
 
-__all__ = ["PLACEHOLDER_IDS", "ExperimentLineage", "LineageId"]
+__all__ = [
+    "PLACEHOLDER_IDS",
+    "SESSION_COMPILATION_ARM_ID",
+    "ExperimentLineage",
+    "LineageId",
+    "session_compilation_lineage",
+]
+
+SESSION_COMPILATION_ARM_ID: Final[str] = "session_compilation"
+"""The arm of a long session video re-assembled from already released tracks (ADR-0044
+revision). It is no P2 arm: such a video's results credit no experiment."""
 
 PLACEHOLDER_IDS: Final[frozenset[str]] = frozenset(
     {
@@ -58,3 +70,16 @@ class ExperimentLineage(BaseModel):
     content_arm_id: LineageId
     content_genome_id: LineageId
     production_directive_id: LineageId
+
+
+def session_compilation_lineage(candidate_ids: Sequence[str]) -> ExperimentLineage:
+    """The lineage of a session compilation of ``candidate_ids``: content-addressed over
+    the recordings, with :data:`SESSION_COMPILATION_ARM_ID` as arm, family and genome."""
+    digest = hashlib.sha256("|".join(sorted(candidate_ids)).encode("utf-8")).hexdigest()[:16]
+    return ExperimentLineage(
+        experiment_id=f"cmp_{digest}",
+        experiment_family_id=SESSION_COMPILATION_ARM_ID,
+        content_arm_id=SESSION_COMPILATION_ARM_ID,
+        content_genome_id=SESSION_COMPILATION_ARM_ID,
+        production_directive_id=f"cmp_{digest}",
+    )
