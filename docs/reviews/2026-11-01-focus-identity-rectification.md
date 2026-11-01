@@ -43,7 +43,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 |---|---|---|
 | P3-1 | No focus_electronic template and no sub-style templates | fixed: 866734a |
 | P3-2 | Inference sends study_focus/focus to lofi, ambient and jazz | fixed: 866734a |
-| P3-3 | The duration policy is 45–75 min; ADR-0044 sets 90–120 min | fixed: 866734a (90_120m default; ADR-0036 amended) |
+| P3-3 | The duration policy is 45–75 min; ADR-0044 sets 90–120 min | fixed: 866734a (90_120m default; ADR-0036 amended); revised to 20–30 min (20_30m default, templates v7) after the owner ruled out a paid API |
 | P3-4 | No focus palette; existing palettes carry vinyl_crackle, trap and neon textures | fixed: 866734a (contrast v6, per-sub-style) |
 | P3-5 | A BPM treatment can shift tracks outside 70–110 | fixed: 866734a (bpm_limits); c303313 adds energy_limits (low/medium) |
 
@@ -52,7 +52,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | ID | Item | Status |
 |---|---|---|
 | P4-1 | Default request genre is `rnb` (`music_factory/domain/models.py:79`); the provider registry is not used at runtime | open (low impact) |
-| P4-2 | Hand-making 33–44 tracks per 90–120 min video by hand is a heavy owner workload; there is no Lyria (Gemini API) adapter | open: needs an API adapter, and each paid run needs authorization |
+| P4-2 | Hand-making 33–44 tracks per 90–120 min video by hand is a heavy owner workload; there is no Lyria (Gemini API) adapter | resolved by the 20–30 min revision: about 6–9 tracks per video by hand on free Gemini credit; no paid adapter |
 | P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | open |
 
 ## P6 media
@@ -92,6 +92,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 | V-2 | Old v1/v2 arms kept being served on their last scores | fixed: 83eaf55, recompute retires arms from other taxonomy namespaces |
 | V-3 | A `focus_electronic` arm with no use case was refused | fixed: 00d2b02 |
 | V-4 | All focus arms fall in one similarity cluster, so p2-v2's limit of 2 per cluster gives 2 directives per cycle, with the `ALL_SELECTED_ONE_CLUSTER` alert | not a defect: matches the planned cadence of 2 uploads a week; revisit when sub-style arms carry more evidence |
+| V-5 | Genre-less focus arms always got the plain base template, so their videos all sounded alike | fixed: P3 picks a sub-style not used by the latest experiments |
 
 ## Verification (2026-11-01)
 
@@ -103,7 +104,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 
 ## Still open
 
-- P4-2: a Lyria (Gemini API) adapter for 33+ tracks per video; each paid run needs authorization.
+- Long "session" compilations (1–2 h from existing tracks) for long-session searches: not built.
 - P5-1: audio detection of vocals, BPM and drops.
 - B-1: internal brand id rename. B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).

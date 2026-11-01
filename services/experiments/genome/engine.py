@@ -8,8 +8,8 @@ categorical dimensions (``alternatives``), which the treatment generator draws f
 
 The same file declares ``playlist_duration_buckets``: the playlist-length range each P2
 ``duration_bucket`` stands for, and ``playlist_duration_policy``: the owner's playlist
-length (decision 2026-10-15, ADR-0036, amended 2026-11-01 by ADR-0044: 90–120 minutes,
-the ``90_120m`` bucket; the target is only the planning midpoint). The policy is the single
+length (decision 2026-10-15, ADR-0036, amended 2026-11-01 by ADR-0044: 20–30 minutes,
+the ``20_30m`` bucket; the target is only the planning midpoint). The policy is the single
 source of a playlist range:
 
 * a brief that names a bucket gets that bucket's range, which must lie inside the
@@ -24,7 +24,8 @@ source of a playlist range:
 
 ``subgenre_templates`` maps a genre's sub-styles to their own (child) templates (ADR-0044
 amendment, decision 1): a brief whose ``subgenre`` is listed gets that template; one with
-no subgenre, or an unlisted one, gets the genre's template. A template may declare
+no subgenre, or an unlisted one, gets a sub-style P3 picks: one not among the genre's most
+recent videos, so consecutive videos differ (ADR-0044, revised 2026-11-01). A template may declare
 ``bpm_limits``, the tempo every treatment of it must stay inside (ADR-0044 decision 2:
 70–110 BPM for focus music); its own ``bpm`` must lie inside them, or it fails to load.
 """
@@ -63,6 +64,7 @@ __all__ = [
     "UnknownGenreError",
     "brief_genre",
     "brief_playlist_duration",
+    "brief_subgenre_note",
     "brief_template",
     "build_genome_from_directive",
     "default_template_library",
@@ -377,6 +379,24 @@ class TemplateLibrary:
         """The sub-styles with their own template under ``genre``."""
         return tuple(sorted(self._subgenres.get(genre, {})))
 
+    def choose_subgenre(self, genre: str, directive_id: str,
+                        recent: tuple[str, ...] = ()) -> str | None:
+        """A sub-style for a brief that names none (or an unlisted one); ``None`` when
+        ``genre`` lists no sub-styles.
+
+        ``recent`` is the genre's sub-styles, newest video first. A sub-style absent from it
+        is preferred; when every one appears, the one used longest ago is taken. A stable
+        hash of the directive id picks among the equally fresh ones.
+        """
+        listed = self.subgenres(genre)
+        if not listed:
+            return None
+        unused = tuple(sub for sub in listed if sub not in recent)
+        if not unused:
+            return max(listed, key=recent.index)
+        digest = hashlib.sha256(directive_id.encode("utf-8")).digest()
+        return unused[int.from_bytes(digest[:4], "big") % len(unused)]
+
     def for_subgenre(self, genre: str, subgenre: str | None) -> GenreTemplate:
         """The sub-style's template when ``genre`` lists it, else the genre's template."""
         name = self._subgenres.get(genre, {}).get(subgenre or "")
@@ -545,23 +565,43 @@ def brief_genre(
     return lib.infer_genre(use_cases, directive.directive_id)
 
 
+def _brief_subgenre(directive: AdaptedDirective) -> str | None:
+    raw = directive.brief.get("subgenre")
+    return normalize_dimension_value("subgenre", str(raw)) if _present(raw) else None
+
+
 def brief_template(
-    directive: AdaptedDirective, *, library: TemplateLibrary | None = None
+    directive: AdaptedDirective, *, library: TemplateLibrary | None = None,
+    recent_subgenres: tuple[str, ...] = (),
 ) -> tuple[GenreTemplate, str | None]:
     """The brief's template: its sub-style's when the genre lists it, else the genre's.
 
-    A subgenre the genre does not list gets the genre's template and a note; a genre with
-    no sub-style templates ignores the brief's subgenre, as before.
+    When the genre lists sub-styles and the brief names none, or one not listed, P3 picks
+    one (:meth:`TemplateLibrary.choose_subgenre` over ``recent_subgenres``) and the note
+    records it. A genre with no sub-style templates ignores the brief's subgenre, as before.
     """
     lib = library or default_template_library()
     genre, _ = brief_genre(directive, library=lib)
-    raw = directive.brief.get("subgenre")
-    subgenre = normalize_dimension_value("subgenre", str(raw)) if _present(raw) else None
-    template = lib.for_subgenre(genre, subgenre)
+    subgenre = _brief_subgenre(directive)
     listed = lib.subgenres(genre)
-    if subgenre is not None and listed and subgenre not in listed:
-        return template, f"subgenre_unmatched:{subgenre}->{template.template_name}"
-    return template, None
+    if listed and subgenre not in listed:
+        subgenre = lib.choose_subgenre(genre, directive.directive_id, recent_subgenres)
+    template = lib.for_subgenre(genre, subgenre)
+    return template, brief_subgenre_note(directive, template.genome, library=lib)
+
+
+def brief_subgenre_note(
+    directive: AdaptedDirective, genome: ContentGenome, *, library: TemplateLibrary | None = None
+) -> str | None:
+    """The note recording that P3 picked ``genome``'s sub-style instead of the brief's."""
+    lib = library or default_template_library()
+    subgenre = _brief_subgenre(directive)
+    if genome.subgenre not in lib.subgenres(genome.genre) or subgenre == genome.subgenre:
+        return None
+    template = lib.for_subgenre(genome.genre, genome.subgenre).template_name
+    if subgenre is None:
+        return f"subgenre_chosen:{genome.subgenre}->{template}"
+    return f"subgenre_unmatched:{subgenre}->{template}"
 
 
 def brief_playlist_duration(
@@ -576,7 +616,8 @@ def brief_playlist_duration(
 
 
 def build_genome_from_directive(
-    directive: AdaptedDirective, *, library: TemplateLibrary | None = None
+    directive: AdaptedDirective, *, library: TemplateLibrary | None = None,
+    recent_subgenres: tuple[str, ...] = (),
 ) -> ContentGenome:
     """Build the base genome: the brief's template (:func:`brief_template`: the sub-style's,
     else the genre's), overridden where the brief is explicit.
@@ -586,11 +627,12 @@ def build_genome_from_directive(
     are open, so the template's default applies, except the playlist range: a named
     ``duration_bucket`` sets it to the bucket's declared range when that lies inside the
     policy; an open, unknown or out-of-policy one gets the policy range (ADR-0036 as
-    amended 2026-10-31, recorded on the experiment).
+    amended 2026-10-31, recorded on the experiment). ``recent_subgenres`` (newest first)
+    steers the sub-style P3 picks when the brief names none.
     """
     lib = library or default_template_library()
     brief = directive.brief
-    base = brief_template(directive, library=lib)[0].genome
+    base = brief_template(directive, library=lib, recent_subgenres=recent_subgenres)[0].genome
 
     updates: dict[str, Any] = {}
     if _present(brief.get("mood")):

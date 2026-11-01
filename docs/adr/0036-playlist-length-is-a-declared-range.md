@@ -99,3 +99,13 @@ unknown (`gt_75m`) or outside the policy (`45_75m`, `10_45m`) is made at the pol
 length with `duration_bucket_mapped:<bucket>->policy` recorded. A focus package (210 s
 planned tracks) now plans 26 base specs plus 7 spares, where a 45-75 min one planned
 about 19 specs in all.
+
+## Amendment 2026-11-01, later (ADR-0044 revision)
+
+ADR-0044's revision sets this brand's video length to **20-30 min**, because tracks are
+made by hand on free Gemini credit and no paid music API will be used.
+`genome_templates.json` (`p3-genome-templates-v7`) adds the bucket `20_30m` (1200-1800 s,
+target 1500) and makes it the `playlist_duration_policy.default_bucket`; every template
+declares that range. The rules above are unchanged: `45_75m`, `90_120m` and `10_45m` now
+lie outside the policy and are made at the policy length with the mapping recorded. A
+focus package (210 s planned tracks) plans 6 base specs plus 2 spares.

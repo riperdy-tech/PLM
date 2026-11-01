@@ -38,7 +38,7 @@ from ..domain.errors import (
 from ..domain.experiment import Experiment, Treatment
 from ..domain.package import ContentPackage
 from ..experiments.engine import design_experiment
-from ..genome.engine import build_genome_from_directive
+from ..genome.engine import brief_genre, build_genome_from_directive
 from ..ingestion.p2_adapter import DirectiveValidationError, adapt_directive
 from ..materialization.builder import (
     BudgetEnvelopeExceededError,
@@ -115,7 +115,9 @@ def build_router(
                 ) from err
 
             try:
-                base_genome = build_genome_from_directive(adapted)
+                recent = repositories.recent_subgenres(
+                    session, genre=brief_genre(adapted)[0])
+                base_genome = build_genome_from_directive(adapted, recent_subgenres=recent)
                 exp = design_experiment(
                     adapted,
                     base_genome,

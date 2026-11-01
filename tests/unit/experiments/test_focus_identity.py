@@ -1,7 +1,7 @@
 """P3 inside the brand's identity: focus-electronic templates, sub-styles and tempo bounds.
 
 ADR-0044 (amendment 2026-11-01): the channel is instrumental deep-focus electronic music,
-70–110 BPM on every track, in nine sub-styles, as 90–120 min videos. These tests run P3's
+70–110 BPM on every track, in nine sub-styles, as 20–30 min videos. These tests run P3's
 own genome engine, experiment designer and materializer.
 """
 
@@ -79,7 +79,7 @@ def test_every_focus_template_is_instrumental_and_inside_the_identity() -> None:
         # inside manual supply's 90-300 s per-song limits
         assert 90 <= genome.track_duration.min_seconds <= genome.track_duration.max_seconds <= 300
         assert (genome.playlist_duration.min_seconds,
-                genome.playlist_duration.max_seconds) == (5400, 7200)
+                genome.playlist_duration.max_seconds) == (1200, 1800)
         assert genome.hook_profile != "vocal_refrain"
         assert genome.thumbnail_family != "illustrated_lofi"
         assert genome.song_structure != "build_drop_breakdown"
@@ -111,17 +111,73 @@ def test_an_inferred_focus_genre_still_takes_the_sub_style() -> None:
     assert genome.bpm.target_bpm == 102
 
 
-def test_no_subgenre_gets_the_base_and_an_unlisted_one_is_recorded() -> None:
-    base = default_template_library().for_genre("focus_electronic")
-    assert build_genome_from_directive(_focus({})).instrumentation_profile == (
-        base.genome.instrumentation_profile)
+def test_no_subgenre_gets_a_chosen_sub_style_and_an_unlisted_one_is_recorded() -> None:
+    """A brief without a sub-style still gets one of the nine, not the plain base, so a
+    genre-less focus arm does not sound the same in every video (ADR-0044, revised)."""
+    library = default_template_library()
+    for directive_id in ("dir_a", "dir_b", "dir_c"):
+        directive = _focus({}, directive_id=directive_id)
+        template, note = brief_template(directive)
+        sub = template.genome.subgenre
+        assert sub in SUB_STYLES
+        assert note == f"subgenre_chosen:{sub}->{template.template_name}"
+        assert build_genome_from_directive(directive).subgenre == sub
     directive = _focus({"subgenre": "lofi_hip_hop"})
     template, note = brief_template(directive)
-    assert template.template_name == base.template_name
-    assert note == "subgenre_unmatched:lofi_hip_hop->focus_electronic_base"
+    assert template.genome.subgenre in SUB_STYLES
+    assert template.template_name != library.for_genre("focus_electronic").template_name
+    assert note == f"subgenre_unmatched:lofi_hip_hop->{template.template_name}"
     exp = design_experiment(directive, build_genome_from_directive(directive),
                             created_at=FIXED_NOW)
     assert note in exp.design_notes
+
+
+def test_a_named_sub_style_carries_no_note() -> None:
+    directive = _focus({"subgenre": "minimal_pulse"})
+    exp = design_experiment(directive, build_genome_from_directive(directive),
+                            created_at=FIXED_NOW)
+    assert not any(n.startswith("subgenre_") for n in exp.design_notes)
+
+
+def test_the_chosen_sub_style_skips_the_recent_videos() -> None:
+    library = default_template_library()
+    recent = SUB_STYLES[:8]
+    assert library.choose_subgenre("focus_electronic", "dir_x", recent) == SUB_STYLES[8]
+    # every sub-style used: the one used longest ago comes back first
+    order = ("minimal_pulse", *(s for s in SUB_STYLES if s != "minimal_pulse"))
+    assert library.choose_subgenre("focus_electronic", "dir_x", order) == order[-1]
+    assert library.choose_subgenre("rnb", "dir_x", ()) is None
+
+
+def test_nine_consecutive_genre_less_videos_use_all_nine_sub_styles() -> None:
+    """Over HTTP and the experiments DB: each new focus experiment reads the previous ones,
+    so nine in a row never repeat a sub-style."""
+    from fastapi.testclient import TestClient
+    from plm_platform.config import load_settings
+    from sqlalchemy.orm import sessionmaker
+
+    from services.experiments.api.app import create_app
+    from services.experiments.config import load_experiments_settings
+    from tests.support.experiments_db import create_experiments_engine
+    from tests.unit.experiments.test_api_endpoints import ENV_WITH_TOKEN
+
+    settings = load_experiments_settings(platform=load_settings(env=dict(ENV_WITH_TOKEN)))
+    factory = sessionmaker(bind=create_experiments_engine(static_pool=True))
+    client = TestClient(create_app(session_factory=factory, settings=settings))
+    chosen = []
+    for index in range(9):
+        wire = ProductionDirectivePayload.build(**directive_fields(
+            directive_id=f"dir_rotation_{index}", decision_id=f"dec_rotation_{index}",
+            brief={"use_case": ["study_focus"], "vocal_mode": "instrumental"},
+        )).to_wire()
+        response = client.post("/experiments/v1/experiments",
+                               headers={"X-PLM-Service-Token": "experiments-seam-token"},
+                               json={"directive": wire})
+        assert response.status_code == 200, response.text
+        notes = response.json()["experiment"]["design_notes"]
+        chosen.append(next(n for n in notes if n.startswith("subgenre_chosen:")
+                           ).split(":")[1].split("->")[0])
+    assert sorted(chosen) == sorted(SUB_STYLES)
 
 
 def test_another_genre_ignores_the_subgenre_as_before() -> None:
@@ -184,8 +240,8 @@ def test_a_sub_style_package_keeps_its_sound_through_a_top_up() -> None:
     exp = design_experiment(directive, genome, created_at=FIXED_NOW)
     exp = promote_to_validated(exp, validate_experiment(exp, genome))
     package = materialize_package(exp, exp.treatments[0], genome, created_at=FIXED_NOW)
-    # 90-120 min at 210 s tracks: ceil(5400/210) = 26 base + ceil(26 * 0.25) = 7 spares
-    assert len(package.track_specs) == 33
+    # 20-30 min at 210 s tracks: ceil(1200/210) = 6 base + ceil(6 * 0.25) = 2 spares
+    assert len(package.track_specs) == 8
     _, extra = extend_package(package, count=2, idempotency_key="k", created_at=FIXED_NOW)
     organic_leads = {"kalimba", "marimba", "nylon_guitar", "soft_flute", "handpan",
                      "felt_piano"}

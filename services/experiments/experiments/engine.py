@@ -41,7 +41,7 @@ from ..genome.engine import (
     TemplateLibrary,
     brief_genre,
     brief_playlist_duration,
-    brief_template,
+    brief_subgenre_note,
     default_template_library,
 )
 from ..storage.ids import experiment_id, treatment_id
@@ -214,7 +214,7 @@ def design_experiment(
     # Record where P3 filled in or overrode the arm's brief (owner decisions 2026-10-31).
     _, inferred = brief_genre(directive, library=library)
     _, mapped = brief_playlist_duration(directive, library=library)
-    _, unmatched = brief_template(directive, library=library)
+    unmatched = brief_subgenre_note(directive, base_genome, library=library)
     notes = [*notes, *(note for note in (inferred, mapped, unmatched) if note is not None)]
     exp_id = experiment_id(
         directive.arm_id,

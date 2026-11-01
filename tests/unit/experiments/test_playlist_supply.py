@@ -1,8 +1,8 @@
 """P3 plans supply to the declared playlist range, extends it, and replays by key (R5).
 
 Owner decision 2026-10-15: a playlist video's length is a declared range and its target
-is only the planning midpoint. ADR-0044 (2026-11-01) set the policy to 90–120 minutes
-(the ``90_120m`` bucket) for this brand. These
+is only the planning midpoint. ADR-0044 (2026-11-01, revised the same day) set the policy to 20–30 minutes
+(the ``20_30m`` bucket) for this brand. These
 tests run P3's own code (planner, genome engine, HTTP routes over SQLite); they prove P3's
 behaviour, not that P4–P6 consume it (the integration and media tests cover that).
 """
@@ -115,17 +115,17 @@ def test_spare_ratio_is_versioned_data_not_a_constant() -> None:
 
 
 def test_directive_bucket_sets_the_playlist_range() -> None:
-    """Proves ``duration_bucket: 90_120m`` makes the genome's playlist range 5400–7200 s
+    """Proves ``duration_bucket: 20_30m`` makes the genome's playlist range 1200–1800 s
     (the policy range, ADR-0044), with the midpoint as target."""
-    directive = adapt_directive(_directive(duration_bucket="90_120m"))
+    directive = adapt_directive(_directive(duration_bucket="20_30m"))
     genome = build_genome_from_directive(directive)
     assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds,
-            genome.playlist_duration.target_seconds) == (5400, 7200, 6300)
+            genome.playlist_duration.target_seconds) == (1200, 1800, 1500)
     assert brief_playlist_duration(directive)[1] is None
 
 
 def test_without_a_bucket_the_policy_range_applies() -> None:
-    """Proves an open bucket gets the owner's policy range (90-120 min, ADR-0036 as
+    """Proves an open bucket gets the owner's policy range (20-30 min, ADR-0036 as
     amended by ADR-0044), not
     the genre template's. R5: the lofi, jazz and ambient templates declared 60-120 and
     60-180 min, so a directive naming no bucket (P1's CI arms name none) planned a
@@ -134,18 +134,18 @@ def test_without_a_bucket_the_policy_range_applies() -> None:
         directive = _directive(duration_bucket=None, genre=genre)
         genome = build_genome_from_directive(adapt_directive(directive))
         assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds,
-                genome.playlist_duration.target_seconds) == (5400, 7200, 6300), genre
+                genome.playlist_duration.target_seconds) == (1200, 1800, 1500), genre
 
 
-@pytest.mark.parametrize("bucket", ["10_45m", "45_75m"])
+@pytest.mark.parametrize("bucket", ["10_45m", "45_75m", "90_120m"])
 def test_a_bucket_outside_the_policy_is_made_at_the_policy_length(bucket: str) -> None:
     """Owner decision 2026-10-31 (amends ADR-0036): an arm whose bucket lies outside the
     policy is produced at the policy range, and the experiment records it. Since ADR-0044
-    the old 45-75 min bucket is outside the 90-120 min policy too."""
+    the 45-75 and 90-120 min buckets are outside the 20-30 min policy too."""
     directive = adapt_directive(_directive(duration_bucket=bucket))
     genome = build_genome_from_directive(directive)
     assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds) == (
-        5400, 7200)
+        1200, 1800)
     assert brief_playlist_duration(directive)[1] == f"duration_bucket_mapped:{bucket}->policy"
 
     response = _client().post("/experiments/v1/experiments", headers=HEADERS,
@@ -179,11 +179,11 @@ def test_the_policy_must_be_declared() -> None:
 
 
 def test_undeclared_bucket_is_made_at_the_policy_length() -> None:
-    """``gt_75m`` declares no range; the arm is produced at the policy range (90-120 min,
-    the ``90_120m`` bucket) with the mapping recorded, through the engine and over HTTP."""
+    """``gt_75m`` declares no range; the arm is produced at the policy range (20-30 min,
+    the ``20_30m`` bucket) with the mapping recorded, through the engine and over HTTP."""
     genome = build_genome_from_directive(adapt_directive(_directive(duration_bucket="gt_75m")))
     assert (genome.playlist_duration.min_seconds, genome.playlist_duration.max_seconds) == (
-        5400, 7200)
+        1200, 1800)
     response = _client().post("/experiments/v1/experiments", headers=HEADERS,
                               json={"directive": _directive(duration_bucket="gt_75m")})
     assert response.status_code == 200
@@ -215,11 +215,11 @@ def test_package_api_exposes_the_declared_range_and_plan() -> None:
     fetched = client.get(f"/experiments/v1/packages/{package['package_id']}", headers=HEADERS)
     assert fetched.status_code == 200
     playlist = fetched.json()["playlist_spec"]
-    assert playlist["duration_range_seconds"] == {"min_seconds": 5400, "max_seconds": 7200}
-    assert playlist["target_duration_seconds"] == 6300
+    assert playlist["duration_range_seconds"] == {"min_seconds": 1200, "max_seconds": 1800}
+    assert playlist["target_duration_seconds"] == 1500
     assert playlist["planned_track_duration_seconds"] == 190
-    assert (playlist["base_track_count"], playlist["spare_track_count"]) == (29, 8)
-    assert playlist["track_count_target"] == len(fetched.json()["track_specs"]) == 37
+    assert (playlist["base_track_count"], playlist["spare_track_count"]) == (7, 2)
+    assert playlist["track_count_target"] == len(fetched.json()["track_specs"]) == 9
     assert playlist["spare_ratio"] == "0.25"
     assert "total_duration_minutes" not in playlist
     DurationRangeSeconds.model_validate(playlist["duration_range_seconds"])
@@ -236,7 +236,7 @@ def test_extend_is_idempotent_by_key_and_bounded() -> None:
     pkg_id = package["package_id"]
     url = f"/experiments/v1/packages/{pkg_id}/extend"
     bound = package["playlist_spec"]["max_extension_track_count"]
-    assert bound == 19  # ceil(37 * 0.5)
+    assert bound == 5  # ceil(9 * 0.5)
 
     first = client.post(url, headers=HEADERS, json={"count": 3, "idempotency_key": "top-up-1"})
     assert first.status_code == 200, first.text
@@ -247,13 +247,13 @@ def test_extend_is_idempotent_by_key_and_bounded() -> None:
     assert all(spec["track_role"] == "secondary" for spec in added["track_specs"])
     assert all(spec["lineage"] == package["track_specs"][0]["lineage"]
                for spec in added["track_specs"])
-    assert (added["extension_track_count"], added["remaining_extension_track_count"]) == (3, 16)
+    assert (added["extension_track_count"], added["remaining_extension_track_count"]) == (3, 2)
 
     replay = client.post(url, headers=HEADERS, json={"count": 3, "idempotency_key": "top-up-1"})
     assert replay.status_code == 200
     assert [s["track_spec_id"] for s in replay.json()["track_specs"]] == ids
     stored = client.get(f"/experiments/v1/packages/{pkg_id}", headers=HEADERS).json()
-    assert len(stored["track_specs"]) == 37 + 3
+    assert len(stored["track_specs"]) == 9 + 3
     assert [s["track_spec_id"] for s in stored["track_specs"]][-3:] == ids
     assert [e["idempotency_key"] for e in stored["extensions"]] == ["top-up-1"]
 
@@ -261,11 +261,11 @@ def test_extend_is_idempotent_by_key_and_bounded() -> None:
     assert reused.status_code == 409
     assert reused.json()["detail"]["code"] == "idempotency_key_reused"
 
-    over = client.post(url, headers=HEADERS, json={"count": 17, "idempotency_key": "top-up-2"})
+    over = client.post(url, headers=HEADERS, json={"count": 3, "idempotency_key": "top-up-2"})
     assert over.status_code == 409
     assert over.json()["detail"]["code"] == "package_extension_limit_exceeded"
 
-    rest = client.post(url, headers=HEADERS, json={"count": 16, "idempotency_key": "top-up-2"})
+    rest = client.post(url, headers=HEADERS, json={"count": 2, "idempotency_key": "top-up-2"})
     assert rest.status_code == 200
     assert rest.json()["remaining_extension_track_count"] == 0
     assert client.post(url, headers=HEADERS, json={"count": 1, "idempotency_key": "top-up-3"}

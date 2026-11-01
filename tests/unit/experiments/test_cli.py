@@ -111,9 +111,9 @@ def test_cli_materialize() -> None:
         session_factory=factory,
     )
     assert "Materialized package pkg_" in mat_out
-    # rnb tracks plan 190 s; 90-120 min needs ceil(5400/190) = 29 plus 25 % spares = 8.
-    assert "tracks: 37" in mat_out
-    assert "playlist range: 5400-7200s" in mat_out
+    # rnb tracks plan 190 s; 20-30 min needs ceil(1200/190) = 7 plus 25 % spares = 2.
+    assert "tracks: 9" in mat_out
+    assert "playlist range: 1200-1800s" in mat_out
     assert "neon_seoul" in mat_out
 
     # Verify status changed in storage

@@ -1,6 +1,6 @@
 # ADR-0044 — Channel identity locked: instrumental deep-focus electronic music
 
-- Status: accepted by the owner, 2026-11-01. **No pipeline change made yet**; P2, P3 and the held run are untouched.
+- Status: accepted by the owner, 2026-11-01; amended the same day (implementation decisions, then the video-length revision below). Applied across P1–P8: see `docs/reviews/2026-11-01-focus-identity-rectification.md`.
 - Date: 2026-11-01
 - Owner: channel owner (decision); P2/P3 (follow-up work)
 - Related: `docs/research/channel-identity/2026-11-01/` (prompt, three identity reports, sleep-vs-focus follow-up)
@@ -60,7 +60,7 @@ how well they serve the project target, not by preference. Decisions:
 2. **Tempo 70–110 BPM on every track.** Below about 70 drifts into sleep and
    ambient-drone territory (OUT). Above about 110 drifts into dance (OUT). Focus
    listening wants a steady, subdued pulse.
-3. **Video length 90–120 min, replacing ADR-0036's 45–75 min for this brand.**
+3. **Video length 90–120 min, replacing ADR-0036's 45–75 min for this brand.** *(Superseded by the 20–30 min revision below.)*
    Focus won the revenue comparison only because awake listeners accept
    mid-rolls, and ad load per view grows with length. 90–120 min matches one
    deep-work block (the report's session unit) and builds watch hours toward the
@@ -77,11 +77,35 @@ how well they serve the project target, not by preference. Decisions:
    arms; P1's new focus vocabulary (5f87cb8) adds measured focus arms as it
    collects.
 
+## Revision 2026-11-01: 20–30 minute videos, supply by hand
+
+The owner will not spend money on a paid music API. Supply is by hand through
+Flow Music / Gemini on the owner's Gemini Pro free credit. Decision 3 changes
+from 90–120 minutes to **20–30 minutes**, with variety between videos. Why this
+fits the target:
+
+- Even 90–120 min videos expect a median watch of about 20 minutes (the ChatGPT
+  report's own success test), so most of the extra length goes unwatched and
+  carries few of its mid-rolls.
+- A 20–30 min video still allows mid-rolls (eligible after 8 minutes), and
+  stays under YouTube's "continue watching?" prompt (30 min mobile, 60 web).
+- About 6–9 tracks per video instead of 33–44, so two videos a week by hand is
+  feasible; more uploads also give P2 more measured results.
+- Cost: watch hours per view are capped at the video length, and 20–30 min
+  videos compete less for "2 hours coding music" searches. A later remedy, not
+  yet built: periodic 1–2 h "session" compilations made from existing tracks,
+  which need no new generation.
+
+Variety: when an arm's brief names no sub-style (or one not listed), P3 picks one
+of the nine that was not used by the genre's most recent experiments, so
+consecutive videos differ. A sub-style the arm names is kept.
+
 ## Consequences
 
 - The held live run `b0eb2a4f-4850-5977-9beb-e609e4e11063` (19 vocal R&B
-  sheets) is outside this identity. What to do with it is the owner's call.
-- P2 needs limiting to focus-music arms, and P3 templates need checking
-  against the IN/OUT lists. Both are follow-up work that needs approval.
+  sheets) was cancelled by the owner on 2026-11-01.
+- P2 is limited to focus-music arms and P3's templates follow the IN/OUT lists
+  (rectification register above).
+- No paid Lyria / Gemini API adapter is planned; every track is made by hand.
 - The main open risk is that focus music's higher RPM is estimated, not
   measured. The 90-day metrics in the ChatGPT report are the check.

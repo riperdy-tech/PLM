@@ -295,6 +295,24 @@ def list_experiments(
     return results
 
 
+def recent_subgenres(session: Session, *, genre: str, limit: int = 20) -> tuple[str, ...]:
+    """The sub-styles of the genre's latest experiments, newest first (with repeats).
+
+    P3 picks a sub-style for a brief that names none from this, so consecutive videos
+    differ (ADR-0044, revised 2026-11-01).
+    """
+    rows = session.execute(
+        sa.select(content_genomes_table.c.subgenre)
+        .join(experiments_table,
+              experiments_table.c.base_genome_fingerprint == content_genomes_table.c.fingerprint)
+        .where(content_genomes_table.c.genre == genre,
+               content_genomes_table.c.subgenre.is_not(None))
+        .order_by(experiments_table.c.created_at.desc(), experiments_table.c.experiment_id)
+        .limit(limit)
+    ).scalars().all()
+    return tuple(str(row) for row in rows)
+
+
 def update_experiment_status(
     session: Session, experiment_id: str, status: ExperimentStatus, *, now: datetime
 ) -> None:
