@@ -41,6 +41,7 @@ from ..domain.models import (
     QuarantineCase,
     ReleaseManifest,
 )
+from ..evaluators.identity import evaluate_identity_audio
 from ..evaluators.lyrics import evaluate_lyric_similarity, evaluate_lyrics
 from ..evaluators.musical import evaluate_musical_qualities
 from ..evaluators.policy import screen_policy_and_risk
@@ -192,6 +193,10 @@ def run_candidate_evaluation(
     evaluation.risk_findings.extend(musical_res.findings)
     evaluation.composite_quality_score = musical_res.composite_score
     evaluation.composite_quality_confidence = musical_res.confidence
+
+    identity_res = evaluate_identity_audio(evaluation.id, audio_path, genre_tags, now=now)
+    evaluation.musical_checks.extend(identity_res.checks)
+    evaluation.risk_findings.extend(identity_res.findings)
 
     lyric_res = evaluate_lyrics(
         evaluation_id=evaluation.id,

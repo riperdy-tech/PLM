@@ -1,0 +1,22 @@
+{
+  "policy_version": "p5-identity-audio-v1",
+  "notes": [
+    "Audio checks that a track fits the channel identity (ADR-0044): per genre, the tempo band and the loudness-rise warning. The C4 event's first genre tag selects the profile; a genre without a profile is not checked here.",
+    "Tempo is measured with P6's onset-autocorrelation estimator (media_factory.audio.features) over 50-200 BPM with the tempo prior centred on the band. A tempo half or double the band counts as inside it (half-time feel, for example 140 BPM chillstep felt at 70), so the check catches the dance range between the band and its double, not high-BPM drum and bass. tolerance_bpm absorbs the estimator's error at the band edges (a 140 BPM click track measures 69.98). Below min_confidence, or with no beat (ambient), the tempo is unknown and nothing is judged.",
+    "Calibration 2026-11-01 on 39 real tracks in output_media (Suno, Lyria, Stable Audio; lo-fi and chill): every measured tempo was 72-89 BPM or had no beat, so none would be held. The 3 s RMS level rose by up to 17.3 dB inside 4 s in calm tracks (breakdown returns), so a rise cannot separate an EDM drop from a breakdown: it is a non-blocking warning above loudness_rise_warn_db, recorded for later calibration."
+  ],
+  "profiles": {
+    "focus_electronic": {
+      "bpm_min": 70.0,
+      "bpm_max": 110.0,
+      "octave_equivalent": true,
+      "tolerance_bpm": 2.0,
+      "min_confidence": 0.3,
+      "level_window_seconds": 3.0,
+      "rise_window_seconds": 4.0,
+      "edge_skip_seconds": 10.0,
+      "loudness_rise_warn_db": 18.0,
+      "source": "ADR-0044 decision 2 (70-110 BPM on every track; no EDM drops)."
+    }
+  }
+}

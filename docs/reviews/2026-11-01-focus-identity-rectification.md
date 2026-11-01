@@ -53,7 +53,7 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 |---|---|---|
 | P4-1 | Default request genre is `rnb` (`music_factory/domain/models.py:79`); the provider registry is not used at runtime | open (low impact) |
 | P4-2 | Hand-making 33–44 tracks per 90–120 min video by hand is a heavy owner workload; there is no Lyria (Gemini API) adapter | resolved by the 20–30 min revision: about 6–9 tracks per video by hand on free Gemini credit; no paid adapter |
-| P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | open |
+| P5-1 | No audio check for vocal presence, BPM or sudden drops; an instrumental track with sung vocals would pass | partly fixed: tempo outside 70–110 BPM (half/double counted) rejects, a sudden level rise warns (p5-identity-audio-v1, calibrated on 40 real tracks: 0 findings). Vocals: open, no vocal detector (needs an ML model); lyrics on an instrumental are already caught |
 
 ## P6 media
 
@@ -105,6 +105,6 @@ Status: **open**, **in progress**, **fixed** (code, tests passing), **deferred**
 ## Still open
 
 - Long "session" compilations (1–2 h from existing tracks) for long-session searches: not built.
-- P5-1: audio detection of vocals, BPM and drops.
+- P5-1 rest: sung-vocal detection (no detector; needs an ML model such as source separation). The drop warning is uncalibrated against real EDM drops.
 - B-1: internal brand id rename. B-2: the real channel's display name (an external write).
 - P2-3: manual overrides are never read (not an identity conflict).
