@@ -233,6 +233,43 @@ def test_usable_files_import_as_suno_through_the_import_guard(tmp_path: Path) ->
         assert event.rights.account_identity_ref == "suno-account:owner"
 
 
+class _CrashingTerms(SunoManualAdapter):
+    """Fails after its attempt is on record, as the 2026-11-01 rights overflow did."""
+
+    def license_terms(self) -> Any:
+        raise RuntimeError("rights snapshot did not fit")
+
+
+def test_an_import_that_crashed_mid_way_is_imported_again(tmp_path: Path) -> None:
+    budget = FreeBudget()
+    spec = adapt_track_spec(_spec())
+    plan, variants = plan_generation(spec, created_at=NOW)
+    engine = GenerationEngine(clock=FixedClock(NOW), storage=InMemoryArtifactStorage(),
+                              write_guard=_guard(budget))
+    settings = _adapter(tmp_path)._settings
+    db = create_music_engine(static_pool=True)
+    with music_session(db) as session:
+        _execute(tmp_path, budget, session)  # writes the sheet
+        for tone, stem in enumerate(_stems(tmp_path), start=1):
+            _drop(tmp_path, stem, tone=tone)
+        # Two crashes in a row: more than the one retry a variant is allowed.
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                engine.execute_plan(session, plan=plan, variants=variants, spec=spec,
+                                    provider_adapter=_CrashingTerms(settings),
+                                    checkpoint=session.commit)
+            session.rollback()
+        result = engine.execute_plan(session, plan=plan, variants=variants, spec=spec,
+                                     provider_adapter=_adapter(tmp_path),
+                                     checkpoint=session.commit)
+        attempts = list_generation_attempts(session, plan.plan_id)
+    assert "provider_job_reconciliation_required" not in result.errors
+    assert result.status is PlanStatus.COMPLETED and len(result.candidates) == 2
+    # The crashed attempts stay on record; the import continued under new attempt ids.
+    assert len(attempts) == 4
+    assert {c.source_attempt_id for c in result.candidates} <= {a.attempt_id for a in attempts}
+
+
 @pytest.mark.parametrize("tier", [None, "free"])
 def test_without_a_declared_paid_tier_there_are_no_terms(tmp_path: Path,
                                                          tier: str | None) -> None:

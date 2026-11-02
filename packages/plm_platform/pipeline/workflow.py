@@ -9,8 +9,11 @@ here, deterministically; the store makes each write idempotent).
   ``idempotency_key(workflow_id, step)`` (a playlist top-up round ``n`` uses
   ``<step>.r<n>``). Retries come from the Temporal retry policy; a non-retryable failure
   ends the step. ``CapabilityUnavailable`` (the runtime cannot do the step) becomes a
-  ``CAPABILITY_UNAVAILABLE`` hold; any other permanent failure, or retries exhausted,
-  moves the run to ``FAILED`` with the error recorded.
+  ``CAPABILITY_UNAVAILABLE`` hold; any other permanent failure moves the run to
+  ``FAILED`` with the error recorded. Retries exhausted on a retryable failure (a phase
+  bug or outage, not a business outcome) hold the run as ``STEP_RETRIES_EXHAUSTED``: once
+  the cause is fixed, the platform owner's resume retries the step with the same key, so
+  work the run already holds (the owner's songs, a paid result) is not lost.
 * **Budget (R5).** The pipeline reserves nothing. The phase's external-write guard is
   the single reservation at the write boundary (P4 generation, P7 upload, P8
   submission). A guard refusal (a ``409`` with the guard's reason) raises a reviewable
@@ -54,7 +57,7 @@ from typing import Any, Final
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, ApplicationError
+from temporalio.exceptions import ActivityError, ApplicationError, RetryState
 
 with workflow.unsafe.imports_passed_through():
     from plm_contracts.enums import ObservationWindow
@@ -92,6 +95,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = [
     "BUDGET_HOLD_REASON",
     "CAPABILITY_HOLD_REASON",
+    "RETRIES_HOLD_REASON",
     "SUPPLY_HOLD_REASON",
     "WORKFLOW_NAME",
     "PipelineWorkflow",
@@ -103,6 +107,7 @@ BUDGET_HOLD_REASON: Final[str] = "BUDGET_RESERVATION_REFUSED"
 CAPABILITY_HOLD_REASON: Final[str] = "CAPABILITY_UNAVAILABLE"
 """Classified HARD_STOP in the hold policy: no approval can produce the missing work."""
 SUPPLY_HOLD_REASON: Final[str] = "PLAYLIST_SUPPLY_SHORT"
+RETRIES_HOLD_REASON: Final[str] = "STEP_RETRIES_EXHAUSTED"
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 SUPPLY_SHORT_FAILURE: Final[str] = "PlaylistSupplyShort"
 EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
@@ -125,6 +130,7 @@ class _Failure:
     details: dict[str, Any] = field(default_factory=dict)
     started_at: datetime | None = None
     key_name: str | None = None
+    retries_exhausted: bool = False
 
     @property
     def no_effect(self) -> bool:
@@ -148,6 +154,7 @@ class _Done:
 
 def _failure(error: ActivityError) -> _Failure:
     cause = error.cause
+    exhausted = error.retry_state is RetryState.MAXIMUM_ATTEMPTS_REACHED
     if isinstance(cause, ApplicationError):
         details = cause.details[0] if cause.details and isinstance(cause.details[0], dict) else {}
         attempt = details.get("attempt")
@@ -155,11 +162,13 @@ def _failure(error: ActivityError) -> _Failure:
             type=cause.type or "ApplicationError", message=cause.message,
             attempt=attempt if isinstance(attempt, int) else 0,
             non_retryable=cause.non_retryable, details=dict(details),
+            retries_exhausted=exhausted,
         )
     name = type(cause).__name__ if cause is not None else "ActivityError"
     message = str(cause) if cause is not None else str(error)
     return _Failure(type=name, message=message, attempt=0, non_retryable=False,
-                    details={"retry_state": str(error.retry_state)})
+                    details={"retry_state": str(error.retry_state)},
+                    retries_exhausted=exhausted)
 
 
 def _cost_dict(cost: WriteCost) -> dict[str, Any]:
@@ -561,6 +570,10 @@ class PipelineWorkflow:
                 if await self._write_hold(step, failure):
                     continue
                 return None
+            if failure.retries_exhausted:
+                if await self._retries_hold(step, failure):
+                    continue
+                return None
             return failure
 
     async def _step(self, step: Step, inputs: dict[str, Any], *,
@@ -584,6 +597,15 @@ class PipelineWorkflow:
                    "capability": failure.details.get("capability")}
         return await self._hold(step, [(STEP_ORIGIN_PHASE[step], CAPABILITY_HOLD_REASON, details)],
                                 error_code=CAPABILITY_HOLD_REASON, error_detail=failure.message,
+                                attempt=failure.attempt, key_name=failure.key_name)
+
+    async def _retries_hold(self, step: Step, failure: _Failure) -> bool:
+        """A retryable failure outlasted its retries: hold until the cause is fixed."""
+        details = {"step": step.value, "error": failure.message, "error_type": failure.type,
+                   "idempotency_key": idempotency_key(workflow.info().workflow_id,
+                                                      failure.key_name or step.value)}
+        return await self._hold(step, [(STEP_ORIGIN_PHASE[step], RETRIES_HOLD_REASON, details)],
+                                error_code=RETRIES_HOLD_REASON, error_detail=failure.message,
                                 attempt=failure.attempt, key_name=failure.key_name)
 
     async def _write_hold(self, step: Step, failure: _Failure) -> bool:

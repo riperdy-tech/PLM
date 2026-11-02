@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v6",
+  "policy_version": "hold-classes-v7",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -9,7 +9,8 @@
     "Citations: AGENTS.md:43; docs/P0_master_integration_implementation_plan.md:66 (human hard-stops); docs/architecture.md:906-921 (P29); docs/reviews/2026-10-13-system-review-and-remediation-plan.md:183-187 (R3 exception queue); docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1420-1437 (P5 section 49 quarantine semantics).",
     "v4 (R4, ADR-0034): P5 rights detectors and P28 provenance. New codes INCOMPLETE_P28_PROVENANCE, REFERENCE_AUDIO_MATCH, INTERNAL_CATALOG_AUDIO_MATCH, AUDIO_FINGERPRINT_UNKNOWN, LYRIC_SIMILARITY_UNKNOWN; the P29 codes now name their P5 emitter. services/quality_gate/detectors/reason_codes.py lists every code P5 emits as a hold and the P29 category each reports.",
     "v5 (R5): the pipeline no longer reserves budget; a phase's external-write guard is the single reservation and its refusal (409) holds the run. BUDGET_RESERVATION_REFUSED is now raised for a guard's budget reason; new EXTERNAL_WRITE_NOT_AUTHORIZED for a guard's authorization or policy reason; new PLAYLIST_SUPPLY_SHORT when a playlist's cleared supply stays short of its declared minimum after the bounded top-up rounds. A guard reason nobody declared is raised as EXTERNAL_WRITE_REFUSED, deliberately unmapped (hard stop, fail closed).",
-    "v6 (R6, D10): new MANUAL_AUDIO_AWAITED when P4 waits for songs the owner makes on suno.com and saves in the import inbox."
+    "v6 (R6, D10): new MANUAL_AUDIO_AWAITED when P4 waits for songs the owner makes on suno.com and saves in the import inbox.",
+    "v7 (R6): new STEP_RETRIES_EXHAUSTED when a step's retryable failure outlasts its retries. Before v7 the run failed for good, which on 2026-11-01 lost a run holding the owner's eight hand-made songs to a P4 import bug."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -281,6 +282,16 @@
       "category": "manual_audio_import",
       "source": "docs/plans/2026-10-30-r6-real-suno-plan.md (D10: Suno's terms bar automated access, so the owner makes the songs in Suno's interface and PLM imports the downloads); raised by plm_platform.pipeline.workflow when P4 answers manual_audio_awaited (services/music_factory/providers/suno_manual.py)",
       "description": "P4 wrote the prompts of the songs it needs into the Suno import inbox and is waiting for the owner's WAV downloads (and lyrics for vocal tracks); nothing was imported. Reviewable, not a hard stop: making the songs is the owner's own production work. The production owner resumes once the files are saved, citing the inbox; the workflow then retries the step and P4 checks every file again before importing any."
+    },
+    "STEP_RETRIES_EXHAUSTED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["platform_fix_ref"],
+      "reviewer_role": "platform_owner",
+      "category": "platform_failure",
+      "source": "docs/reviews/2026-11-01-focus-identity-rectification.md V-9 (a P4 import bug failed run 1d4447ac, which could not be retried, and its eight songs were lost); raised by plm_platform.pipeline.workflow when a step's activity fails retryably until Temporal's maximum attempts",
+      "description": "A phase kept failing in a way that is retried (an outage or a platform bug, not a creative, policy or validation outcome) until the step's retries ran out. Nothing about the content was decided. Reviewable, not a hard stop: fixing PLM is an operator act inside PLM. The platform owner resumes once the cause is fixed or gone, citing the fix (a commit or an incident note); the workflow then retries the step with the same idempotency key, so a phase never repeats a write it already made."
     }
   }
 }

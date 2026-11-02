@@ -325,7 +325,16 @@ class GenerationEngine:
             for c in list_candidates_by_track(session, plan.track_spec_id)
             if c.generation_plan_id == plan.plan_id
         }
-        total_attempts = len(stored_attempts)
+        capability = getattr(adapter, "write_capability", GENERATE_CAPABILITY)
+        # An import re-reads the owner's file from the inbox and spends nothing through
+        # PLM, so an import that crashed before its candidate was stored is abandoned,
+        # not a paid job to reconcile: it is imported again without using up a retry.
+        abandoned = {
+            a.attempt_id for a in stored_attempts
+            if capability != GENERATE_CAPABILITY and a.status is not AttemptStatus.FAILED
+            and a.attempt_id not in stored_candidates
+        }
+        total_attempts = len(stored_attempts) - len(abandoned)
         candidate_count = 0
         # A live provider may have accepted/charged a job even without a
         # persisted provider_job_id (crash after submit, before the receipt).
@@ -350,11 +359,10 @@ class GenerationEngine:
                 or a.credit_basis in {"provider_reported", "legacy_unverified"}
                 or a.money_basis in {"provider_reported", "legacy_unverified"}
             ))
-            for a in stored_attempts
+            for a in stored_attempts if a.attempt_id not in abandoned
         )
         if unresolved_live_job:
             errors.append("provider_job_reconciliation_required")
-        capability = getattr(adapter, "write_capability", GENERATE_CAPABILITY)
 
         awaiting_audio = getattr(adapter, "awaiting_audio", None)
         if awaiting_audio is not None and not unresolved_live_job:
@@ -402,10 +410,13 @@ class GenerationEngine:
                                      candidates=candidates, artifacts=artifacts,
                                      rights_snapshots=rights_snapshots, errors=errors)
             retry_count = len(earlier)
+            # Attempt ids keep counting past abandoned imports; the retry bound does not.
+            skipped = sum(a.attempt_id in abandoned for a in earlier)
             transport_parent: str | None = earlier[-1].attempt_id if earlier else None
             base_seed = stable_seed("p4.generation", spec.track_spec_id, variant.variant_code)
 
-            while retry_count <= max_retries_per_variant and total_attempts < plan.max_attempts:
+            while (retry_count - skipped <= max_retries_per_variant
+                   and total_attempts < plan.max_attempts):
                 total_attempts += 1
                 att_id = f"gen_att_{plan.plan_id}_{variant.variant_code}_{retry_count}"
                 attempt_type = AttemptType.INITIAL if retry_count == 0 else AttemptType.RETRY

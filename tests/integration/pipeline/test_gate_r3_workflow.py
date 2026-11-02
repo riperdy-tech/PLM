@@ -37,6 +37,7 @@ from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from tests.integration.pipeline.support import (
+    OPTIONS,
     Budget,
     guarded_steps,
     new_run,
@@ -358,3 +359,40 @@ async def test_hard_stop_refuses_a_generic_approve_and_proceeds_only_on_external
     assert final_case.resolution is not None
     assert final_case.resolution.value == "CLEARED_BY_EXTERNAL_PROCESS"
     assert all(e[0] != "RESOLVED" for e in events)  # never closed by an approve
+
+
+async def test_a_step_that_exhausts_its_retries_holds_and_resumes_after_the_fix(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves: a step whose retryable failure outlasts every retry (a phase bug) holds the
+    run as STEP_RETRIES_EXHAUSTED instead of failing it; a production owner cannot clear
+    it; the platform owner citing the fix resumes it, and the step is retried under the
+    same idempotency key and the run completes. Before this, run 1d4447ac was lost."""
+    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(
+        outputs={"candidate_ids": ["cand-mock-1"]},
+        transient_failures=OPTIONS.step_maximum_attempts)))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the retries hold")
+        assert held.held_from == "GENERATING"
+        assert held.last_error_code == "STEP_RETRIES_EXHAUSTED"
+        (case_id,) = held.open_case_ids
+        with factory() as session:
+            case = ExceptionQueue().require(session, case_id)
+        assert case.reason_code == "STEP_RETRIES_EXHAUSTED"
+        assert case.reviewer_role == "platform_owner"
+
+        refused = await signal_and_wait(handle, lambda: handle.signal(
+            PipelineWorkflow.resume, ResumeSignal(actor="pia", role="production_owner",
+                                                  evidence={"platform_fix_ref": "abc123"})))
+        assert refused.state == "HELD"
+        await signal_and_wait(handle, lambda: handle.signal(
+            PipelineWorkflow.resume, ResumeSignal(actor="otto", role="platform_owner",
+                                                  evidence={"platform_fix_ref": "abc123"})))
+        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), RESULT_TIMEOUT)
+
+    assert outcome.completed
+    key = idempotency_key(workflow_id, Step.GENERATE.value)
+    assert steps.calls_for(Step.GENERATE) == [key] * (OPTIONS.step_maximum_attempts + 1)
+    _assert_contiguous(factory, workflow_id)
