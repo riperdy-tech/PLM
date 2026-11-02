@@ -19,7 +19,8 @@ Executing the plan then imports those files.
   ``PLM_SUNO_ACCOUNT_REF``); only a paid tier with an account on file yields terms.
   Nothing is inferred from the file.
 * **Import is a write.** It goes through the guard as :data:`IMPORT_CAPABILITY`, so the
-  owner authorizes it like any other capability (a ledger rate of 0 prices it).
+  owner authorizes it like any other capability (a ledger rate of 0 prices it). The
+  adapter declares ``costs_nothing``, so P4 imports it without a paid-job journal.
 """
 
 from __future__ import annotations
@@ -150,9 +151,10 @@ def suno_styles(request: GenerationRequest) -> str:
         if sep and label.lower() in _STYLE_PHRASES:
             words = value.replace("_", " ")
             template = _STYLE_PHRASES[label.lower()]
-            # "airy_synth_lead" is already a lead: "airy synth lead", not "... lead lead"
-            phrase = (words if template.startswith("{} ") and words.endswith(template[2:])
-                      else template.format(words))
+            # "airy_synth_lead" is already a lead: "airy synth lead", not "... lead lead";
+            # so is a bare "lead"
+            phrase = (words if template.startswith("{} ")
+                      and f" {words}".endswith(template[2:]) else template.format(words))
         elif sentence.lower().endswith(" track") and " " not in sentence[:-6]:
             phrase = sentence[:-6].lower()  # "LOFI track" -> "lofi"
         elif sentence.startswith("for "):
@@ -181,6 +183,7 @@ class SunoManualAdapter:
 
     provider_mode = ProviderMode.REAL
     write_capability = IMPORT_CAPABILITY
+    costs_nothing = True
     paid_tiers: frozenset[str] = PAID_TIERS
     terms_version = TERMS_VERSION
     license_reference = LICENSE_REFERENCE

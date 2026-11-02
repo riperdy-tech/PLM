@@ -13,7 +13,9 @@ here, deterministically; the store makes each write idempotent).
   ``FAILED`` with the error recorded. Retries exhausted on a retryable failure (a phase
   bug or outage, not a business outcome) hold the run as ``STEP_RETRIES_EXHAUSTED``: once
   the cause is fixed, the platform owner's resume retries the step with the same key, so
-  work the run already holds (the owner's songs, a paid result) is not lost.
+  work the run already holds (the owner's songs, a paid result) is not lost. A
+  ``PlatformFault`` (a permanent failure that is the platform's, such as a P4 plan that
+  failed without a policy refusal) holds the same way as ``STEP_PLATFORM_FAULT``.
 * **Budget (R5).** The pipeline reserves nothing. The phase's external-write guard is
   the single reservation at the write boundary (P4 generation, P7 upload, P8
   submission). A guard refusal (a ``409`` with the guard's reason) raises a reviewable
@@ -95,6 +97,7 @@ with workflow.unsafe.imports_passed_through():
 __all__ = [
     "BUDGET_HOLD_REASON",
     "CAPABILITY_HOLD_REASON",
+    "PLATFORM_FAULT_HOLD_REASON",
     "RETRIES_HOLD_REASON",
     "SUPPLY_HOLD_REASON",
     "WORKFLOW_NAME",
@@ -108,6 +111,7 @@ CAPABILITY_HOLD_REASON: Final[str] = "CAPABILITY_UNAVAILABLE"
 """Classified HARD_STOP in the hold policy: no approval can produce the missing work."""
 SUPPLY_HOLD_REASON: Final[str] = "PLAYLIST_SUPPLY_SHORT"
 RETRIES_HOLD_REASON: Final[str] = "STEP_RETRIES_EXHAUSTED"
+PLATFORM_FAULT_HOLD_REASON: Final[str] = "STEP_PLATFORM_FAULT"
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 SUPPLY_SHORT_FAILURE: Final[str] = "PlaylistSupplyShort"
 EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
@@ -154,7 +158,8 @@ class _Done:
 
 def _failure(error: ActivityError) -> _Failure:
     cause = error.cause
-    exhausted = error.retry_state is RetryState.MAXIMUM_ATTEMPTS_REACHED
+    # Out of attempts, or out of the retry policy's time: either way retries ran out.
+    exhausted = error.retry_state in {RetryState.MAXIMUM_ATTEMPTS_REACHED, RetryState.TIMEOUT}
     if isinstance(cause, ApplicationError):
         details = cause.details[0] if cause.details and isinstance(cause.details[0], dict) else {}
         attempt = details.get("attempt")
@@ -570,8 +575,10 @@ class PipelineWorkflow:
                 if await self._write_hold(step, failure):
                     continue
                 return None
-            if failure.retries_exhausted:
-                if await self._retries_hold(step, failure):
+            if failure.retries_exhausted or failure.type == "PlatformFault":
+                reason = (RETRIES_HOLD_REASON if failure.retries_exhausted
+                          else PLATFORM_FAULT_HOLD_REASON)
+                if await self._platform_hold(step, failure, reason):
                     continue
                 return None
             return failure
@@ -599,13 +606,14 @@ class PipelineWorkflow:
                                 error_code=CAPABILITY_HOLD_REASON, error_detail=failure.message,
                                 attempt=failure.attempt, key_name=failure.key_name)
 
-    async def _retries_hold(self, step: Step, failure: _Failure) -> bool:
-        """A retryable failure outlasted its retries: hold until the cause is fixed."""
+    async def _platform_hold(self, step: Step, failure: _Failure, reason_code: str) -> bool:
+        """The platform failed (retries ran out, or a ``PlatformFault``): hold until the
+        cause is fixed."""
         details = {"step": step.value, "error": failure.message, "error_type": failure.type,
                    "idempotency_key": idempotency_key(workflow.info().workflow_id,
                                                       failure.key_name or step.value)}
-        return await self._hold(step, [(STEP_ORIGIN_PHASE[step], RETRIES_HOLD_REASON, details)],
-                                error_code=RETRIES_HOLD_REASON, error_detail=failure.message,
+        return await self._hold(step, [(STEP_ORIGIN_PHASE[step], reason_code, details)],
+                                error_code=reason_code, error_detail=failure.message,
                                 attempt=failure.attempt, key_name=failure.key_name)
 
     async def _write_hold(self, step: Step, failure: _Failure) -> bool:

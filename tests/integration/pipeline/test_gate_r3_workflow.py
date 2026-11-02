@@ -31,7 +31,7 @@ from plm_platform.pipeline.types import (
     ResumeSignal,
 )
 from plm_platform.pipeline.workflow import PipelineWorkflow
-from plm_platform.temporal import idempotency_key
+from plm_platform.temporal import PlatformFault, idempotency_key
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -396,3 +396,34 @@ async def test_a_step_that_exhausts_its_retries_holds_and_resumes_after_the_fix(
     key = idempotency_key(workflow_id, Step.GENERATE.value)
     assert steps.calls_for(Step.GENERATE) == [key] * (OPTIONS.step_maximum_attempts + 1)
     _assert_contiguous(factory, workflow_id)
+
+
+async def test_a_platform_fault_holds_the_run_instead_of_ending_it(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves: a permanent failure that is the platform's (P4 failed a plan without a
+    policy refusal) holds the run as STEP_PLATFORM_FAULT for the platform owner instead
+    of ending it; the resume retries the step under the same key, and while the fault
+    persists the run holds again rather than failing."""
+    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(
+        raises=PlatformFault("P4 plan p-1 failed its candidate target"))))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the fault hold")
+        assert held.held_from == "GENERATING"
+        assert held.last_error_code == "STEP_PLATFORM_FAULT"
+        (case_id,) = held.open_case_ids
+        with factory() as session:
+            case = ExceptionQueue().require(session, case_id)
+        assert (case.reason_code, case.reviewer_role) == ("STEP_PLATFORM_FAULT",
+                                                          "platform_owner")
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="otto", role="platform_owner", evidence={"platform_fix_ref": "abc123"}))
+        again = await wait_until(handle, lambda s: s.state == "HELD" and bool(
+            s.open_case_ids) and case_id not in s.open_case_ids, "the second fault hold")
+        assert again.last_error_code == "STEP_PLATFORM_FAULT"
+        await handle.terminate(reason="R6 test: the fault persists")
+
+    key = idempotency_key(workflow_id, Step.GENERATE.value)
+    assert steps.calls_for(Step.GENERATE) == [key, key]

@@ -98,21 +98,27 @@ def _wav(seconds: float = 1.0, tone: int = 1) -> bytes:
 
 @dataclass
 class FreeBudget:
-    """Funds every import at no cost and records what was reserved."""
+    """Funds every import at no cost; like the ledger, a held key is only replayed."""
 
     reserved: list[tuple[str, str]] = field(default_factory=list)
     committed: list[str] = field(default_factory=list)
+    released: list[str] = field(default_factory=list)
+    held: set[str] = field(default_factory=set)
 
     def reserve(self, capability: str, idempotency_key: str,
                 cost_estimate: CostEstimate) -> BudgetVerdict:
+        if idempotency_key in self.held:
+            return BudgetVerdict(allowed=True, reason="reserved", replayed=True)
         self.reserved.append((capability, idempotency_key))
+        self.held.add(idempotency_key)
         return BudgetVerdict(allowed=True, reason="reserved")
 
     def commit(self, capability: str, idempotency_key: str, *, actual: Money | None) -> None:
         self.committed.append(idempotency_key)
 
     def release(self, capability: str, idempotency_key: str, *, reason: str) -> None:
-        raise AssertionError("an import is never released")
+        self.released.append(idempotency_key)
+        self.held.discard(idempotency_key)
 
 
 def _guard(budget: FreeBudget) -> ExternalWriteGuard:
@@ -265,9 +271,27 @@ def test_an_import_that_crashed_mid_way_is_imported_again(tmp_path: Path) -> Non
         attempts = list_generation_attempts(session, plan.plan_id)
     assert "provider_job_reconciliation_required" not in result.errors
     assert result.status is PlanStatus.COMPLETED and len(result.candidates) == 2
-    # The crashed attempts stay on record; the import continued under new attempt ids.
-    assert len(attempts) == 4
-    assert {c.source_attempt_id for c in result.candidates} <= {a.attempt_id for a in attempts}
+    # A crash stores nothing and frees its keys: the import reruns under the same ids.
+    keys = sorted(a.attempt_id for a in attempts)
+    assert len(keys) == 2 and sorted(budget.committed) == keys
+    assert budget.released == [keys[0]] * 2  # each crash hit the first song
+
+
+def test_a_key_left_held_by_a_dead_run_is_skipped(tmp_path: Path) -> None:
+    budget = FreeBudget()
+    db = create_music_engine(static_pool=True)
+    with music_session(db) as session:
+        _execute(tmp_path, budget, session)  # writes the sheet
+        for tone, stem in enumerate(_stems(tmp_path), start=1):
+            _drop(tmp_path, stem, tone=tone)
+        plan, (dead, alive) = plan_generation(adapt_track_spec(_spec()), created_at=NOW)
+        # A run killed mid-import stored nothing but never settled its first key.
+        budget.held.add(f"gen_att_{plan.plan_id}_{dead.variant_code}_0")
+        result, _ = _execute(tmp_path, budget, session)
+        attempts = sorted(a.attempt_id for a in list_generation_attempts(session, plan.plan_id))
+    assert result.status is PlanStatus.COMPLETED and len(result.candidates) == 2
+    assert attempts == sorted([f"gen_att_{plan.plan_id}_{dead.variant_code}_1",
+                               f"gen_att_{plan.plan_id}_{alive.variant_code}_0"])
 
 
 @pytest.mark.parametrize("tier", [None, "free"])
@@ -409,3 +433,7 @@ def test_a_value_that_already_names_its_kind_is_not_doubled() -> None:
     assert styles == "airy synth lead, glass pad, airy synth lead, atmospheric hook, low energy" \
         or styles == "airy synth lead, glass pad, atmospheric hook, low energy"
     assert "lead lead" not in styles and "hook hook" not in styles
+    bare = suno_styles(GenerationRequest(
+        track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
+        prompt="foreground lead: lead. hook character: hook"))
+    assert bare == "lead, hook"

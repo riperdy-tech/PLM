@@ -28,7 +28,13 @@ from plm_platform.pipeline.phase_client import request_key
 from plm_platform.pipeline.states import Step
 from plm_platform.pipeline.types import StepRequest
 from plm_platform.service_urls import service_url, service_urls
-from plm_platform.temporal import CreativeRejection, Phase, PolicyRejection, ValidationFailure
+from plm_platform.temporal import (
+    CreativeRejection,
+    Phase,
+    PlatformFault,
+    PolicyRejection,
+    ValidationFailure,
+)
 
 TOKEN = "unit-token"
 KEY = "pipeline.dir-1:research"
@@ -249,14 +255,15 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
         Phase.MUSIC: _client(Phase.MUSIC, lambda r: httpx.Response(
             200, json={"plan_id": "plan-1", "status": "completed", "candidates": []})),
     })
-    with pytest.raises(CreativeRejection):
+    with pytest.raises(PlatformFault):
         asyncio.run(empty.generate(_request(Step.GENERATE, inputs)))
 
 
 @pytest.mark.parametrize(
     ("bad_status", "error_type"),
     [
-        ("failed", CreativeRejection),
+        ("failed", PlatformFault),
+        ("refused", CreativeRejection),
         ("running", ValidationFailure),
         (None, ValidationFailure),
     ],
@@ -284,6 +291,9 @@ def test_generation_does_not_export_any_candidate_if_later_plan_is_not_complete(
                 "candidates": [{"candidate_id": f"candidate-{path.split('/')[3]}"}],
                 "external_writes": [{"decision": "simulate", "reason": "mock_provider"}],
             }
+            if status == "refused":  # P29 refused the plan: the content is decided
+                status = "failed"
+                response["refusal_codes"] = ["PROTECTED_ARTIST_REFERENCE_DETECTED"]
             if status is not None:
                 response["status"] = status
             if status == "failed":
@@ -347,7 +357,7 @@ def test_generation_exports_only_after_all_plans_confirm_completion() -> None:
 @pytest.mark.parametrize(
     ("second_candidates", "error_type"),
     [
-        ([], CreativeRejection),
+        ([], PlatformFault),
         ("not-a-list", ValidationFailure),
         ([{"candidate_id": 123}], ValidationFailure),
         ([{"candidate_id": "  "}], ValidationFailure),

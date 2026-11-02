@@ -16,6 +16,7 @@ from plm_platform.temporal import (
     CreativeRejection,
     NonRetryableError,
     Phase,
+    PlatformFault,
     PolicyRejection,
     TaskQueue,
     ValidationFailure,
@@ -97,7 +98,8 @@ def test_default_retry_policy_matches_the_documented_table() -> None:
 
 
 def test_non_retryable_policy_list_names_the_error_classes() -> None:
-    classes = (ValidationFailure, PolicyRejection, CreativeRejection, CapabilityUnavailable)
+    classes = (ValidationFailure, PolicyRejection, CreativeRejection, CapabilityUnavailable,
+               PlatformFault)
     assert tuple(cls.__name__ for cls in classes) == NON_RETRYABLE_ERROR_TYPES
     for cls in classes:
         assert issubclass(cls, NonRetryableError)

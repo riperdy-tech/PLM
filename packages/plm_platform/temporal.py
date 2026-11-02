@@ -63,6 +63,7 @@ __all__ = [
     "CreativeRejection",
     "NonRetryableError",
     "Phase",
+    "PlatformFault",
     "PolicyRejection",
     "TaskQueue",
     "ValidationFailure",
@@ -196,6 +197,12 @@ class CreativeRejection(NonRetryableError):
     """The creative artifact was rejected on its merits — never silently re-rolled."""
 
 
+class PlatformFault(NonRetryableError):
+    """The platform, not the work, failed: a phase reported a state only a fix or an
+    operator can clear (a defect, a provider job to reconcile). Nothing about the content
+    was decided, so the pipeline holds the run instead of ending it."""
+
+
 class CapabilityUnavailable(NonRetryableError):
     """The runtime cannot perform this step at all today; retrying cannot change that.
 
@@ -218,6 +225,7 @@ NON_RETRYABLE_ERROR_TYPES: Final[tuple[str, ...]] = (
     "PolicyRejection",
     "CreativeRejection",
     "CapabilityUnavailable",
+    "PlatformFault",
 )
 """Permanent failure class names for ``RetryPolicy(non_retryable_error_types=...)``."""
 

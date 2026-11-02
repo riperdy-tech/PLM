@@ -35,6 +35,7 @@ from plm_contracts.seams.c5 import ReleaseManifestPayload
 from ..temporal import (
     CreativeRejection,
     Phase,
+    PlatformFault,
     PolicyRejection,
     ValidationFailure,
 )
@@ -339,10 +340,16 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     # HTTP 200 can still mean P4 completed only part of its C3
                     # candidate target. Retain the provider's recorded attempt
                     # and funds in P4; do not export any C4 event or continue QA.
-                    raise CreativeRejection(
+                    # Only a P29 refusal decides the content; any other failure
+                    # (a job to reconcile, an import not stored) is the platform's
+                    # and holds the run for a fix instead of ending it.
+                    refused = run.get("refusal_codes")
+                    failure = CreativeRejection if refused else PlatformFault
+                    raise failure(
                         f"P4 plan {plan_id} failed its candidate target; "
                         f"produced {len(run.get('candidates') or [])} candidates "
                         f"and reported errors {run.get('errors')!r}"
+                        + (f" (refused: {refused!r})" if refused else "")
                     )
                 if outcome != "completed":
                     raise ValidationFailure(
@@ -356,7 +363,7 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 if not plan_candidates:
                     # One empty completed plan must not be masked by another
                     # successful plan in the same multi-track generation step.
-                    raise CreativeRejection(
+                    raise PlatformFault(
                         f"P4 plan {plan_id}: completed plan returned zero candidates"
                     )
                 for candidate in plan_candidates:
@@ -380,7 +387,7 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
             provider_ids[f"candidate.{n}"] = candidate_id
         if not candidates:
             # Provider calls were made and may have spent credits: not a no-effect failure.
-            raise CreativeRejection(f"P4 produced no candidates for plans {plans}")
+            raise PlatformFault(f"P4 produced no candidates for plans {plans}")
         for candidate_id in pending_exports:
             p4.post(f"/music/candidates/{candidate_id}/export-to-p5",
                     idempotency_key=request_key(key, "export", candidate_id))

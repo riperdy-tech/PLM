@@ -382,6 +382,7 @@ def build_router(
             "candidates": [c.model_dump(mode="json") for c in result.candidates],
             "attempts_count": len(result.attempts),
             "errors": result.errors,
+            "refusal_codes": result.refusal_codes,
             "external_writes": external_writes,
         })
 

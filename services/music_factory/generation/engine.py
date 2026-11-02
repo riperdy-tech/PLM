@@ -20,7 +20,9 @@ stored attempts, and the plan's attempt budget counts them.
 **An adapter can wait for input (D10).** An adapter with ``awaiting_audio`` (the owner's
 Suno imports) is asked first what every variant still to run is missing; while anything is,
 no attempt is made, no guard is asked, and the result lists it in ``awaiting_audio``. Its
-``write_capability`` replaces ``music.generate`` in the guard.
+``write_capability`` replaces ``music.generate`` in the guard. One that declares
+``costs_nothing`` is not braked by prior credit use, is not journaled as a paid call, and
+runs in one transaction (see :meth:`GenerationEngine.execute_plan`).
 
 **A paid call stays on record (B03/B04).** With a ``checkpoint`` (the API and CLI pass the
 session's commit), a REAL call's SUBMITTED attempt is made durable before the call and its
@@ -187,6 +189,9 @@ class GenerationEngineResult:
     """Every write-guard decision this run made, one per provider call considered."""
     awaiting_audio: list[str] = field(default_factory=list)
     """What an input-waiting adapter still needs; non-empty means nothing was attempted."""
+    refusal_codes: list[str] = field(default_factory=list)
+    """The P29 reason codes when policy refused the plan; a FAILED plan without them
+    failed for a platform reason (a provider job to reconcile, a target not met)."""
 
 
 class GenerationEngine:
@@ -238,7 +243,7 @@ class GenerationEngine:
         return GenerationEngineResult(
             plan_id=plan.plan_id, status=PlanStatus.FAILED, candidates=candidates,
             attempts=attempts, artifacts=artifacts, rights_snapshots=rights_snapshots,
-            errors=[*errors, str(refusal)],
+            errors=[*errors, str(refusal)], refusal_codes=list(refusal.reason_codes),
         )
 
     def execute_plan(
@@ -257,7 +262,40 @@ class GenerationEngine:
         ``checkpoint`` commits the caller's session. When given, every REAL (paid)
         call is bracketed by durable records; without it the run stays one
         all-or-nothing transaction, as for in-process callers and mock providers.
+
+        An adapter with ``costs_nothing`` (the owner's imports) is never bracketed: its
+        run is one transaction, committed once at the end, so the plan row stays locked
+        and a concurrent run of the same plan waits for it instead of importing again.
+        Its guard reservations are committed after that commit and released if the run
+        raises, so a crashed import is imported again under the same attempt id.
         """
+        pending: list[GuardDecision] = []
+        try:
+            return self._execute_plan(
+                session, plan=plan, variants=variants, spec=spec,
+                provider_adapter=provider_adapter,
+                max_retries_per_variant=max_retries_per_variant,
+                checkpoint=checkpoint, pending_imports=pending,
+            )
+        except BaseException:
+            for decision in pending:
+                self.write_guard.settle_external_write(
+                    decision, performed=False, reason="import_not_stored",
+                )
+            raise
+
+    def _execute_plan(
+        self,
+        session: Session,
+        *,
+        plan: GenerationPlan,
+        variants: list[CreativeVariant],
+        spec: AdaptedTrackSpec,
+        provider_adapter: MusicProviderProtocol | None,
+        max_retries_per_variant: int,
+        checkpoint: Callable[[], None] | None,
+        pending_imports: list[GuardDecision],
+    ) -> GenerationEngineResult:
         now = self.clock.now()
         from ..storage.repositories import get_generation_plan, list_creative_variants
 
@@ -326,12 +364,15 @@ class GenerationEngine:
             if c.generation_plan_id == plan.plan_id
         }
         capability = getattr(adapter, "write_capability", GENERATE_CAPABILITY)
+        # Only an adapter that says so is free; no capability is assumed to cost nothing.
+        free = bool(getattr(adapter, "costs_nothing", False))
         # An import re-reads the owner's file from the inbox and spends nothing through
-        # PLM, so an import that crashed before its candidate was stored is abandoned,
-        # not a paid job to reconcile: it is imported again without using up a retry.
+        # PLM. One stored without its candidate (before 2026-11-02 an import's attempt
+        # was committed ahead of it) is abandoned, not a paid job to reconcile: it is
+        # imported again without using up a retry.
         abandoned = {
             a.attempt_id for a in stored_attempts
-            if capability != GENERATE_CAPABILITY and a.status is not AttemptStatus.FAILED
+            if free and a.status is not AttemptStatus.FAILED
             and a.attempt_id not in stored_candidates
         }
         total_attempts = len(stored_attempts) - len(abandoned)
@@ -466,9 +507,9 @@ class GenerationEngine:
                         plan_refusal = "plan_money_budget_exhausted"
                     elif plan.credit_limit <= 0:
                         plan_refusal = "plan_credit_budget_exhausted"
-                    elif capability == GENERATE_CAPABILITY:
+                    elif not free:
                         # An import spends no provider credits through PLM (the owner
-                        # spent them in Suno's interface), so only generation is braked.
+                        # spent them in Suno's interface), so only a paid call is braked.
                         plan_refusal = _prior_paid_credit_refusal(
                             [*stored_attempts, *attempts], plan.credit_limit,
                         )
@@ -481,6 +522,15 @@ class GenerationEngine:
                     now=self.clock.now(),
                 )
                 decisions.append(decision)
+                if (free and decision.reason == "budget_reservation_replayed"
+                        and all(a.attempt_id != att_id for a in stored_attempts)):
+                    # A free run holds its plan row until it commits, so a key still
+                    # held with nothing stored belongs to a run that died before
+                    # settling it: skip it, as an abandoned import.
+                    retry_count += 1
+                    skipped += 1
+                    total_attempts -= 1
+                    continue
                 if not decision.decision.may_call_provider:
                     stopped = decision
                     errors.append(
@@ -488,7 +538,7 @@ class GenerationEngine:
                         f"{decision.decision.value} ({decision.reason})"
                     )
                     break
-                journaled = mode is ProviderMode.REAL and checkpoint is not None
+                journaled = mode is ProviderMode.REAL and checkpoint is not None and not free
                 if journaled:
                     assert checkpoint is not None
                     # Durable before the paid call: a crash, or any later failure in
@@ -504,7 +554,9 @@ class GenerationEngine:
                 # that a REAL request had no external effect. A FAILED response
                 # with no job ID may be a lost receipt after a charged submit;
                 # its reservation must stay held until reconciliation.
-                if mode is not ProviderMode.REAL or accepted or gen_res.confirmed_unsubmitted:
+                if free and accepted:
+                    pending_imports.append(decision)  # committed once the import is stored
+                elif mode is not ProviderMode.REAL or accepted or gen_res.confirmed_unsubmitted:
                     self.write_guard.settle_external_write(
                         decision, performed=accepted, actual_cost=None,
                         reason="provider_confirmed_unsubmitted",
@@ -716,6 +768,12 @@ class GenerationEngine:
         )
         update_plan_status(session, plan.plan_id, final_status, finished_at=self.clock.now())
         session.flush()
+        if pending_imports:
+            if checkpoint is not None:
+                checkpoint()
+            for decision in pending_imports:
+                self.write_guard.settle_external_write(decision, performed=True)
+            pending_imports.clear()
 
         return GenerationEngineResult(
             plan_id=plan.plan_id,
