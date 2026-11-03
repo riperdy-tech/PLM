@@ -44,8 +44,12 @@ from tests.support.media_tools import require_media_tool
 pytestmark = pytest.mark.media
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+# Small video for speed, but the production AAC bitrate: at 96k the encoder overshoots the
+# -1 dBTP ceiling by 1.5 dB on these synthetic tones (beyond the 1 dB tolerance) for some
+# track orders, which tests the test profile, not P6 (measured 2026-11-03: 96k +0.5 dBTP,
+# 128k and 192k -1.0 dBTP on the same mix).
 TINY = RenderProfile(name="test_tiny_v1", width=160, height=90, fps=10,
-                     x264_preset="ultrafast", x264_crf=35, audio_bitrate="96k")
+                     x264_preset="ultrafast", x264_crf=35, audio_bitrate="192k")
 SECONDS = (12.0, 13.0, 12.0)
 
 

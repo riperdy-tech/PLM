@@ -61,7 +61,7 @@ def test_assemble_playlist_success() -> None:
     )
 
     assert res.session.status == PlaylistStatus.ASSEMBLED
-    assert res.session.sequence_version == "seq-beam-v2"
+    assert res.session.sequence_version == "seq-beam-v3"
     # The session records the planning midpoint of the declared range.
     assert res.session.requested_duration_seconds == 445.0
     assert len(res.tracks) == 3

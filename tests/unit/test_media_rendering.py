@@ -90,7 +90,7 @@ def test_every_checksum_is_the_sha256_of_the_stored_bytes() -> None:
     assert wire.audio.checksum == pkg.audio_checksum
     assert [t.checksum for t in wire.thumbnails] == [t["checksum"] for t in pkg.thumbnails]
     assert len(wire.chapters) == 3
-    assert pkg.render_report["sequencing"]["policy"]["version"] == "seq-beam-v2"
+    assert pkg.render_report["sequencing"]["policy"]["version"] == "seq-beam-v3"
 
 
 def test_claimed_render_scopes_all_blobs_and_preserves_content_checksums() -> None:

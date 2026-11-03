@@ -130,3 +130,13 @@ round bass low in the mix, and adds "catchy hook, prominent lead melody, punchy 
 booming or distorted bass, sudden loud accents" to the negative prompt. Track specs made
 before v7 (run c1f32e48's eight songs and its four top-up sheets) keep their prompts.
 Whether Flow Music follows the instruction is unproven until the next songs are heard.
+
+## Amendment 2026-11-03: level energy, typical opener
+
+The owner approved flattening the playlist's energy curve. P6's sequencing policy
+`seq-beam-v3` replaces v2's absolute arc (0.45 at the start, rising to 0.85 at 60%,
+0.5 at the end) with a flat arc anchored at the median energy of the cleared tracks,
+plus an `opening` term that favours the track nearest that median as the first one.
+Background focus music keeps a level energy and starts on its most typical track, as
+the growth spec (ADR-0045) asks for. The package version follows the sequencing version,
+so packages assembled from now on get new ids; stored packages are unchanged.

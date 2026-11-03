@@ -12,7 +12,11 @@ declared cost.
   :attr:`SequencingPolicy.bpm_full_penalty_ratio`;
 * ``energy_flow``: the jump from one track's outro energy to the next one's intro energy;
 * ``energy_arc``: each track's mean energy against the declared target curve
-  (:attr:`SequencingPolicy.energy_arc`) at the track's midpoint on the timeline;
+  (:attr:`SequencingPolicy.energy_arc`) at the track's midpoint on the timeline. Since
+  v3 the curve is an offset from the pool's median energy (the anchor) and is flat: the
+  energy stays level, as background focus music should (owner, 2026-11-03);
+* ``opening``: the first track's distance from the anchor, so a video opens on its most
+  typical track, never an outlier (growth spec: open on the most representative track);
 * ``vocal``: the change in vocal density between consecutive tracks.
 
 A sequence's score is its mean weighted cost per scored term, so playlists of different
@@ -69,6 +73,7 @@ __all__ = [
     "SequenceResult",
     "SequencingPolicy",
     "camelot_cost",
+    "energy_anchor",
     "evaluate_order",
     "range_midpoint",
     "sequence_tracks",
@@ -84,14 +89,16 @@ _TIE_DECIMALS: Final[int] = 9
 class SequencingPolicy:
     """Declared sequencing weights and search parameters (versioned data)."""
 
-    version: str = "seq-beam-v2"
+    version: str = "seq-beam-v3"
     beam_width: int = 16
     weights: Mapping[str, float] = field(default_factory=lambda: MappingProxyType({
         "key": 0.30, "bpm": 0.25, "energy_flow": 0.15, "energy_arc": 0.20, "vocal": 0.10,
+        "opening": 0.20,
     }))
     bpm_full_penalty_ratio: float = 0.12
-    energy_arc: tuple[tuple[float, float], ...] = ((0.0, 0.45), (0.6, 0.85), (1.0, 0.5))
-    """Target mean energy (0..1) at relative timeline positions; linear in between."""
+    energy_arc: tuple[tuple[float, float], ...] = ((0.0, 0.0), (1.0, 0.0))
+    """Target mean energy at relative timeline positions, as an offset from the pool's
+    median energy; linear in between (v2 was absolute and rose to 0.85 at 60%)."""
     duration_target_weight: float = 0.5
     """Weight of the timeline's normalised distance from the range midpoint (0..1)."""
     max_candidates_per_track_spec: int = 1
@@ -103,6 +110,7 @@ class SequencingPolicy:
             "weights": dict(sorted(self.weights.items())),
             "bpm_full_penalty_ratio": self.bpm_full_penalty_ratio,
             "energy_arc": [list(p) for p in self.energy_arc],
+            "energy_arc_anchor": "pool_median_energy",
             "duration_target_weight": self.duration_target_weight,
             "max_candidates_per_track_spec": self.max_candidates_per_track_spec,
             "unknown_rule": self.unknown_rule,
@@ -186,10 +194,26 @@ def _transition_terms(a: TrackFeatures, b: TrackFeatures,
     }
 
 
-def _arc_term(features: TrackFeatures, position: float, policy: SequencingPolicy) -> float:
-    if features.energy_mean is None:
+def _arc_term(features: TrackFeatures, position: float, policy: SequencingPolicy,
+              anchor: float | None) -> float:
+    if features.energy_mean is None or anchor is None:
         return 1.0
-    return min(1.0, abs(features.energy_mean - _arc_target(position, policy)))
+    return min(1.0, abs(features.energy_mean - anchor - _arc_target(position, policy)))
+
+
+def _opening_term(features: TrackFeatures, anchor: float | None) -> float:
+    if features.energy_mean is None or anchor is None:
+        return 1.0
+    return min(1.0, abs(features.energy_mean - anchor))
+
+
+def energy_anchor(items: Sequence[SequenceItem]) -> float | None:
+    """The pool's median mean energy (the arc's anchor); ``None`` when none is measured."""
+    known = sorted(i.features.energy_mean for i in items if i.features.energy_mean is not None)
+    if not known:
+        return None
+    middle = len(known) // 2
+    return known[middle] if len(known) % 2 else (known[middle - 1] + known[middle]) / 2
 
 
 def _weighted(terms: Mapping[str, float], policy: SequencingPolicy) -> float:
@@ -238,6 +262,7 @@ def evaluate_order(items: Sequence[SequenceItem], order: Sequence[str], *,
     """The ordering score :func:`sequence_tracks` assigns to an order (lower is better),
     with the energy arc laid over ``target_duration_seconds``."""
     arc_seconds = target_duration_seconds
+    anchor = energy_anchor(items)
     by_id = {item.candidate_id: item for item in items}
     cost, terms, elapsed = 0.0, 0, 0.0
     previous: SequenceItem | None = None
@@ -245,7 +270,10 @@ def evaluate_order(items: Sequence[SequenceItem], order: Sequence[str], *,
         item = by_id[candidate_id]
         start = elapsed + (transition_offset_seconds if previous is not None else 0.0)
         position = (start + item.duration_seconds / 2) / arc_seconds
-        cost += policy.weights.get("energy_arc", 0.0) * _arc_term(item.features, position, policy)
+        cost += policy.weights.get("energy_arc", 0.0) * _arc_term(
+            item.features, position, policy, anchor)
+        if previous is None:
+            cost += policy.weights.get("opening", 0.0) * _opening_term(item.features, anchor)
         terms += 1
         if previous is not None:
             cost += _weighted(_transition_terms(previous.features, item.features, policy),
@@ -300,6 +328,7 @@ def sequence_tracks(items: Sequence[SequenceItem], *, duration_range: DurationRa
         )
 
     arc_weight = policy.weights.get("energy_arc", 0.0)
+    anchor = energy_anchor(ranked)
     beams = [_State(order=(), cost=0.0, terms=0, elapsed=0.0)]
     complete: list[_State] = []
     for _ in range(len(ranked)):
@@ -319,7 +348,11 @@ def sequence_tracks(items: Sequence[SequenceItem], *, duration_range: DurationRa
                 if end > maximum:
                     continue
                 position = (start + item.duration_seconds / 2) / arc_seconds
-                cost = state.cost + arc_weight * _arc_term(item.features, position, policy)
+                cost = state.cost + arc_weight * _arc_term(
+                    item.features, position, policy, anchor)
+                if not state.order:
+                    cost += policy.weights.get("opening", 0.0) * _opening_term(
+                        item.features, anchor)
                 terms = state.terms + 1
                 if state.order:
                     previous = ranked[state.order[-1]]
@@ -365,6 +398,7 @@ def sequence_tracks(items: Sequence[SequenceItem], *, duration_range: DurationRa
             transition_offset_seconds=transition_offset_seconds, policy=policy), 6),
         "window_seconds": [round(minimum, 3), round(maximum, 3)],
         "target_seconds": round(arc_seconds, 3),
+        "energy_anchor": None if anchor is None else round(anchor, 6),
         "target_distance": round(_target_distance(best.elapsed, duration_range), 6),
         "timeline_seconds": round(best.elapsed, 3),
         "order": list(order),

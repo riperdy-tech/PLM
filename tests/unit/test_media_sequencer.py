@@ -15,6 +15,7 @@ import pytest
 from media_factory.audio.features import TrackFeatures
 from media_factory.errors import MediaAssemblyError
 from media_factory.playlist.sequencer import (
+    DEFAULT_SEQUENCING_POLICY,
     PLAYLIST_RANGE_UNMET,
     PLAYLIST_SUPPLY_SHORT,
     SequenceItem,
@@ -176,3 +177,21 @@ def test_a_track_with_unknown_features_is_not_excluded() -> None:
     assert "u1" in result.order
     assert result.report["unknown_features"]["u1"] == {
         "bpm": "test", "energy": "test", "key": "test", "vocal_density": "test"}
+
+
+def test_the_energy_stays_level_and_the_video_opens_on_its_most_typical_track() -> None:
+    """Owner, 2026-11-03 (growth spec: open on the most representative track, no abrupt
+    jumps; background music has nothing that stands out): v3 lays a flat arc at the
+    pool's median energy and favours the track nearest that median as the opener."""
+    assert DEFAULT_SEQUENCING_POLICY.version == "seq-beam-v3"
+    assert {offset for _, offset in DEFAULT_SEQUENCING_POLICY.energy_arc} == {0.0}
+    pool = [_item("loud", energy=0.9), _item("quiet", energy=0.2),
+            _item("mid_a", energy=0.5), _item("typical", energy=0.52),
+            _item("mid_b", energy=0.6)]
+    required = 5 * 60 - 4 * 2
+    result = sequence_tracks(pool, duration_range=_range(required, required + 10),
+                             transition_offset_seconds=-2.0)
+    assert result.order[0] == "typical"
+    assert result.report["energy_anchor"] == 0.52
+    # The quiet and loud tracks are the outliers: neither opens the video.
+    assert result.order[0] not in {"loud", "quiet"}
