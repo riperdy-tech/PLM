@@ -34,6 +34,8 @@ class CatalogAlbum:
     track_signatures: object
     policy_version: str | None = None
     extractor_version: str | None = None
+    variation: dict[str, Any] | None = None
+    """The upload variation fingerprint (:mod:`.variation`); ``None`` before it existed."""
 
 
 def serialize_album_signatures(

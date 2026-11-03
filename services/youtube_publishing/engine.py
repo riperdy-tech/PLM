@@ -366,6 +366,7 @@ class YouTubePublishingEngine:
                         status=status,
                         content_length=total_bytes,
                         upload_key=manifest.idempotency_key,
+                        localizations=manifest.localizations or None,
                     )
                     update_publish_attempt(
                         session,

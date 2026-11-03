@@ -25,9 +25,17 @@ from media_factory.artwork.generator import (
 )
 from media_factory.domain.models import PlaylistTrack
 from media_factory.errors import MediaAssemblyError
-from media_factory.metadata.compiler import compile_metadata_and_chapters
+from media_factory.metadata.compiler import HASHTAGS, compile_metadata_and_chapters
+from media_factory.metadata.packaging import (
+    FEELINGS,
+    HOOK_MAX_CHARS,
+    SCENES,
+    choose_activities,
+    choose_hooks,
+)
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
+from media_factory.visuals.worlds import WORLDS
 from PIL import Image, ImageDraw
 
 from tests.support.media_backend import InMemoryArtifactStore
@@ -167,39 +175,65 @@ def _tracks(*spans: tuple[float, float]) -> list[PlaylistTrack]:
     ]
 
 
-def test_titles_are_functional_and_state_the_length() -> None:
+def test_titles_are_three_hook_first_variants_that_state_the_length() -> None:
+    """Growth spec (ADR-0045): a scenario hook from the video's visual world, the words
+    people search for, three candidates that differ on one axis, the hook first."""
     tracks = _tracks((0.0, 2400.0), (2398.0, 4800.0), (4798.0, 7200.0))
     res = compile_metadata_and_chapters(tracks=tracks, brand_name="Longform Signal",
-                                        playlist_concept="Deep Work Signal")
-    a, b = res.metadata_candidates
-    assert a["title"] == (
-        "Deep Work Signal — 2 Hours of Instrumental Electronic Music for Coding & Focus")
-    assert b["title"].startswith("Deep Work Signal — 2 Hours ")
+                                        playlist_concept="focused focus_electronic for x",
+                                        visual_world="server_hall_glow", seed="mpkg_1")
+    scene, feeling = res.hooks
+    assert scene in SCENES["server_hall_glow"] and feeling in FEELINGS
+    a, b, c = res.metadata_candidates
+    assert [m["variant_id"] for m in (a, b, c)] == ["meta_a_scenario", "meta_b_keyword",
+                                                     "meta_c_feeling"]
+    assert a["title"].startswith(f"{scene} — Focus Music for ")
+    assert b["title"].startswith("2 Hours of Focus Music for ") and b["title"].endswith(scene)
+    assert c["title"].startswith(f"{feeling} · Instrumental Focus Music for ")
     for meta in res.metadata_candidates:
         title = meta["title"]
-        assert len(title) <= 100
+        assert len(title) <= 100 and "focus_electronic" not in title
         for banned in ("Official Mix", "Full Album", "Vol.", "lofi", "Lofi", "Relaxing"):
             assert banned not in title
-        assert not {"lofi", "beats", "relaxing", "music"} & set(meta["tags"])
-        assert "longformsignal" in meta["tags"]
+        assert "longformsignal" in meta["tags"] and 5 <= len(meta["tags"]) <= 10
+        assert {"music for studying", "concentration music"} <= set(meta["tags"])
         assert meta["category_id"] == "10"
-        assert "Curated by Longform Signal" in meta["description"]
+        lines = meta["description"].split("\n")
+        assert lines[0].startswith(f"{scene}: 2 Hours of calm instrumental electronic music")
+        assert lines[1].startswith("No lyrics and no vocals")
         assert "00:00 - Amber Circuit" in meta["description"]
+        assert "Visuals: original artwork created for Longform Signal." in lines
         assert "Notice: Sound recording" in meta["description"]
-    assert {"deep focus", "coding music", "programming music"} <= set(a["tags"])
+        assert "Curated by Longform Signal" in meta["description"]
+        assert lines[-1] == HASHTAGS and len(HASHTAGS.split()) <= 3
     assert [c["title"] for c in res.chapters] == ["Amber Circuit", "Quiet Lattice",
                                                   "Linear Draft"]
     assert [t["title"] for t in res.tracklist] == [c["title"] for c in res.chapters]
 
 
+def test_hooks_are_short_and_a_recent_hook_is_not_taken_again() -> None:
+    for hook in (*FEELINGS, *(s for scenes in SCENES.values() for s in scenes)):
+        assert len(hook) <= HOOK_MAX_CHARS, hook
+    assert set(SCENES) == {name for name in WORLDS if name in SCENES}
+    used = set(SCENES["blueprint_hall"][:2]) | set(FEELINGS[:-1])
+    assert choose_hooks("blueprint_hall", "x", seed="s", recent=used) == (
+        SCENES["blueprint_hall"][2], FEELINGS[-1])
+    assert choose_hooks(None, " Night Driving ", seed="s")[0] == "Night Driving"
+    first, second, third = choose_activities("mpkg_1")
+    assert len({first, second, third}) == 3
+
+
 def test_a_long_concept_is_shortened_so_the_title_fits() -> None:
+    """A world without scenes falls back on the concept, which is cut, never the rest."""
     tracks = _tracks((0.0, 2700.0), (2698.0, 5400.0))
     res = compile_metadata_and_chapters(tracks=tracks, brand_name="Longform Signal",
                                         playlist_concept="Graphite Studio Night " * 8)
-    for meta in res.metadata_candidates:
+    a, b, _ = res.metadata_candidates
+    for meta in (a, b):
         assert 95 <= len(meta["title"]) <= 100
-        assert meta["title"].startswith("Graphite Studio Night")
-        assert "… — 90 Minutes " in meta["title"]  # the concept is cut, never the length
+    assert a["title"].startswith("Graphite Studio Night") and "… — Focus Music for " in a[
+        "title"]
+    assert b["title"].startswith("90 Minutes of Focus Music for ") and b["title"].endswith("…")
 
 
 @pytest.mark.parametrize(("concept", "label"), [
@@ -222,3 +256,35 @@ def test_every_thumbnail_carries_the_brand_logo_mark() -> None:
         assert image.convert("RGB").getpixel((1180, 14)) == accent, variant
     hero = Image.open(io.BytesIO(render_thumbnail("thumb_a_hero", BRAND, "Deep Work")))
     assert hero.convert("RGB").getpixel((80, 616)) == accent  # the label's tile
+
+
+def test_every_scene_has_its_own_wording_in_each_chosen_language() -> None:
+    """ADR-0045 decision 2: de, nl, sv, ko, zh-Hant, ja; every focus scene written in each;
+    a title within 100 characters; the AI notice in each language's description."""
+    from media_factory.metadata.localization import _SCENES, LANGUAGES, localize
+
+    english = [s for scenes in SCENES.values() for s in scenes]
+    assert set(LANGUAGES) == {"de", "nl", "sv", "ko", "zh-Hant", "ja"}
+    for code, scenes in _SCENES.items():
+        assert len(scenes) == len(english) and len(set(scenes)) == len(scenes), code
+    for scene in english:
+        out = localize(scene, seconds=1500, chapter_block="00:00 - A", brand_name="LS")
+        assert set(out) == set(LANGUAGES)
+        for code, text in out.items():
+            assert len(text["title"]) <= 100, (code, text["title"])
+            assert text["title"].startswith(_SCENES[code][english.index(scene)])
+            assert "00:00 - A" in text["description"]
+            assert LANGUAGES[code].notice in text["description"]
+            assert "25" in text["description"]
+    assert localize("Night Driving", seconds=60, chapter_block="", brand_name="LS") == {}
+
+
+def test_the_package_carries_the_translations_on_every_candidate() -> None:
+    tracks = _tracks((0.0, 700.0), (698.0, 1500.0))
+    res = compile_metadata_and_chapters(tracks=tracks, brand_name="Longform Signal",
+                                        playlist_concept="x", visual_world="blueprint_hall",
+                                        seed="mpkg_2")
+    first = res.metadata_candidates[0]["localizations"]
+    assert set(first) == {"de", "nl", "sv", "ko", "zh-Hant", "ja"}
+    assert all(m["localizations"] == first for m in res.metadata_candidates)
+    assert first["ko"]["title"].endswith("집중할 때 듣는 음악 | 공부·작업용 BGM")

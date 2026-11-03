@@ -103,6 +103,9 @@ class PublishManifest(BaseModel):
     """NULL on historical manifests: never invent an exposure assignment."""
     tracks: tuple[ManifestTrack, ...]
     """The package's tracklist; an empty one is never cleared (a legacy manifest)."""
+    localizations: dict[str, dict[str, str]] = Field(default_factory=dict)
+    """YouTube ``localizations`` (language code -> title, description), ADR-0045; empty
+    on manifests stored before migration 0043."""
     created_at: datetime
 
     @property

@@ -35,6 +35,7 @@ from .storage.repositories import (
     get_publish_manifest_by_id,
     insert_publish_manifest,
 )
+from .test_kit import build_test_kit
 
 CLOCK: Clock = SystemClock()
 """The CLI's time source; the only wall-clock read in the P7 command line."""
@@ -125,7 +126,23 @@ def cli_publish(
         }
         if result.publication_record:
             out["video_url"] = result.publication_record.video_url
+        if result.attempt.youtube_video_id:
+            out["test_and_compare_kit"] = build_test_kit(pkg, published_at=now)
         typer.echo(json.dumps(out, indent=2))
+
+
+def cli_test_kit(package_path: str) -> None:
+    """Print the Test & Compare kit of a Seam C6 media package JSON file."""
+    path = Path(package_path)
+    if not path.is_file():
+        typer.echo(f"Error: package file {package_path} not found", err=True)
+        raise typer.Exit(code=1)
+    try:
+        pkg = parse_seam(MediaPackagePayload, json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, SeamRejection) as exc:
+        typer.echo(f"Error: media package refused: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(json.dumps(build_test_kit(pkg), indent=2))
 
 
 def cli_attempt(attempt_id: str) -> None:

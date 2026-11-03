@@ -59,6 +59,7 @@ class MockYouTubeClient:
         status: dict[str, Any],
         content_length: int,
         upload_key: str | None = None,
+        localizations: dict[str, dict[str, str]] | None = None,
     ) -> str:
         self._check_fault_injection("insert_resumable_session")
         if upload_key:
@@ -71,6 +72,7 @@ class MockYouTubeClient:
         self.sessions[session_uri] = {
             "snippet": snippet,
             "status": status,
+            "localizations": dict(localizations or {}),
             "content_length": content_length,
             "uploaded_bytes": 0,
         }

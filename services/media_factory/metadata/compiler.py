@@ -3,23 +3,39 @@
 Assembles YouTube-compliant chapter markers, tracklist arrays, and metadata
 candidates with synthetic media disclosure.
 
-Titles are functional, for the focus-music identity (ADR-0044): what the video is for
-and how long it runs, e.g. ``Deep Work Signal — 2 Hours of Instrumental Electronic
-Music for Coding & Focus``. They never use a numbered-volume, "Official Mix", "Full
-Album" or lo-fi formula, and never exceed YouTube's 100 characters.
+Titles follow the growth spec (2026-11-03, ADR-0045): a scenario or feeling hook from
+:mod:`.packaging` plus the words people search for, in three candidates that differ on
+one axis (scenario first, keyword first, feeling first) for YouTube's Test & Compare,
+e.g. ``Night Shift in the Server Hall — Focus Music for Studying & Coding``. They never
+use a numbered-volume, "Official Mix", "Full Album" or lo-fi formula, and never exceed
+YouTube's 100 characters. The description follows the spec's layout: a hook line with the
+primary search words, a second line of secondary ones, the tracklist (chapters), where
+the music and the visuals come from, the AI notice, and at most three hashtags.
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 from ..domain.models import Chapter, PlaylistTrack
+from .localization import localize
+from .packaging import choose_activities, choose_hooks
 
-__all__ = ["TITLE_MAX_CHARS", "MetadataCompilationResult", "compile_metadata_and_chapters",
-           "duration_phrase", "functional_title"]
+__all__ = ["HASHTAGS", "TITLE_MAX_CHARS", "MetadataCompilationResult",
+           "compile_metadata_and_chapters", "duration_phrase", "functional_title"]
 
 TITLE_MAX_CHARS = 100
 """YouTube's title limit."""
+
+HASHTAGS = "#focusmusic #studymusic #deepwork"
+"""At most three (YouTube shows the first three above the title)."""
+
+_TAGS = ("focus music", "study music", "music for studying", "concentration music",
+         "deep work music", "coding music", "background music for work",
+         "instrumental music no lyrics")
+"""Search phrases seen in YouTube's autocomplete (2026-11-03); tags carry little weight,
+so they repeat the title's words rather than add new claims."""
 
 
 def duration_phrase(seconds: float) -> str:
@@ -40,6 +56,15 @@ def functional_title(concept: str, suffix: str) -> str:
     return f"{concept}{suffix}"
 
 
+def _fit(prefix: str, hook: str) -> str:
+    """``prefix`` + ``hook``, the hook shortened (never the prefix) to fit 100."""
+    room = TITLE_MAX_CHARS - len(prefix)
+    hook = hook.strip()
+    if len(hook) > room:
+        hook = hook[:room - 1].rstrip() + "…"
+    return f"{prefix}{hook}"
+
+
 class MetadataCompilationResult:
     """Outcome of metadata compilation."""
 
@@ -49,11 +74,14 @@ class MetadataCompilationResult:
         tracklist: list[dict[str, Any]],
         metadata_candidates: list[dict[str, Any]],
         chapter_objects: list[Chapter],
+        hooks: tuple[str, str] = ("", ""),
     ) -> None:
         self.chapters = chapters
         self.tracklist = tracklist
         self.metadata_candidates = metadata_candidates
         self.chapter_objects = chapter_objects
+        self.hooks = hooks
+        """(scene, feeling) the titles use; the upload variation check records them."""
 
 
 def compile_metadata_and_chapters(
@@ -62,8 +90,15 @@ def compile_metadata_and_chapters(
     brand_name: str,
     playlist_concept: str,
     ai_disclosure_required: bool = True,
+    visual_world: str | None = None,
+    seed: str = "",
+    recent_hooks: Collection[str] = (),
 ) -> MetadataCompilationResult:
-    """Compile timestamped chapter markers, tracklist, and publishable metadata options."""
+    """Compile timestamped chapter markers, tracklist, and publishable metadata options.
+
+    ``seed`` (the package id) varies the hooks and search words between videos;
+    ``recent_hooks`` are the brand's recent ones, which are not taken again while others
+    are left."""
     # 1. Compile chapters from the final timeline
     chapter_objects: list[Chapter] = []
     chapters_json: list[dict[str, Any]] = []
@@ -117,46 +152,49 @@ def compile_metadata_and_chapters(
         else ""
     )
 
-    # 5. Metadata Candidates: functional titles, focus-identity tags (ADR-0044).
+    # 5. Metadata candidates (growth spec, ADR-0045): three titles, one description.
     length = duration_phrase(tracks[-1].end_offset_seconds if tracks else 0.0)
+    scene, feeling = choose_hooks(visual_world, playlist_concept, seed=seed,
+                                  recent=recent_hooks)
+    first, second, third = choose_activities(seed)
     brand_slug = brand_name.lower().replace(" ", "")
-    curation = f"Curated by {brand_name}: tracks chosen and sequenced for long focus sessions."
+    titles = {
+        "meta_a_scenario": functional_title(scene, f" — Focus Music for {first} & {second}"),
+        "meta_b_keyword": _fit(f"{length} of Focus Music for {first} & {second} · ", scene),
+        "meta_c_feeling": functional_title(
+            feeling, f" · Instrumental Focus Music for {first}"),
+    }
+    description = "\n".join((
+        (f"{scene}: {length} of calm instrumental electronic music for "
+         f"{first.lower()}, {second.lower()} and {third.lower()}."),
+        ("No lyrics and no vocals, a soft steady pulse in the background: focus music for "
+         "work, studying and late-night concentration."),
+        "",
+        f"Tracklist:\n{chapter_block}",
+        "",
+        (f"Music: original instrumentals made with AI music tools, selected and sequenced "
+         f"by {brand_name}."),
+        f"Visuals: original artwork created for {brand_name}.",
+        disclosure_statement,
+        f"Curated by {brand_name}: tracks chosen and sequenced for long focus sessions.",
+        "",
+        HASHTAGS,
+    )).replace("\n\n\n", "\n\n").strip()
+    # The same translations ride on every candidate: YouTube shows them only to viewers
+    # of that language, and Test & Compare tests the English title (ADR-0045).
+    localizations = localize(scene, seconds=tracks[-1].end_offset_seconds if tracks else 0.0,
+                             chapter_block=chapter_block, brand_name=brand_name)
     metadata_candidates = [
         {
-            "variant_id": "meta_a_concept_focused",
-            "title": functional_title(
-                playlist_concept,
-                f" — {length} of Instrumental Electronic Music for Coding & Focus"),
-            "description": (
-                f"{length} of instrumental electronic music for coding, programming and "
-                f"deep work: {playlist_concept}. No vocals, a steady pulse, one long "
-                "session.\n\n"
-                f"Tracklist:\n{chapter_block}\n\n"
-                f"{disclosure_statement}\n\n"
-                f"{curation}"
-            ).strip(),
-            "tags": ["deep focus", "coding music", "programming music", "instrumental music",
-                     "electronic music", "study music", "deep work", brand_slug],
+            "variant_id": variant_id,
+            "title": title,
+            "description": description,
+            "tags": [*_TAGS, brand_slug],
             "category_id": "10",  # Music
             "contains_synthetic_media": ai_disclosure_required,
-        },
-        {
-            "variant_id": "meta_b_mood_focused",
-            "title": functional_title(
-                playlist_concept,
-                f" — {length} Deep Focus Electronic Music for Programming & Work"),
-            "description": (
-                f"Deep focus music for programming and concentrated work: {length} of "
-                f"{playlist_concept}, instrumental electronic and free of vocals.\n\n"
-                f"Timestamps:\n{chapter_block}\n\n"
-                f"{disclosure_statement}\n\n"
-                f"{curation}"
-            ).strip(),
-            "tags": ["focus music", "music for coding", "programming music", "instrumental",
-                     "electronic", "study", "work", brand_slug],
-            "category_id": "10",
-            "contains_synthetic_media": ai_disclosure_required,
-        },
+            "localizations": localizations,
+        }
+        for variant_id, title in titles.items()
     ]
 
     return MetadataCompilationResult(
@@ -164,4 +202,5 @@ def compile_metadata_and_chapters(
         tracklist=tracklist_json,
         metadata_candidates=metadata_candidates,
         chapter_objects=chapter_objects,
+        hooks=(scene, feeling),
     )

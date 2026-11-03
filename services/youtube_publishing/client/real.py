@@ -125,16 +125,20 @@ class RealYouTubeClient:
         status: dict[str, Any],
         content_length: int,
         upload_key: str | None = None,
+        localizations: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Initiate resumable upload session. Returns session upload URI."""
-        url = f"{YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status"
+        parts = "snippet,status,localizations" if localizations else "snippet,status"
+        url = f"{YOUTUBE_UPLOAD_URL}?uploadType=resumable&part={parts}"
         headers = self._auth_headers()
         headers.update({
             "Content-Type": "application/json; charset=UTF-8",
             "X-Upload-Content-Length": str(content_length),
             "X-Upload-Content-Type": "video/mp4",
         })
-        payload = {"snippet": snippet, "status": status}
+        payload: dict[str, Any] = {"snippet": snippet, "status": status}
+        if localizations:
+            payload["localizations"] = localizations
 
         with self._http() as client:
             resp = client.post(url, headers=headers, json=payload)

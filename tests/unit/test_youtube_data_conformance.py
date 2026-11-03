@@ -37,6 +37,18 @@ def _chunk(client: RealYouTubeClient, start: int) -> dict | None:
                                      start_byte=start, total_bytes=1000)
 
 
+def test_localizations_are_requested_as_their_own_part(mock_http: MockHTTP) -> None:
+    """videos.insert writes ``localizations`` only when ``part`` names it (ADR-0045)."""
+    enqueue(mock_http, P, "oauth_token", "session_created")
+    texts = {"ja": {"title": "サーバールームの夜勤｜作業用BGM", "description": "説明"}}
+    _client(mock_http).insert_resumable_session(
+        snippet={"title": "t", "defaultLanguage": "en"}, status={}, content_length=1,
+        localizations=texts)
+    _, init = mock_http.requests
+    assert init.param("part") == "snippet,status,localizations"
+    assert init.json()["localizations"] == texts
+
+
 def test_resumable_upload_follows_the_documented_protocol(mock_http: MockHTTP) -> None:
     enqueue(mock_http, P, "oauth_token", "session_created", "chunk_308_all_received",
             "upload_complete")
@@ -54,6 +66,7 @@ def test_resumable_upload_follows_the_documented_protocol(mock_http: MockHTTP) -
     assert init.headers["Authorization"] == BEARER
     assert init.headers["X-Upload-Content-Length"] == "1000"
     assert init.json() == {"snippet": {"title": "t"}, "status": {"privacyStatus": "private"}}
+    assert init.param("part") == "snippet,status"  # no localizations, no extra part
     assert (first.method, first.url) == ("PUT", SESSION)
     assert first.headers["Content-Range"] == "bytes 0-499/1000"
     assert last.headers["Content-Range"] == "bytes 500-999/1000"

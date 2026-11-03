@@ -490,10 +490,12 @@ def list_catalog_albums(
             else:
                 if not archived_sources_match(session, row, tracklist, parsed):
                     signatures = None
+        variation = report.get("variation") if isinstance(report, dict) else None
         albums.append(CatalogAlbum(
             media_package_id=row["media_package_id"],
             release_manifest_id=row["release_manifest_id"],
             track_signatures=signatures,
+            variation=variation if isinstance(variation, dict) else None,
             policy_version=stored.get("policy_version") if isinstance(stored, dict) else None,
             extractor_version=(
                 stored.get("extractor_version") if isinstance(stored, dict) else None

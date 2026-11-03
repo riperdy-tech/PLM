@@ -269,3 +269,28 @@ def test_template_energy_outside_its_limits_is_refused_at_load() -> None:
     raw["templates"]["focus_minimal_pulse"]["energy"] = "high"
     with pytest.raises(TemplateLibraryError, match="energy_limits"):
         TemplateLibrary(raw)
+
+
+def test_a_recently_used_visual_world_is_rotated_to_a_fresh_one() -> None:
+    """Growth spec 2026-11-03 (variation): consecutive videos must not share a visual
+    world. The sub-style's own world is kept while it is fresh; once it appears among the
+    genre's recent worlds P3 takes an unused alternative, else the one used longest ago.
+    A world the brief names is kept as named."""
+    directive = _focus({"subgenre": "future_garage_focus"})
+    default = build_genome_from_directive(directive).visual_world
+    assert default == "observatory_workspace"
+    assert build_genome_from_directive(
+        directive, recent_visual_worlds=("blueprint_hall",)).visual_world == default
+
+    fresh = build_genome_from_directive(directive, recent_visual_worlds=(default,))
+    assert fresh.visual_world in FOCUS_WORLDS - {default}
+
+    newest_first = ("observatory_workspace", "architect_studio_night", "drafting_table_dawn",
+                    "minimal_desk_monolith", "server_hall_glow", "circuit_grid_abstract",
+                    "blueprint_hall")
+    assert build_genome_from_directive(
+        directive, recent_visual_worlds=newest_first).visual_world == "blueprint_hall"
+
+    named = _focus({"subgenre": "future_garage_focus", "visual_world": "server_hall_glow"})
+    assert build_genome_from_directive(
+        named, recent_visual_worlds=("server_hall_glow",)).visual_world == "server_hall_glow"

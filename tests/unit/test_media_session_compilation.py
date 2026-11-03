@@ -111,9 +111,12 @@ def test_a_session_compilation_reassembles_two_released_albums_over_http() -> No
         settings=MediaFactorySettings(platform=platform), clock=FixedClock(NOW),
         backend=backend_for(store, [*first, *second], toolchain=toolchain)))
 
-    for album in (first, second):
+    # Each upload differs in concept and visual world (P6's upload variation check).
+    for album, concept, world in ((first, "Night Desk", "architect_studio_night"),
+                                  (second, "Dawn Drafting", "drafting_table_dawn")):
         made = client.post("/media/packages/assemble", headers=HEADERS,
-                           json=_request(*(m.candidate_id for m in album)))
+                           json=_request(*(m.candidate_id for m in album),
+                                         playlist_concept=concept, visual_profile=world))
         assert made.status_code == 200, made.text
 
     every = [m.candidate_id for m in (*first, *second)]
@@ -124,6 +127,7 @@ def test_a_session_compilation_reassembles_two_released_albums_over_http() -> No
 
     compiled = client.post("/media/packages/assemble", headers=HEADERS,
                            json=_request(*every, session_compilation=True,
+                                         visual_profile="blueprint_hall",
                                          duration_range_seconds={
                                              "min_seconds": 340, "max_seconds": 360}))
     assert compiled.status_code == 200, compiled.text

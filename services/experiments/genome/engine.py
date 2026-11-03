@@ -140,6 +140,16 @@ class UnknownGenreError(GenomeBuildError):
         )
 
 
+def choose_fresh(listed: tuple[str, ...], seed: str, recent: tuple[str, ...]) -> str:
+    """One of ``listed`` (non-empty) absent from ``recent`` (newest first); when every one
+    appears, the one used longest ago. A stable hash of ``seed`` picks among the fresh."""
+    unused = tuple(item for item in listed if item not in recent)
+    if not unused:
+        return max(listed, key=recent.index)
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return unused[int.from_bytes(digest[:4], "big") % len(unused)]
+
+
 class GenreTemplate(BaseModel):
     """A resolved, validated template: the default genome and the genre's ontology."""
 
@@ -391,11 +401,7 @@ class TemplateLibrary:
         listed = self.subgenres(genre)
         if not listed:
             return None
-        unused = tuple(sub for sub in listed if sub not in recent)
-        if not unused:
-            return max(listed, key=recent.index)
-        digest = hashlib.sha256(directive_id.encode("utf-8")).digest()
-        return unused[int.from_bytes(digest[:4], "big") % len(unused)]
+        return choose_fresh(listed, directive_id, recent)
 
     def for_subgenre(self, genre: str, subgenre: str | None) -> GenreTemplate:
         """The sub-style's template when ``genre`` lists it, else the genre's template."""
@@ -617,7 +623,7 @@ def brief_playlist_duration(
 
 def build_genome_from_directive(
     directive: AdaptedDirective, *, library: TemplateLibrary | None = None,
-    recent_subgenres: tuple[str, ...] = (),
+    recent_subgenres: tuple[str, ...] = (), recent_visual_worlds: tuple[str, ...] = (),
 ) -> ContentGenome:
     """Build the base genome: the brief's template (:func:`brief_template`: the sub-style's,
     else the genre's), overridden where the brief is explicit.
@@ -628,11 +634,15 @@ def build_genome_from_directive(
     ``duration_bucket`` sets it to the bucket's declared range when that lies inside the
     policy; an open, unknown or out-of-policy one gets the policy range (ADR-0036 as
     amended 2026-10-31, recorded on the experiment). ``recent_subgenres`` (newest first)
-    steers the sub-style P3 picks when the brief names none.
+    steers the sub-style P3 picks when the brief names none. A brief that names no visual
+    world keeps the template's unless it is in ``recent_visual_worlds`` (newest first);
+    then a fresh one of the template's alternatives is taken (:func:`choose_fresh`), so
+    consecutive videos do not share a visual world (growth spec, 2026-11-03).
     """
     lib = library or default_template_library()
     brief = directive.brief
-    base = brief_template(directive, library=lib, recent_subgenres=recent_subgenres)[0].genome
+    template = brief_template(directive, library=lib, recent_subgenres=recent_subgenres)[0]
+    base = template.genome
 
     updates: dict[str, Any] = {}
     if _present(brief.get("mood")):
@@ -645,6 +655,10 @@ def build_genome_from_directive(
         updates["visual_world"] = normalize_dimension_value(
             "visual_world", str(brief["visual_world"])
         )
+    elif base.visual_world in recent_visual_worlds:
+        worlds = template.alternatives.get("visual_world") or (base.visual_world,)
+        updates["visual_world"] = choose_fresh(
+            tuple(worlds), f"{directive.directive_id}:visual_world", recent_visual_worlds)
     if _present(brief.get("vocal_mode")):
         token = normalize_dimension_value("vocal_mode", str(brief["vocal_mode"]))
         try:

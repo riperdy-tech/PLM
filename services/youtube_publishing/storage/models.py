@@ -74,6 +74,9 @@ class PublishManifestRow(Base):
     selection_json: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON, nullable=True)
     # NULL only on manifests stored before migration 0033; they are never cleared.
     tracks_json: Mapped[list[dict[str, str]] | None] = mapped_column(sa.JSON, nullable=True)
+    # NULL on manifests stored before migration 0043 (no localizations then).
+    localizations_json: Mapped[dict[str, dict[str, str]] | None] = mapped_column(
+        sa.JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
 
 

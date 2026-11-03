@@ -21,6 +21,7 @@ from .lineage import ExperimentLineage
 __all__ = [
     "AudioMaster",
     "ChapterEntry",
+    "LocalizedText",
     "MediaPackagePayload",
     "MetadataCandidate",
     "ThumbnailAsset",
@@ -74,6 +75,12 @@ class ChapterEntry(_Closed):
     song_id: NonEmpty
 
 
+class LocalizedText(_Closed):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
+                                            max_length=100)]
+    description: NonEmpty
+
+
 class MetadataCandidate(_Closed):
     variant_id: NonEmpty
     title: NonEmpty
@@ -81,13 +88,16 @@ class MetadataCandidate(_Closed):
     tags: tuple[NonEmpty, ...]
     category_id: NonEmpty
     contains_synthetic_media: bool
+    localizations: dict[NonEmpty, LocalizedText] = Field(default_factory=dict)
+    """YouTube ``localizations`` by language code (schema 1.1, ADR-0045); empty before."""
 
 
 class MediaPackagePayload(SeamModel):
     """Hop 1: one publish-ready media package and its lineage."""
 
     SEAM: ClassVar[str] = "C6/hop1"
-    SCHEMA_VERSION: ClassVar[str] = "1.0"
+    SCHEMA_VERSION: ClassVar[str] = "1.1"
+    """1.1 (ADR-0045): optional ``MetadataCandidate.localizations``."""
 
     media_package_id: NonEmpty
     release_manifest_id: NonEmpty

@@ -82,6 +82,9 @@ def run_migrations_online() -> None:
         # Owner-approved 2026-10-31 (D10 import needs 0040/0041).
         "plm_approved_0042_local_connection": (
             "0042_media_render_evidence", "0039_merge_0038_branches"),
+        # Owner-approved 2026-11-03 ("Yes, back up and migrate"; ADR-0045 localizations).
+        "plm_approved_0043_local_connection": (
+            "0043_youtube_localizations", "0042_media_render_evidence"),
     }
     for attribute, (step_head, step_start) in approved_steps.items():
         approved = config.attributes.get(attribute)

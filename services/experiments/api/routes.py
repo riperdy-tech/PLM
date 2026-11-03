@@ -115,9 +115,12 @@ def build_router(
                 ) from err
 
             try:
-                recent = repositories.recent_subgenres(
-                    session, genre=brief_genre(adapted)[0])
-                base_genome = build_genome_from_directive(adapted, recent_subgenres=recent)
+                genre = brief_genre(adapted)[0]
+                base_genome = build_genome_from_directive(
+                    adapted,
+                    recent_subgenres=repositories.recent_subgenres(session, genre=genre),
+                    recent_visual_worlds=repositories.recent_visual_worlds(
+                        session, genre=genre))
                 exp = design_experiment(
                     adapted,
                     base_genome,

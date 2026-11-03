@@ -32,9 +32,12 @@ class YouTubeClientProtocol(Protocol):
         status: dict[str, Any],
         content_length: int,
         upload_key: str | None = None,
+        localizations: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Initiate resumable upload session. Returns session upload URI.
 
+        ``localizations`` (language code -> title, description) is sent with
+        ``part=localizations`` when given; ``snippet.defaultLanguage`` must be set.
         ``upload_key`` is PLM's idempotency key of the publish (one per channel, package
         and video checksum). A real client may ignore it; the mock derives its session
         and video ids from it, so they are unique and stable across process restarts.

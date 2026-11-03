@@ -313,6 +313,26 @@ def recent_subgenres(session: Session, *, genre: str, limit: int = 20) -> tuple[
     return tuple(str(row) for row in rows)
 
 
+def recent_visual_worlds(session: Session, *, genre: str, limit: int = 3) -> tuple[str, ...]:
+    """The visual worlds of the genre's latest ``limit`` experiments, newest first.
+
+    P3 moves a brief off its template's world when that world was used recently, so the
+    last three videos never share one: P6's upload variation check refuses a world reused
+    within that window (growth spec, 2026-11-03).
+    """
+    rows = session.execute(
+        sa.select(visual_specs_table.c.visual_world)
+        .join(experiments_table,
+              experiments_table.c.experiment_id == visual_specs_table.c.experiment_id)
+        .join(content_genomes_table,
+              experiments_table.c.base_genome_fingerprint == content_genomes_table.c.fingerprint)
+        .where(content_genomes_table.c.genre == genre)
+        .order_by(experiments_table.c.created_at.desc(), visual_specs_table.c.visual_spec_id)
+        .limit(limit)
+    ).scalars().all()
+    return tuple(str(row) for row in rows)
+
+
 def update_experiment_status(
     session: Session, experiment_id: str, status: ExperimentStatus, *, now: datetime
 ) -> None:

@@ -145,6 +145,7 @@ def _to_manifest_domain(row: PublishManifestRow) -> PublishManifest:
         metadata_version=row.metadata_version,
         selection=CandidateSelection.model_validate(row.selection_json) if row.selection_json else None,
         tracks=tuple(ManifestTrack(**t) for t in (row.tracks_json or [])),
+        localizations=dict(row.localizations_json or {}),
         created_at=_utc(row.created_at),
     )
 
@@ -180,6 +181,7 @@ def insert_publish_manifest(session: Session, manifest: PublishManifest) -> None
         metadata_version=manifest.metadata_version,
         selection_json=manifest.selection.model_dump(mode="json") if manifest.selection else None,
         tracks_json=[t.model_dump() for t in manifest.tracks],
+        localizations_json=manifest.localizations or None,
         created_at=manifest.created_at,
     )
     session.add(row)

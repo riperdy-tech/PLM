@@ -337,3 +337,28 @@ def test_same_key_with_a_different_request_is_409() -> None:
                         json={"directive": SAMPLE_DIRECTIVE, "seed": 3})
     assert blank.status_code == 422
     assert blank.json()["detail"]["code"] == "idempotency_key_invalid"
+
+
+def test_consecutive_videos_of_a_genre_never_share_a_visual_world() -> None:
+    """Growth spec 2026-11-03 (variation): P3 reads the genre's recent visual worlds from
+    its own store, so two videos of the same sub-style in a row get different worlds."""
+    client = _client()
+    worlds = []
+    for n in range(3):
+        directive = _directive(use_case=["study_focus"], vocal_mode="instrumental",
+                               subgenre="future_garage_focus", genre="focus_electronic")
+        directive["directive_id"] = f"dir_visual_{n}"
+        directive["brief"].pop("visual_world", None)  # P3 chooses the world
+        created = client.post("/experiments/v1/experiments", headers=HEADERS,
+                              json={"directive": directive, "seed": 7})
+        assert created.status_code == 200, created.text
+        experiment = created.json()["experiment"]
+        exp_id = experiment["experiment_id"]
+        assert client.post(f"/experiments/v1/experiments/{exp_id}/validate",
+                           headers=HEADERS).status_code == 200
+        package = client.post(
+            f"/experiments/v1/experiments/{exp_id}/materialize", headers=HEADERS,
+            json={"treatment_id": experiment["treatments"][0]["treatment_id"]}).json()["package"]
+        worlds.append(package["visual_spec"]["visual_world"])
+    assert worlds[0] == "observatory_workspace"
+    assert len(set(worlds)) == 3, worlds

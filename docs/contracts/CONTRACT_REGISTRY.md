@@ -578,6 +578,10 @@ producer sent the identity fields P9 §38 requires).
   `youtube_video_id`, `publish_attempt_id`, `channel_id`, `media_package_id`,
   `lineage` (replaces the five loose R9 identifiers), `published_at` (aware),
   `metadata_version`, `contains_synthetic_media`.
+- Hop 1 schema **1.1** (ADR-0045, 2026-11-03): each `MetadataCandidate` may carry
+  `localizations` (`{language code: {title (<= 100), description}}`, default empty). P6
+  writes them for de, nl, sv, ko, zh-Hant and ja; P7 stores them on the manifest
+  (migration 0043) and sends them to `videos.insert` with `part=localizations`.
 - P7 refuses unconfigured channels, unready packages and naive schedule times. P8
   submits only from C5 manifests + the C6 package (+ optional, matching C6 event).
   ISRCs are allocated once per recording from a persisted sequence.

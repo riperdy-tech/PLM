@@ -276,3 +276,32 @@ def test_upload_body_defaults_to_english_without_a_stored_channel_profile() -> N
         assert engine.execute_publish(session, manifest, video_data=b"0" * 1024).is_success
     snippet, _ = _upload_body(client)
     assert (snippet["defaultLanguage"], snippet["defaultAudioLanguage"]) == ("en", "en")
+
+
+def test_localizations_are_stored_with_the_manifest_and_sent_with_the_upload() -> None:
+    """ADR-0045: the package's translations survive the stored manifest (migration 0043)
+    and go to YouTube as ``localizations``; a manifest without them sends none."""
+    from youtube_publishing.storage.repositories import get_publish_manifest_by_id
+
+    texts = {"ko": {"title": "서버실의 야간 근무 | 집중할 때 듣는 음악", "description": "설명"},
+             "de": {"title": "Nachtschicht im Serverraum – Musik", "description": "Text"}}
+    manifest = _sample_manifest().model_copy(update={"localizations": texts})
+    client = MockYouTubeClient()
+    engine = YouTubePublishingEngine(client, clock=FixedClock(T0), chunk_size=1024,
+                                     clearance=p5_clearing_test_track())
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        stored = get_publish_manifest_by_id(session, manifest.manifest_id)
+        assert stored is not None and stored.localizations == texts
+        assert engine.execute_publish(session, stored, video_data=b"0" * 1024).is_success
+    (upload,) = client.sessions.values()
+    assert upload["localizations"] == texts
+
+    plain = MockYouTubeClient()
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, _sample_manifest())
+        assert YouTubePublishingEngine(
+            plain, clock=FixedClock(T0), chunk_size=1024, clearance=p5_clearing_test_track(),
+        ).execute_publish(session, _sample_manifest(), video_data=b"0" * 1024).is_success
+    (upload,) = plain.sessions.values()
+    assert upload["localizations"] == {}

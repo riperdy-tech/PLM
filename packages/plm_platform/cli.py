@@ -186,6 +186,7 @@ def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
 _CODE_ONLY_HEADS = frozenset({
     "0039_merge_0038_branches", "0040_p4_unpriced_costs",
     "0041_p4_credit_provenance", "0042_media_render_evidence",
+    "0043_youtube_localizations",
 })
 
 
@@ -1048,6 +1049,18 @@ def youtube_publish(
         package_path=package_path, channel_id=channel_id, mode=mode,
         metadata_variant_id=metadata_variant_id, thumbnail_id=thumbnail_id,
     )
+
+
+@youtube_app.command(name="test-kit")
+def youtube_test_kit(
+    package_path: str = typer.Option(
+        ..., "--package", "-p", help="Path to media package JSON file"
+    ),
+) -> None:
+    """Print the Test & Compare kit (3 titles, 3 thumbnails) to start in YouTube Studio."""
+    from youtube_publishing.cli import cli_test_kit
+
+    cli_test_kit(package_path=package_path)
 
 
 @youtube_app.command(name="attempt")

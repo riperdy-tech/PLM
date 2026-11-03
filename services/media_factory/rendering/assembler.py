@@ -57,6 +57,7 @@ from ..playlist.catalog import (
 )
 from ..playlist.diversity import check_album_texture
 from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
+from ..playlist.variation import check_upload_variation, variation_fingerprint
 from ..visuals.planner import BrandProfile, plan_visual_session
 from .profiles import RenderProfile, render_profile
 from .renderer import MediaRenderer, RenderExecutionResult
@@ -214,6 +215,26 @@ def assemble_media_package(
         **catalog_report,
         "coverage": "complete" if recorded is not None else "not_configured",
     }
+    # Packaging must not feel like the brand's last uploads (growth spec, rank 1): the
+    # titles take hooks the recent packages did not use (the chapters above are the same).
+    recent_hooks = {hook for album in (recorded or ()) if album.variation
+                    for hook in (album.variation.get("concept"),
+                                 *(album.variation.get("hooks") or ()))
+                    if isinstance(hook, str)}
+    meta_res = compile_metadata_and_chapters(
+        tracks=tracks, brand_name=brand_profile.brand_name, playlist_concept=playlist_concept,
+        ai_disclosure_required=True, visual_world=visual_profile, seed=package_id,
+        recent_hooks=recent_hooks)
+    variation = variation_fingerprint(
+        concept=meta_res.hooks[0], visual_world=visual_profile,
+        titles=[str(c["title"]) for c in meta_res.metadata_candidates])
+    variation["hooks"] = list(meta_res.hooks)
+    variation_report = {
+        **variation,
+        **check_upload_variation(variation, current_release_manifest_id=rel_id,
+                                 history=recorded if recorded is not None else ()),
+        "coverage": "complete" if recorded is not None else "not_configured",
+    }
 
     # 6. Visual plan and render.
     visual_res = plan_visual_session(
@@ -290,6 +311,7 @@ def assemble_media_package(
         **render_res.render_report,
         "sequencing": playlist_res.sequence.report,
         "album_texture": texture_report,
+        "variation": variation_report,
         "chapters": {"rules": "yt-chapters-v1", "count": len(meta_res.chapters)},
     }
     media_package = MediaPackage.create(

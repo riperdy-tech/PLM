@@ -153,5 +153,6 @@ def build_publish_manifest(
             ManifestTrack(candidate_id=t.song_id, artifact_id=t.source_artifact_id)
             for t in pkg.tracklist
         ),
+        localizations={code: text.model_dump() for code, text in meta.localizations.items()},
         created_at=now,
     )
