@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v8",
+  "policy_version": "hold-classes-v9",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -11,7 +11,8 @@
     "v5 (R5): the pipeline no longer reserves budget; a phase's external-write guard is the single reservation and its refusal (409) holds the run. BUDGET_RESERVATION_REFUSED is now raised for a guard's budget reason; new EXTERNAL_WRITE_NOT_AUTHORIZED for a guard's authorization or policy reason; new PLAYLIST_SUPPLY_SHORT when a playlist's cleared supply stays short of its declared minimum after the bounded top-up rounds. A guard reason nobody declared is raised as EXTERNAL_WRITE_REFUSED, deliberately unmapped (hard stop, fail closed).",
     "v6 (R6, D10): new MANUAL_AUDIO_AWAITED when P4 waits for songs the owner makes on suno.com and saves in the import inbox.",
     "v7 (R6): new STEP_RETRIES_EXHAUSTED when a step's retryable failure outlasts its retries. Before v7 the run failed for good, which on 2026-11-01 lost a run holding the owner's eight hand-made songs to a P4 import bug.",
-    "v8 (R6): new STEP_PLATFORM_FAULT when a step fails with PlatformFault, a permanent failure that is the platform's, not the content's (a P4 plan that failed without a P29 refusal). Before v8 such a failure ended the run as a creative rejection."
+    "v8 (R6): new STEP_PLATFORM_FAULT when a step fails with PlatformFault, a permanent failure that is the platform's, not the content's (a P4 plan that failed without a P29 refusal). Before v8 such a failure ended the run as a creative rejection.",
+    "v9 (R6): STEP_PLATFORM_FAULT also covers every other permanent step failure that decides nothing about the content (a ValidationFailure, such as a P6 render its own post-render QA blocked). Only a CreativeRejection or PolicyRejection still ends a run. Before v9 such a failure ended the run for good."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -301,8 +302,8 @@
       "required_evidence": ["platform_fix_ref"],
       "reviewer_role": "platform_owner",
       "category": "platform_failure",
-      "source": "docs/reviews/2026-11-01-focus-identity-rectification.md V-13 (a P4 plan that failed for a platform reason, not a P29 refusal, ended the run as a creative rejection); raised by plm_platform.pipeline.workflow when a step fails with PlatformFault",
-      "description": "A phase reported a failure only a fix or an operator can clear: a P4 plan that missed its candidate target without a policy refusal (a provider job to reconcile, an import that could not be stored), or a phase answer that contradicts itself. Nothing about the content was decided. Reviewable, not a hard stop: the platform owner resumes once the cause is fixed or reconciled, citing it (a commit, an incident note or the reconciliation); the workflow then retries the step with the same idempotency key."
+      "source": "docs/reviews/2026-11-01-focus-identity-rectification.md V-13 (a P4 plan that failed for a platform reason, not a P29 refusal, ended the run as a creative rejection); raised by plm_platform.pipeline.workflow when a step fails permanently with anything but a CreativeRejection or PolicyRejection (v9)",
+      "description": "A phase reported a failure only a fix or an operator can clear: a P4 plan that missed its candidate target without a policy refusal (a provider job to reconcile, an import that could not be stored), a phase answer that contradicts itself or that another phase refuses, or a render its own post-render QA blocked. Nothing about the content was decided. Reviewable, not a hard stop: the platform owner resumes once the cause is fixed or reconciled, citing it (a commit, an incident note or the reconciliation); the workflow then retries the step with the same idempotency key."
     }
   }
 }

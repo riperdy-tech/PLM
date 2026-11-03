@@ -1,4 +1,4 @@
-"""Real Temporal/ops failure handoff: P6 response -> pipeline HTTP -> FAILED.
+"""Real Temporal/ops failure handoff: P6 response -> pipeline HTTP -> HELD.
 
 P6 runs as an in-process stand-in renderer. P3/P5 HTTP requests are served by a
 mock transport and pre-assemble steps are scripted. The workflow, Temporal
@@ -8,13 +8,12 @@ No deployed pipeline worker, P7 provider, MinIO object or external write is used
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import pytest
 from plm_platform.pipeline.mock import MockPhaseSteps, default_scripts
 from plm_platform.pipeline.states import PipelineState, Step
-from plm_platform.pipeline.types import PipelineOutcome, StepRequest, StepResult
+from plm_platform.pipeline.types import StepRequest, StepResult
 from plm_platform.temporal import idempotency_key
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio.client import Client
@@ -24,6 +23,7 @@ from tests.integration.pipeline.support import (
     running,
     start_run,
     transitions,
+    wait_until,
     worker_for,
 )
 from tests.support.media_backend import (
@@ -59,7 +59,7 @@ class _FailedAssemblySteps(MockPhaseSteps):
     ({"audio_stream_duration_seconds": 80.0}, "video_audio_duration_mismatch"),
     ({"video_stream_duration_seconds": None}, "stream_duration_unmeasured"),
 ])
-async def test_p6_timing_failure_ends_real_temporal_run_before_p7(
+async def test_p6_timing_failure_holds_real_temporal_run_before_p7(
     client: Client, factory: sessionmaker[Session], platform: Any,
     probe_overrides: dict[str, float | None], expected_code: str,
 ) -> None:
@@ -89,19 +89,20 @@ async def test_p6_timing_failure_ends_real_temporal_run_before_p7(
     steps = _FailedAssemblySteps(_steps(phases))
     async with running(worker_for(client, steps, platform)):
         handle = await start_run(client, directive_id, workflow_id)
-        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), 120.0)
+        # A failed render is the platform's, not a decision about the content: the run
+        # holds for the platform owner (STEP_PLATFORM_FAULT) instead of ending.
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the fault hold")
+        await handle.terminate(reason="R6 test: hold observed")
 
-    assert (outcome.final_state, outcome.completed) == ("FAILED", False)
-    assert outcome.error_code == "ValidationFailure"
+    assert held.held_from == "ASSEMBLING"
+    assert held.last_error_code == "STEP_PLATFORM_FAULT"
     records = transitions(factory, workflow_id)
-    failure = records[-1]
-    assert failure.to_state is PipelineState.FAILED
-    assert failure.from_state is PipelineState.ASSEMBLING
-    assert failure.step == Step.ASSEMBLE.value and failure.final
-    assert failure.attempt == 1  # non-retryable
-    assert failure.error_code == "ValidationFailure"
-    assert expected_code in (failure.error_detail or "")
-    assert failure.outputs["failure"]["non_retryable"] is True
+    hold = records[-1]
+    assert hold.to_state is PipelineState.HELD
+    assert hold.from_state is PipelineState.ASSEMBLING
+    assert hold.step == Step.ASSEMBLE.value and not hold.final
+    assert hold.attempt == 1  # non-retryable
+    assert expected_code in (hold.error_detail or "")
     assert all(row.to_state not in (PipelineState.PACKAGED, PipelineState.UPLOADING)
                for row in records)
     assert len(phases.p6_bodies) == 1

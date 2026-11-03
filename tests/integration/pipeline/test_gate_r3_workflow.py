@@ -31,7 +31,14 @@ from plm_platform.pipeline.types import (
     ResumeSignal,
 )
 from plm_platform.pipeline.workflow import PipelineWorkflow
-from plm_platform.temporal import PlatformFault, idempotency_key
+from plm_platform.temporal import (
+    CreativeRejection,
+    NonRetryableError,
+    PlatformFault,
+    PolicyRejection,
+    ValidationFailure,
+    idempotency_key,
+)
 from sqlalchemy.orm import Session, sessionmaker
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -398,15 +405,20 @@ async def test_a_step_that_exhausts_its_retries_holds_and_resumes_after_the_fix(
     _assert_contiguous(factory, workflow_id)
 
 
+@pytest.mark.parametrize("fault", [
+    PlatformFault("P4 plan p-1 failed its candidate target"),
+    ValidationFailure("generate outputs: 'candidate_ids' is not a list"),
+], ids=["platform_fault", "validation_failure"])
 async def test_a_platform_fault_holds_the_run_instead_of_ending_it(
     client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+    fault: NonRetryableError,
 ) -> None:
     """Proves: a permanent failure that is the platform's (P4 failed a plan without a
-    policy refusal) holds the run as STEP_PLATFORM_FAULT for the platform owner instead
-    of ending it; the resume retries the step under the same key, and while the fault
-    persists the run holds again rather than failing."""
-    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(
-        raises=PlatformFault("P4 plan p-1 failed its candidate target"))))
+    policy refusal, or a phase answer another phase refuses) holds the run as
+    STEP_PLATFORM_FAULT for the platform owner instead of ending it; the resume retries
+    the step under the same key, and while the fault persists the run holds again
+    rather than failing."""
+    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(raises=fault)))
     directive_id, workflow_id = new_run()
     async with running(worker_for(client, steps, platform)):
         handle = await start_run(client, directive_id, workflow_id)
@@ -427,3 +439,25 @@ async def test_a_platform_fault_holds_the_run_instead_of_ending_it(
 
     key = idempotency_key(workflow_id, Step.GENERATE.value)
     assert steps.calls_for(Step.GENERATE) == [key, key]
+
+
+@pytest.mark.parametrize("decision", [
+    CreativeRejection("P4 refused the plan: protected artist reference"),
+    PolicyRejection("P2 did not queue the directive"),
+], ids=["creative", "policy"])
+async def test_a_decided_rejection_still_ends_the_run(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+    decision: NonRetryableError,
+) -> None:
+    """Proves: a creative or policy rejection decides the content, so it ends the run
+    (FAILED, recorded) and is never held for the platform owner."""
+    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(raises=decision)))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        outcome = await asyncio.wait_for(handle.result(), 60)
+
+    assert (outcome.final_state, outcome.completed) == ("FAILED", False)
+    assert outcome.error_code == type(decision).__name__
+    assert steps.calls_for(Step.GENERATE) == [idempotency_key(workflow_id,
+                                                              Step.GENERATE.value)]

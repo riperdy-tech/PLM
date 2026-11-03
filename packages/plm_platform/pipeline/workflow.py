@@ -9,13 +9,15 @@ here, deterministically; the store makes each write idempotent).
   ``idempotency_key(workflow_id, step)`` (a playlist top-up round ``n`` uses
   ``<step>.r<n>``). Retries come from the Temporal retry policy; a non-retryable failure
   ends the step. ``CapabilityUnavailable`` (the runtime cannot do the step) becomes a
-  ``CAPABILITY_UNAVAILABLE`` hold; any other permanent failure moves the run to
-  ``FAILED`` with the error recorded. Retries exhausted on a retryable failure (a phase
-  bug or outage, not a business outcome) hold the run as ``STEP_RETRIES_EXHAUSTED``: once
-  the cause is fixed, the platform owner's resume retries the step with the same key, so
-  work the run already holds (the owner's songs, a paid result) is not lost. A
-  ``PlatformFault`` (a permanent failure that is the platform's, such as a P4 plan that
-  failed without a policy refusal) holds the same way as ``STEP_PLATFORM_FAULT``.
+  ``CAPABILITY_UNAVAILABLE`` hold. Only a decision about the content
+  (``CreativeRejection``, ``PolicyRejection``) moves the run to ``FAILED`` with the error
+  recorded. Retries exhausted on a retryable failure (a phase bug or outage, not a
+  business outcome) hold the run as ``STEP_RETRIES_EXHAUSTED``: once the cause is fixed,
+  the platform owner's resume retries the step with the same key, so work the run
+  already holds (the owner's songs, a paid result) is not lost. Any other permanent
+  failure is the platform's (a ``PlatformFault`` such as a P4 plan that failed without a
+  policy refusal, or a ``ValidationFailure`` such as a P6 render its own QA blocked) and
+  holds the same way as ``STEP_PLATFORM_FAULT``.
 * **Budget (R5).** The pipeline reserves nothing. The phase's external-write guard is
   the single reservation at the write boundary (P4 generation, P7 upload, P8
   submission). A guard refusal (a ``409`` with the guard's reason) raises a reviewable
@@ -115,6 +117,9 @@ PLATFORM_FAULT_HOLD_REASON: Final[str] = "STEP_PLATFORM_FAULT"
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 SUPPLY_SHORT_FAILURE: Final[str] = "PlaylistSupplyShort"
 EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
+DECIDED_FAILURES: Final[frozenset[str]] = frozenset({"CreativeRejection", "PolicyRejection"})
+"""Failures that decide the content: they end the run. Any other permanent failure of a
+step is the platform's and holds it."""
 
 
 def topup_count(missing_seconds: int, shortest_track_seconds: int, spare: int) -> int:
@@ -575,7 +580,11 @@ class PipelineWorkflow:
                 if await self._write_hold(step, failure):
                     continue
                 return None
-            if failure.retries_exhausted or failure.type == "PlatformFault":
+            # The caller decides a short playlist supply and P3's extension bound.
+            handled = (failure.type == SUPPLY_SHORT_FAILURE
+                       or failure.code == EXTENSION_LIMIT_CODE)
+            if failure.retries_exhausted or not (handled
+                                                 or failure.type in DECIDED_FAILURES):
                 reason = (RETRIES_HOLD_REASON if failure.retries_exhausted
                           else PLATFORM_FAULT_HOLD_REASON)
                 if await self._platform_hold(step, failure, reason):
@@ -607,8 +616,8 @@ class PipelineWorkflow:
                                 attempt=failure.attempt, key_name=failure.key_name)
 
     async def _platform_hold(self, step: Step, failure: _Failure, reason_code: str) -> bool:
-        """The platform failed (retries ran out, or a ``PlatformFault``): hold until the
-        cause is fixed."""
+        """The platform failed (retries ran out, or a permanent failure that decided
+        nothing about the content): hold until the cause is fixed."""
         details = {"step": step.value, "error": failure.message, "error_type": failure.type,
                    "idempotency_key": idempotency_key(workflow.info().workflow_id,
                                                       failure.key_name or step.value)}
