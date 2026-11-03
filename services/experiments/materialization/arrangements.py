@@ -21,6 +21,12 @@ listening/embedding QA remains necessary.
   replaces the genre palette's lead, bass, drums and colour with its own, so the nine
   sub-styles keep their own sound while the album still rotates; the direction records
   the ``subgenre`` so top-up tracks rebuild from the same palette.
+* **Focus electronic is background music (v7, owner 2026-11-03).** The first Flow Music
+  songs had a melody, bass and kick that stood out, which pulls attention from the work.
+  A focus track names no riff or catchy hook and no forward bass (reese, rolling,
+  pulsing, octave), takes its melody from :data:`_FOCUS_MELODIES` instead of the shared
+  patterns, and carries :data:`FOCUS_MIX` (``mix_balance``) and :data:`FOCUS_AVOID`
+  (``avoid``, which P4 adds to the negative prompt).
 """
 from __future__ import annotations
 
@@ -28,7 +34,7 @@ import hashlib
 from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v6"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v7"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -40,6 +46,19 @@ _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("restrained pulse with brief fills", "answering melody in a contrasting register", "open intervals and delayed resolutions", "gradual thinning toward the ending"),
 )
 
+
+FOCUS_MIX: Final[str] = (
+    "background listening, the melody sits back behind the pads, soft muted kick, warm "
+    "round bass low in the mix, nothing that grabs attention")
+FOCUS_AVOID: Final[str] = (
+    "catchy hook, prominent lead melody, punchy kick, booming or distorted bass, sudden "
+    "loud accents")
+_FOCUS_MELODIES: Final[tuple[str, ...]] = (
+    "sparse understated motif", "slow long tones with long rests",
+    "soft repeating figure that never climaxes", "gentle stepwise phrases, low in the mix",
+    "few notes over sustained chords", "quiet fragments that fade into the pads",
+)
+"""Melodic motion for focus tracks: present but never the thing the listener notices."""
 
 _NON_MELODIC: Final[tuple[str, ...]] = (
     "crackle", "hiss", "noise", "rain", "ambience", "field_recording", "room_tone",
@@ -165,7 +184,7 @@ _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "focus_electronic": {
         "lead": ("muted_synth_pluck", "felt_piano", "glassy_fm_synth", "soft_analog_lead",
                  "echo_electric_guitar", "marimba_synth"),
-        "bass": ("warm_sub_bass", "round_synth_bass", "rolling_sub_bass"),
+        "bass": ("warm_sub_bass", "round_synth_bass", "soft_round_sub_bass"),
         "drums": ("soft_electronic_drums", "shuffled_soft_garage_drums",
                   "soft_breakbeat_drums", "minimal_electronic_drums", ""),
         "color": ("soft_analog_pad", "granular_pad", "filtered_pad", "digital_pad",
@@ -173,7 +192,7 @@ _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "key_profile": ("D_minor", "A_minor", "F_major", "E_minor", "C_major", "G_minor",
                         "Bb_major", "B_minor"),
         "production_style": ("clean_modern", "analog_warm", "minimalist"),
-        "hook_profile": ("atmospheric", "instrumental_riff", "slow_burn"),
+        "hook_profile": ("atmospheric", "slow_burn", "atmospheric"),
         "song_structure": ("loop_progression", "ambient_evolving", "loop_progression"),
         "energy": ("low", "medium", "low"),
         "groove": ("steady spacious groove", "straight laid-back pulse",
@@ -188,7 +207,7 @@ _SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "future_garage_focus": {
         "lead": ("pitched_synth_chops", "airy_synth_lead", "felt_piano", "muted_synth_pluck",
                  "echo_electric_guitar", "soft_bell_synth"),
-        "bass": ("reese_sub_bass", "warm_sub_bass", "rolling_sub_bass"),
+        "bass": ("soft_round_sub_bass", "warm_sub_bass", "filtered_sub_bass"),
         "drums": ("shuffled_soft_garage_drums", "swung_soft_garage_drums",
                   "sparse_garage_percussion", ""),
         "color": ("airy_synth_pad", "granular_pad", "tape_delay_wash", "soft_string_pad",
@@ -197,7 +216,7 @@ _SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "soft_cyber_electronica": {
         "lead": ("glassy_fm_synth", "digital_bell_lead", "soft_arp_synth", "crystal_pluck_synth",
                  "muted_synth_pluck", "fm_electric_piano"),
-        "bass": ("pulsing_sub_bass", "round_synth_bass", "warm_sub_bass"),
+        "bass": ("filtered_sub_bass", "round_synth_bass", "warm_sub_bass"),
         "drums": ("soft_glitch_percussion", "minimal_electronic_drums", "soft_electronic_drums",
                   ""),
         "color": ("digital_pad", "granular_pad", "shimmer_pad", "soft_noise_bed",
@@ -215,7 +234,7 @@ _SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "ambient_breakbeat": {
         "lead": ("echo_electric_guitar", "felt_piano", "soft_analog_lead",
                  "ambient_electric_guitar_swells", "muted_synth_pluck", "vibraphone"),
-        "bass": ("rolling_sub_bass", "warm_sub_bass", "round_synth_bass"),
+        "bass": ("soft_round_sub_bass", "warm_sub_bass", "round_synth_bass"),
         "drums": ("soft_breakbeat_drums", "brushed_breakbeat_drums", "filtered_breakbeat_drums",
                   ""),
         "color": ("ambient_synth_pad", "shimmer_pad", "granular_pad", "soft_string_pad",
@@ -241,7 +260,7 @@ _SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "restrained_retro_future": {
         "lead": ("warm_analog_arpeggio", "analog_poly_synth", "fm_electric_piano",
                  "soft_analog_lead", "chorused_electric_guitar", "arpeggiated_pluck_synth"),
-        "bass": ("analog_synth_bass", "octave_synth_bass", "round_synth_bass"),
+        "bass": ("soft_analog_bass", "soft_synth_bass", "round_synth_bass"),
         "drums": ("soft_gated_drums", "soft_electronic_drums", "linn_drum_machine", ""),
         "color": ("chorus_pad", "lush_string_pad", "tape_hiss", "bell_synth", "soft_analog_pad",
                   "slow_filter_sweep_pad"),
@@ -270,7 +289,7 @@ lead, bass, drums and colour; the genre palette's other dimensions still rotate.
 _ROTATION: Final[dict[str, tuple[int, int]]] = {
     "lead": (1, 0), "bass": (2, 6), "drums": (3, 6), "color": (1, 3),
     "key_profile": (5, 0), "production_style": (1, 5), "hook_profile": (2, 5),
-    "song_structure": (2, 7), "energy": (1, 7), "groove": (2, 3),
+    "song_structure": (2, 7), "energy": (1, 7), "groove": (2, 3), "melody": (1, 4),
 }
 
 STYLE_DIMENSIONS: Final[tuple[str, ...]] = (
@@ -348,6 +367,10 @@ def arrangement_direction(
         direction["subgenre"] = subgenre
     if "groove" in palette:  # a genre whose feel the generic grooves would contradict
         direction["rhythmic_feel"] = _pick(palette["groove"], "groove", turn)
+    if (genre or "").lower() == "focus_electronic":  # background music (v7)
+        direction["melodic_motion"] = _pick(_FOCUS_MELODIES, "melody", turn)
+        direction["mix_balance"] = FOCUS_MIX
+        direction["avoid"] = FOCUS_AVOID
     lead = _pick(palette["lead"], "lead", turn)
     drums = _pick(palette["drums"], "drums", turn)
     ambient = ("song_structure" not in held

@@ -118,3 +118,15 @@ snapshots and storage URIs keep the old id.
 - No paid Lyria / Gemini API adapter is planned; every track is made by hand.
 - The main open risk is that focus music's higher RPM is estimated, not
   measured. The 90-day metrics in the ChatGPT report are the check.
+
+## Amendment 2026-11-03: background mix
+
+The owner listened to the first eight Flow Music songs: the melody, the bass and the
+kick stood out too much for music meant to stay in the background. P3's focus palette
+had asked for that (reese, rolling and pulsing sub basses, riff hooks, call-and-response
+and leaping melodies). From `p3-album-contrast-v7` a focus track asks for an understated
+melody (its own six melodic motions), no riff or catchy hook, a soft muted kick and a
+round bass low in the mix, and adds "catchy hook, prominent lead melody, punchy kick,
+booming or distorted bass, sudden loud accents" to the negative prompt. Track specs made
+before v7 (run c1f32e48's eight songs and its four top-up sheets) keep their prompts.
+Whether Flow Music follows the instruction is unproven until the next songs are heard.

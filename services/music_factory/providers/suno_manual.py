@@ -129,6 +129,7 @@ _STYLE_PHRASES = {
     "melodic character": "melody: {}",
     "harmonic motion": "harmony: {}",
     "arrangement progression": "arrangement: {}",
+    "mix balance": "mix: {}",
     "vocal character": "{} vocals",
     "lyric density": "{} lyric density",
 }

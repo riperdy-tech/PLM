@@ -148,6 +148,7 @@ def build_generation_prompt(
             if isinstance(density, str) and density.strip():
                 descriptors.append(f"lyric density: {density}")
 
+    avoid = None
     latitude = track_spec.raw_spec.get("creative_latitude", {})
     if isinstance(latitude, dict):
         energy = latitude.get("energy")
@@ -161,10 +162,12 @@ def build_generation_prompt(
                 ("melodic_motion", "melodic character"),
                 ("harmonic_motion", "harmonic motion"),
                 ("arrangement_arc", "arrangement progression"),
+                ("mix_balance", "mix balance"),
             ):
                 value = direction.get(key)
                 if isinstance(value, str) and value.strip():
                     descriptors.append(f"{label}: {value}")
+            avoid = direction.get("avoid")
 
     if "extra_instruction" in delta:
         descriptors.append(delta["extra_instruction"])
@@ -187,6 +190,9 @@ def build_generation_prompt(
     negative_prompt = (
         "low quality, distorted audio, noise, harsh frequencies, sudden cutoffs, out of tune"
     )
+    # P3's arrangement may name more to avoid (focus music: anything that stands out).
+    if isinstance(avoid, str) and avoid.strip():
+        negative_prompt = f"{negative_prompt}, {avoid.strip()}"
 
     style_tuple = tuple(dict.fromkeys(style_tags_list))
 

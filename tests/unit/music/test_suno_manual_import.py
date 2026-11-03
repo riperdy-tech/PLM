@@ -437,3 +437,13 @@ def test_a_value_that_already_names_its_kind_is_not_doubled() -> None:
         track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
         prompt="foreground lead: lead. hook character: hook"))
     assert bare == "lead, hook"
+
+
+def test_the_mix_balance_reads_as_a_mix_phrase() -> None:
+    from services.music_factory.domain.models import GenerationRequest
+    from services.music_factory.providers.suno_manual import suno_styles
+
+    styles = suno_styles(GenerationRequest(
+        track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
+        prompt="energy: low. mix balance: soft muted kick, warm round bass low in the mix."))
+    assert styles == "low energy, mix: soft muted kick, warm round bass low in the mix"

@@ -23,7 +23,7 @@ def test_album_tracks_have_distinct_arrangement_briefs_and_provider_prompts() ->
     directions = [spec.creative_latitude["track_arrangement"] for spec in package.track_specs]
     assert directions == [spec.creative_latitude["track_arrangement"] for spec in replay.track_specs]
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions[:8]}) == 8
-    assert all(d["policy_version"] == "p3-album-contrast-v6" for d in directions)
+    assert all(d["policy_version"] == "p3-album-contrast-v7" for d in directions)
     # Every planned track, not just the first eight, must receive a different
     # rhythmic+melodic pairing. The former eight-pattern cycle reused briefs.
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions}) == len(directions)
@@ -215,3 +215,59 @@ def test_focus_sub_style_albums_vary_inside_the_identity() -> None:
         assert {d["energy"] for d in tracks} <= {"low", "medium"}, sub_style
         lead_sets.add(frozenset(d["lead_instrument"] for d in tracks))
     assert len(lead_sets) == 9
+
+
+def test_focus_tracks_are_background_music_with_nothing_that_stands_out() -> None:
+    """Owner, 2026-11-03: the first Flow Music songs had a melody, bass and kick that
+    stood out, which is wrong for background focus music. Every focus track asks for an
+    understated melody, no riff or catchy hook, a soft kick and a low round bass, and
+    names the standout parts to avoid; no palette asks for a forward bass."""
+    from services.experiments.genome.engine import default_template_library
+    from services.experiments.materialization.arrangements import (
+        _FOCUS_MELODIES,
+        _GENRE_PALETTES,
+        _SUBGENRE_PALETTES,
+        FOCUS_AVOID,
+        FOCUS_MIX,
+    )
+
+    library = default_template_library()
+    forward = ("reese", "rolling", "pulsing", "octave", "punchy", "booming", "riff", "hook")
+    palettes = [_GENRE_PALETTES["focus_electronic"],
+                *(_SUBGENRE_PALETTES[s] for s in library.subgenres("focus_electronic"))]
+    for palette in palettes:
+        for name in ("bass", "drums", "lead"):
+            for value in palette.get(name, ()):
+                assert not any(word in value for word in forward), value
+    assert set(_GENRE_PALETTES["focus_electronic"]["hook_profile"]) <= {"atmospheric",
+                                                                      "slow_burn"}
+    for sub_style in library.subgenres("focus_electronic"):
+        genome = library.for_subgenre("focus_electronic", sub_style).genome
+        for i in range(23):
+            d = arrangement_direction("pkg_focus", i, genome.instrumentation_profile,
+                                      genre="focus_electronic", subgenre=sub_style)
+            assert d["melodic_motion"] in _FOCUS_MELODIES, d["melodic_motion"]
+            assert (d["mix_balance"], d["avoid"]) == (FOCUS_MIX, FOCUS_AVOID)
+            assert d["hook_profile"] in {"atmospheric", "slow_burn"}
+    # Other genres keep their sound: nothing focus-specific leaks into them.
+    lofi = arrangement_direction("pkg_a", 0, ("felt_piano",), genre="lofi")
+    assert "mix_balance" not in lofi and "avoid" not in lofi
+
+
+def test_p4_carries_the_mix_balance_into_the_prompt_and_the_avoid_list() -> None:
+    """The mix line reaches the provider prompt and its avoid terms join the negative
+    prompt; a spec made before v7 (no mix line) compiles exactly as before."""
+    from services.experiments.materialization.arrangements import FOCUS_AVOID, FOCUS_MIX
+
+    exp, treatment, genome = _sample_experiment()
+    spec = materialize_package(exp, treatment, genome, created_at=FIXED_NOW).track_specs[0]
+    before = build_generation_prompt(adapt_track_spec(spec.to_wire()))
+    wire = spec.to_wire()
+    direction = wire["creative_latitude"]["track_arrangement"]
+    direction.update({"mix_balance": FOCUS_MIX, "avoid": FOCUS_AVOID})
+    after = build_generation_prompt(adapt_track_spec(wire))
+    assert f"mix balance: {FOCUS_MIX}" in after.prompt
+    assert after.negative_prompt == f"{before.negative_prompt}, {FOCUS_AVOID}"
+    assert "mix balance" not in before.prompt
+    assert before.negative_prompt == (
+        "low quality, distorted audio, noise, harsh frequencies, sudden cutoffs, out of tune")
