@@ -20,7 +20,7 @@ from typing import Any
 
 from ..domain.models import Chapter, PlaylistTrack
 from .localization import localize
-from .packaging import choose_activities, choose_hooks
+from .packaging import choose_activities, choose_hooks, series_for
 
 __all__ = ["HASHTAGS", "TITLE_MAX_CHARS", "MetadataCompilationResult",
            "compile_metadata_and_chapters", "duration_phrase", "functional_title"]
@@ -158,6 +158,7 @@ def compile_metadata_and_chapters(
                                   recent=recent_hooks)
     first, second, third = choose_activities(seed)
     brand_slug = brand_name.lower().replace(" ", "")
+    series = series_for(visual_world)
     titles = {
         "meta_a_scenario": functional_title(scene, f" — Focus Music for {first} & {second}"),
         "meta_b_keyword": _fit(f"{length} of Focus Music for {first} & {second} · ", scene),
@@ -177,6 +178,7 @@ def compile_metadata_and_chapters(
         f"Visuals: original artwork created for {brand_name}.",
         disclosure_statement,
         f"Curated by {brand_name}: tracks chosen and sequenced for long focus sessions.",
+        "" if series is None else f"Series: {series[1]}",
         "",
         HASHTAGS,
     )).replace("\n\n\n", "\n\n").strip()
@@ -193,6 +195,7 @@ def compile_metadata_and_chapters(
             "category_id": "10",  # Music
             "contains_synthetic_media": ai_disclosure_required,
             "localizations": localizations,
+            "series": None if series is None else series[0],
         }
         for variant_id, title in titles.items()
     ]

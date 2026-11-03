@@ -38,6 +38,7 @@ from ..manifests import (
     same_publish_choice,
 )
 from ..preflight.gates import evaluate_preflight_all
+from ..series import load_series_playlists
 from ..storage.repositories import (
     get_channel_profile_by_channel_id,
     get_publication_record_by_package_id,
@@ -195,6 +196,7 @@ def create_youtube_router(
                 manifest = build_publish_manifest(
                     pkg, profile, publish_at=req.publish_at, now=now,
                     metadata_variant_id=req.metadata_variant_id, thumbnail_id=req.thumbnail_id,
+                    series_playlists=load_series_playlists(),
                 )
             except PackageNotReadyError as exc:
                 raise HTTPException(

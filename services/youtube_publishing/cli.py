@@ -29,6 +29,7 @@ from .manifests import (
     same_publish_choice,
 )
 from .preflight.gates import evaluate_preflight_all
+from .series import load_series_playlists
 from .storage.repositories import (
     get_channel_profile_by_channel_id,
     get_publish_attempt_by_id,
@@ -75,6 +76,7 @@ def cli_publish(
             manifest = build_publish_manifest(
                 pkg, profile, publish_at=None, now=now,
                 metadata_variant_id=metadata_variant_id, thumbnail_id=thumbnail_id,
+                series_playlists=load_series_playlists(),
             )
         except (PackageNotReadyError, CandidateSelectionError) as exc:
             typer.echo(f"Error: {exc}", err=True)

@@ -30,6 +30,7 @@ from media_factory.metadata.packaging import (
     FEELINGS,
     HOOK_MAX_CHARS,
     SCENES,
+    SERIES,
     choose_activities,
     choose_hooks,
 )
@@ -288,3 +289,17 @@ def test_the_package_carries_the_translations_on_every_candidate() -> None:
     assert set(first) == {"de", "nl", "sv", "ko", "zh-Hant", "ja"}
     assert all(m["localizations"] == first for m in res.metadata_candidates)
     assert first["ko"]["title"].endswith("집중할 때 듣는 음악 | 공부·작업용 BGM")
+
+
+def test_a_focus_world_names_its_series_in_the_package() -> None:
+    tracks = _tracks((0.0, 700.0), (698.0, 1500.0))
+    res = compile_metadata_and_chapters(tracks=tracks, brand_name="LS", playlist_concept="x",
+                                        visual_world="observatory_workspace", seed="s")
+    assert {m["series"] for m in res.metadata_candidates} == {"night_desk"}
+    assert "Series: Night Desk Sessions" in res.metadata_candidates[0]["description"]
+    other = compile_metadata_and_chapters(tracks=tracks, brand_name="LS",
+                                          playlist_concept="x", seed="s")
+    assert {m["series"] for m in other.metadata_candidates} == {None}
+    assert "Series:" not in other.metadata_candidates[0]["description"]
+    assert len({series for series, _ in SERIES.values()}) == 4  # spec: 3–5 series
+    assert set(SERIES) == set(SCENES)

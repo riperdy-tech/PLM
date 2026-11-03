@@ -90,14 +90,18 @@ class MetadataCandidate(_Closed):
     contains_synthetic_media: bool
     localizations: dict[NonEmpty, LocalizedText] = Field(default_factory=dict)
     """YouTube ``localizations`` by language code (schema 1.1, ADR-0045); empty before."""
+    series: NonEmpty | None = None
+    """The channel series the video belongs to (schema 1.2, ADR-0045); P7 adds the video
+    to that series' playlist when one is configured."""
 
 
 class MediaPackagePayload(SeamModel):
     """Hop 1: one publish-ready media package and its lineage."""
 
     SEAM: ClassVar[str] = "C6/hop1"
-    SCHEMA_VERSION: ClassVar[str] = "1.1"
-    """1.1 (ADR-0045): optional ``MetadataCandidate.localizations``."""
+    SCHEMA_VERSION: ClassVar[str] = "1.2"
+    """1.1 (ADR-0045): optional ``MetadataCandidate.localizations``; 1.2: optional
+    ``MetadataCandidate.series``."""
 
     media_package_id: NonEmpty
     release_manifest_id: NonEmpty

@@ -28,6 +28,9 @@ x-plm-app: &plm-app
     - PLM_PIPELINE_CONFIG_FILE=${PLM_PIPELINE_CONFIG_FILE:-/app/config/dev/pipeline.json}
     # Who may clear a pipeline hold ({"actor": ["role", ...]}); unset, nobody can.
     - PLM_PIPELINE_REVIEWERS_FILE=${PLM_PIPELINE_REVIEWERS_FILE:-}
+    # Series -> YouTube playlist ({"series": {"playlist_id", "title"}}, ADR-0045); unset,
+    # P7 attaches no playlist.
+    - PLM_YOUTUBE_SERIES_PLAYLISTS_FILE=${PLM_YOUTUBE_SERIES_PLAYLISTS_FILE:-}
     # The deterministic mock outcome model behind P7's mock YouTube Analytics source and
     # P8's mock distributor statements (labelled mock; never a real audience).
     - PLM_MOCK_OUTCOMES_FILE=${PLM_MOCK_OUTCOMES_FILE:-/app/config/dev/mock_outcomes.json}

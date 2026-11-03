@@ -582,6 +582,8 @@ producer sent the identity fields P9 §38 requires).
   `localizations` (`{language code: {title (<= 100), description}}`, default empty). P6
   writes them for de, nl, sv, ko, zh-Hant and ja; P7 stores them on the manifest
   (migration 0043) and sends them to `videos.insert` with `part=localizations`.
+- Hop 1 schema **1.2** (ADR-0045): each `MetadataCandidate` may carry `series` (the
+  channel series id, default none); P7 adds the video to that series' configured playlist.
 - P7 refuses unconfigured channels, unready packages and naive schedule times. P8
   submits only from C5 manifests + the C6 package (+ optional, matching C6 event).
   ISRCs are allocated once per recording from a persisted sequence.

@@ -24,8 +24,8 @@ import hashlib
 from collections.abc import Collection
 from typing import Final
 
-__all__ = ["ACTIVITIES", "FEELINGS", "HOOK_MAX_CHARS", "SCENES", "choose_activities",
-           "choose_hooks"]
+__all__ = ["ACTIVITIES", "FEELINGS", "HOOK_MAX_CHARS", "SCENES", "SERIES", "choose_activities",
+           "choose_hooks", "series_for"]
 
 HOOK_MAX_CHARS: Final[int] = 40
 
@@ -46,6 +46,25 @@ SCENES: Final[dict[str, tuple[str, ...]]] = {
                        "Big Plans, Quiet Hall"),
 }
 """Scenario hooks per focus visual world (P6's :data:`..visuals.worlds.WORLDS`)."""
+
+SERIES: Final[dict[str, tuple[str, str]]] = {
+    "architect_studio_night": ("night_desk", "Night Desk Sessions"),
+    "observatory_workspace": ("night_desk", "Night Desk Sessions"),
+    "drafting_table_dawn": ("first_light", "First Light Focus"),
+    "minimal_desk_monolith": ("first_light", "First Light Focus"),
+    "server_hall_glow": ("signal_room", "Signal Room"),
+    "circuit_grid_abstract": ("signal_room", "Signal Room"),
+    "blueprint_hall": ("blueprint_hours", "Blueprint Hours"),
+}
+"""The channel's recurring series (growth spec rank 4: 3–5 named series, each with a fixed
+visual motif and its own playlist): (series id, name) by visual world. Late-night
+workspaces, morning desks, technical rooms, planning halls."""
+
+
+def series_for(visual_world: str | None) -> tuple[str, str] | None:
+    """The (series id, name) a visual world belongs to, or ``None``."""
+    return SERIES.get(visual_world or "")
+
 
 FEELINGS: Final[tuple[str, ...]] = (
     "Headphones On, World Off", "When the Noise Fades and Work Begins",

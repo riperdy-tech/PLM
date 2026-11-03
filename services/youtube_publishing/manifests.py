@@ -8,7 +8,9 @@ comes from the parsed package or from the operator-configured channel profile:
 * ``containsSyntheticMedia`` is always true: every recording this pipeline publishes
   is AI-generated (ADR-0044), whatever a package declares (ARCH-P18);
 * privacy and made-for-kids are the channel's configured defaults;
-* no playlist is attached unless one is configured (none is configurable yet).
+* the video goes to its series' playlist when ``series_playlists`` (:mod:`.series`)
+  lists the package's series, and the description links that playlist; otherwise no
+  playlist is attached.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from plm_platform.media_timing import classify_saved_media_timing
 
 from .domain.ids import build_idempotency_key, build_manifest_id
 from .domain.models import CandidateSelection, ChannelProfile, ManifestTrack, PublishManifest
+from .series import SeriesPlaylist
 
 __all__ = ["CandidateSelectionError", "PackageNotReadyError", "build_publish_manifest",
            "preflight_metadata", "same_publish_choice"]
@@ -102,6 +105,7 @@ def build_publish_manifest(
     now: datetime,
     metadata_variant_id: str | None = None,
     thumbnail_id: str | None = None,
+    series_playlists: dict[str, SeriesPlaylist] | None = None,
 ) -> PublishManifest:
     """Derive the immutable publish manifest for one package on one configured channel."""
     if pkg.status != "ready_for_publish":
@@ -118,6 +122,9 @@ def build_publish_manifest(
     )
     lineage = pkg.lineage
     channel_id = profile.channel_id
+    playlist = (series_playlists or {}).get(meta.series or "")
+    description = meta.description if playlist is None else (
+        f"{meta.description}\n\nMore in {playlist.title}: {playlist.url}")
     return PublishManifest(
         manifest_id=build_manifest_id(channel_id, pkg.media_package_id, pkg.video.checksum),
         channel_id=channel_id,
@@ -138,15 +145,15 @@ def build_publish_manifest(
         thumbnail_uri=thumb.uri,
         thumbnail_checksum=thumb.checksum,
         title=meta.title,
-        description=meta.description,
+        description=description,
         tags=list(meta.tags),
         category_id=meta.category_id,
         privacy_status=profile.default_privacy_mode,
         publish_at=publish_at,
         contains_synthetic_media=True,
         made_for_kids=profile.default_made_for_kids,
-        playlist_id=None,
-        playlist_title=None,
+        playlist_id=None if playlist is None else playlist.playlist_id,
+        playlist_title=None if playlist is None else playlist.title,
         metadata_version=meta.variant_id,
         selection=selection,
         tracks=tuple(

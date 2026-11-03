@@ -228,3 +228,37 @@ def test_hop2_consumers_refuse_invalid_values(
     hop2: dict[str, Any], field: str, value: Any
 ) -> None:
     assert_refused(_parse_hop2, with_value(hop2, field, value), SeamRejection, because=field)
+
+
+def test_p7_puts_a_series_video_in_its_playlist_and_links_it(
+        hop1: dict[str, Any], tmp_path: Any) -> None:
+    """ADR-0045 rank 4: the package names its series; P7 adds the video to the series'
+    configured playlist and links it; with no playlist configured nothing is attached."""
+    import json
+
+    from services.youtube_publishing.series import (
+        SERIES_PLAYLISTS_VAR,
+        load_series_playlists,
+    )
+
+    wire = dict(hop1)
+    wire["metadata_candidates"] = [{**c, "series": "night_desk"}
+                                   for c in hop1["metadata_candidates"]]
+    pkg = parse_seam(MediaPackagePayload, wire)
+    plain = build_publish_manifest(pkg, CHANNEL, publish_at=None, now=NOW)
+    assert (plain.playlist_id, plain.playlist_title) == (None, None)
+
+    config = tmp_path / "series.json"
+    config.write_text(json.dumps({"night_desk": {"playlist_id": "PLnight",
+                                                 "title": "Night Desk Sessions"}}))
+    playlists = load_series_playlists({SERIES_PLAYLISTS_VAR: str(config)})
+    manifest = build_publish_manifest(pkg, CHANNEL, publish_at=None, now=NOW,
+                                      series_playlists=playlists)
+    assert (manifest.playlist_id, manifest.playlist_title) == ("PLnight",
+                                                               "Night Desk Sessions")
+    assert manifest.description.endswith(
+        "More in Night Desk Sessions: https://www.youtube.com/playlist?list=PLnight")
+    assert load_series_playlists({}) == {}
+    config.write_text(json.dumps({"night_desk": {"title": "no id"}}))
+    with pytest.raises(ValueError, match="playlist_id"):
+        load_series_playlists({SERIES_PLAYLISTS_VAR: str(config)})

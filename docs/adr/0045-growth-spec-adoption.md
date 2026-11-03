@@ -57,6 +57,17 @@ principles apply and its examples do not.
    `zh-Hant` code (YouTube may want `zh-TW`) and `defaultAudioLanguage: zxx` for
    instrumentals (left at the channel language for now).
 
+7. **Series (rank 4, built 2026-11-03):** four series, each a pair of visual worlds so it
+   keeps one visual motif: Night Desk Sessions (studio, observatory), First Light Focus
+   (drafting table, minimal desk), Signal Room (server hall, circuit grid), Blueprint
+   Hours (blueprint hall). P6 names the series in each candidate (C6 hop 1 schema 1.2) and
+   the description; P7 adds the upload to the series' playlist listed in
+   `PLM_YOUTUBE_SERIES_PLAYLISTS_FILE` and links it. P7 does not create playlists: the
+   owner creates them once in Studio (plus a "Start Here" playlist, curated by hand from
+   the best performers, as the spec's channel-page layout is Studio-only). Series stay
+   out of the titles, so a repeated series never makes two titles a one-word template
+   fill of each other.
+
 ## Limits
 
 - A refused package holds the run for the platform owner (`STEP_PLATFORM_FAULT`), not for
