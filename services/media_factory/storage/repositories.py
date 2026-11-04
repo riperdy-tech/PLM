@@ -632,6 +632,26 @@ def get_media_package_by_release_manifest(
     )
 
 
+def replace_media_package_thumbnails(
+    session: Session,
+    package_id: str,
+    thumbnails: list[dict[str, Any]],
+    *,
+    expected_status: PackageStatus,
+    status: PackageStatus,
+    now: datetime,
+) -> bool:
+    """Swap the package's offered thumbnails and status, only from ``expected_status``;
+    ``False`` when another writer moved the package first."""
+    result = session.execute(
+        media_packages_table.update()
+        .where(media_packages_table.c.media_package_id == package_id,
+               media_packages_table.c.status == expected_status.value)
+        .values(thumbnails_json=json.dumps(thumbnails), status=status.value, updated_at=now)
+    )
+    return bool(result.rowcount)
+
+
 def update_media_package_status(
     session: Session,
     package_id: str,

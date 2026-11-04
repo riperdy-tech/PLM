@@ -39,6 +39,9 @@ x-plm-app: &plm-app
     # 1080p takes about 20 min per video on a dev machine. Production sets
     # yt_longform_1080p_v1 (P6's default when unset).
     - PLM_MEDIA_RENDER_PROFILE=${PLM_MEDIA_RENDER_PROFILE:-preview_360p_v1}
+    # P6 waits for the owner's thumbnail art in this folder (relative to /app, the repo);
+    # unset, P6 offers its own drawn thumbnails (services/media_factory/thumbnail_art).
+    - PLM_THUMBNAIL_ART_INBOX=${PLM_THUMBNAIL_ART_INBOX:-}
   volumes:
     - .:/app
   depends_on:

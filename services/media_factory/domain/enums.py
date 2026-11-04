@@ -62,5 +62,7 @@ class PackageStatus(str, Enum):
 
     DRAFT = "draft"
     READY_FOR_PUBLISH = "ready_for_publish"
+    AWAITING_THUMBNAIL_ART = "awaiting_thumbnail_art"
+    """Rendered and QA-passed, waiting for the owner's thumbnail art (:mod:`..thumbnail_art`)."""
     PUBLISHED = "published"
     FAILED = "failed"

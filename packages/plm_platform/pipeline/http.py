@@ -43,6 +43,7 @@ from .config import PipelineConfig
 from .http_outcome import OutcomeSteps
 from .http_release import ReleaseSteps
 from .phase_client import (
+    EXTERNAL_WRITE_CODE_PREFIX,
     MANUAL_AUDIO_HOLD_REASON,
     ExternalWriteRefused,
     PhaseClient,
@@ -67,6 +68,8 @@ __all__ = [
 
 PLAYLIST_SUPPLY_SHORT_CODE: Final[str] = "playlist_supply_short"
 """P6's refusal when every cleared recording together is shorter than the range minimum."""
+THUMBNAIL_ART_STATUS: Final[str] = "awaiting_thumbnail_art"
+"""P6's status for a rendered package waiting for the owner's thumbnail art."""
 
 _MISSING_SECONDS: Final = re.compile(r"(\d+(?:\.\d+)?)\s*s(?:econds)?\s+(?:are\s+)?missing")
 
@@ -482,8 +485,10 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         track_minimums = [require(require(s, "duration_range", f"{where} track spec"),
                                   "min_seconds", f"{where} track duration range")
                           for s in specs]
+        thumbnail = package.get("thumbnail_spec") or {}
         return {
             "brand_id": str(require(package, "brand_id", where)),
+            "thumbnail_family": thumbnail.get("thumbnail_family") or None,
             "duration_range_seconds": {"min_seconds": int(minimum),
                                        "max_seconds": int(maximum)},
             "visual_profile": str(require(visual, "visual_world", f"{where} visual spec")),
@@ -541,6 +546,7 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         p3, p6 = self._client(Phase.EXPERIMENTS), self._client(Phase.MEDIA)
         packages: list[dict[str, Any]] = []
         short: list[dict[str, Any]] = []
+        awaiting_art: list[str] = []
         for raw_package_id in package_ids:
             package_id = str(raw_package_id)
             facts = self._playlist_facts(
@@ -554,15 +560,17 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 short.append({**shortage, "cleared_count": 0, "missing_seconds":
                               facts["duration_range_seconds"]["min_seconds"]})
                 continue
+            body = {"candidate_ids": members, "brand_id": facts["brand_id"],
+                    "duration_range_seconds": facts["duration_range_seconds"],
+                    "visual_profile": facts["visual_profile"],
+                    "playlist_concept": facts["playlist_concept"]}
+            if facts["thumbnail_family"]:
+                body["thumbnail_family"] = facts["thumbnail_family"]
             try:
                 assembled = p6.post(
                     "/media/packages/assemble",
                     idempotency_key=request_key(key, "assemble", package_id),
-                    timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS,
-                    body={"candidate_ids": members, "brand_id": facts["brand_id"],
-                          "duration_range_seconds": facts["duration_range_seconds"],
-                          "visual_profile": facts["visual_profile"],
-                          "playlist_concept": facts["playlist_concept"]})
+                    timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS, body=body)
             except PhaseRequestRefused as exc:
                 if exc.code != PLAYLIST_SUPPLY_SHORT_CODE:
                     raise
@@ -571,6 +579,9 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 continue
             media_package_id = str(require(assembled, "media_package_id", "P6 package"))
             package_status = str(require(assembled, "status", "P6 package"))
+            if package_status == THUMBNAIL_ART_STATUS:
+                awaiting_art.append(media_package_id)
+                continue
             if package_status != "ready_for_publish":
                 codes = assembled.get("blocking_reason_codes") or []
                 raise ValidationFailure(
@@ -582,6 +593,13 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                                                        "P6 package")})
         if short:
             raise PlaylistSupplyShort(short, packages)
+        if awaiting_art:
+            # Every package was assembled first, so each waiting one has its art job.
+            raise ExternalWriteRefused(
+                Phase.MEDIA, "/media/packages/assemble", 409,
+                f"{EXTERNAL_WRITE_CODE_PREFIX}record_intent",
+                f"thumbnail.art not performed: thumbnail_art_awaited "
+                f"(packages {', '.join(awaiting_art)} wait for the owner's thumbnail art)")
         if not packages:
             raise ValidationFailure(f"assemble: no P3 package in {package_ids}")
         return StepResult(

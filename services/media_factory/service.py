@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from plm_platform.clock import Clock
 from sqlalchemy.orm import Session
 
 from .api.schemas import AssemblePackageRequest
 from .backend import MediaBackend
-from .domain.enums import RenderJobStatus
+from .domain.enums import PackageStatus, RenderJobStatus
 from .domain.models import MediaPackage, RenderJob
 from .errors import MediaAssemblyError
 from .playlist.intake import fetch_cleared_manifests
@@ -52,6 +53,8 @@ from .storage.repositories import (
     list_catalog_albums,
     list_visual_assets,
 )
+from .thumbnail_art.guide import build_prompts, load_style_guide
+from .thumbnail_art.inbox import write_job
 
 __all__ = ["assemble_and_persist"]
 
@@ -62,6 +65,7 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
                          render_session_factory: Callable[[], Session] | None = None,
                          worker_id_factory: Callable[[], str] | None = None,
                          recovery_job_id: str | None = None,
+                         thumbnail_art_inbox: Path | None = None,
                          ) -> MediaPackage:
     """Assemble and persist, optionally committing a fenced intent before rendering.
 
@@ -69,6 +73,10 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
     to commit QUEUED and RUNNING ahead of FFmpeg. Direct in-process callers
     without a factory retain the legacy path. A crash leaves RUNNING for
     explicit reconciliation, never automatic replay or blob publication.
+
+    With ``thumbnail_art_inbox`` a package that passed QA waits at
+    ``awaiting_thumbnail_art`` instead of offering P6's drawn thumbnails, and its art
+    job is written to the inbox (:mod:`.thumbnail_art`).
     """
     claim: tuple[str, str, str, datetime] | None = None
     recovery_attempt = 1
@@ -171,14 +179,18 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:
+        _write_art_job(replay.package, request, thumbnail_art_inbox)
         return replay.package
     except Exception as exc:
         if claim is not None and render_session_factory is not None:
             _quarantine_own_claim(render_session_factory, claim, exc, clock)
         raise
 
+    if (thumbnail_art_inbox is not None
+            and result.media_package.status is PackageStatus.READY_FOR_PUBLISH):
+        result.media_package.status = PackageStatus.AWAITING_THUMBNAIL_ART
     try:
-        return _persist_assembled(session, result, claim, clock)
+        persisted = _persist_assembled(session, result, claim, clock)
     except Exception as exc:
         # The render finished but this process could not or would not persist
         # it. Fence the claim unless another actor already did (ownership lost).
@@ -190,6 +202,22 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             session.rollback()
             _quarantine_own_claim(render_session_factory, claim, exc, clock)
         raise
+    _write_art_job(persisted, request, thumbnail_art_inbox)
+    return persisted
+
+
+def _write_art_job(pkg: MediaPackage, request: AssemblePackageRequest,
+                   inbox: Path | None) -> None:
+    """Write a waiting package's art job (once; a replay finds it already there)."""
+    if inbox is None or pkg.status is not PackageStatus.AWAITING_THUMBNAIL_ART:
+        return
+    guide = load_style_guide()
+    write_job(inbox, package_id=pkg.media_package_id,
+              title=str(pkg.metadata_candidates[0]["title"]),
+              guide_version=guide.guide_version,
+              prompts=build_prompts(guide, package_id=pkg.media_package_id,
+                                    thumbnail_family=request.thumbnail_family,
+                                    visual_world=request.visual_profile))
 
 
 def _persist_assembled(session: Session, result: AssemblyPipelineResult,

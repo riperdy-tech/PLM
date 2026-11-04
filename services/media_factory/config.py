@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from plm_platform.config import Settings as PlatformSettings
@@ -27,6 +28,9 @@ class MediaFactorySettings:
     default_render_profile: str = "yt_longform_1080p_v1"
     """The profile an assemble request that names none is rendered with."""
     artifacts_bucket: str = "plm-artifacts"
+    thumbnail_art_inbox: Path | None = None
+    """``PLM_THUMBNAIL_ART_INBOX``: set, a rendered package waits for the owner's thumbnail
+    art there (:mod:`.thumbnail_art.inbox`); unset, P6's drawn thumbnails are offered."""
 
 
 def load_media_factory_settings(
@@ -37,13 +41,17 @@ def load_media_factory_settings(
     sets ``default_render_profile`` unless overridden. An undeclared profile fails at
     boot (:class:`~plm_platform.config.SettingsError`), not at the first request."""
     from .rendering.profiles import RENDER_PROFILES
+    from .thumbnail_art.inbox import art_inbox
 
     unknown = set(overrides) - set(MediaFactorySettings.__dataclass_fields__)
     if unknown:
         raise TypeError(f"unknown media factory settings: {sorted(unknown)}")
-    configured = (os.environ if env is None else env).get(RENDER_PROFILE_VAR, "").strip()
+    source = os.environ if env is None else env
+    configured = source.get(RENDER_PROFILE_VAR, "").strip()
     if configured and "default_render_profile" not in overrides:
         overrides["default_render_profile"] = configured
+    if "thumbnail_art_inbox" not in overrides:
+        overrides["thumbnail_art_inbox"] = art_inbox(source)
     settings = MediaFactorySettings(platform=platform, **overrides)  # type: ignore[arg-type]
     if settings.default_render_profile not in RENDER_PROFILES:
         raise SettingsError(

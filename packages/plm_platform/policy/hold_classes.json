@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v10",
+  "policy_version": "hold-classes-v11",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -13,7 +13,8 @@
     "v7 (R6): new STEP_RETRIES_EXHAUSTED when a step's retryable failure outlasts its retries. Before v7 the run failed for good, which on 2026-11-01 lost a run holding the owner's eight hand-made songs to a P4 import bug.",
     "v8 (R6): new STEP_PLATFORM_FAULT when a step fails with PlatformFault, a permanent failure that is the platform's, not the content's (a P4 plan that failed without a P29 refusal). Before v8 such a failure ended the run as a creative rejection.",
     "v9 (R6): STEP_PLATFORM_FAULT also covers every other permanent step failure that decides nothing about the content (a ValidationFailure, such as a P6 render its own post-render QA blocked). Only a CreativeRejection or PolicyRejection still ends a run. Before v9 such a failure ended the run for good.",
-    "v10 (R6): new SIMULATED_PUBLICATION when P7 or P8 answers with a write a mock provider only simulated and the pipeline configuration does not set publish.allow_simulated. Before v10 the run went PUBLISHED on 2026-11-04 (run c1f32e48) with a mock video id, and would have measured and learned from a video that does not exist."
+    "v10 (R6): new SIMULATED_PUBLICATION when P7 or P8 answers with a write a mock provider only simulated and the pipeline configuration does not set publish.allow_simulated. Before v10 the run went PUBLISHED on 2026-11-04 (run c1f32e48) with a mock video id, and would have measured and learned from a video that does not exist.",
+    "v11 (R6): new THUMBNAIL_ART_AWAITED when P6 renders a package while PLM_THUMBNAIL_ART_INBOX is set and waits for the owner's thumbnail art. Before v11 P6 offered only its own drawn thumbnails, and on 2026-11-04 one went live on video jTZCpyc5Qyw (made unlisted the same day)."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -305,6 +306,16 @@
       "category": "simulated_publication",
       "source": "run c1f32e48 (2026-11-04): the mock YouTube and distribution providers answered simulate and the run went PUBLISHED with video yt_vid_37524356f5b on UC_plm_dev_mock_channel; raised by plm_platform.pipeline.http_release when an upload or distribution submission is only simulated and publish.allow_simulated is unset",
       "description": "The upload or distribution step reached a mock provider: nothing was published or submitted, so the run must not go on to measure and learn from it. Reviewable, not a hard stop: it is PLM's own configuration. The platform owner resumes only on a stack meant to simulate, after setting publish.allow_simulated and citing that change; the workflow retries the step with the same idempotency key, so the phase replays the same simulated answer. To publish for real, cancel the run and start a new one once the live provider, its write authorization and the owner's approval are in place."
+    },
+    "THUMBNAIL_ART_AWAITED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "LOW",
+      "override_permitted": true,
+      "required_evidence": ["thumbnail_art_inbox_ref"],
+      "reviewer_role": "production_owner",
+      "category": "thumbnail_art_import",
+      "source": "owner decision 2026-11-04 (P6's drawn thumbnails would push viewers away; the owner makes thumbnails in Nano Banana Pro from P6's prompts); raised by plm_platform.pipeline.http when P6 answers awaiting_thumbnail_art (services/media_factory/thumbnail_art)",
+      "description": "P6 rendered the package and it passed QA, but it waits for the owner's thumbnail art: P6 wrote three image prompts to <PLM_THUMBNAIL_ART_INBOX>/<media_package_id>/PROMPTS.md. Reviewable, not a hard stop: making the art is the owner's own production work. The production owner saves A, B and C there and runs plm media thumbnail-import, which checks every image and releases the package; then resumes citing the inbox, and the workflow retries the step with the same key, so P6 replays the now-ready package."
     },
     "STEP_PLATFORM_FAULT": {
       "hold_class": "REVIEWABLE_QUARANTINE",

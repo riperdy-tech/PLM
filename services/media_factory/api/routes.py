@@ -39,8 +39,11 @@ __all__ = ["build_router"]
 
 def _package_response(pkg: MediaPackage) -> MediaPackageResponse:
     qa = pkg.render_report.get("qa") or {}
-    blocking = [] if pkg.status is PackageStatus.READY_FOR_PUBLISH else list(
-        qa.get("reason_codes") or [])
+    if pkg.status is PackageStatus.AWAITING_THUMBNAIL_ART:
+        blocking = ["thumbnail_art_awaited"]
+    else:
+        blocking = [] if pkg.status is PackageStatus.READY_FOR_PUBLISH else list(
+            qa.get("reason_codes") or [])
     return MediaPackageResponse(
         media_package_id=pkg.media_package_id,
         release_manifest_id=pkg.release_manifest_id,
@@ -119,7 +122,9 @@ def build_router(
         ``detail.facts.missing_seconds`` (how far the cleared supply is below the range
         minimum), so the caller tops the P3 package up and retries. 503: an authority,
         the artifact store or the toolchain is unavailable. 200 with ``status: failed``
-        and ``blocking_reason_codes``: the render ran and post-render QA blocked it. A
+        and ``blocking_reason_codes``: the render ran and post-render QA blocked it. 200
+        with ``status: awaiting_thumbnail_art`` (``thumbnail_art_awaited``): it passed and
+        waits for the owner's thumbnail art in the configured inbox. A
         request that resolves to an existing package returns it without rendering.
         """
         if backend is None:
@@ -142,7 +147,8 @@ def build_router(
                     session, backend, payload, clock=clock,
                     default_render_profile=settings.default_render_profile,
                     render_session_factory=session_factory,
-                    worker_id_factory=lambda: uuid4().hex)
+                    worker_id_factory=lambda: uuid4().hex,
+                    thumbnail_art_inbox=settings.thumbnail_art_inbox)
                 session.commit()
         except MediaAssemblyError as exc:
             raise HTTPException(

@@ -34,6 +34,9 @@ from .storage.repositories import (
 )
 from .texture_backfill import backfill_package_texture, backfill_packages_texture
 from .texture_inventory import inspect_brand_album_textures
+from .thumbnail_art.guide import build_prompts, load_style_guide
+from .thumbnail_art.importer import import_owner_art
+from .thumbnail_art.inbox import INBOX_VAR, write_job
 
 media_cli = typer.Typer(help="Media factory CLI commands")
 
@@ -73,14 +76,15 @@ def _run_assembly(req: AssemblePackageRequest) -> None:
     if backend is None:
         typer.echo("blocked: no service token (PLM_SERVICE_TOKEN) to ask P5", err=True)
         raise typer.Exit(code=3)
+    settings = load_media_factory_settings(platform=platform)
     with factory() as session:
         try:
             pkg = assemble_and_persist(
                 session, backend, req, clock=SystemClock(),
-                default_render_profile=load_media_factory_settings(
-                    platform=platform).default_render_profile,
+                default_render_profile=settings.default_render_profile,
                 render_session_factory=factory,
-                worker_id_factory=lambda: uuid4().hex)
+                worker_id_factory=lambda: uuid4().hex,
+                thumbnail_art_inbox=settings.thumbnail_art_inbox)
         except MediaAssemblyError as exc:
             typer.echo(f"Error: assembly refused: {exc}", err=True)
             raise typer.Exit(code=2) from exc
@@ -97,6 +101,11 @@ def _run_assembly(req: AssemblePackageRequest) -> None:
     typer.echo(f"Thumbnails:          {len(pkg.thumbnails)} variants")
     typer.echo(f"Chapters:            {len(pkg.chapters)}")
     typer.echo(f"Status:              {pkg.status.value}")
+    if (pkg.status is PackageStatus.AWAITING_THUMBNAIL_ART
+            and settings.thumbnail_art_inbox is not None):
+        typer.echo("Waiting for thumbnail art: follow "
+                   f"{settings.thumbnail_art_inbox / pkg.media_package_id / 'PROMPTS.md'}")
+        return
     if pkg.status is not PackageStatus.READY_FOR_PUBLISH:
         codes = (pkg.render_report.get("qa") or {}).get("reason_codes") or []
         typer.echo(f"Blocked by post-render QA: {', '.join(codes)}", err=True)
@@ -449,6 +458,58 @@ def cli_package(
         typer.echo(f"Brand ID:         {pkg.brand_id}")
         typer.echo(f"Video Master URI: {pkg.video_master_uri}")
         typer.echo(f"Status:           {pkg.status.value}")
+
+
+def _art_inbox() -> Path:
+    inbox = load_media_factory_settings(platform=load_settings()).thumbnail_art_inbox
+    if inbox is None:
+        typer.echo(f"Error: {INBOX_VAR} is not set", err=True)
+        raise typer.Exit(code=1)
+    return inbox
+
+
+@media_cli.command(name="thumbnail-job")
+def cli_thumbnail_job(
+    package_id: str = typer.Argument(..., help="Media package to write art prompts for"),
+    visual_world: str = typer.Option(..., "--visual-world", help="The package's P3 visual world"),
+    thumbnail_family: str | None = typer.Option(
+        None, "--thumbnail-family", help="P2's thumbnail style for variant A"),
+) -> None:
+    """Write a package's thumbnail art prompts without changing its status
+    (an already published video's new art; a waiting package gets its job at assembly)."""
+    inbox = _art_inbox()
+    with platform_session_factory()() as session:
+        pkg = get_media_package_by_id(session, package_id)
+    if pkg is None:
+        typer.echo(f"No media package found for ID {package_id}.", err=True)
+        raise typer.Exit(code=1)
+    guide = load_style_guide()
+    folder = write_job(inbox, package_id=package_id,
+                       title=str(pkg.metadata_candidates[0]["title"]),
+                       guide_version=guide.guide_version,
+                       prompts=build_prompts(guide, package_id=package_id,
+                                             thumbnail_family=thumbnail_family,
+                                             visual_world=visual_world))
+    typer.echo(f"Prompts: {folder / 'PROMPTS.md'}")
+
+
+@media_cli.command(name="thumbnail-import")
+def cli_thumbnail_import(
+    package_id: str = typer.Argument(..., help="Package waiting at awaiting_thumbnail_art"),
+) -> None:
+    """Check the owner's three images and, if all pass, release the package."""
+    inbox = _art_inbox()
+    platform = load_settings()
+    with platform_session_factory()() as session:
+        try:
+            pkg = import_owner_art(session, MinioArtifactStore(platform), package_id,
+                                   inbox / package_id, now=SystemClock().now())
+        except MediaAssemblyError as exc:
+            typer.echo(f"Not imported: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        session.commit()
+    typer.echo(f"{package_id} is {pkg.status.value} with thumbnails "
+               f"{', '.join(t['id'] for t in pkg.thumbnails)}")
 
 
 def serve(host: str = "127.0.0.1", port: int = 8006) -> None:

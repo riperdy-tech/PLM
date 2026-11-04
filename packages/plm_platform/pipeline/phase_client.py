@@ -44,6 +44,7 @@ __all__ = [
     "EXTERNAL_WRITE_CODE_PREFIX",
     "MANUAL_AUDIO_HOLD_REASON",
     "SIMULATED_PUBLICATION_HOLD_REASON",
+    "THUMBNAIL_ART_HOLD_REASON",
     "UNCLASSIFIED_WRITE_HOLD_REASON",
     "ExternalWriteRefused",
     "PhaseClient",
@@ -68,6 +69,9 @@ MANUAL_AUDIO_HOLD_REASON: Final[str] = "MANUAL_AUDIO_AWAITED"
 SIMULATED_PUBLICATION_HOLD_REASON: Final[str] = "SIMULATED_PUBLICATION"
 """A mock provider only simulated a publish or a distribution submission (reason
 ``simulated_write``) on a stack whose configuration does not allow it."""
+THUMBNAIL_ART_HOLD_REASON: Final[str] = "THUMBNAIL_ART_AWAITED"
+"""P6 rendered a package and waits for the owner's thumbnail art (reason
+``thumbnail_art_awaited``)."""
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 """Not in the hold policy on purpose: a guard reason nobody declared holds as an
 unmapped hard stop (fail closed, ``policy_mapped = False``)."""
@@ -144,6 +148,8 @@ class ExternalWriteRefused(PhaseRequestRefused):
             self.hold_reason_code = MANUAL_AUDIO_HOLD_REASON
         elif self.guard_reason == "simulated_write":
             self.hold_reason_code = SIMULATED_PUBLICATION_HOLD_REASON
+        elif self.guard_reason == "thumbnail_art_awaited":
+            self.hold_reason_code = THUMBNAIL_ART_HOLD_REASON
         else:
             self.hold_reason_code = UNCLASSIFIED_WRITE_HOLD_REASON
 
