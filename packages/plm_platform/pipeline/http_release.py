@@ -123,6 +123,10 @@ class ReleaseSteps(HttpStepsBase):
         return await asyncio.to_thread(self._submit_distribution, request)
 
     def _submit_distribution(self, request: StepRequest) -> StepResult:
+        if not self._config.distribution_enabled:
+            # A YouTube-only channel: nothing is submitted, and nothing claims it was.
+            return StepResult(outputs={"releases": [], "external_writes": [],
+                                       "skipped": "distribution_disabled"})
         release = self._config.require_release(request.step)
         key = request.idempotency_key
         uploaded = require(request.inputs, "upload", "submit_distribution inputs")

@@ -19,6 +19,7 @@ limited to loopback origins without credentials.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
@@ -47,6 +48,7 @@ from .live import VIEW_NAMES, LiveDashboard
 from .orchestrator import DemoOrchestrator
 from .service import DEMO_DATA_SOURCE, DashboardService, UnknownCaseError
 from .sources import LIVE_DATA_SOURCE, PhaseApis, ReadOnlyDatabase, SourceUnavailable
+from .studio import Studio, build_studio
 
 __all__ = [
     "DATA_SOURCE_HEADER",
@@ -133,6 +135,7 @@ def create_live_app(
     actions: ExceptionActions,
     *,
     platform: Settings | None = None,
+    studio: Studio | None = None,
 ) -> FastAPI:
     """The live dashboard. ``platform=None`` keeps every mutating route closed (503)."""
     app = _base_app(
@@ -208,8 +211,107 @@ def create_live_app(
             raise _http(refused) from None
         return {"data_source": LIVE_DATA_SOURCE, "action": "resend_signal", **answer}
 
+    if studio is not None:
+        _studio_routes(app, studio, require_token)
     _serve_static(app, LIVE_STATIC_DIR)
     return app
+
+
+def _range(request: Request, data: bytes, media_type: str) -> Response:
+    """``data`` whole, or the one byte range the browser asks for (video seeking)."""
+    total = len(data)
+    header = request.headers.get("range", "")
+    if not header.startswith("bytes="):
+        return Response(content=data, media_type=media_type,
+                        headers={"Accept-Ranges": "bytes"})
+    first, _, last = header[6:].split(",")[0].partition("-")
+    try:
+        start = int(first) if first else max(0, total - int(last))
+        end = min(int(last), total - 1) if first and last else total - 1
+    except ValueError:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{total}"})
+    if start >= total or start > end:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{total}"})
+    return Response(content=data[start:end + 1], status_code=206, media_type=media_type,
+                    headers={"Accept-Ranges": "bytes",
+                             "Content-Range": f"bytes {start}-{end}/{total}"})
+
+
+def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
+    """The Studio (``dashboard.studio``): reads are open like the views, every write
+    needs the service token."""
+
+    def guarded(call: Callable[[], Any]) -> Any:
+        try:
+            return call()
+        except ActionRefused as refused:
+            raise _http(refused) from None
+
+    async def guarded_async(call: Callable[[], Awaitable[Any]]) -> Any:
+        try:
+            return await call()
+        except ActionRefused as refused:
+            raise _http(refused) from None
+
+    @app.get("/api/studio")
+    async def studio_overview() -> dict[str, Any]:
+        return {"data_source": LIVE_DATA_SOURCE,
+                **await asyncio.to_thread(guarded, studio.overview)}
+
+    @app.post("/api/studio/start", dependencies=[Depends(require_token)])
+    async def studio_start() -> dict[str, Any]:
+        return {"started": await guarded_async(studio.start_run)}
+
+    @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
+    async def studio_song(stem: str, request: Request) -> dict[str, Any]:
+        data = await request.body()
+        saved: dict[str, Any] = guarded(lambda: studio.save_song(stem, data))
+        return saved
+
+    @app.post("/api/studio/songs/done", dependencies=[Depends(require_token)])
+    async def studio_songs_done() -> dict[str, Any]:
+        return {"resumed": await guarded_async(studio.songs_done)}
+
+    @app.get("/api/studio/thumbnails/{package_id}/{letter}")
+    def studio_art(package_id: str, letter: str) -> Response:
+        data, kind = guarded(lambda: studio.art_file(package_id, letter))
+        return Response(content=data, media_type=kind)
+
+    @app.put("/api/studio/thumbnails/{package_id}/{letter}",
+             dependencies=[Depends(require_token)])
+    async def studio_art_upload(package_id: str, letter: str,
+                                request: Request) -> dict[str, Any]:
+        data = await request.body()
+        saved: dict[str, Any] = guarded(lambda: studio.save_art(package_id, letter, data))
+        return saved
+
+    @app.post("/api/studio/thumbnails/{package_id}/import",
+              dependencies=[Depends(require_token)])
+    async def studio_art_import(package_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(
+            lambda: studio.import_thumbnails(package_id))
+        return result
+
+    @app.get("/api/studio/packages/{package_id}/video")
+    async def studio_video(package_id: str, request: Request) -> Response:
+        data = await asyncio.to_thread(guarded, lambda: studio.video(package_id))
+        return _range(request, data, "video/mp4")
+
+    @app.get("/api/studio/packages/{package_id}/thumbnails/{variant}")
+    async def studio_thumbnail(package_id: str, variant: str) -> Response:
+        data = await asyncio.to_thread(guarded, lambda: studio.thumbnail(package_id, variant))
+        return Response(content=data, media_type="image/png" if data[1:4] == b"PNG"
+                        else "image/jpeg")
+
+    @app.post("/api/studio/approvals/{case_id}/approve", dependencies=[Depends(require_token)])
+    async def studio_approve(case_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(lambda: studio.approve(case_id))
+        return result
+
+    @app.post("/api/studio/approvals/{case_id}/reject", dependencies=[Depends(require_token)])
+    async def studio_reject(case_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(lambda: studio.reject(case_id))
+        return result
 
 
 def build_live_components(
@@ -360,5 +462,11 @@ def create_app(
     """The dashboard the CLI serves: live unless ``demo`` is set explicitly."""
     if demo:
         return create_demo_app(platform=platform)
+    from ..service_urls import LOOPBACK_HOST, service_urls
+
     live, actions = build_live_components(platform, reviewers_file=reviewers_file)
-    return create_live_app(live, actions, platform=platform)
+    urls = service_urls(default_host=LOOPBACK_HOST)
+    token = (None if platform is None or platform.service_token is None
+             else platform.service_token.get_secret_value())
+    studio = build_studio(platform, live, actions, PhaseApis(urls, token=token), urls)
+    return create_live_app(live, actions, platform=platform, studio=studio)

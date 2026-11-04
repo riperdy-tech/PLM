@@ -104,9 +104,24 @@ input, select, textarea {
 .bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); overflow: hidden; min-width: 60px; }
 .bar > span { display: block; height: 100%; background: var(--cyan); }
 
+.studio-tab { border-color: var(--emerald); }
+.step { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.step.waiting { border-color: rgba(245, 158, 11, 0.7); }
+.step-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.prompt { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin: 6px 0; max-height: 220px; overflow: auto; }
+.song, .variant { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.saved { color: var(--emerald); font-family: var(--mono); font-size: 12px; }
+.missing { color: var(--amber); font-family: var(--mono); font-size: 12px; }
+.preview { max-width: 320px; width: 100%; border-radius: 8px; border: 1px solid var(--border); display: block; margin-top: 6px; }
+.review-media { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+.review-media video { width: 100%; border-radius: 10px; background: #000; }
+.big { font-size: 15px; padding: 10px 18px; }
+
 @media (max-width: 640px) {
   .app { padding: 12px 16px 32px; }
   .app-header { flex-direction: column; }
   .header-side { align-items: flex-start; }
-  .case dl, form.action .row { grid-template-columns: 1fr; }
+  .case dl, form.action .row, .review-media { grid-template-columns: 1fr; }
 }

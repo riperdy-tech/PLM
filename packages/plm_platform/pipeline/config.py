@@ -27,6 +27,8 @@ The file::
   were published.
 * ``release``: P8's release-level facts (P8 §11), which P8 never defaults. The release
   date is the submission instant's date plus ``release_date_offset_days``.
+* ``distribution``: ``{"enabled": false}`` skips the P8 submission (a YouTube-only
+  channel; P8 has only a mock distributor). Unset: enabled, as before.
 * ``fx_rates``: rates P9 records before it measures, so amounts convert into its
   reporting currency from recorded rates (ADR-0031); a missing rate stays a refusal.
 * ``learning``: the second allocation cycle P2 runs after the posterior update.
@@ -119,6 +121,7 @@ class PipelineConfig:
     release: ReleaseConfig | None = None
     fx_rates: tuple[FxRateConfig, ...] = ()
     learning: LearningCycleConfig | None = None
+    distribution_enabled: bool = True
 
     def require_publish(self, step: str) -> PublishConfig:
         if self.publish is None:
@@ -150,8 +153,8 @@ def _int(section: Mapping[str, Any], key: str, where: str, *, minimum: int) -> i
     return value
 
 
-def _flag(section: Mapping[str, Any], key: str, where: str) -> bool:
-    value = section.get(key, False)
+def _flag(section: Mapping[str, Any], key: str, where: str, *, default: bool = False) -> bool:
+    value = section.get(key, default)
     if not isinstance(value, bool):
         raise SettingsError(f"{where}.{key} must be true or false")
     return value
@@ -193,6 +196,7 @@ def parse_pipeline_config(raw: Mapping[str, Any]) -> PipelineConfig:
     publish = _section(raw, "publish")
     release = _section(raw, "release")
     learning = _section(raw, "learning")
+    distribution = _section(raw, "distribution")
     rates = raw.get("fx_rates", [])
     if not isinstance(rates, list):
         raise SettingsError("fx_rates must be a list")
@@ -220,6 +224,8 @@ def parse_pipeline_config(raw: Mapping[str, Any]) -> PipelineConfig:
             slot_count=_int(learning, "slot_count", "learning", minimum=1), budget=budget,
             policy_version=_text(learning, "policy_version", "learning"),
             activation_state=_text(learning, "activation_state", "learning")),
+        distribution_enabled=(True if distribution is None
+                              else _flag(distribution, "enabled", "distribution", default=True)),
     )
 
 

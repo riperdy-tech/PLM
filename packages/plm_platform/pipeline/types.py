@@ -65,6 +65,9 @@ class PipelineOptions:
     topup_spare_tracks: int = 1
     """Recordings asked for beyond ``ceil(missing seconds / shortest track)``, so one P5
     rejection does not cost a whole round."""
+    require_publish_approval: bool = True
+    """Hold every package as ``PUBLISH_APPROVAL_AWAITED`` before the upload step until the
+    owner approves it (owner decision 2026-11-05)."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,16 +8,17 @@ retry with the same package resumes the attempt and asks the guard again (R5).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from plm_contracts import ErrorShape, ObservationWindow
+from plm_contracts import ErrorShape, ObservationWindow, ProviderMode
 from plm_contracts.seams import ExperimentLineage, SeamRejection, parse_seam
 from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clearance import ClearanceVerifier
 from plm_platform.clock import Clock
-from plm_platform.execution import ExternalWriteGuard, WriteDecision
+from plm_platform.execution import ExternalWriteGuard, WriteDecision, provider_mode_of
 from pydantic import AwareDatetime
 
 from ..analytics import YouTubeAnalyticsSource
@@ -118,10 +119,17 @@ def create_youtube_router(
     clock: Clock,
     clearance: ClearanceVerifier,
     write_guard: ExternalWriteGuard | None = None,
+    write_guard_factory: Callable[[], ExternalWriteGuard] | None = None,
+    media_bytes: Callable[[str, str], bytes] | None = None,
     analytics: YouTubeAnalyticsSource | None = None,
 ) -> APIRouter:
     """``analytics`` is the YouTube Analytics source (only a mock before R6); ``None``
-    makes the analytics route refuse with ``analytics_source_not_configured``."""
+    makes the analytics route refuse with ``analytics_source_not_configured``.
+
+    ``write_guard_factory`` builds the guard for each publish, so a grant the owner adds
+    while the service runs (the dashboard's approval) is seen; it wins over
+    ``write_guard``. ``media_bytes(uri, checksum)`` fetches the package's own video and
+    thumbnail bytes for a real client (a real upload without them is refused)."""
     router = APIRouter(prefix="/youtube", tags=["youtube"])
     yt_client = client or MockYouTubeClient()
     guard = write_guard or ExternalWriteGuard()
@@ -251,13 +259,25 @@ def create_youtube_router(
                     )
                 manifest = stored
 
-            # 4. Execute Publishing Engine
+            # 4. Execute Publishing Engine. A real upload sends the package's own bytes,
+            # fetched by their pinned digests; a mock client uses its placeholders.
+            video_data = thumbnail_data = None
+            if provider_mode_of(yt_client) is ProviderMode.REAL:
+                if media_bytes is None:
+                    raise _refused(503, "media_store_not_configured",
+                                   "a real upload needs the package's stored bytes", [])
+                video_data = media_bytes(manifest.video_master_uri, manifest.video_checksum)
+                thumbnail_data = media_bytes(manifest.thumbnail_uri,
+                                             manifest.thumbnail_checksum)
             engine = YouTubePublishingEngine(
-                yt_client, clock=clock, clearance=clearance, write_guard=guard
+                yt_client, clock=clock, clearance=clearance,
+                write_guard=guard if write_guard_factory is None else write_guard_factory(),
             )
             result = engine.execute_publish(
                 session,
                 manifest,
+                video_data=video_data,
+                thumbnail_data=thumbnail_data,
                 operating_mode=OperatingMode(req.operating_mode),
             )
 

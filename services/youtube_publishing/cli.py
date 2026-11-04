@@ -21,7 +21,6 @@ from plm_platform.execution import (
     load_write_authorizations,
 )
 from plm_platform.ledger import budget_gate_for
-from plm_platform.storage import digest_from_key, from_uri, get_verified
 
 from .client.mock import MockYouTubeClient
 from .client.real import RealYouTubeClient
@@ -34,6 +33,7 @@ from .manifests import (
     preflight_metadata,
     same_publish_choice,
 )
+from .media import artifact_bytes
 from .preflight.gates import evaluate_preflight_all
 from .series import load_series_playlists
 from .storage.repositories import (
@@ -46,14 +46,6 @@ from .test_kit import build_test_kit
 
 CLOCK: Clock = SystemClock()
 """The CLI's time source; the only wall-clock read in the P7 command line."""
-
-
-def _artifact_bytes(uri: str, checksum: str) -> bytes:
-    """The stored bytes of a C6 asset, refused unless they hash to its checksum."""
-    key = from_uri(uri)
-    if digest_from_key(key) != checksum:
-        raise ValueError(f"{uri} does not pin checksum {checksum}")
-    return get_verified(key)
 
 
 def cli_publish(
@@ -124,8 +116,8 @@ def cli_publish(
         client = RealYouTubeClient() if real else MockYouTubeClient()
         # A real upload sends the package's own bytes, fetched by their pinned digests;
         # a mock client uses its placeholders.
-        video_data = _artifact_bytes(manifest.video_master_uri, manifest.video_checksum)             if real else None
-        thumbnail_data = _artifact_bytes(manifest.thumbnail_uri,
+        video_data = artifact_bytes(manifest.video_master_uri, manifest.video_checksum)             if real else None
+        thumbnail_data = artifact_bytes(manifest.thumbnail_uri,
                                          manifest.thumbnail_checksum) if real else None
         yt_engine = YouTubePublishingEngine(
             client,

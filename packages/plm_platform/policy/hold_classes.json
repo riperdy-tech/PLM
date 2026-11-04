@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v11",
+  "policy_version": "hold-classes-v12",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -14,7 +14,8 @@
     "v8 (R6): new STEP_PLATFORM_FAULT when a step fails with PlatformFault, a permanent failure that is the platform's, not the content's (a P4 plan that failed without a P29 refusal). Before v8 such a failure ended the run as a creative rejection.",
     "v9 (R6): STEP_PLATFORM_FAULT also covers every other permanent step failure that decides nothing about the content (a ValidationFailure, such as a P6 render its own post-render QA blocked). Only a CreativeRejection or PolicyRejection still ends a run. Before v9 such a failure ended the run for good.",
     "v10 (R6): new SIMULATED_PUBLICATION when P7 or P8 answers with a write a mock provider only simulated and the pipeline configuration does not set publish.allow_simulated. Before v10 the run went PUBLISHED on 2026-11-04 (run c1f32e48) with a mock video id, and would have measured and learned from a video that does not exist.",
-    "v11 (R6): new THUMBNAIL_ART_AWAITED when P6 renders a package while PLM_THUMBNAIL_ART_INBOX is set and waits for the owner's thumbnail art. Before v11 P6 offered only its own drawn thumbnails, and on 2026-11-04 one went live on video jTZCpyc5Qyw (made unlisted the same day)."
+    "v11 (R6): new THUMBNAIL_ART_AWAITED when P6 renders a package while PLM_THUMBNAIL_ART_INBOX is set and waits for the owner's thumbnail art. Before v11 P6 offered only its own drawn thumbnails, and on 2026-11-04 one went live on video jTZCpyc5Qyw (made unlisted the same day).",
+    "v12 (R6): new PUBLISH_APPROVAL_AWAITED: before every upload the run waits for the owner to watch the finished package and approve it (owner decision 2026-11-05). Before v12 a package that passed QA went straight to the upload step."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -316,6 +317,16 @@
       "category": "thumbnail_art_import",
       "source": "owner decision 2026-11-04 (P6's drawn thumbnails would push viewers away; the owner makes thumbnails in Nano Banana Pro from P6's prompts); raised by plm_platform.pipeline.http when P6 answers awaiting_thumbnail_art (services/media_factory/thumbnail_art)",
       "description": "P6 rendered the package and it passed QA, but it waits for the owner's thumbnail art: P6 wrote three image prompts to <PLM_THUMBNAIL_ART_INBOX>/<media_package_id>/PROMPTS.md. Reviewable, not a hard stop: making the art is the owner's own production work. The production owner saves A, B and C there and runs plm media thumbnail-import, which checks every image and releases the package; then resumes citing the inbox, and the workflow retries the step with the same key, so P6 replays the now-ready package."
+    },
+    "PUBLISH_APPROVAL_AWAITED": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "LOW",
+      "override_permitted": true,
+      "required_evidence": ["publish_approval_ref"],
+      "reviewer_role": "production_owner",
+      "category": "publish_approval",
+      "source": "owner decision 2026-11-05 (the owner watches every video and approves it before it is uploaded); raised by plm_platform.pipeline.workflow before the upload step unless PipelineOptions.require_publish_approval is false",
+      "description": "The package is rendered, passed QA and carries the owner's thumbnail art, and waits for the owner to watch it and approve the upload. Reviewable, not a hard stop: approving is the owner's own decision. The production owner approves in the dashboard's Studio, which grants the upload for that package and resumes citing the approval; rejecting ends the run, and resuming with rewind_to=assemble re-renders the package instead."
     },
     "STEP_PLATFORM_FAULT": {
       "hold_class": "REVIEWABLE_QUARANTINE",

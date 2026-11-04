@@ -521,3 +521,47 @@ async def test_a_rewind_on_any_other_hold_is_ignored(
     key = idempotency_key(workflow_id, Step.GENERATE.value)
     assert steps.calls_for(Step.GENERATE) == [key, key]
     assert steps.calls_for(Step.ASSEMBLE) == []
+
+
+async def test_the_upload_waits_for_the_owner_approval_of_the_package(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves (hold-classes-v12, owner decision 2026-11-05): with the default options a
+    packaged run holds as PUBLISH_APPROVAL_AWAITED before any upload call; a resume
+    without the approval evidence is refused; the production owner's approval uploads
+    once and the run goes on to publish."""
+    import dataclasses
+
+    from plm_platform.pipeline.client import start_pipeline
+    from plm_platform.pipeline.workflow import PUBLISH_APPROVAL_HOLD_REASON
+
+    from tests.integration.pipeline.support import QUEUE
+
+    steps = MockPhaseSteps(_scripts())
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(
+            client, directive_id=directive_id, brand_id="gate_brand", task_queue=QUEUE,
+            options=dataclasses.replace(OPTIONS, require_publish_approval=True))
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the approval hold")
+        assert held.held_from == "PACKAGED"
+        assert steps.calls_for(Step.UPLOAD) == []
+        with factory() as session:
+            case = ExceptionQueue().require(session, held.open_case_ids[0])
+        assert case.reason_code == PUBLISH_APPROVAL_HOLD_REASON
+        assert case.reviewer_role == "production_owner"
+
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="pia", role="production_owner", evidence={}))
+        await asyncio.sleep(2)
+        assert (await handle.query(PipelineWorkflow.status)).state == "HELD"
+        assert steps.calls_for(Step.UPLOAD) == []
+
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="pia", role="production_owner",
+            evidence={"publish_approval_ref": "dashboard studio approval"}))
+        await wait_until(handle, lambda s: s.state in ("ANALYZING", "LEARNING"),
+                         "the publish after the approval")
+        await handle.terminate(reason="R6 test: approval proven")
+
+    assert steps.calls_for(Step.UPLOAD) == [idempotency_key(workflow_id, "upload")]

@@ -27,7 +27,6 @@ from youtube_publishing.analytics import MockYouTubeAnalytics
 from youtube_publishing.api.app import create_app
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.models import ChannelProfile
-from youtube_publishing.engine import YouTubePublishingEngine
 from youtube_publishing.storage.repositories import insert_channel_profile
 
 from tests.support.clearance import p5_holding
@@ -105,8 +104,9 @@ def test_a_guard_denial_is_a_409_with_the_capability_and_reason(
 ) -> None:
     """A real client under a live policy with no operator authorization: the guard
     denies, nothing is sent, and the answer names the capability and reason."""
-    monkeypatch.setattr(YouTubePublishingEngine, "_media_bytes",
-                        lambda self, supplied, attr: b"video-bytes")
+    monkeypatch.setattr("youtube_publishing.api.app.artifact_bytes",
+                        lambda uri, checksum: b"video-bytes")
+    monkeypatch.delenv("PLM_WRITE_AUTHORIZATIONS_FILE", raising=False)
     real = RealModeClient()
     execution = ExecutionSettings(provider_modes={"youtube": ProviderMode.REAL},
                                   policies={"youtube.upload": ExecutionPolicy.LIVE})
@@ -116,6 +116,36 @@ def test_a_guard_denial_is_a_409_with_the_capability_and_reason(
     assert res.json()["detail"]["code"] == "external_write_deny"
     assert res.json()["detail"]["message"] == "youtube.upload not performed: no_authorization"
     assert real.recorded_calls == []  # nothing reached the provider
+
+
+def test_a_real_publish_fetches_the_package_bytes_and_sees_a_grant_added_later(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """The API route sends a real client the package's own video and thumbnail bytes
+    (it sent none before), and reads the owner's grants on every publish: a grant written
+    while the service runs (the dashboard's approval) gets past the authorization check
+    (here the next gate, the unconfigured budget ledger, refuses instead)."""
+    fetched: list[str] = []
+    monkeypatch.setattr("youtube_publishing.api.app.artifact_bytes",
+                        lambda uri, checksum: fetched.append(uri) or b"bytes")
+    grants = tmp_path / "write-authorizations.json"
+    grants.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("PLM_WRITE_AUTHORIZATIONS_FILE", str(grants))
+    execution = ExecutionSettings(provider_modes={"youtube": ProviderMode.REAL},
+                                  policies={"youtube.upload": ExecutionPolicy.LIVE})
+    client = _app(client=RealModeClient(), execution=execution)
+    before = _publish(client)
+    assert before.json()["detail"]["message"] == "youtube.upload not performed: no_authorization"
+    package = media_package("cand_r5", media_package_id="pkg_r5")
+    assert fetched[:2] == [package.video.master_uri, package.thumbnails[0].uri]
+
+    grants.write_text('[{"capability": "youtube.upload", "granted_by": "owner", '
+                      '"granted_at": "2026-09-30T00:00:00+00:00", '
+                      '"expires_at": "2026-10-02T00:00:00+00:00"}]', encoding="utf-8")
+    after = _publish(client)
+    assert after.status_code == 409, after.text
+    assert after.json()["detail"]["message"] == (
+        "youtube.upload not performed: budget_ledger_unavailable")
 
 
 def test_the_mock_analytics_source_is_deterministic_per_arm_and_labelled() -> None:

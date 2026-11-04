@@ -252,6 +252,22 @@ def test_submission_sends_the_manifests_package_event_and_configured_release_fac
     assert result.outputs["external_writes"][0]["media_package_id"] == "m1"
 
 
+def test_a_disabled_distribution_submits_nothing_and_says_so() -> None:
+    """``{"distribution": {"enabled": false}}`` (a YouTube-only channel; P8 is mock only):
+    no P8 call, no receipt, and the outputs name the skip instead of a release."""
+    world = World()
+    config = parse_pipeline_config({"distribution": {"enabled": False}})
+    assert config.distribution_enabled is False
+    assert parse_pipeline_config({}).distribution_enabled is True
+    result = asyncio.run(world.steps(config).submit_distribution(
+        _request(Step.SUBMIT_DISTRIBUTION, {"upload": PUBLICATIONS})))
+    assert result.outputs == {"releases": [], "external_writes": [],
+                              "skipped": "distribution_disabled"}
+    assert world.requests == []
+    with pytest.raises(SettingsError, match="distribution.enabled"):
+        parse_pipeline_config({"distribution": {"enabled": "no"}})
+
+
 # -- await_processing ---------------------------------------------------------------------------
 
 

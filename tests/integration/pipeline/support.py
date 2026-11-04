@@ -67,7 +67,8 @@ REVIEWERS = {
 }
 OPTIONS = PipelineOptions(step_start_to_close_seconds=120.0, step_heartbeat_seconds=5.0,
                           step_maximum_attempts=5, platform_start_to_close_seconds=30.0,
-                          platform_maximum_attempts=5)
+                          platform_maximum_attempts=5, require_publish_approval=False)
+"""The gate tests drive past the upload unattended; the approval hold has its own test."""
 WAIT_SECONDS = 60.0
 
 

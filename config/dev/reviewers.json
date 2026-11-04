@@ -1,5 +1,20 @@
 {
-  "admin": ["admin", "budget_owner", "rights_reviewer", "rights_counsel", "operator", "qa_reviewer", "creative_director"],
-  "operator": ["operator", "rights_reviewer", "qa_reviewer"]
+  "admin": [
+    "admin",
+    "budget_owner",
+    "rights_reviewer",
+    "rights_counsel",
+    "operator",
+    "qa_reviewer",
+    "creative_director"
+  ],
+  "operator": [
+    "operator",
+    "rights_reviewer",
+    "qa_reviewer"
+  ],
+  "owner": [
+    "production_owner",
+    "platform_owner"
+  ]
 }
-

@@ -100,6 +100,7 @@ __all__ = [
     "BUDGET_HOLD_REASON",
     "CAPABILITY_HOLD_REASON",
     "PLATFORM_FAULT_HOLD_REASON",
+    "PUBLISH_APPROVAL_HOLD_REASON",
     "RETRIES_HOLD_REASON",
     "SUPPLY_HOLD_REASON",
     "WORKFLOW_NAME",
@@ -114,6 +115,8 @@ CAPABILITY_HOLD_REASON: Final[str] = "CAPABILITY_UNAVAILABLE"
 SUPPLY_HOLD_REASON: Final[str] = "PLAYLIST_SUPPLY_SHORT"
 RETRIES_HOLD_REASON: Final[str] = "STEP_RETRIES_EXHAUSTED"
 PLATFORM_FAULT_HOLD_REASON: Final[str] = "STEP_PLATFORM_FAULT"
+PUBLISH_APPROVAL_HOLD_REASON: Final[str] = "PUBLISH_APPROVAL_AWAITED"
+"""The owner watches the finished package and approves its upload (hold-classes-v12)."""
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 SUPPLY_SHORT_FAILURE: Final[str] = "PlaylistSupplyShort"
 EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
@@ -289,6 +292,9 @@ class PipelineWorkflow:
             if assembled is None:
                 return self._outcome()
             await self._move(PipelineState.PACKAGED, step=Step.ASSEMBLE, done=assembled)
+            if (pipeline_input.options.require_publish_approval
+                    and not await self._approval_hold(assembled)):
+                return self._outcome()
             try:
                 uploaded = await self._step(
                     Step.UPLOAD, {"assemble": assembled.result.outputs},
@@ -514,6 +520,19 @@ class PipelineWorkflow:
             Step.ASSEMBLE, [(STEP_ORIGIN_PHASE[Step.ASSEMBLE], SUPPLY_HOLD_REASON, details)],
             error_code="playlist_supply_short",
             error_detail=f"cleared supply still short after {rounds} top-up round(s) ({why})")
+
+    async def _approval_hold(self, assembled: _Done) -> bool:
+        """Wait for the owner's approval of the packages before uploading them. A resume
+        with ``rewind_to=assemble`` re-renders instead (the next upload attempt rewinds)."""
+        outputs = assembled.result.outputs
+        details = {"media_package_ids": list(outputs.get("media_package_ids") or []),
+                   "packages": list(outputs.get("packages") or []),
+                   "rule": "nothing is uploaded until the owner has watched it and approved"}
+        return await self._hold(
+            Step.UPLOAD,
+            [(STEP_ORIGIN_PHASE[Step.UPLOAD], PUBLISH_APPROVAL_HOLD_REASON, details)],
+            error_code="publish_approval_awaited",
+            error_detail="the package waits for the owner's approval before upload")
 
     async def _analyze(self, published_at: datetime, horizon: ObservationWindow) -> bool:
         matures_at = window_end(published_at, horizon)

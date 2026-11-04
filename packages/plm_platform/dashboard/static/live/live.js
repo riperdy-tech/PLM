@@ -7,9 +7,9 @@
 
 const TOKEN_HEADER = 'X-PLM-Service-Token';
 const TOKEN_KEY = 'plmServiceToken';
-const VIEWS = ['command-center', 'market-map', 'production-queue', 'experiment-board', 'economics', 'exceptions'];
+const VIEWS = ['studio', 'command-center', 'market-map', 'production-queue', 'experiment-board', 'economics', 'exceptions'];
 
-let currentView = 'command-center';
+let currentView = 'studio';
 let reviewers = { configured: false, reviewers: [] };
 
 // ------------------------------------------------------------------------ helpers
@@ -317,6 +317,171 @@ function resendButton(workflowId) {
   return h('div', {}, h('p', { class: 'notice' }, 'Holds closed; the run awaits its signal.'), select, ' ', button, result);
 }
 
+// ------------------------------------------------------------------------ studio
+//
+// The owner's steps of a run (dashboard/studio.py): songs, thumbnails, review. Uploads
+// are sent as raw bytes with the service token; the server checks every file.
+
+async function authedSend(url, method, body, contentType) {
+  const send = (token) => fetch(url, {
+    method, body,
+    headers: { ...(contentType ? { 'Content-Type': contentType } : {}), ...(token ? { [TOKEN_HEADER]: token } : {}) },
+  });
+  let res = await send(readToken());
+  if (res.status === 401) {
+    const entered = window.prompt('Service token (PLM_SERVICE_TOKEN) required for this action:');
+    if (entered) { storeToken(entered); res = await send(entered); }
+  }
+  const out = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body: out };
+}
+
+function refusal(out) {
+  const d = out.body.detail || {};
+  return `REFUSED (${out.status}) ${d.code || ''}: ${d.message || ''}`;
+}
+
+function copyButton(text) {
+  const button = h('button', { class: 'btn', type: 'button', onclick: async () => {
+    try { await navigator.clipboard.writeText(text); button.textContent = 'Copied'; }
+    catch { button.textContent = 'Copy failed: select the text'; }
+    setTimeout(() => { button.textContent = 'Copy prompt'; }, 1500);
+  } }, 'Copy prompt');
+  return button;
+}
+
+function actionButton(label, cls, run, { confirm: question, busy } = {}) {
+  const result = h('div', { class: 'result' });
+  const button = h('button', { class: `btn ${cls || ''}`, type: 'button', onclick: async () => {
+    if (question && !window.confirm(question)) return;
+    button.disabled = true;
+    result.className = 'result';
+    result.textContent = busy || 'Working...';
+    const out = await run();
+    button.disabled = false;
+    if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
+    result.className = 'result done';
+    result.textContent = 'Done.';
+    setTimeout(() => loadView('studio'), 1200);
+  } }, label);
+  return h('span', {}, button, ' ', result);
+}
+
+function uploadInput(accept, url) {
+  const result = h('span', { class: 'result' });
+  const input = h('input', { type: 'file', accept, onchange: async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    result.className = 'result';
+    result.textContent = `uploading ${file.name}...`;
+    const out = await authedSend(url, 'PUT', file, 'application/octet-stream');
+    if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
+    result.className = 'result done';
+    result.textContent = `saved as ${out.body.saved}`;
+    setTimeout(() => loadView('studio'), 800);
+  } });
+  return h('span', {}, input, ' ', result);
+}
+
+function stepCard(title, waitingCount) {
+  return h('section', { class: `step ${waitingCount ? 'waiting' : ''}` },
+    h('div', { class: 'step-head' }, h('h2', {}, title),
+      waitingCount ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, 'nothing waiting')));
+}
+
+function songsStep(songs, waiting) {
+  const card = stepCard('1. Songs', (waiting.MANUAL_AUDIO_AWAITED || []).length);
+  if (!songs.configured) {
+    card.append(h('p', { class: 'notice' }, 'The music inbox is not configured (PLM_FLOW_MUSIC_MANUAL_INBOX).'));
+    return card;
+  }
+  if (!songs.sheets.length) { card.append(h('p', { class: 'muted' }, 'No song is waiting.')); return card; }
+  card.append(h('p', { class: 'muted' }, 'Make each song in Flow Music from its prompt, download it as WAV and upload it here. When every song is saved, press Continue.'));
+  let missing = 0;
+  for (const sheet of songs.sheets) {
+    card.append(h('h3', {}, sheet.sheet));
+    for (const song of sheet.songs) {
+      if (!song.saved) missing += 1;
+      card.append(h('div', { class: 'song' },
+        h('div', { class: 'step-head' }, h('strong', { class: 'mono' }, `${song.stem}.wav`),
+          song.saved ? h('span', { class: 'saved' }, 'saved') : h('span', { class: 'missing' }, 'missing')),
+        h('div', { class: 'prompt' }, song.text),
+        h('div', { class: 'row-actions' }, copyButton(song.text), uploadInput('.wav,audio/wav', `/api/studio/songs/${encodeURIComponent(song.stem)}`)),
+        song.lyrics_needed && !song.lyrics_saved ? h('p', { class: 'notice' }, `This song has vocals: save its lyrics as ${song.stem}.lyrics.txt in ${songs.inbox}.`) : null));
+    }
+  }
+  card.append(h('div', { class: 'row-actions' },
+    actionButton(missing ? `Continue (${missing} still missing)` : 'Continue', 'btn-ok big',
+      () => authedSend('/api/studio/songs/done', 'POST'), { busy: 'Sending the songs to the run...' })));
+  return card;
+}
+
+function thumbnailsStep(jobs, waiting) {
+  const card = stepCard('2. Thumbnails', (waiting.THUMBNAIL_ART_AWAITED || []).length);
+  if (!jobs.length) { card.append(h('p', { class: 'muted' }, 'No thumbnail is waiting.')); return card; }
+  card.append(h('p', { class: 'muted' }, 'Make each image in Nano Banana Pro (16:9, full size) and upload it. Image A is also the picture of the whole video. Import checks all three and renders the video; it can take a few minutes.'));
+  for (const job of jobs) {
+    card.append(h('h3', {}, job.title || job.media_package_id));
+    for (const v of job.variants) {
+      const url = `/api/studio/thumbnails/${job.media_package_id}/${v.letter}`;
+      card.append(h('div', { class: 'variant' },
+        h('div', { class: 'step-head' }, h('strong', {}, `${v.letter}: ${v.style_id} ("${v.text}")`),
+          v.saved.length ? h('span', { class: 'saved' }, `saved: ${v.saved.join(', ')}`) : h('span', { class: 'missing' }, 'missing')),
+        h('div', { class: 'prompt' }, v.prompt || ''),
+        h('div', { class: 'row-actions' }, copyButton(v.prompt || ''), uploadInput('image/png,image/jpeg,image/webp', url)),
+        v.saved.length ? h('img', { class: 'preview', src: `${url}?t=${Date.now()}`, alt: `thumbnail ${v.letter}` }) : null));
+    }
+    const ready = job.variants.every((v) => v.saved.length);
+    card.append(h('div', { class: 'row-actions' }, ready
+      ? actionButton('Import and make the video', 'btn-ok big', () => authedSend(`/api/studio/thumbnails/${job.media_package_id}/import`, 'POST'),
+        { busy: 'Checking the images and rendering the still video... this can take several minutes.' })
+      : h('span', { class: 'muted' }, 'Upload A, B and C to import.')));
+  }
+  return card;
+}
+
+function reviewStep(reviews) {
+  const card = stepCard('3. Review and upload', reviews.length);
+  if (!reviews.length) { card.append(h('p', { class: 'muted' }, 'No video is waiting for approval.')); return card; }
+  for (const r of reviews) {
+    for (const p of r.packages) {
+      if (p.error) { card.append(h('p', { class: 'notice' }, `${p.media_package_id}: ${p.error}`)); continue; }
+      const base = `/api/studio/packages/${p.media_package_id}`;
+      card.append(h('div', { class: 'variant' },
+        h('h3', {}, p.title || p.media_package_id),
+        h('div', { class: 'review-media' },
+          h('video', { controls: true, preload: 'metadata', src: `${base}/video` }),
+          h('div', {}, h('strong', {}, 'Thumbnail'),
+            p.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${p.thumbnails[0]}`, alt: 'thumbnail' }) : h('p', { class: 'unknown' }, 'none'),
+            h('p', { class: 'muted' }, `${Math.round((p.duration_seconds || 0) / 60)} min, ${p.chapters} chapters`))),
+        h('strong', {}, 'Title'), h('div', { class: 'prompt' }, p.title || ''),
+        h('strong', {}, 'Description'), h('div', { class: 'prompt' }, p.description || ''),
+        h('p', { class: 'muted' }, `Tags: ${(p.tags || []).join(', ')}`)));
+    }
+    card.append(h('div', { class: 'row-actions' },
+      actionButton('Approve and upload to YouTube', 'btn-ok big', () => authedSend(`/api/studio/approvals/${r.case_id}/approve`, 'POST'),
+        { confirm: 'Upload this video to YouTube now? This publishes it on your channel.', busy: 'Granting the upload and resuming the run...' }),
+      actionButton('Reject', 'btn-danger', () => authedSend(`/api/studio/approvals/${r.case_id}/reject`, 'POST'),
+        { confirm: 'Reject this video? The run ends and nothing is uploaded.' })));
+  }
+  return card;
+}
+
+async function renderStudio() {
+  const s = await getJson('/api/studio');
+  const waiting = s.waiting || {};
+  const count = Object.values(waiting).reduce((n, ids) => n + ids.length, 0);
+  document.getElementById('studio-count').textContent = count ? `(${count})` : '';
+  const head = h('section', { class: 'step' },
+    h('div', { class: 'step-head' },
+      h('div', {}, h('h2', {}, 'Studio'), h('p', { class: 'muted' }, 'Start a video, then answer each step when it waits for you. Nothing is uploaded until you approve it.')),
+      s.start_available
+        ? actionButton('Start a new video', 'btn-ok big', () => authedSend('/api/studio/start', 'POST'),
+          { confirm: 'Start a new video? P2 picks what to make and the run begins.', busy: 'Asking P2 for the next video and starting the run...' })
+        : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
+  return h('div', {}, head, songsStep(s.songs, waiting), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
+}
+
 // ------------------------------------------------------------------------ shell
 
 async function loadView(name) {
@@ -324,6 +489,11 @@ async function loadView(name) {
   for (const tab of document.querySelectorAll('.tab')) tab.classList.toggle('active', tab.dataset.view === name);
   const root = document.getElementById('view-root');
   try {
+    if (name === 'studio') {
+      document.getElementById('generated-at').textContent = `updated ${new Date().toLocaleTimeString()}`;
+      root.replaceChildren(await renderStudio());
+      return;
+    }
     if (name === 'exceptions' || name === 'production-queue') reviewers = await getJson('/api/reviewers');
     const view = await getJson(`/api/views/${name}`);
     const pill = document.getElementById('data-source-pill');
@@ -340,5 +510,5 @@ document.addEventListener('DOMContentLoaded', () => {
   for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => loadView(tab.dataset.view));
   document.getElementById('refresh-btn').addEventListener('click', () => loadView(currentView));
   const initial = (location.hash || '').slice(1);
-  loadView(VIEWS.includes(initial) ? initial : 'command-center');
+  loadView(VIEWS.includes(initial) ? initial : 'studio');
 });

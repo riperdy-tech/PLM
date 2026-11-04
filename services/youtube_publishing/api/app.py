@@ -14,6 +14,7 @@ from plm_platform.execution import (
     ExternalWriteGuard,
     IntegrationRequirement,
     load_execution_settings,
+    load_write_authorizations,
     provider_mode_of,
     validate_integrations,
 )
@@ -22,6 +23,7 @@ from plm_platform.ledger import budget_gate_for
 from plm_platform.testing.mock_outcomes import mock_outcome_model_from_env
 
 from ..analytics import MockYouTubeAnalytics, YouTubeAnalyticsSource
+from ..media import artifact_bytes
 from .routes import create_youtube_router
 from .service_token import require_service_token
 
@@ -87,10 +89,15 @@ def create_app(
             clearance_verifier_for(platform_settings, session_factory)
             if clearance is None else clearance
         ),
-        write_guard=ExternalWriteGuard(
+        # Built per publish: the deployment's policies, the owner's grants as they are
+        # now (the dashboard writes one when the owner approves a package) and the
+        # budget ledger. A guard without grants refuses every live write.
+        write_guard_factory=lambda: ExternalWriteGuard(
             execution_settings,
+            authorizations=load_write_authorizations(),
             budget=budget_gate_for(execution_settings, session_factory, clock=service_clock),
         ),
+        media_bytes=artifact_bytes,
         analytics=analytics,
     )
     app.include_router(router)

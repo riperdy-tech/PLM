@@ -192,7 +192,7 @@ CONFIG = _DEV_CONFIG if _DEV_CONFIG.publish is None else dataclasses.replace(
 MODEL = load_mock_outcome_model(REPO_ROOT / "config" / "dev" / "mock_outcomes.json")
 OPTIONS = PipelineOptions(step_start_to_close_seconds=3600.0, step_heartbeat_seconds=60.0,
                           step_maximum_attempts=6, platform_start_to_close_seconds=60.0,
-                          platform_maximum_attempts=5)
+                          platform_maximum_attempts=5, require_publish_approval=False)
 TERMINAL = {"FAILED", "CANCELLED", "REJECTED", "HELD"}
 
 

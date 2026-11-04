@@ -1,4 +1,5 @@
-"""``plm youtube publish`` sends a real client the package's own verified bytes.
+"""``plm youtube publish`` and ``POST /youtube/publish`` send a real client the
+package's own verified bytes (``youtube_publishing.media.artifact_bytes``).
 
 Before this, the CLI called ``execute_publish`` without ``video_data``, so a real upload
 always stopped at ``PREFLIGHT_ARTIFACT_MISSING``.
@@ -7,7 +8,7 @@ always stopped at ``PREFLIGHT_ARTIFACT_MISSING``.
 from __future__ import annotations
 
 import pytest
-from youtube_publishing import cli
+from youtube_publishing import media as cli
 
 DIGEST = "a" * 64
 URI = f"plm://plm-media/media/renders/b/m/video_master.mp4/{DIGEST}"
@@ -17,7 +18,7 @@ def test_artifact_bytes_fetches_the_key_the_uri_pins(monkeypatch: pytest.MonkeyP
     fetched: list[str] = []
     monkeypatch.setattr(cli, "from_uri", lambda uri: uri.removeprefix("plm://plm-media/"))
     monkeypatch.setattr(cli, "get_verified", lambda key: fetched.append(key) or b"video")
-    assert cli._artifact_bytes(URI, DIGEST) == b"video"
+    assert cli.artifact_bytes(URI, DIGEST) == b"video"
     assert fetched == [f"media/renders/b/m/video_master.mp4/{DIGEST}"]
 
 
@@ -26,4 +27,4 @@ def test_artifact_bytes_refuses_a_uri_that_pins_another_checksum(
     monkeypatch.setattr(cli, "from_uri", lambda uri: uri.removeprefix("plm://plm-media/"))
     monkeypatch.setattr(cli, "get_verified", lambda key: pytest.fail("fetched"))
     with pytest.raises(ValueError, match="does not pin"):
-        cli._artifact_bytes(URI, "b" * 64)
+        cli.artifact_bytes(URI, "b" * 64)
