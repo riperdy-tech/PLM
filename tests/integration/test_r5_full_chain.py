@@ -183,8 +183,12 @@ BRAND = "longform_signal"
 TASK_QUEUE = "r5-full-chain"
 TIMEOUT_SECONDS = 3600
 MIN_EFFECT_RATIO = Decimal("1.2")
-CONFIG = load_pipeline_config(env={"PLM_PIPELINE_CONFIG_FILE": str(
+_DEV_CONFIG = load_pipeline_config(env={"PLM_PIPELINE_CONFIG_FILE": str(
     REPO_ROOT / "config" / "dev" / "pipeline.json")}, dotenv_path=REPO_ROOT / "none.env")
+# The compose stack's providers are mocks: this test opts in to simulated publications,
+# which the development configuration itself holds (SIMULATED_PUBLICATION).
+CONFIG = _DEV_CONFIG if _DEV_CONFIG.publish is None else dataclasses.replace(
+    _DEV_CONFIG, publish=dataclasses.replace(_DEV_CONFIG.publish, allow_simulated=True))
 MODEL = load_mock_outcome_model(REPO_ROOT / "config" / "dev" / "mock_outcomes.json")
 OPTIONS = PipelineOptions(step_start_to_close_seconds=3600.0, step_heartbeat_seconds=60.0,
                           step_maximum_attempts=6, platform_start_to_close_seconds=60.0,

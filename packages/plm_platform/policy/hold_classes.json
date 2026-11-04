@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "hold-classes-v9",
+  "policy_version": "hold-classes-v10",
   "notes": [
     "Maps exception reason codes to a hold class (R3, PART XVIII). Loaded and validated by plm_platform.exceptions.load_hold_class_policy.",
     "HARD_STOP: no approve or override from any role resumes the case. It resolves only when the external process's evidence is recorded (record_external_resolution).",
@@ -12,7 +12,8 @@
     "v6 (R6, D10): new MANUAL_AUDIO_AWAITED when P4 waits for songs the owner makes on suno.com and saves in the import inbox.",
     "v7 (R6): new STEP_RETRIES_EXHAUSTED when a step's retryable failure outlasts its retries. Before v7 the run failed for good, which on 2026-11-01 lost a run holding the owner's eight hand-made songs to a P4 import bug.",
     "v8 (R6): new STEP_PLATFORM_FAULT when a step fails with PlatformFault, a permanent failure that is the platform's, not the content's (a P4 plan that failed without a P29 refusal). Before v8 such a failure ended the run as a creative rejection.",
-    "v9 (R6): STEP_PLATFORM_FAULT also covers every other permanent step failure that decides nothing about the content (a ValidationFailure, such as a P6 render its own post-render QA blocked). Only a CreativeRejection or PolicyRejection still ends a run. Before v9 such a failure ended the run for good."
+    "v9 (R6): STEP_PLATFORM_FAULT also covers every other permanent step failure that decides nothing about the content (a ValidationFailure, such as a P6 render its own post-render QA blocked). Only a CreativeRejection or PolicyRejection still ends a run. Before v9 such a failure ended the run for good.",
+    "v10 (R6): new SIMULATED_PUBLICATION when P7 or P8 answers with a write a mock provider only simulated and the pipeline configuration does not set publish.allow_simulated. Before v10 the run went PUBLISHED on 2026-11-04 (run c1f32e48) with a mock video id, and would have measured and learned from a video that does not exist."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -294,6 +295,16 @@
       "category": "platform_failure",
       "source": "docs/reviews/2026-11-01-focus-identity-rectification.md V-9 (a P4 import bug failed run 1d4447ac, which could not be retried, and its eight songs were lost); raised by plm_platform.pipeline.workflow when a step's activity fails retryably until Temporal's maximum attempts",
       "description": "A phase kept failing in a way that is retried (an outage or a platform bug, not a creative, policy or validation outcome) until the step's retries ran out. Nothing about the content was decided. Reviewable, not a hard stop: fixing PLM is an operator act inside PLM. The platform owner resumes once the cause is fixed or gone, citing the fix (a commit or an incident note); the workflow then retries the step with the same idempotency key, so a phase whose writes are keyed by it does not repeat one it already made."
+    },
+    "SIMULATED_PUBLICATION": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "HIGH",
+      "override_permitted": true,
+      "required_evidence": ["publish_config_ref"],
+      "reviewer_role": "platform_owner",
+      "category": "simulated_publication",
+      "source": "run c1f32e48 (2026-11-04): the mock YouTube and distribution providers answered simulate and the run went PUBLISHED with video yt_vid_37524356f5b on UC_plm_dev_mock_channel; raised by plm_platform.pipeline.http_release when an upload or distribution submission is only simulated and publish.allow_simulated is unset",
+      "description": "The upload or distribution step reached a mock provider: nothing was published or submitted, so the run must not go on to measure and learn from it. Reviewable, not a hard stop: it is PLM's own configuration. The platform owner resumes only on a stack meant to simulate, after setting publish.allow_simulated and citing that change; the workflow retries the step with the same idempotency key, so the phase replays the same simulated answer. To publish for real, cancel the run and start a new one once the live provider, its write authorization and the owner's approval are in place."
     },
     "STEP_PLATFORM_FAULT": {
       "hold_class": "REVIEWABLE_QUARANTINE",

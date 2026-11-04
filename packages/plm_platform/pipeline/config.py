@@ -20,7 +20,11 @@ The file::
     }
 
 * ``publish``: the operator-configured P7 channel and P7's operating mode. P7 refuses a
-  channel it has no profile for (``channel_not_configured``).
+  channel it has no profile for (``channel_not_configured``). ``allow_simulated``
+  (default ``false``) lets a mock provider's ``simulate`` write count as a publication or
+  a distribution submission; only test and demo stacks set it. Unset, a simulated write
+  holds the run as ``SIMULATED_PUBLICATION`` instead of publishing nothing as if it
+  were published.
 * ``release``: P8's release-level facts (P8 §11), which P8 never defaults. The release
   date is the submission instant's date plus ``release_date_offset_days``.
 * ``fx_rates``: rates P9 records before it measures, so amounts convert into its
@@ -75,6 +79,7 @@ class PipelineConfigMissing(ValidationFailure):
 class PublishConfig:
     channel_id: str
     operating_mode: str
+    allow_simulated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +150,13 @@ def _int(section: Mapping[str, Any], key: str, where: str, *, minimum: int) -> i
     return value
 
 
+def _flag(section: Mapping[str, Any], key: str, where: str) -> bool:
+    value = section.get(key, False)
+    if not isinstance(value, bool):
+        raise SettingsError(f"{where}.{key} must be true or false")
+    return value
+
+
 def _section(raw: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
     value = raw.get(key)
     if value is None:
@@ -193,7 +205,8 @@ def parse_pipeline_config(raw: Mapping[str, Any]) -> PipelineConfig:
     return PipelineConfig(
         publish=None if publish is None else PublishConfig(
             channel_id=_text(publish, "channel_id", "publish"),
-            operating_mode=_text(publish, "operating_mode", "publish")),
+            operating_mode=_text(publish, "operating_mode", "publish"),
+            allow_simulated=_flag(publish, "allow_simulated", "publish")),
         release=None if release is None else ReleaseConfig(
             artist_name=_text(release, "artist_name", "release"),
             label_name=_text(release, "label_name", "release"),

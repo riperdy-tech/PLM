@@ -34,6 +34,7 @@ P1; otherwise P2's named refusal is accepted or reported, never faked.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -96,8 +97,12 @@ pytestmark = pytest.mark.integration
 BRAND = "longform_signal"
 TRACKS = ((12.0, {"bpm": 120.0, "tonic": 0}), (13.0, {"bpm": 122.0, "tonic": 7}),
           (12.0, {"bpm": 118.0, "tonic": 9, "minor": True}))
-CONFIG = load_pipeline_config(env={"PLM_PIPELINE_CONFIG_FILE": str(
+_DEV_CONFIG = load_pipeline_config(env={"PLM_PIPELINE_CONFIG_FILE": str(
     REPO_ROOT / "config" / "dev" / "pipeline.json")}, dotenv_path=REPO_ROOT / "none.env")
+# The compose stack's providers are mocks: this test opts in to simulated publications,
+# which the development configuration itself holds (SIMULATED_PUBLICATION).
+CONFIG = _DEV_CONFIG if _DEV_CONFIG.publish is None else dataclasses.replace(
+    _DEV_CONFIG, publish=dataclasses.replace(_DEV_CONFIG.publish, allow_simulated=True))
 
 
 @dataclass

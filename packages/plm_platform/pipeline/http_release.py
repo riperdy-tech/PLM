@@ -6,12 +6,14 @@
   receipts of the writes its guard decided (``external_writes``). A guard refusal is a
   ``409`` (:class:`~.phase_client.ExternalWriteRefused`); a write the guard only recorded
   as intent (a non-live policy for a real provider) is refused the same way, because
-  nothing was published.
+  nothing was published. So is a write a mock provider only simulated, unless
+  ``publish.allow_simulated`` is set: nothing reached YouTube, and a run that went on
+  would measure and learn from a video that does not exist (``SIMULATED_PUBLICATION``).
 * ``submit_distribution``: P5's C5 manifest of every track in the package
   (``GET /qa/release-manifests/{candidate_id}``), the C6 package, the publication event
   and the release metadata from configuration go to ``POST /distribution/releases``.
   P8 answers with the release, its ISRCs, the Seam C7 leg-1 distribution record and its
-  guard receipts.
+  guard receipts. A simulated submission holds the same way.
 * ``await_processing``: ``GET /youtube/attempts/{attempt_id}`` until every publication
   is ``verified`` / ``published`` / ``scheduled`` with its ``published_at``; still
   processing is :class:`~.phase_client.StepNotReady` (retried with backoff), anything
@@ -57,6 +59,17 @@ def _tag(receipts: Any, **unit: str) -> list[dict[str, Any]]:
     return [{**r, **unit} for r in receipts if isinstance(r, dict)]
 
 
+def _refuse_simulated(writes: list[dict[str, Any]], phase: Phase, path: str,
+                      allowed: bool) -> None:
+    """A mock provider's ``simulate`` published nothing: hold unless the stack allows it."""
+    simulated = next((w for w in writes if w.get("decision") == "simulate"), None)
+    if simulated is not None and not allowed:
+        raise ExternalWriteRefused(
+            phase, path, 409, "external_write_simulate",
+            f"{simulated.get('capability')} not performed: simulated_write "
+            f"({simulated.get('reason')}; set publish.allow_simulated only on a test stack)")
+
+
 class ReleaseSteps(HttpStepsBase):
     # -- upload: P6's C6 package to P7 on the configured channel ---------------------------
 
@@ -77,6 +90,7 @@ class ReleaseSteps(HttpStepsBase):
                              body={"media_package": c6, "channel_id": publish.channel_id,
                                    "operating_mode": publish.operating_mode})
             writes = _tag(answer.get("external_writes"), media_package_id=media_package_id)
+            _refuse_simulated(writes, Phase.YOUTUBE, path, publish.allow_simulated)
             event = answer.get("publication_event")
             if not isinstance(event, dict):
                 intent = next((w for w in writes if w.get("decision") == "record_intent"), None)
@@ -121,6 +135,8 @@ class ReleaseSteps(HttpStepsBase):
                       self._client(Phase.DISTRIBUTION))
         releases: list[dict[str, Any]] = []
         receipts: list[dict[str, Any]] = []
+        path = "/distribution/releases"
+        allowed = self._config.publish is not None and self._config.publish.allow_simulated
         for publication in publications:
             media_package_id = str(require(publication, "media_package_id", "publication"))
             c6 = p6.get(f"/media/packages/{media_package_id}/c6", idempotency_key=key)
@@ -131,7 +147,7 @@ class ReleaseSteps(HttpStepsBase):
                 for track in tracklist
             ]
             answer = p8.post(
-                "/distribution/releases",
+                path,
                 idempotency_key=request_key(key, "submit", media_package_id),
                 body={"track_manifests": manifests, "media_package": c6,
                       "publication": require(publication, "publication_event", "publication"),
@@ -140,6 +156,8 @@ class ReleaseSteps(HttpStepsBase):
                       "copyright_line": release.copyright_line,
                       "publisher_line": release.publisher_line,
                       "territories": release.territories})
+            writes = _tag(answer.get("external_writes"), media_package_id=media_package_id)
+            _refuse_simulated(writes, Phase.DISTRIBUTION, path, allowed)
             record = require(answer, "distribution_record", "P8 release")
             isrcs = require(answer, "isrcs", "P8 release")
             if not isinstance(isrcs, list) or not isrcs:
@@ -151,8 +169,7 @@ class ReleaseSteps(HttpStepsBase):
                 "isrcs": [str(i) for i in isrcs],
                 "distribution_record": record,
             })
-            receipts.extend(_tag(answer.get("external_writes"),
-                                 media_package_id=media_package_id))
+            receipts.extend(writes)
         return StepResult(
             outputs={"releases": releases, "external_writes": receipts},
             provider_ids={f"release.{n}": r["release_id"] for n, r in enumerate(releases)},

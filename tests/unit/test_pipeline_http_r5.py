@@ -12,6 +12,7 @@ integration tests do.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -46,7 +47,8 @@ TOKEN = "unit-token"
 NOW = datetime(2026, 11, 12, 9, 30, tzinfo=UTC)
 PUBLISHED = "2026-10-15T09:30:00+00:00"
 CONFIG = parse_pipeline_config({
-    "publish": {"channel_id": "UC_test", "operating_mode": "private_only"},
+    "publish": {"channel_id": "UC_test", "operating_mode": "private_only",
+                "allow_simulated": True},
     "release": {"artist_name": "A", "label_name": "L", "copyright_line": "C",
                 "publisher_line": "P", "territories": "WORLDWIDE",
                 "release_date_offset_days": 2},
@@ -163,6 +165,45 @@ def test_upload_turns_a_guard_refusal_into_its_hold() -> None:
                             "state": "failed_permanent", "error": "boom"})
     with pytest.raises(ValidationFailure, match="did not publish"):
         asyncio.run(failed.steps().upload(_request(Step.UPLOAD, {"assemble": ASSEMBLED})))
+
+
+STRICT = dataclasses.replace(CONFIG, publish=dataclasses.replace(
+    CONFIG.publish, allow_simulated=False))
+
+
+def test_a_simulated_publication_holds_unless_the_configuration_allows_it() -> None:
+    """A mock provider's ``simulate`` is not a publication: the run would go PUBLISHED
+    and P2 would learn from a video nobody can see. It holds as SIMULATED_PUBLICATION
+    (default), or passes only where the configuration opts in (tests, demo stacks)."""
+    assert parse_pipeline_config({"publish": {
+        "channel_id": "UC_x", "operating_mode": "private_only"}}).publish.allow_simulated         is False
+    world = _upload_world({"attempt_id": "att-1", "manifest_id": "man-1", "state": "verified",
+                           "youtube_video_id": "yt1", "publication_event": EVENT,
+                           "external_writes": RECEIPTS})
+    with pytest.raises(ExternalWriteRefused) as raised:
+        asyncio.run(world.steps(STRICT).upload(
+            _request(Step.UPLOAD, {"assemble": ASSEMBLED})))
+    assert raised.value.details["hold_reason_code"] == "SIMULATED_PUBLICATION"
+    assert raised.value.capability == "youtube.upload"
+    assert raised.value.guard_reason == "simulated_write"
+
+    submit = World()
+    submit.on("GET", "/media/packages/m1/c6", C6)
+    for candidate in ("cand-1", "cand-2"):
+        submit.on("GET", f"/qa/release-manifests/{candidate}", {"manifest_of": candidate})
+    submit.on("POST", "/distribution/releases", lambda r: httpx.Response(201, json={
+        "release_id": "rel-1", "status": "submitted", "isrcs": RECORD["isrcs"],
+        "distribution_record": RECORD, "external_writes": [
+            {"capability": "distribution.submit", "idempotency_key": "f:submit",
+             "decision": "simulate", "reason": "mock_provider"}]}))
+    with pytest.raises(ExternalWriteRefused) as raised:
+        asyncio.run(submit.steps(STRICT).submit_distribution(
+            _request(Step.SUBMIT_DISTRIBUTION, {"upload": PUBLICATIONS})))
+    assert raised.value.details["hold_reason_code"] == "SIMULATED_PUBLICATION"
+    assert raised.value.capability == "distribution.submit"
+    with pytest.raises(SettingsError, match="allow_simulated"):
+        parse_pipeline_config({"publish": {"channel_id": "UC_x", "operating_mode": "m",
+                                           "allow_simulated": "yes"}})
 
 
 def test_upload_and_submission_refuse_without_their_configuration() -> None:
@@ -462,3 +503,10 @@ def test_configuration_is_optional_but_never_malformed(tmp_path: Any) -> None:
                                          "activation_state": "A"}}, "budget")):
         with pytest.raises(SettingsError, match=match):
             parse_pipeline_config(broken)
+
+
+def test_the_simulated_publication_hold_is_a_reviewable_platform_case() -> None:
+    from plm_platform.exceptions import load_hold_class_policy
+    classified = load_hold_class_policy().classify("SIMULATED_PUBLICATION")
+    assert classified.mapped and classified.rule.hold_class.value == "REVIEWABLE_QUARANTINE"
+    assert classified.rule.reviewer_role == "platform_owner"
