@@ -192,7 +192,7 @@
       "required_evidence": ["listening_review_ref"],
       "reviewer_role": "quality_reviewer",
       "category": "technical_quality",
-      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (blocking, policy p5-audio-qa-v1) by services/quality_gate/evaluators/technical.py",
+      "source": "docs/P5_quality_rights_provenance_release_gate_implementation_plan.md:1434 ('technical issue may be repairable'); emitted (blocking, policy p5-audio-qa-v2) by services/quality_gate/evaluators/technical.py",
       "description": "A run of full-scale samples at or above the declared clipping threshold (quality_gate/audio/audio_qa_policy.json). It blocks; a quality reviewer may clear it with a recorded listening review."
     },
     "CAPABILITY_UNAVAILABLE": {

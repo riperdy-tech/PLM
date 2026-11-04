@@ -131,6 +131,16 @@ booming or distorted bass, sudden loud accents" to the negative prompt. Track sp
 before v7 (run c1f32e48's eight songs and its four top-up sheets) keep their prompts.
 Whether Flow Music follows the instruction is unproven until the next songs are heard.
 
+## Amendment 2026-11-04: headroom, and clipping judged by ear
+
+Run c1f32e48's four top-up Flow Music songs carried flat tops of 4 to 17 samples (under
+0.4 ms) on their peaks, which P5's v1 clip rule (3 samples) rejected. The owner judged
+them inaudible. P5's audio policy `p5-audio-qa-v2` blocks only runs of 48 samples or more
+(about 1 ms), which is heard as distortion. From `p3-album-contrast-v8` a focus track also
+asks for "a dynamic master with headroom, peaks well below full scale" and adds
+"clipping, brickwall limiting, loud over-compressed master" to the negative prompt.
+Whether Flow Music follows that is unproven until new songs are measured.
+
 ## Amendment 2026-11-03: level energy, typical opener
 
 The owner approved flattening the playlist's energy curve. P6's sequencing policy

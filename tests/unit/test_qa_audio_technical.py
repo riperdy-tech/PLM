@@ -91,6 +91,21 @@ def test_hard_clipped_signal_is_blocked(tmp_path: Path) -> None:
     assert res.has_blocking_defects
 
 
+def test_a_sub_millisecond_flat_top_passes_but_a_sustained_one_blocks(tmp_path: Path) -> None:
+    """Proves the v2 threshold (owner decision 2026-11-04): a 17-sample flat top, the
+    longest seen on a provider master, is inaudible and passes; a run of 48 or more
+    samples (about 1 ms) still blocks."""
+    short = clean_sine(3.0)
+    short[RATE:RATE + 17, 0] = 1.0
+    res = _evaluate(write_wav(tmp_path / "short.wav", short))
+    assert _check(res, "clipping_check").status == CheckStatus.PASS
+    assert "SEVERE_CLIPPING_DETECTED" not in _codes(res)
+    sustained = clean_sine(3.0)
+    sustained[RATE:RATE + POLICY.clipping.min_run_samples, 0] = 1.0
+    res = _evaluate(write_wav(tmp_path / "sustained.wav", sustained))
+    assert _codes(res)["SEVERE_CLIPPING_DETECTED"] is True
+
+
 def test_inter_sample_peak_is_caught_by_true_peak_not_sample_peak(tmp_path: Path) -> None:
     """Proves the true-peak check flags an over that the sample-domain checks cannot
     see: sample peak below 0 dBFS, no clipping, true peak above 0 dBTP."""

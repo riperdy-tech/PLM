@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "policy_version": "p5-audio-qa-v1",
+  "policy_version": "p5-audio-qa-v2",
   "notes": [
     "Declared thresholds for the P5 technical and musical audio checks (R4). Loaded and validated by quality_gate.audio.policy.load_audio_qa_policy; no threshold lives in evaluator code.",
     "policy_version is stamped on every technical check (config_version), every musical check (model_version), the audio_measurements evidence item and the evaluator results, so a decision can be replayed against the exact thresholds that produced it. Change any value only together with a new policy_version.",
@@ -30,9 +30,9 @@
   },
   "clipping": {
     "full_scale_dbfs": -0.01,
-    "min_run_samples": 3,
+    "min_run_samples": 48,
     "block_min_events": 1,
-    "source": "A clip event is a run of at least min_run_samples consecutive samples in one channel at or above full_scale_dbfs (16-bit full scale 32767/32768 is -0.0003 dBFS). A single near-full-scale sample is not an event (P5 plan section 16). block_min_events or more events is the blocking CLIPPING_DETECTED."
+    "source": "A clip event is a run of at least min_run_samples consecutive samples in one channel at or above full_scale_dbfs (16-bit full scale 32767/32768 is -0.0003 dBFS). A single near-full-scale sample is not an event (P5 plan section 16). v2 (2026-11-04, owner decision): 48 samples is about 1 ms at 44.1/48 kHz; shorter flat tops (the 4-17 sample runs hot provider masters put on kick transients, under 0.4 ms) are inaudible and no longer block, while sustained clipping that is heard as distortion still does. v1 blocked at 3 samples. block_min_events or more events is the blocking CLIPPING_DETECTED."
   },
   "silence": {
     "threshold_dbfs": -60.0,

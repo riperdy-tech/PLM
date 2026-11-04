@@ -153,7 +153,7 @@ def test_packaged_policy_loads_with_a_version() -> None:
     """Proves the shipped thresholds are declared data with a version that fits the
     check's config_version column."""
     policy = load_audio_qa_policy()
-    assert policy.policy_version == "p5-audio-qa-v1"
+    assert policy.policy_version == "p5-audio-qa-v2"
     assert len(policy.policy_version) <= 32
     assert policy.true_peak.oversampling_factor == 4
 

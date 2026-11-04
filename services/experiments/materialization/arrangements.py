@@ -34,7 +34,7 @@ import hashlib
 from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v7"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v8"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -49,10 +49,11 @@ _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
 
 FOCUS_MIX: Final[str] = (
     "background listening, the melody sits back behind the pads, soft muted kick, warm "
-    "round bass low in the mix, nothing that grabs attention")
+    "round bass low in the mix, nothing that grabs attention, dynamic master with "
+    "headroom, peaks well below full scale")
 FOCUS_AVOID: Final[str] = (
     "catchy hook, prominent lead melody, punchy kick, booming or distorted bass, sudden "
-    "loud accents")
+    "loud accents, clipping, brickwall limiting, loud over-compressed master")
 _FOCUS_MELODIES: Final[tuple[str, ...]] = (
     "sparse understated motif", "slow long tones with long rests",
     "soft repeating figure that never climaxes", "gentle stepwise phrases, low in the mix",

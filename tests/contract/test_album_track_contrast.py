@@ -23,7 +23,7 @@ def test_album_tracks_have_distinct_arrangement_briefs_and_provider_prompts() ->
     directions = [spec.creative_latitude["track_arrangement"] for spec in package.track_specs]
     assert directions == [spec.creative_latitude["track_arrangement"] for spec in replay.track_specs]
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions[:8]}) == 8
-    assert all(d["policy_version"] == "p3-album-contrast-v7" for d in directions)
+    assert all(d["policy_version"] == "p3-album-contrast-v8" for d in directions)
     # Every planned track, not just the first eight, must receive a different
     # rhythmic+melodic pairing. The former eight-pattern cycle reused briefs.
     assert len({(d["rhythmic_feel"], d["melodic_motion"]) for d in directions}) == len(directions)
