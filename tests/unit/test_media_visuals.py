@@ -163,7 +163,7 @@ def test_chapters_come_from_the_final_timeline() -> None:
     assert len(res.tracklist) == 3
     for meta in res.metadata_candidates:
         assert meta["contains_synthetic_media"] is True
-        assert "Notice: Sound recording" in meta["description"]
+        assert "Notice:" not in meta["description"]  # the API flag discloses AI use
 
 
 def _tracks(*spans: tuple[float, float]) -> list[PlaylistTrack]:
@@ -203,10 +203,9 @@ def test_titles_are_three_hook_first_variants_that_state_the_length() -> None:
         assert lines[0].startswith(f"{scene}: 2 hours of calm instrumental electronic music")
         assert lines[1].startswith("No lyrics and no vocals")
         assert "00:00 - Amber Circuit" in meta["description"]
-        assert "Visuals: original artwork created for Longform Signal." in lines
-        assert "Notice: Sound recording" in meta["description"]
-        assert "Curated by Longform Signal" in meta["description"]
-        assert lines[-1] == HASHTAGS and len(HASHTAGS.split()) <= 3
+        for owner_cut in ("Music:", "Visuals:", "Notice:", "Curated by", "Series:"):
+            assert owner_cut not in meta["description"]
+        assert lines[-2:] == ["", HASHTAGS] and len(HASHTAGS.split()) <= 3
     assert [c["title"] for c in res.chapters] == ["Amber Circuit", "Quiet Lattice",
                                                   "Linear Draft"]
     assert [t["title"] for t in res.tracklist] == [c["title"] for c in res.chapters]
@@ -261,7 +260,7 @@ def test_every_thumbnail_carries_the_brand_logo_mark() -> None:
 
 def test_every_scene_has_its_own_wording_in_each_chosen_language() -> None:
     """ADR-0045 decision 2: de, nl, sv, ko, zh-Hant, ja; every focus scene written in each;
-    a title within 100 characters; the AI notice in each language's description."""
+    a title within 100 characters; no credit or AI-notice lines (the API flag discloses AI)."""
     from media_factory.metadata.localization import _SCENES, LANGUAGES, localize
 
     english = [s for scenes in SCENES.values() for s in scenes]
@@ -269,15 +268,15 @@ def test_every_scene_has_its_own_wording_in_each_chosen_language() -> None:
     for code, scenes in _SCENES.items():
         assert len(scenes) == len(english) and len(set(scenes)) == len(scenes), code
     for scene in english:
-        out = localize(scene, seconds=1500, chapter_block="00:00 - A", brand_name="LS")
+        out = localize(scene, seconds=1500, chapter_block="00:00 - A")
         assert set(out) == set(LANGUAGES)
         for code, text in out.items():
             assert len(text["title"]) <= 100, (code, text["title"])
             assert text["title"].startswith(_SCENES[code][english.index(scene)])
             assert "00:00 - A" in text["description"]
-            assert LANGUAGES[code].notice in text["description"]
+            assert "AI" not in text["description"]
             assert "25" in text["description"]
-    assert localize("Night Driving", seconds=60, chapter_block="", brand_name="LS") == {}
+    assert localize("Night Driving", seconds=60, chapter_block="") == {}
 
 
 def test_the_package_carries_the_translations_on_every_candidate() -> None:
@@ -296,7 +295,7 @@ def test_a_focus_world_names_its_series_in_the_package() -> None:
     res = compile_metadata_and_chapters(tracks=tracks, brand_name="LS", playlist_concept="x",
                                         visual_world="observatory_workspace", seed="s")
     assert {m["series"] for m in res.metadata_candidates} == {"night_desk"}
-    assert "Series: Night Desk Sessions" in res.metadata_candidates[0]["description"]
+    assert "Series:" not in res.metadata_candidates[0]["description"]
     other = compile_metadata_and_chapters(tracks=tracks, brand_name="LS",
                                           playlist_concept="x", seed="s")
     assert {m["series"] for m in other.metadata_candidates} == {None}

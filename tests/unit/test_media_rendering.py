@@ -430,4 +430,4 @@ def test_the_ai_disclosure_is_on_even_when_p5_declares_none() -> None:
     assert pkg.to_c6_payload()["ai_disclosure_required"] is True
     for meta in pkg.metadata_candidates:
         assert meta["contains_synthetic_media"] is True
-        assert "Notice: Sound recording" in meta["description"]
+        assert "Notice:" not in meta["description"]

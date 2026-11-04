@@ -145,14 +145,7 @@ def compile_metadata_and_chapters(
     chapter_lines = [f"{c['timestamp_str']} - {c['title']}" for c in chapters_json]
     chapter_block = "\n".join(chapter_lines)
 
-    # 4. Mandatory YouTube AI Disclosure (P5 §4.1, P6 §4)
-    disclosure_statement = (
-        "Notice: Sound recording and audiovisual elements were created using synthetic media / AI tools."
-        if ai_disclosure_required
-        else ""
-    )
-
-    # 5. Metadata candidates (growth spec, ADR-0045): three titles, one description.
+    # 4. Metadata candidates (growth spec, ADR-0045): three titles, one description.
     length = duration_phrase(tracks[-1].end_offset_seconds if tracks else 0.0)
     scene, feeling = choose_hooks(visual_world, playlist_concept, seed=seed,
                                   recent=recent_hooks)
@@ -173,19 +166,12 @@ def compile_metadata_and_chapters(
         "",
         f"Tracklist:\n{chapter_block}",
         "",
-        (f"Music: original instrumentals made with AI music tools, selected and sequenced "
-         f"by {brand_name}."),
-        f"Visuals: original artwork created for {brand_name}.",
-        disclosure_statement,
-        f"Curated by {brand_name}: tracks chosen and sequenced for long focus sessions.",
-        "" if series is None else f"Series: {series[1]}",
-        "",
         HASHTAGS,
-    )).replace("\n\n\n", "\n\n").strip()
+    ))
     # The same translations ride on every candidate: YouTube shows them only to viewers
     # of that language, and Test & Compare tests the English title (ADR-0045).
     localizations = localize(scene, seconds=tracks[-1].end_offset_seconds if tracks else 0.0,
-                             chapter_block=chapter_block, brand_name=brand_name)
+                             chapter_block=chapter_block)
     metadata_candidates = [
         {
             "variant_id": variant_id,

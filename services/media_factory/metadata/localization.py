@@ -30,10 +30,6 @@ class _Language:
     hook: str
     """First description line: ``{scene}``, ``{length}``."""
     calm: str
-    music: str
-    """``{brand}``."""
-    visuals: str
-    notice: str
     tracklist: str
     hashtags: str
     separator: str = " – "
@@ -45,55 +41,34 @@ LANGUAGES: Final[dict[str, _Language]] = {
         hook="{scene}: {length} ruhige instrumentale elektronische Musik zum Lernen, "
              "Programmieren und konzentrierten Arbeiten.",
         calm="Keine Texte, kein Gesang, ein sanfter, gleichmäßiger Puls im Hintergrund.",
-        music="Musik: mit KI-Musikwerkzeugen erstellte Instrumentals, ausgewählt und "
-              "angeordnet von {brand}.",
-        visuals="Bilder: eigens für {brand} gestaltet.",
-        notice="Hinweis: Musik und Bilder wurden mit KI-Werkzeugen erstellt.",
         tracklist="Titelliste", hashtags="#konzentrationsmusik #lernmusik #focusmusic"),
     "nl": _Language(
         head="Muziek om te focussen, studeren en werken", minutes="{} minuten",
         hook="{scene}: {length} rustige instrumentale elektronische muziek om te "
              "studeren, programmeren en geconcentreerd te werken.",
         calm="Geen tekst, geen zang, een zachte, gelijkmatige puls op de achtergrond.",
-        music="Muziek: instrumentals gemaakt met AI-muziektools, gekozen en gerangschikt "
-              "door {brand}.",
-        visuals="Beelden: speciaal gemaakt voor {brand}.",
-        notice="Let op: muziek en beelden zijn gemaakt met AI-tools.",
         tracklist="Tracklijst", hashtags="#concentratiemuziek #studeermuziek #focusmusic"),
     "sv": _Language(
         head="Fokusmusik för plugg och arbete", minutes="{} minuter",
         hook="{scene}: {length} lugn instrumental elektronisk musik för plugg, "
              "programmering och koncentrerat arbete.",
         calm="Ingen text, ingen sång, en mjuk och jämn puls i bakgrunden.",
-        music="Musik: instrumentala spår gjorda med AI-musikverktyg, valda och ordnade "
-              "av {brand}.",
-        visuals="Bilder: skapade för {brand}.",
-        notice="Obs: musik och bilder är skapade med AI-verktyg.",
         tracklist="Låtlista", hashtags="#fokusmusik #pluggmusik #focusmusic"),
     "ko": _Language(
         head="집중할 때 듣는 음악 | 공부·작업용 BGM", minutes="{}분", separator=" | ",
         hook="{scene}: 공부, 코딩, 몰입 작업을 위한 {length} 차분한 일렉트로닉 연주곡.",
         calm="가사도 보컬도 없이, 배경에 잔잔하게 깔리는 부드러운 비트.",
-        music="음악: AI 음악 도구로 만든 연주곡 · 선곡과 구성 {brand}",
-        visuals="이미지: {brand} 오리지널 아트워크",
-        notice="안내: 음악과 이미지는 AI 도구로 제작되었습니다.",
         tracklist="트랙리스트", hashtags="#집중음악 #공부할때듣는음악 #작업용BGM"),
     "zh-Hant": _Language(
         head="專注音樂・讀書工作用", minutes="{} 分鐘", separator="｜",
         hook="{scene}：{length}平靜的電子器樂，適合讀書、寫程式與專注工作。",
         calm="沒有歌詞、沒有人聲，只有背景裡柔和而穩定的節奏。",
-        music="音樂：以 AI 音樂工具製作的器樂，由 {brand} 挑選與編排。",
-        visuals="影像：為 {brand} 製作的原創圖像。",
-        notice="說明：音樂與影像皆以 AI 工具製作。",
         tracklist="曲目", hashtags="#專注音樂 #讀書音樂 #工作音樂"),
     "ja": _Language(
         head="作業用BGM・集中できる音楽", minutes="{}分", separator="｜",
         hook="{scene}：勉強、プログラミング、集中作業のための{length}の穏やかな"
              "エレクトロニック・インストゥルメンタル。",
         calm="歌詞もボーカルもなく、やわらかく一定のリズムが流れ続けます。",
-        music="音楽：AI音楽ツールで制作したインストゥルメンタルを {brand} が選び、構成しました。",
-        visuals="映像：{brand} のために制作したオリジナル画像。",
-        notice="お知らせ：音楽と映像はAIツールで制作されています。",
         tracklist="トラックリスト", hashtags="#作業用BGM #勉強用BGM #集中BGM"),
 }
 """YouTube language codes (``zh-Hant``: Traditional Chinese, for Taiwan and Hong Kong)."""
@@ -167,7 +142,7 @@ _SCENES: Final[dict[str, tuple[str, ...]]] = {
 _ENGLISH: Final[tuple[str, ...]] = tuple(s for scenes in SCENES.values() for s in scenes)
 
 
-def localize(scene: str, *, seconds: float, chapter_block: str, brand_name: str,
+def localize(scene: str, *, seconds: float, chapter_block: str,
              ) -> dict[str, dict[str, str]]:
     """``{language: {title, description}}`` for an English ``scene`` of
     :data:`.packaging.SCENES`; empty for any other scene (nothing is half translated)."""
@@ -181,9 +156,7 @@ def localize(scene: str, *, seconds: float, chapter_block: str, brand_name: str,
         length = lang.minutes.format(minutes)
         description = "\n".join((
             lang.hook.format(scene=local, length=length), lang.calm, "",
-            f"{lang.tracklist}:\n{chapter_block}", "",
-            lang.music.format(brand=brand_name), lang.visuals.format(brand=brand_name),
-            lang.notice, "", lang.hashtags))
+            f"{lang.tracklist}:\n{chapter_block}", "", lang.hashtags))
         out[code] = {"title": f"{local}{lang.separator}{lang.head}"[:100],
                      "description": description}
     return out
