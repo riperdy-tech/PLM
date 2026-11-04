@@ -279,45 +279,6 @@ def test_a_package_blocked_by_post_render_qa_is_reported(cleared: Any) -> None:
     assert resp.json()["blocking_reason_codes"] == ["loudness_out_of_tolerance"]
 
 
-class _OvershootingToolchain(StandInToolchain):
-    """The encoder overshoots the limiter by ``overshoot`` dB until the audio is turned
-    down by at least that much (as FFmpeg's AAC did on Flow Music masters)."""
-
-    def __init__(self, overshoot: float) -> None:
-        super().__init__()
-        self.overshoot = overshoot
-        self.gain = 0.0
-
-    def render_video_master(self, audio_master: Path, visual: Any, profile: Any, out: Path,
-                            audio_gain_db: float = 0.0) -> None:
-        self.gain = audio_gain_db
-        super().render_video_master(audio_master, visual, profile, out, audio_gain_db)
-
-    def measure_loudness(self, path: Path) -> Any:
-        measured = super().measure_loudness(path)
-        ceiling = self._profile.true_peak_dbtp + self._profile.true_peak_tolerance_db
-        return replace(measured, true_peak_dbtp=ceiling + self.overshoot + self.gain,
-                       integrated_lufs=measured.integrated_lufs + self.gain)
-
-
-def test_an_encode_over_the_true_peak_ceiling_is_trimmed_once_and_recorded(
-    cleared: Any,
-) -> None:
-    """Proves: an encoded true peak over the ceiling (AAC overshoot) re-encodes the
-    video once, quieter by the excess plus the margin, so the package passes QA, and
-    the trim is in the render report; an unmeasured or in-range peak is never trimmed."""
-    store, manifests = cleared
-    toolchain = _OvershootingToolchain(overshoot=0.3)
-    resp = _client(backend_for(store, manifests, toolchain=toolchain)).post(
-        "/media/packages/assemble", json=_request(*[m.candidate_id for m in manifests]),
-        headers=HEADERS)
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ready_for_publish"
-    assert [c for c in toolchain.calls if c.startswith("video")] == ["video", "video-0.60dB"]
-    report = resp.json()["render_report"]
-    assert report["audio_pipeline"]["true_peak_trim_db"] == 0.6
-
-
 @pytest.mark.parametrize(("probe_overrides", "expected_codes"), [
     ({"audio_stream_duration_seconds": None}, {"stream_duration_unmeasured"}),
     ({"audio_stream_duration_seconds": 100.0},

@@ -127,9 +127,8 @@ class StandInToolchain:
         return {"filter": "stand-in"}
 
     def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path,
-                            audio_gain_db: float = 0.0) -> None:
-        self.calls.append("video" if not audio_gain_db else f"video{audio_gain_db:+.2f}dB")
+                            profile: RenderProfile, out: Path) -> None:
+        self.calls.append("video")
         out.write_bytes(b"STAND-IN VIDEO MASTER " + hashlib.sha256(
             audio_master.read_bytes() + visual.background_png.read_bytes()).hexdigest().encode())
 
