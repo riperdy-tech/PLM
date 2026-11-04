@@ -15,7 +15,12 @@ from plm_platform.clearance import clearance_verifier_for
 from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
-from plm_platform.execution import load_execution_settings
+from plm_platform.execution import (
+    ExternalWriteGuard,
+    load_execution_settings,
+    load_write_authorizations,
+)
+from plm_platform.ledger import budget_gate_for
 from plm_platform.storage import digest_from_key, from_uri, get_verified
 
 from .client.mock import MockYouTubeClient
@@ -126,6 +131,13 @@ def cli_publish(
             client,
             clock=CLOCK,
             clearance=clearance_verifier_for(load_settings(), factory),
+            # The deployment's policies, the owner's grants and the budget ledger: a
+            # bare guard would decide every write under the default dry-run policy.
+            write_guard=ExternalWriteGuard(
+                exec_settings,
+                authorizations=load_write_authorizations(),
+                budget=budget_gate_for(exec_settings, factory, clock=CLOCK),
+            ),
         )
         result = yt_engine.execute_publish(session, manifest, video_data=video_data,
                                            thumbnail_data=thumbnail_data,
