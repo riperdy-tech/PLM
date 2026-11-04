@@ -68,7 +68,7 @@ def test_every_waveform_reads_against_its_own_sky() -> None:
 def test_the_plan_draws_the_world_and_says_so() -> None:
     plan = _plan("misty_forest")
     world = WORLDS["misty_forest"]
-    assert plan["background"] == {"style": "vertical_gradient",
+    assert plan["background"] == {"style": "world_scene",
                                   "colors": [world.sky_top, world.sky_bottom]}
     assert plan["visualizer"]["color"] == world.glow  # type: ignore[index]
     assert plan["visual_world"] == {"name": "misty_forest", "known": True,
@@ -140,3 +140,47 @@ def test_the_default_brand_renders_every_variant(variant: str) -> None:
     data = render_thumbnail(variant, DEFAULT_BRANDS.get("longform_signal"), "Deep Work Signal",
                             "architect_studio_night")
     assert Image.open(io.BytesIO(data)).size == (1280, 720)
+
+
+@pytest.mark.parametrize("variant", ["thumb_a_hero", "thumb_b_bold_text", "thumb_c_minimal"])
+def test_the_headline_replaces_the_internal_concept(variant: str) -> None:
+    """Proves (review 2026-11-04): a thumbnail shows the package's scene line, not P3's
+    concept made of internal codes ("focused focus_electronic for study_focus")."""
+    brand = DEFAULT_BRANDS.get("longform_signal")
+    concept = "focused focus_electronic for study_focus"
+    with_headline = render_thumbnail(variant, brand, concept, "architect_studio_night",
+                                     headline="Stars Overhead, Work on Screen")
+    assert with_headline != render_thumbnail(variant, brand, concept, "architect_studio_night")
+    assert with_headline == render_thumbnail(variant, brand, "another concept",
+                                             "architect_studio_night",
+                                             headline="Stars Overhead, Work on Screen") \
+        or variant == "thumb_a_hero"  # A's label and scene seed still read the concept
+
+
+def test_thumbnail_c_keeps_its_text_inside_the_plate() -> None:
+    """Proves: the minimal variant's text block ends above its rule and never rises past
+    the plate's top edge (y = 86), even at three lines."""
+    data = render_thumbnail("thumb_c_minimal", BRAND, "x",
+                            headline="Stars Overhead, Work on Screen, Every Night Again")
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    plate = (12, 19, 38)
+    assert all(image.getpixel((x, 80)) != (235, 235, 235) for x in range(100, 1180))
+    assert image.getpixel((640, 100)) == plate
+
+
+def test_a_known_world_fills_the_video_background_with_its_scene() -> None:
+    """Proves: the background is the world's scene (not a flat gradient), dimmed under
+    the waveform, deterministic; an unknown world keeps the gradient."""
+    world = WORLDS["night_ocean"]
+    scene = render_background(BRAND, 640, 360, colors=(world.sky_top, world.sky_bottom),
+                              world_name="night_ocean")
+    gradient = render_background(BRAND, 640, 360, colors=(world.sky_top, world.sky_bottom))
+    assert scene != gradient
+    assert scene == render_background(BRAND, 640, 360, colors=(world.sky_top, world.sky_bottom),
+                                      world_name="night_ocean")
+    image = Image.open(io.BytesIO(scene)).convert("RGB")
+    assert image.size == (640, 360)
+    assert len(set(image.get_flattened_data())) > 50  # a drawn scene, not a two-colour gradient
+    assert render_background(BRAND, 64, 32, colors=("#111111", "#222222"),
+                             world_name="neon_v1") == render_background(
+        BRAND, 64, 32, colors=("#111111", "#222222"))

@@ -229,11 +229,16 @@ class ResumeVerdict:
 
 @dataclass(frozen=True, slots=True)
 class ResumeSignal:
-    """``resume(actor, role, evidence)``: ask to continue past every open hold."""
+    """``resume(actor, role, evidence)``: ask to continue past every open hold.
+
+    ``rewind_to="assemble"`` on a hold of the upload step (nothing is published yet)
+    assembles the run's packages again instead of retrying the upload, so P6 re-renders
+    a package whose presentation changed since. Ignored on any other hold."""
 
     actor: str
     role: str | None
     evidence: dict[str, str] = field(default_factory=dict)
+    rewind_to: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

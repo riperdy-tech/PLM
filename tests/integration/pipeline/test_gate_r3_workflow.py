@@ -461,3 +461,63 @@ async def test_a_decided_rejection_still_ends_the_run(
     assert outcome.error_code == type(decision).__name__
     assert steps.calls_for(Step.GENERATE) == [idempotency_key(workflow_id,
                                                               Step.GENERATE.value)]
+
+
+async def test_a_held_upload_rewinds_to_assemble_and_re_renders(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves: a cleared upload hold whose resume asks ``rewind_to="assemble"`` assembles
+    again under new keys (so P6 re-renders a package whose presentation changed), and
+    the upload then runs under its own key; the run moves UPLOADING -> ASSEMBLING."""
+    steps = MockPhaseSteps(_scripts(upload=ScriptedStep(
+        outputs=default_scripts()[Step.UPLOAD].outputs,
+        provider_ids=default_scripts()[Step.UPLOAD].provider_ids,
+        cost=default_scripts()[Step.UPLOAD].cost,
+        raises_first=ValidationFailure("P7 refused the package"), raises_for_first_keys=1)))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the upload hold")
+        assert held.held_from == "UPLOADING"
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="otto", role="platform_owner", evidence={"platform_fix_ref": "abc123"},
+            rewind_to="assemble"))
+        await wait_until(handle, lambda s: s.state in ("ANALYZING", "LEARNING"),
+                         "the publish after the rewind")
+        await handle.terminate(reason="R6 test: rewind proven")
+
+    assert steps.calls_for(Step.ASSEMBLE) == [
+        idempotency_key(workflow_id, "assemble"), idempotency_key(workflow_id, "assemble.rr1")]
+    assert steps.calls_for(Step.UPLOAD) == [
+        idempotency_key(workflow_id, "upload"), idempotency_key(workflow_id, "upload.rr1")]
+    states = [row.to_state for row in transitions(factory, workflow_id)]
+    rewound = states.index("HELD")
+    assert states[rewound + 1:rewound + 3] == ["UPLOADING", "ASSEMBLING"]
+
+
+async def test_a_rewind_on_any_other_hold_is_ignored(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves: ``rewind_to`` only rewinds an upload hold; on another step's hold the
+    resume retries that step under the same key, as any resume does (the fault
+    persists, so the run holds there again and never reaches assembly)."""
+    steps = MockPhaseSteps(_scripts(generate=ScriptedStep(
+        outputs=default_scripts()[Step.GENERATE].outputs,
+        provider_ids=default_scripts()[Step.GENERATE].provider_ids,
+        cost=default_scripts()[Step.GENERATE].cost,
+        raises_first=ValidationFailure("bad outputs"), raises_for_first_keys=1)))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the generate hold")
+        (case_id,) = held.open_case_ids
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="otto", role="platform_owner", evidence={"platform_fix_ref": "abc123"},
+            rewind_to="assemble"))
+        await wait_until(handle, lambda s: s.state == "HELD" and bool(
+            s.open_case_ids) and case_id not in s.open_case_ids, "the second generate hold")
+        await handle.terminate(reason="R6 test: rewind ignored")
+
+    key = idempotency_key(workflow_id, Step.GENERATE.value)
+    assert steps.calls_for(Step.GENERATE) == [key, key]
+    assert steps.calls_for(Step.ASSEMBLE) == []

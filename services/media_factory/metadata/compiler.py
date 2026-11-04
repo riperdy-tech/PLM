@@ -166,7 +166,7 @@ def compile_metadata_and_chapters(
             feeling, f" · Instrumental Focus Music for {first}"),
     }
     description = "\n".join((
-        (f"{scene}: {length} of calm instrumental electronic music for "
+        (f"{scene}: {length.lower()} of calm instrumental electronic music for "
          f"{first.lower()}, {second.lower()} and {third.lower()}."),
         ("No lyrics and no vocals, a soft steady pulse in the background: focus music for "
          "work, studying and late-night concentration."),

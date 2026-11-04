@@ -191,6 +191,10 @@ def _cost_dict(cost: WriteCost) -> dict[str, Any]:
             "context": dict(cost.context)}
 
 
+class _RewindToAssemble(Exception):
+    """A cleared upload hold asked to assemble again (``ResumeSignal.rewind_to``)."""
+
+
 @workflow.defn(name=WORKFLOW_NAME)
 class PipelineWorkflow:
     def __init__(self) -> None:
@@ -204,6 +208,9 @@ class PipelineWorkflow:
         self._window_closed: OutcomeWindowClosedSignal | None = None
         self._last_error: str | None = None
         self._hold_episodes: dict[str, int] = {}
+        self._rewind = False
+        self._candidates: list[str] | None = None
+        """Every candidate assembly was offered, top-ups included, for a rewind."""
         self._receipts: list[dict[str, Any]] = []
         """Every external write the phases reported, for the cost read at the outcome."""
 
@@ -276,13 +283,21 @@ class PipelineWorkflow:
         if not await self._qa(generated):
             return self._outcome()
 
-        assembled = await self._assemble(policy, generated)
-        if assembled is None:
-            return self._outcome()
-        await self._move(PipelineState.PACKAGED, step=Step.ASSEMBLE, done=assembled)
-
-        uploaded = await self._step(Step.UPLOAD, {"assemble": assembled.result.outputs},
-                                    enter=PipelineState.UPLOADING)
+        rerenders = 0
+        while True:
+            assembled = await self._assemble(policy, generated, rerenders)
+            if assembled is None:
+                return self._outcome()
+            await self._move(PipelineState.PACKAGED, step=Step.ASSEMBLE, done=assembled)
+            try:
+                uploaded = await self._step(
+                    Step.UPLOAD, {"assemble": assembled.result.outputs},
+                    enter=PipelineState.UPLOADING,
+                    key_name=None if rerenders == 0 else f"{Step.UPLOAD.value}.rr{rerenders}")
+            except _RewindToAssemble:
+                rerenders += 1
+                continue
+            break
         if uploaded is None:
             return self._outcome()
         self._collect_receipts(uploaded)
@@ -378,16 +393,24 @@ class PipelineWorkflow:
                                   "disposition": "QUARANTINED"})
         return True
 
-    async def _assemble(self, policy: _Done, generated: _Done) -> _Done | None:
-        """Assemble every package; top a short playlist up, bounded, then hold."""
+    async def _assemble(self, policy: _Done, generated: _Done,
+                        rerender: int = 0) -> _Done | None:
+        """Assemble every package; top a short playlist up, bounded, then hold.
+
+        ``rerender`` counts rewinds: each assembles again under its own keys, from every
+        candidate offered before (top-ups included), so nothing is generated twice."""
         assert self._input is not None
         options = self._input.options
-        candidates = [str(c) for c in generated.result.outputs.get("candidate_ids") or []]
+        if self._candidates is None:
+            self._candidates = [str(c) for c in
+                                generated.result.outputs.get("candidate_ids") or []]
+        candidates = self._candidates
         rounds = 0
         allowance = options.max_topup_rounds
+        base = Step.ASSEMBLE.value if rerender == 0 else f"{Step.ASSEMBLE.value}.rr{rerender}"
         await self._move(PipelineState.ASSEMBLING)
         while True:
-            key_name = Step.ASSEMBLE.value if rounds == 0 else f"{Step.ASSEMBLE.value}.r{rounds}"
+            key_name = base if rounds == 0 else f"{base}.r{rounds}"
             inputs = {"policy_check": policy.result.outputs,
                       "generate": {"candidate_ids": list(candidates)}}
             outcome = await self._attempt(Step.ASSEMBLE, inputs, key_name=key_name)
@@ -562,6 +585,9 @@ class PipelineWorkflow:
         or a hold closed without clearance)."""
         name = step.value if key_name is None else key_name
         while True:
+            if self._rewind:
+                self._rewind = False
+                raise _RewindToAssemble
             if await self._cancelled():
                 return None
             if enter is not None and self._state is not enter:
@@ -709,6 +735,13 @@ class PipelineWorkflow:
                 self._open_cases = ()
                 return False
             if all(case in cleared for case in self._open_cases):
+                rewind = getattr(signal, "rewind_to", None)
+                if rewind is not None:
+                    self._rewind = step is Step.UPLOAD and rewind == Step.ASSEMBLE.value
+                    summary["rewind_to"] = rewind if self._rewind else None
+                    if not self._rewind:
+                        workflow.logger.warning("rewind to %r ignored on a %s hold",
+                                                rewind, step.value)
                 await self._move(held_from, outputs=summary, hold_case_ids=self._open_cases)
                 self._open_cases = ()
                 if self._signals:

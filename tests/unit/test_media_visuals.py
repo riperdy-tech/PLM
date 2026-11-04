@@ -81,7 +81,7 @@ def test_thumbnails_are_stored_with_the_checksum_of_the_stored_bytes() -> None:
         assert hashlib.sha256(store.get(variant.uri)).hexdigest() == variant.checksum
         assert variant.uri.endswith(variant.checksum)
         assert variant.text_payload == "Focus"
-        assert variant.layout_version.startswith("thumb-layout-v5+")
+        assert variant.layout_version.startswith("thumb-layout-v6+")
 
 
 @pytest.mark.parametrize(("width", "start", "minimum"), [
@@ -200,7 +200,7 @@ def test_titles_are_three_hook_first_variants_that_state_the_length() -> None:
         assert {"music for studying", "concentration music"} <= set(meta["tags"])
         assert meta["category_id"] == "10"
         lines = meta["description"].split("\n")
-        assert lines[0].startswith(f"{scene}: 2 Hours of calm instrumental electronic music")
+        assert lines[0].startswith(f"{scene}: 2 hours of calm instrumental electronic music")
         assert lines[1].startswith("No lyrics and no vocals")
         assert "00:00 - Amber Circuit" in meta["description"]
         assert "Visuals: original artwork created for Longform Signal." in lines

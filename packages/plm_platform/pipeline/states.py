@@ -101,7 +101,8 @@ _FORWARD: Final[dict[PipelineState, frozenset[PipelineState]]] = {
     PipelineState.PASSED: frozenset({PipelineState.ASSEMBLING}),
     PipelineState.ASSEMBLING: frozenset({PipelineState.PACKAGED}),
     PipelineState.PACKAGED: frozenset({PipelineState.UPLOADING}),
-    PipelineState.UPLOADING: frozenset({PipelineState.PROCESSING}),
+    # Back to ASSEMBLING: a held upload rewound to re-render (ResumeSignal.rewind_to).
+    PipelineState.UPLOADING: frozenset({PipelineState.PROCESSING, PipelineState.ASSEMBLING}),
     PipelineState.PROCESSING: frozenset({PipelineState.PUBLISHED}),
     PipelineState.PUBLISHED: frozenset({PipelineState.ANALYZING}),
     PipelineState.ANALYZING: frozenset({PipelineState.LEARNING}),

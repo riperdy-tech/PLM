@@ -63,7 +63,14 @@ from .profiles import RenderProfile, render_profile
 from .renderer import MediaRenderer, RenderExecutionResult
 from .toolchain import MediaToolchain
 
-__all__ = ["AssemblyPipelineResult", "PackageAlreadyAssembled", "assemble_media_package"]
+__all__ = ["PACKAGING_VERSION", "AssemblyPipelineResult", "PackageAlreadyAssembled",
+           "assemble_media_package"]
+
+PACKAGING_VERSION = "pack-v2"
+"""How a package is presented: thumbnails, video background and mastering. Part of the
+package version (with the sequencing version), so a presentation change gives the same
+release a new package id and re-renders it instead of replaying the stored one.
+v2 (2026-11-04): thumbnails show the scene line, the scene fills the video, -2 dBTP."""
 
 
 class PackageAlreadyAssembled(Exception):
@@ -170,7 +177,7 @@ def assemble_media_package(
     tracks = playlist_res.tracks
     lineage = playlist_res.lineage
     rel_id = playlist_session.release_manifest_id
-    package_version = sequencing_policy.version
+    package_version = f"{sequencing_policy.version}+{PACKAGING_VERSION}"
     package_id = MediaPackage.derive_id(rel_id, brand_id, package_version, profile.name)
     if existing is not None:
         found = existing(package_id)
@@ -217,7 +224,9 @@ def assemble_media_package(
     }
     # Packaging must not feel like the brand's last uploads (growth spec, rank 1): the
     # titles take hooks the recent packages did not use (the chapters above are the same).
-    recent_hooks = {hook for album in (recorded or ()) if album.variation
+    # A re-render of this release keeps its own scene line.
+    recent_hooks = {hook for album in (recorded or ())
+                    if album.variation and album.release_manifest_id != rel_id
                     for hook in (album.variation.get("concept"),
                                  *(album.variation.get("hooks") or ()))
                     if isinstance(hook, str)}
@@ -246,6 +255,9 @@ def assemble_media_package(
         now=planned_at,
     )
     visual_session = visual_res.visual_session
+    # The thumbnails show the scene line, so it is part of the render's input identity.
+    headline = meta_res.hooks[0]
+    presentation = f"{playlist_concept}|{headline}"
     by_candidate = {m.candidate_id: m for m in track_manifests}
     renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
     claim_namespace: str | None = None
@@ -257,7 +269,7 @@ def assemble_media_package(
         claim_namespace = before_render(
             package_id, profile.name,
             renderer.input_manifest_hash(
-                playlist_session, visual_session, playlist_concept=playlist_concept,
+                playlist_session, visual_session, playlist_concept=presentation,
             ),
         )
     render_res = renderer.render(
@@ -271,7 +283,7 @@ def assemble_media_package(
         required_window_seconds=playlist_res.sequence.window,
         claim_namespace=claim_namespace,
         attempt=render_attempt,
-        playlist_concept=playlist_concept,
+        playlist_concept=presentation,
         clock=clock,
     )
     visual_session.assets = list(render_res.visual_assets)
@@ -286,6 +298,7 @@ def assemble_media_package(
         store=store,
         claim_namespace=claim_namespace,
         visual_world=visual_profile,
+        headline=headline,
         now=packaged_at,
     )
 

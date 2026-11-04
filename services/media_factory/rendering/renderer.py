@@ -62,7 +62,7 @@ __all__ = [
     "RenderExecutionResult",
 ]
 
-RENDER_VERSION = "p6-render-v1"
+RENDER_VERSION = "p6-render-v2"
 
 
 @dataclass(frozen=True)
@@ -197,9 +197,12 @@ class MediaRenderer:
                     path=path,
                     duration_seconds=track.end_offset_seconds - track.start_offset_seconds))
 
+            plan = visual_session.visual_plan_json
             background_png = render_background(
                 brand, profile.width, profile.height,
-                colors=tuple(visual_session.visual_plan_json["background"]["colors"][:2]))
+                colors=tuple(plan["background"]["colors"][:2]),
+                world_name=(plan.get("visual_world") or {}).get("name")
+                if plan["background"].get("style") == "world_scene" else None)
             (work / "background.png").write_bytes(background_png)
             background = self._store(f"{root}/background.png", background_png, "image/png")
 

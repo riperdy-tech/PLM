@@ -12,14 +12,18 @@ Thumbnail designs, all 1280x720 (YouTube's recommended size, 16:9), PNG, under 2
   weather and skyline from :mod:`..visuals.worlds`; a world P6 does not know is drawn
   as a neutral workspace in the brand palette) with prominent title typography plus a
   short functional label from the concept (``DEEP WORK``, ``CODING``...).
-* **B, ``thumb_b_bold_text``**: the brand gradient with the playlist concept in large
+* **B, ``thumb_b_bold_text``**: the brand gradient with the headline in large
   type on the left, over an accent bar, and the brand name above it.
-* **C, ``thumb_c_minimal``**: a flat dark field with a thin accent rule and the concept
-  in small type centred.
+* **C, ``thumb_c_minimal``**: a flat dark field with a thin accent rule and the headline
+  in small type centred above it.
 
-The variants change presentation only (P6 §18): every one states the same concept,
+The headline is the package's scene line (the title's hook, e.g. "Stars Overhead, Work
+on Screen"); without one it is the concept. P3's concept is built from internal codes
+(``focus_electronic``, ``study_focus``) and is only read for A's functional label.
+The variants change presentation only (P6 §18): every one states the same headline,
 and every one carries the brand's small logo mark (its initials, drawn here; no
-external asset) in the top-right corner. The video background is the visual plan's gradient (the world's sky, or the brand's).
+external asset) in the top-right corner. The video background is the visual world's
+scene filling the frame (:func:`render_background`), or the visual plan's gradient.
 """
 
 from __future__ import annotations
@@ -57,7 +61,7 @@ THUMBNAIL_HEIGHT: Final[int] = 720
 THUMBNAIL_MAX_BYTES: Final[int] = 2 * 1024 * 1024
 THUMBNAIL_VARIANTS: Final[tuple[str, ...]] = ("thumb_a_hero", "thumb_b_bold_text",
                                               "thumb_c_minimal")
-LAYOUT_VERSION: Final[str] = "thumb-layout-v5"
+LAYOUT_VERSION: Final[str] = "thumb-layout-v6"
 _HEX: Final = re.compile(r"\A#[0-9A-Fa-f]{6}\Z")
 
 RGB = tuple[int, int, int]
@@ -103,11 +107,28 @@ def _gradient(width: int, height: int, top: RGB, bottom: RGB) -> Image.Image:
     return column.resize((width, height), Image.Resampling.NEAREST)
 
 
+_SCENE_CANVAS: Final[tuple[int, int]] = (854, 480)
+"""The size a full-frame scene is drawn at: :func:`_scene`'s shapes are sized for a
+window about 500 px across, so the scene is drawn near that and scaled up."""
+
+
 def render_background(brand: BrandProfile, width: int, height: int,
-                      colors: tuple[str, ...] | None = None) -> bytes:
-    """The gradient the visualiser is drawn over: ``colors`` (the visual plan's, top to
-    bottom) when given, else the brand's base to shade."""
+                      colors: tuple[str, ...] | None = None,
+                      world_name: str | None = None) -> bytes:
+    """What the visualiser is drawn over. A known ``world_name``: that world's scene
+    (sky, light, skyline, weather) filling the frame, dimmed so the waveform stays the
+    brightest thing on screen. Otherwise the gradient: ``colors`` (the visual plan's,
+    top to bottom) when given, else the brand's base to shade."""
     palette = _palette(brand)
+    world = visual_world(world_name) if world_name else None
+    if world is not None:
+        cw, ch = _SCENE_CANVAS
+        scene = _gradient(cw, ch, _rgb(world.sky_top), _rgb(world.sky_bottom))
+        draw = ImageDraw.Draw(scene)
+        draw.ellipse((cw * 3 // 4 - 50, 50, cw * 3 // 4 + 50, 150), fill=_rgb(world.light))
+        _scene(draw, world, f"{brand.brand_id}|{world_name}", (0, 0, cw, ch))
+        scene = scene.resize((width, height), Image.Resampling.LANCZOS)
+        return _png(Image.blend(scene, Image.new("RGB", (width, height)), 0.35))
     if colors:
         return _png(_gradient(width, height, _rgb(colors[0]), _rgb(colors[-1])))
     return _png(_gradient(width, height, palette.base, palette.shade))
@@ -333,11 +354,15 @@ def _motif(seed: bytes, count: int) -> Sequence[float]:
 
 
 def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
-                     world_name: str | None = None) -> bytes:
-    """One thumbnail variant as PNG bytes (deterministic); A draws ``world_name``'s scene."""
+                     world_name: str | None = None, headline: str | None = None) -> bytes:
+    """One thumbnail variant as PNG bytes (deterministic); A draws ``world_name``'s scene.
+
+    ``headline`` is the text shown (the package's scene line); ``concept`` only picks
+    A's functional label and stands in for a missing headline."""
     if not concept.strip():
         raise MediaAssemblyError("playlist_concept_missing", "a thumbnail needs the concept",
                                  ["playlist_concept"])
+    text = headline.strip() if headline and headline.strip() else concept
     palette = _palette(brand)
     # A world P6 does not know is drawn as the identity's neutral workspace in the
     # brand's own colours, never as a scene the brand did not choose.
@@ -368,7 +393,7 @@ def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
         small, brand_lines = _fit(draw, label, 558, 35, minimum=28, max_lines=1)
         if brand_lines:
             draw.text((72, 115), brand_lines[0], fill=(245, 245, 245), font=small)
-        font, lines = _fit(draw, concept.upper(), 558, 87, minimum=72)
+        font, lines = _fit(draw, text.upper(), 558, 87, minimum=72)
         y = 226
         for line in lines:
             draw.text((72, y), line, font=font, fill=(252, 246, 226),
@@ -385,7 +410,7 @@ def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
         # The fixed dark plate preserves title contrast even for pale brand palettes.
         draw.rounded_rectangle((64, 120, w - 64, 572), radius=26, fill=(12, 19, 38))
         draw.rectangle((64, h - 130, w - 64, h - 110), fill=palette.accent)
-        font, lines = _fit(draw, concept.upper(), w - 160, 120, minimum=82)
+        font, lines = _fit(draw, text.upper(), w - 160, 120, minimum=82)
         y = 150
         for line in lines:
             draw.text((80, y), line, font=font, fill=(255, 255, 255))
@@ -400,11 +425,12 @@ def render_thumbnail(variant: str, brand: BrandProfile, concept: str,
         image = Image.new("RGB", (w, h), palette.base)
         draw = ImageDraw.Draw(image)
         draw.rounded_rectangle((96, 86, w - 96, 604), radius=24, fill=(12, 19, 38))
-        draw.rectangle((w // 2 - 160, h // 2 + 50, w // 2 + 160, h // 2 + 54),
-                       fill=palette.accent)
-        font, lines = _fit(draw, concept, w - 300, 88, minimum=72)
+        rule = h // 2 + 50
+        draw.rectangle((w // 2 - 160, rule, w // 2 + 160, rule + 4), fill=palette.accent)
+        # Small type, set to end above the rule: the block never rises past the plate.
+        font, lines = _fit(draw, text, w - 300, 68, minimum=52)
         step = int(getattr(font, "size", 40) * 1.2)
-        y = h // 2 - step * len(lines)
+        y = max(86 + 30, rule - 30 - step * len(lines))
         for line in lines:
             draw.text(((w - draw.textlength(line, font=font)) / 2, y), line,
                       font=font, fill=(235, 235, 235))
@@ -424,14 +450,18 @@ def generate_thumbnails(*, media_package_id_str: str, brand_profile: BrandProfil
                         variant_keys: Sequence[str] = THUMBNAIL_VARIANTS,
                         claim_namespace: str | None = None,
                         visual_world: str | None = None,
+                        headline: str | None = None,
                         now: datetime) -> list[ThumbnailVariant]:
-    """Draw, store and record the thumbnail candidates; checksums are of stored bytes."""
+    """Draw, store and record the thumbnail candidates; checksums are of stored bytes.
+
+    ``headline`` is the text the thumbnails show (see :func:`render_thumbnail`)."""
     root = scoped_artifact_root(
         f"thumbnails/{brand_profile.brand_id}/{media_package_id_str}", claim_namespace,
     )
     variants: list[ThumbnailVariant] = []
     for key in variant_keys:
-        data = render_thumbnail(key, brand_profile, playlist_concept, visual_world)
+        data = render_thumbnail(key, brand_profile, playlist_concept, visual_world,
+                                headline)
         stored = store.put(f"{root}/{key}.png", data, content_type="image/png")
         variants.append(ThumbnailVariant.create(
             media_package_id_str=media_package_id_str,
@@ -439,7 +469,7 @@ def generate_thumbnails(*, media_package_id_str: str, brand_profile: BrandProfil
             source_assets=[],
             uri=stored.uri,
             checksum=stored.sha256,
-            text_payload=playlist_concept,
+            text_payload=headline or playlist_concept,
             width=THUMBNAIL_WIDTH,
             height=THUMBNAIL_HEIGHT,
             layout_version=f"{LAYOUT_VERSION}+{brand_profile.version}",

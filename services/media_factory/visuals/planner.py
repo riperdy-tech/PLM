@@ -84,7 +84,9 @@ def plan_visual_session(
         "duration_seconds": round(total_duration_seconds, 3),
         "visual_world": {"name": visual_profile, "known": world is not None,
                          "version": WORLDS_VERSION},
-        "background": {"style": "vertical_gradient", "colors": background},
+        # A known world fills the frame with its scene; the colours stay the sky's.
+        "background": {"style": "world_scene" if world is not None else "vertical_gradient",
+                       "colors": background},
         "visualizer": {"filter": "showwaves", "mode": "cline", "scale": "sqrt",
                        "color": wave_color,
                        "height_ratio": render_profile.waveform_height_ratio},
