@@ -120,11 +120,17 @@ class Studio:
 
     # -- holds ------------------------------------------------------------------------------
 
+    def _live_holds(self) -> list[dict[str, Any]]:
+        """Open holds of runs that are HELD now (a case left open by a run that was
+        cancelled or ended is not a wait)."""
+        return [c for c in self.open_holds()
+                if (c.get("pipeline") or {}).get("run_state") == "HELD"]
+
     def _cases(self, reason: str) -> list[dict[str, Any]]:
-        return [c for c in self.open_holds() if c.get("reason_code") == reason]
+        return [c for c in self._live_holds() if c.get("reason_code") == reason]
 
     def overview(self) -> dict[str, Any]:
-        holds = self.open_holds()
+        holds = self._live_holds()
         return {
             "waiting": {reason: [c["case_id"] for c in holds if c.get("reason_code") == reason]
                         for reason in (SONGS_REASON, ART_REASON, APPROVAL_REASON)},

@@ -72,7 +72,7 @@ def _studio(tmp_path: Path, holds: list[dict[str, Any]],
     studio = Studio(
         paths=StudioPaths(music_inbox=music, art_inbox=art, grants_file=grants),
         actions=actions,  # type: ignore[arg-type]
-        open_holds=lambda: holds,
+        open_holds=lambda: [{"pipeline": {"run_state": "HELD"}, **h} for h in holds],
         package=lambda pid: {"status": "awaiting_thumbnail_art", "metadata_candidates": [
             {"title": "Working Late", "description": "D", "tags": ["focus music"]}],
             "thumbnails": [{"id": "art_a"}], "chapters": [{}, {}, {}],
@@ -106,7 +106,9 @@ def test_songs_show_the_waiting_sheet_and_take_only_its_wavs(tmp_path: Path) -> 
 
 
 def test_songs_done_refuses_when_no_run_waits(tmp_path: Path) -> None:
-    studio, _ = _studio(tmp_path, [])
+    studio, _ = _studio(tmp_path, [{"case_id": "old", "reason_code": "MANUAL_AUDIO_AWAITED",
+                                    "pipeline": {"run_state": "CANCELLED"}}])
+    assert studio.overview()["waiting"]["MANUAL_AUDIO_AWAITED"] == []
     with pytest.raises(ActionRefused, match="no_run_waiting_for_songs"):
         asyncio.run(studio.songs_done())
 
@@ -139,7 +141,8 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
 
 def test_approval_grants_this_upload_for_two_hours_then_resumes(tmp_path: Path) -> None:
     hold = {"case_id": "c3", "reason_code": "PUBLISH_APPROVAL_AWAITED",
-            "details": {"media_package_ids": [PKG]}, "pipeline": {"workflow_id": "pipeline.d"}}
+            "details": {"media_package_ids": [PKG]},
+            "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
     studio, actions = _studio(tmp_path, [hold])
     (review,) = studio.overview()["reviews"]
     assert review["packages"][0]["title"] == "Working Late"
