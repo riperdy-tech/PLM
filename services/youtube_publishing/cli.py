@@ -16,6 +16,7 @@ from plm_platform.clock import Clock, SystemClock
 from plm_platform.config import load_settings
 from plm_platform.db import build_engine, session_factory
 from plm_platform.execution import load_execution_settings
+from plm_platform.storage import digest_from_key, from_uri, get_verified
 
 from .client.mock import MockYouTubeClient
 from .client.real import RealYouTubeClient
@@ -40,6 +41,14 @@ from .test_kit import build_test_kit
 
 CLOCK: Clock = SystemClock()
 """The CLI's time source; the only wall-clock read in the P7 command line."""
+
+
+def _artifact_bytes(uri: str, checksum: str) -> bytes:
+    """The stored bytes of a C6 asset, refused unless they hash to its checksum."""
+    key = from_uri(uri)
+    if digest_from_key(key) != checksum:
+        raise ValueError(f"{uri} does not pin checksum {checksum}")
+    return get_verified(key)
 
 
 def cli_publish(
@@ -106,17 +115,21 @@ def cli_publish(
             session.commit()
 
         exec_settings = load_execution_settings()
-        client = (
-            RealYouTubeClient()
-            if exec_settings.provider_mode("youtube") == ProviderMode.REAL
-            else MockYouTubeClient()
-        )
+        real = exec_settings.provider_mode("youtube") == ProviderMode.REAL
+        client = RealYouTubeClient() if real else MockYouTubeClient()
+        # A real upload sends the package's own bytes, fetched by their pinned digests;
+        # a mock client uses its placeholders.
+        video_data = _artifact_bytes(manifest.video_master_uri, manifest.video_checksum)             if real else None
+        thumbnail_data = _artifact_bytes(manifest.thumbnail_uri,
+                                         manifest.thumbnail_checksum) if real else None
         yt_engine = YouTubePublishingEngine(
             client,
             clock=CLOCK,
             clearance=clearance_verifier_for(load_settings(), factory),
         )
-        result = yt_engine.execute_publish(session, manifest, operating_mode=OperatingMode(mode))
+        result = yt_engine.execute_publish(session, manifest, video_data=video_data,
+                                           thumbnail_data=thumbnail_data,
+                                           operating_mode=OperatingMode(mode))
 
         out: dict[str, Any] = {
             "attempt_id": result.attempt.attempt_id,
