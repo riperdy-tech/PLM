@@ -109,8 +109,10 @@ class MediaToolchain(Protocol):
         ...
 
     def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        """Encode the visualiser over the background with the audio into ``out``."""
+                            profile: RenderProfile, out: Path,
+                            audio_gain_db: float = 0.0) -> None:
+        """Encode the visualiser over the background with the audio into ``out``;
+        ``audio_gain_db`` (negative: quieter) is applied to the encoded audio only."""
         ...
 
     def probe(self, path: Path) -> ProbeReport:

@@ -62,7 +62,7 @@ __all__ = [
     "RenderExecutionResult",
 ]
 
-RENDER_VERSION = "p6-render-v2"
+RENDER_VERSION = "p6-render-v3"
 
 
 @dataclass(frozen=True)
@@ -156,6 +156,24 @@ class MediaRenderer:
             json.dumps(manifest, sort_keys=True).encode("utf-8"),
         ).hexdigest()
 
+    TRIM_MARGIN_DB = 0.3
+
+    def _true_peak_trim(self, video: Path) -> float:
+        """How far to turn the encoded audio down so its true peak meets the ceiling.
+
+        The AAC encoder overshoots the limited master by an amount that depends on the
+        music (0.8 to 2 dB measured on Flow Music masters, 2026-11-04), so no limiter
+        target holds it. Measured over the ceiling, the video is encoded once more that
+        much quieter (plus a margin); 0.0 when it is under, or unmeasured (QA decides)."""
+        try:
+            peak = self.toolchain.measure_loudness(video).true_peak_dbtp
+        except MediaToolError:
+            return 0.0
+        ceiling = self.profile.true_peak_dbtp + self.profile.true_peak_tolerance_db
+        if peak is None or not math.isfinite(peak) or peak <= ceiling:
+            return 0.0
+        return round(peak - ceiling + self.TRIM_MARGIN_DB, 2)
+
     def _store(self, path: str, data: bytes, content_type: str) -> StoredArtifact:
         return self.store.put(path, data, content_type=content_type)
 
@@ -214,12 +232,16 @@ class MediaRenderer:
                 # Not kept past the upload: an hour of 24-bit stereo is over a gigabyte.
                 audio = self._store(f"{root}/audio_master.wav",
                                     (work / "audio_master.wav").read_bytes(), "audio/wav")
+                visual = VisualizerSpec(
+                    background_png=work / "background.png",
+                    wave_color=str(visual_session.visual_plan_json["visualizer"]["color"]))
                 self.toolchain.render_video_master(
-                    work / "audio_master.wav",
-                    VisualizerSpec(background_png=work / "background.png",
-                                   wave_color=str(visual_session.visual_plan_json
-                                                  ["visualizer"]["color"])),
-                    profile, work / "video_master.mp4")
+                    work / "audio_master.wav", visual, profile, work / "video_master.mp4")
+                trim_db = self._true_peak_trim(work / "video_master.mp4")
+                if trim_db:
+                    self.toolchain.render_video_master(
+                        work / "audio_master.wav", visual, profile,
+                        work / "video_master.mp4", audio_gain_db=-trim_db)
             except MediaToolError as exc:
                 if exc.code == "render_timeout":
                     raise MediaInfrastructureError(exc.code, str(exc)) from exc
@@ -294,6 +316,7 @@ class MediaRenderer:
                 "transition": transition.value,
                 "transition_seconds": transition_seconds,
                 "normaliser": normaliser,
+                "true_peak_trim_db": trim_db,
             },
             "video_pipeline": {
                 "visualizer": visual_session.visual_plan_json.get("visualizer"),

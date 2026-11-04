@@ -202,7 +202,8 @@ class FFmpegToolchain:
     # -- video master ----------------------------------------------------------------------
 
     def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
+                            profile: RenderProfile, out: Path,
+                            audio_gain_db: float = 0.0) -> None:
         if _HEX_COLOUR.match(visual.wave_color) is None:
             raise MediaToolError("render_failed", f"not a #RRGGBB colour: {visual.wave_color!r}")
         wave_height = max(2, int(profile.height * profile.waveform_height_ratio) // 2 * 2)
@@ -219,6 +220,7 @@ class FFmpegToolchain:
             "-loop", "1", "-framerate", str(profile.fps), "-i", str(visual.background_png),
             "-i", str(audio_master),
             "-filter_complex", graph, "-map", "[v]", "-map", "1:a",
+            *(["-filter:a", f"volume={audio_gain_db:.2f}dB"] if audio_gain_db else []),
             "-c:v", "libx264", "-preset", profile.x264_preset, "-crf", str(profile.x264_crf),
             "-pix_fmt", profile.pixel_format, "-r", str(profile.fps),
             "-c:a", "aac", "-b:a", profile.audio_bitrate, "-ar", str(profile.sample_rate),
