@@ -132,6 +132,12 @@ class StandInToolchain:
         out.write_bytes(b"STAND-IN VIDEO MASTER " + hashlib.sha256(
             audio_master.read_bytes() + visual.background_png.read_bytes()).hexdigest().encode())
 
+    def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
+                           out: Path) -> None:
+        self.calls.append("still")
+        out.write_bytes(b"STAND-IN STILL VIDEO " + hashlib.sha256(
+            audio_master.read_bytes() + image.read_bytes()).hexdigest().encode())
+
     def probe(self, path: Path) -> ProbeReport:
         self.calls.append("probe")
         profile = self._profile

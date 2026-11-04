@@ -374,3 +374,47 @@ def test_real_ffmpeg_failed_render_is_persisted_by_p6_http_and_refused_by_p7() -
     assert blocked.status_code == 422, blocked.text
     assert blocked.json()["detail"]["code"] == "package_not_ready"
     assert youtube.recorded_calls == []
+
+
+def test_a_still_video_holds_the_owner_art_unmoving_over_the_audio_master(
+        rendered: tuple[InMemoryArtifactStore, AssemblyPipelineResult],
+        tmp_path: Path) -> None:
+    """The owner's art (a JPEG of another shape) is cropped to the frame and held still
+    for the whole audio master, in TV-range BT.709, and passes post-render QA."""
+    from PIL import Image
+
+    store, result = rendered
+    pkg = result.media_package
+    audio = tmp_path / "audio_master.wav"
+    audio.write_bytes(store.get(pkg.audio_master_uri))
+    art = tmp_path / "A.jpg"
+    Image.effect_noise((688, 384), 60).convert("RGB").save(art, quality=90)
+    out = tmp_path / "still.mp4"
+    toolchain = FFmpegToolchain()
+    toolchain.render_still_video(audio, art, TINY, out)
+
+    probe = _ffprobe(out.read_bytes())
+    streams = probe["streams"]
+    assert isinstance(streams, list)
+    video = next(s for s in streams if s["codec_type"] == "video")
+    assert (video["width"], video["height"], video["pix_fmt"]) == (160, 90, "yuv420p")
+    assert video.get("color_range") == "tv" and video.get("color_space") == "bt709"
+    qa = post_render_qa(
+        probe=toolchain.probe(out), loudness=toolchain.measure_loudness(out), profile=TINY,
+        expected_duration_seconds=result.playlist_session.actual_duration_seconds,
+        required_window_seconds=tuple(
+            pkg.render_report["sequencing"]["window_seconds"]),
+        size_bytes=out.stat().st_size)
+    assert qa.passed, qa.reasons
+
+    def frame(at: float) -> bytes:
+        return subprocess.run(
+            [require_media_tool("ffmpeg"), "-v", "error", "-ss", str(at), "-i", str(out),
+             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+            capture_output=True, check=True).stdout
+
+    first, last = frame(0.5), frame(result.playlist_session.actual_duration_seconds - 1.0)
+    assert len(first) == 160 * 90
+    # No motion: the same picture, up to CRF 35 coding noise on a pure-noise image
+    # (a waveform or a different picture moves the mean by tens of levels).
+    assert sum(abs(a - b) for a, b in zip(first, last, strict=True)) / len(first) <= 3

@@ -632,22 +632,31 @@ def get_media_package_by_release_manifest(
     )
 
 
-def replace_media_package_thumbnails(
+def replace_media_package_art(
     session: Session,
     package_id: str,
     thumbnails: list[dict[str, Any]],
     *,
+    video_master_uri: str,
+    video_checksum: str,
+    video_duration_seconds: float,
+    render_report: dict[str, Any],
+    manifest_hash: str,
     expected_status: PackageStatus,
     status: PackageStatus,
     now: datetime,
 ) -> bool:
-    """Swap the package's offered thumbnails and status, only from ``expected_status``;
-    ``False`` when another writer moved the package first."""
+    """Swap the package's offered thumbnails and its video (with the report and manifest
+    hash that describe it) and status, only from ``expected_status``; ``False`` when
+    another writer moved the package first."""
     result = session.execute(
         media_packages_table.update()
         .where(media_packages_table.c.media_package_id == package_id,
                media_packages_table.c.status == expected_status.value)
-        .values(thumbnails_json=json.dumps(thumbnails), status=status.value, updated_at=now)
+        .values(thumbnails_json=json.dumps(thumbnails), video_master_uri=video_master_uri,
+                video_checksum=video_checksum, video_duration_seconds=video_duration_seconds,
+                render_report_json=json.dumps(render_report), manifest_hash=manifest_hash,
+                status=status.value, updated_at=now)
     )
     return bool(result.rowcount)
 

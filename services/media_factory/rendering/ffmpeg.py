@@ -15,6 +15,9 @@ command string. The steps:
   brand background image, encoded with ``libx264`` (profile preset and CRF, ``yuv420p``)
   plus ``aac`` audio into MP4 with ``+faststart``. Metadata is stripped and bit-exact
   flags are set so the bytes do not carry encoder timestamps.
+* **Still video.** The owner's thumbnail art scaled to cover the frame, centre-cropped and
+  held still (``-tune stillimage``) for exactly the audio master's length, converted to
+  TV-range BT.709 (a JPEG decodes as full-range ``yuvj420p`` otherwise), same codecs.
 * **Probe.** ``ffprobe -show_format -show_streams`` as JSON.
 * **Loudness.** The ``ebur128`` meter (BS.1770, true peak on) over the produced file's
   audio: a separate meter from the ``loudnorm`` normaliser, run on what was produced.
@@ -229,6 +232,32 @@ class FFmpegToolchain:
             "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
             "-f", profile.container, str(out),
         ], step="video encode", programme_seconds=programme)
+
+    def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
+                           out: Path) -> None:
+        programme = self.probe(audio_master).duration_seconds
+        if programme is None or programme <= 0:
+            raise MediaToolError("render_failed", "the audio master has no measurable length")
+        graph = (
+            f"[0:v]scale={profile.width}:{profile.height}:force_original_aspect_ratio=increase:"
+            f"flags=lanczos:out_range=tv:out_color_matrix=bt709,"
+            f"crop={profile.width}:{profile.height},setsar=1,format={profile.pixel_format}[v]"
+        )
+        self._run(self._ffmpeg, [
+            "-hide_banner", "-nostats", "-nostdin", "-y",
+            "-loop", "1", "-framerate", str(profile.fps), "-i", str(image),
+            "-i", str(audio_master),
+            "-filter_complex", graph, "-map", "[v]", "-map", "1:a",
+            "-c:v", "libx264", "-preset", profile.x264_preset, "-tune", "stillimage",
+            "-crf", str(profile.x264_crf), "-pix_fmt", profile.pixel_format,
+            "-r", str(profile.fps), "-color_range", "tv", "-colorspace", "bt709",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-c:a", "aac", "-b:a", profile.audio_bitrate, "-ar", str(profile.sample_rate),
+            "-ac", str(profile.channels), "-t", f"{programme:.3f}",
+            "-movflags", "+faststart",
+            "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
+            "-f", profile.container, str(out),
+        ], step="still video encode", programme_seconds=programme)
 
     # -- measurement -----------------------------------------------------------------------
 

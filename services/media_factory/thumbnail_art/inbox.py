@@ -9,7 +9,8 @@ is not offered for publishing with P6's own drawn thumbnails: it waits at
 * ``job.json``: the same prompts and their styles, as the import reads them.
 
 ``plm media thumbnail-import`` then checks every image (:func:`check_image`) and,
-only when all three pass, attaches them to the package and releases it. Unset, P6
+only when all three pass, renders the video as image A held still and releases the
+package with them. Unset, P6
 publishes its own drawn thumbnails as before (development and tests).
 """
 
@@ -63,7 +64,9 @@ def write_job(inbox: Path, *, package_id: str, title: str, guide_version: str,
              f"Package `{package_id}`, style guide {guide_version}.", "",
              "Paste each prompt into Nano Banana Pro (16:9). Save the image you like into "
              "this folder under the name shown (PNG, JPEG or WebP, at least 1280 px wide), "
-             "then run `plm media thumbnail-import " + package_id + "`.", ""]
+             "then run `plm media thumbnail-import " + package_id + "`. Image A is also "
+             "the video's picture, held still for the whole video, so save it at full "
+             "size (1920 px wide or more).", ""]
     for p in prompts:
         lines += [f"## {_letter(p.variant_key)}.png: {p.style_id} (text: \"{p.text}\")", "",
                   "```", p.prompt, "```", ""]

@@ -113,6 +113,12 @@ class MediaToolchain(Protocol):
         """Encode the visualiser over the background with the audio into ``out``."""
         ...
 
+    def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
+                           out: Path) -> None:
+        """Encode ``image``, cropped to fill the frame and held still for the whole audio
+        master, with the audio into ``out`` (the owner's art as the picture)."""
+        ...
+
     def probe(self, path: Path) -> ProbeReport:
         """Container and stream facts of a produced file."""
         ...

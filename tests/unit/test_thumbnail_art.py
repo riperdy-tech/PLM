@@ -119,7 +119,8 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
     store = InMemoryArtifactStore()
     manifests = [stored_manifest(store, f"art_track_{n}", measured_duration_seconds=60,
                                  synth=spec) for n, spec in enumerate(synth_specs())]
-    backend = backend_for(store, manifests, toolchain=StandInToolchain())
+    toolchain = StandInToolchain()
+    backend = backend_for(store, manifests, toolchain=toolchain)
     request = AssemblePackageRequest.model_validate({
         "candidate_ids": [m.candidate_id for m in manifests], "brand_id": "brand_neon",
         "duration_range_seconds": {"min_seconds": 170, "max_seconds": 180},
@@ -147,7 +148,8 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         (folder / "b.jpg").write_bytes(_png((1280, 960)))
         with factory() as session:
             with pytest.raises(MediaAssemblyError) as refused:
-                import_owner_art(session, store, pkg.media_package_id, folder, now=NOW)
+                import_owner_art(session, store, toolchain, pkg.media_package_id, folder,
+                                 now=NOW)
             session.rollback()
         assert "art_b (b.jpg): 1280x960 is not 16:9" in str(refused.value)
         assert "art_c: no image saved" in str(refused.value)
@@ -159,11 +161,24 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         (folder / "B.png").write_bytes(_png((2560, 1440)))
         (folder / "C.webp").write_bytes(_png((1920, 1080)))
         with factory() as session:
-            released = import_owner_art(session, store, pkg.media_package_id, folder, now=NOW)
+            released = import_owner_art(session, store, toolchain, pkg.media_package_id,
+                                        folder, now=NOW)
             session.commit()
         assert released.status is PackageStatus.READY_FOR_PUBLISH
         assert [t["id"] for t in released.thumbnails] == list(ART_VARIANTS)
         assert all("/owner_art/" in t["uri"] for t in released.thumbnails)
+        # The video is now art A held still over the same audio master (owner, 2026-11-04).
+        assert toolchain.calls.count("still") == 1
+        assert released.video_master_uri != pkg.video_master_uri
+        assert "/owner_art/video_master" in released.video_master_uri
+        assert released.video_checksum != pkg.video_checksum
+        assert released.audio_checksum == pkg.audio_checksum
+        assert released.manifest_hash != pkg.manifest_hash
+        still = released.render_report["video_pipeline"]["still_image"]
+        assert still["variant_key"] == "art_a" and still["source"] == "A.png"
+        assert released.render_report["video_master"]["checksum"] == released.video_checksum
+        assert released.render_report["qa"]["passed"] is True
+        assert store.get(released.video_master_uri).startswith(b"STAND-IN STILL VIDEO")
 
         with factory() as session:
             replay = assemble_and_persist(
@@ -173,6 +188,44 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         assert replay.status is PackageStatus.READY_FOR_PUBLISH
         with factory() as session, pytest.raises(MediaAssemblyError,
                                                  match="thumbnail_art_not_awaited"):
-            import_owner_art(session, store, pkg.media_package_id, folder, now=NOW)
+            import_owner_art(session, store, toolchain, pkg.media_package_id, folder, now=NOW)
+    finally:
+        engine.dispose()
+
+
+def test_a_still_video_that_fails_qa_keeps_the_package_waiting(tmp_path: Path) -> None:
+    engine = create_media_engine(static_pool=True)
+    store = InMemoryArtifactStore()
+    manifests = [stored_manifest(store, f"qa_track_{n}", measured_duration_seconds=60,
+                                 synth=spec) for n, spec in enumerate(synth_specs())]
+    toolchain = StandInToolchain()
+    backend = backend_for(store, manifests, toolchain=toolchain)
+    request = AssemblePackageRequest.model_validate({
+        "candidate_ids": [m.candidate_id for m in manifests], "brand_id": "brand_neon",
+        "duration_range_seconds": {"min_seconds": 170, "max_seconds": 180},
+        "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
+        "render_profile": "preview_360p_v1",
+    })
+    factory = lambda: media_session(engine)
+    try:
+        with factory() as session:
+            pkg = assemble_and_persist(
+                session, backend, request, clock=FixedClock(NOW),
+                default_render_profile="preview_360p_v1", render_session_factory=factory,
+                worker_id_factory=lambda: "w1", thumbnail_art_inbox=tmp_path)
+            session.commit()
+        folder = tmp_path / pkg.media_package_id
+        for name in ("A.png", "B.png", "C.png"):
+            (folder / name).write_bytes(_png((1920, 1080)))
+        toolchain.probe_overrides["pixel_format"] = "yuvj420p"
+        with factory() as session:
+            with pytest.raises(MediaAssemblyError, match="thumbnail_art_video_failed"):
+                import_owner_art(session, store, toolchain, pkg.media_package_id, folder,
+                                 now=NOW)
+            session.rollback()
+        with factory() as session:
+            still = get_media_package_by_id(session, pkg.media_package_id)
+            assert still is not None and still.status is PackageStatus.AWAITING_THUMBNAIL_ART
+            assert still.video_checksum == pkg.video_checksum
     finally:
         engine.dispose()

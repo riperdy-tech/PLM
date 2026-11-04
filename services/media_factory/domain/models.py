@@ -427,21 +427,11 @@ class MediaPackage:
         now: datetime,
     ) -> MediaPackage:
         mpid = cls.derive_id(release_manifest_id, brand_id, package_version, render_profile)
-        content = json.dumps(
-            {
-                "media_package_id": mpid,
-                "release_manifest_id": release_manifest_id,
-                "experiment_id": experiment_id,
-                "content_arm_id": content_arm_id,
-                "lineage": lineage.model_dump(mode="json"),
-                "brand_id": brand_id,
-                "video_checksum": video_checksum,
-                "audio_checksum": audio_checksum,
-                "version": package_version,
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-        m_hash = hashlib.sha256(content).hexdigest()
+        m_hash = cls.compute_manifest_hash(
+            media_package_id=mpid, release_manifest_id=release_manifest_id,
+            experiment_id=experiment_id, content_arm_id=content_arm_id, lineage=lineage,
+            brand_id=brand_id, video_checksum=video_checksum, audio_checksum=audio_checksum,
+            package_version=package_version)
 
         return cls(
             media_package_id=mpid,
@@ -470,6 +460,27 @@ class MediaPackage:
             created_at=now,
             updated_at=now,
         )
+
+    @staticmethod
+    def compute_manifest_hash(*, media_package_id: str, release_manifest_id: str,
+                              experiment_id: str, content_arm_id: str,
+                              lineage: ExperimentLineage, brand_id: str, video_checksum: str,
+                              audio_checksum: str, package_version: str) -> str:
+        content = json.dumps(
+            {
+                "media_package_id": media_package_id,
+                "release_manifest_id": release_manifest_id,
+                "experiment_id": experiment_id,
+                "content_arm_id": content_arm_id,
+                "lineage": lineage.model_dump(mode="json"),
+                "brand_id": brand_id,
+                "video_checksum": video_checksum,
+                "audio_checksum": audio_checksum,
+                "version": package_version,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(content).hexdigest()
 
     @staticmethod
     def derive_id(release_manifest_id: str, brand_id: str, package_version: str,

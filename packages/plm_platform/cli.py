@@ -989,7 +989,7 @@ def media_thumbnail_job(
 def media_thumbnail_import(
     package_id: str = typer.Argument(..., help="Package waiting at awaiting_thumbnail_art"),
 ) -> None:
-    """Check the owner's A/B/C thumbnails and, if all pass, release the package."""
+    """Check the owner's A/B/C thumbnails, make the video a still of A, release the package."""
     from media_factory.cli import cli_thumbnail_import
 
     cli_thumbnail_import(package_id=package_id)

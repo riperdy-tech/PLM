@@ -20,6 +20,7 @@ from .config import load_media_factory_settings
 from .domain.enums import PackageStatus, RenderJobStatus
 from .errors import MediaAssemblyError, MediaInfrastructureError
 from .render_reconciliation import inspect_render_claim, record_claim_inventory
+from .rendering.ffmpeg import FFmpegToolchain
 from .service import assemble_and_persist
 from .storage.render_claims import (
     RecoveryEvidenceKind,
@@ -497,13 +498,14 @@ def cli_thumbnail_job(
 def cli_thumbnail_import(
     package_id: str = typer.Argument(..., help="Package waiting at awaiting_thumbnail_art"),
 ) -> None:
-    """Check the owner's three images and, if all pass, release the package."""
+    """Check the owner's three images, render the video as image A held still over the
+    audio master and, if it passes QA, release the package."""
     inbox = _art_inbox()
     platform = load_settings()
     with platform_session_factory()() as session:
         try:
-            pkg = import_owner_art(session, MinioArtifactStore(platform), package_id,
-                                   inbox / package_id, now=SystemClock().now())
+            pkg = import_owner_art(session, MinioArtifactStore(platform), FFmpegToolchain(),
+                                   package_id, inbox / package_id, now=SystemClock().now())
         except MediaAssemblyError as exc:
             typer.echo(f"Not imported: {exc}", err=True)
             raise typer.Exit(code=2) from exc
