@@ -490,6 +490,9 @@ async function loadView(name) {
   const root = document.getElementById('view-root');
   try {
     if (name === 'studio') {
+      const studioPill = document.getElementById('data-source-pill');
+      studioPill.textContent = 'DATA SOURCE: LIVE';
+      studioPill.className = 'pill pill-live';
       document.getElementById('generated-at').textContent = `updated ${new Date().toLocaleTimeString()}`;
       root.replaceChildren(await renderStudio());
       return;
