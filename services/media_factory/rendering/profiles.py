@@ -36,11 +36,12 @@ class RenderProfile:
     container: str = "mp4"
     loudness_target_lufs: float = -14.0
     loudness_tolerance_lu: float = 1.0
-    true_peak_dbtp: float = -2.0
-    true_peak_tolerance_db: float = 1.0
+    true_peak_dbtp: float = -2.5
+    true_peak_tolerance_db: float = 1.5
     """Lossy (AAC) encoding may overshoot the limiter's ceiling by up to this much. The
-    limiter aims 1 dB under the -1 dBTP delivery ceiling because AAC at 192k measured
-    +0.9 dB over it (run c1f32e48, 2026-11-04), so the encoded master stays at -1."""
+    limiter aims 1.5 dB under the -1 dBTP delivery ceiling (the QA ceiling is their sum)
+    because AAC at 192k measured about +0.8 dB over a limited Flow Music master (run
+    c1f32e48, 2026-11-04), so the encoded master stays at or under -1 dBTP."""
     loudness_range_lu: float = 11.0
     duration_tolerance_seconds: float = 0.5
     """Produced duration vs. the timeline: encoder priming and frame rounding only."""

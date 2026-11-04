@@ -223,8 +223,11 @@ class FFmpegToolchain:
             "-pix_fmt", profile.pixel_format, "-r", str(profile.fps),
             "-c:a", "aac", "-b:a", profile.audio_bitrate, "-ar", str(profile.sample_rate),
             "-ac", str(profile.channels), "-shortest", "-movflags", "+faststart",
+            # No ``-flags:a +bitexact``: it makes FFmpeg's native AAC encoder overshoot
+            # the limited master by about 2 dB true peak (measured 2026-11-04: -1.9 dBTP
+            # WAV -> +0.1 encoded, -1.1 without it). The encode stays deterministic.
             "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
-            "-flags:a", "+bitexact", "-f", profile.container, str(out),
+            "-f", profile.container, str(out),
         ], step="video encode", programme_seconds=programme)
 
     # -- measurement -----------------------------------------------------------------------
