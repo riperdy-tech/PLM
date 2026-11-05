@@ -3,7 +3,7 @@
 Before this, every video background and waveform came from the brand palette and
 thumbnail A always drew rain, whatever world P3 had sent. The focus-music identity
 (ADR-0044) adds workspace and technical worlds; an unknown world is drawn as a
-neutral workspace in the brand's colours, and the default brand is Longform Signal.
+neutral workspace in the brand's colours, and the default brand is Deep Current FM.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def test_an_unknown_world_is_a_neutral_workspace_in_the_brand_colours() -> None:
 
 def test_the_default_brand_is_the_focus_identity() -> None:
     brand = DEFAULT_BRANDS.get("longform_signal")
-    assert brand.brand_name == "Longform Signal"
+    assert brand.brand_name == "Deep Current FM"
     base, shade, accent, highlight = brand.palette
     for ink, floor in ((accent, 3.0), (highlight, 4.5)):
         assert _contrast(ink, base) >= floor
