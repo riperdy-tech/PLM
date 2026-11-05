@@ -50,6 +50,21 @@ APPROVAL_CAPABILITIES: Final[tuple[str, ...]] = (
 SONGS_REASON: Final[str] = "MANUAL_AUDIO_AWAITED"
 ART_REASON: Final[str] = "THUMBNAIL_ART_AWAITED"
 APPROVAL_REASON: Final[str] = "PUBLISH_APPROVAL_AWAITED"
+_FINISHED_STATES: Final = frozenset({
+    "PUBLISHED", "ANALYZING", "LEARNING", "FAILED", "CANCELLED", "REJECTED"})
+_STEPS: Final[dict[str, str]] = {
+    "IDEA": "Planning the video", "RESEARCHED": "Planning the video",
+    "POLICY_CHECKED": "Planning the video", "GENERATING": "Preparing the song prompts",
+    "GENERATED": "Checking the songs", "QA": "Checking the songs", "PASSED": "Checking the songs",
+    "ASSEMBLING": "Building the playlist and rendering the video (this takes a while)",
+    "PACKAGED": "Video rendered", "UPLOADING": "Uploading to YouTube",
+    "PROCESSING": "YouTube is processing the upload",
+}
+_WAITING: Final[dict[str, str]] = {
+    SONGS_REASON: "Waiting for you: songs (step 1)",
+    ART_REASON: "Waiting for you: thumbnails (step 2)",
+    APPROVAL_REASON: "Waiting for you: review and approve (step 3)",
+}
 MUSIC_PROVIDERS: Final[dict[str, str]] = {"suno": "suno_manual",
                                           "flow_music": "flow_music_manual"}
 """The owner's choice at Start -> the P4 provider that writes the song prompts."""
@@ -148,6 +163,8 @@ class Studio:
     keyword arguments); raises on refusal."""
     reopen: Callable[[str], dict[str, Any]] | None = None
     """P6's reopen of one package for new art (``review_edits.reopen_art``)."""
+    runs: Callable[[], list[dict[str, Any]]] | None = None
+    """The pipeline's active runs (the production-queue view); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
     _video_cache: dict[str, bytes] = field(default_factory=dict)
 
@@ -162,9 +179,34 @@ class Studio:
     def _cases(self, reason: str) -> list[dict[str, Any]]:
         return [c for c in self._live_holds() if c.get("reason_code") == reason]
 
+    def videos_now(self) -> list[dict[str, Any]]:
+        """Every run still being made (not yet published), with its step in plain words,
+        so the Studio shows work in progress, not only the steps that wait for the owner."""
+        if self.runs is None:
+            return []
+        holds = {(c.get("pipeline") or {}).get("workflow_id"): c for c in self._live_holds()}
+        videos = []
+        for run in self.runs():
+            state = str(run.get("state"))
+            if state in _FINISHED_STATES:
+                continue
+            hold = holds.get(run.get("workflow_id"))
+            if state == "HELD":
+                reason = None if hold is None else hold.get("reason_code")
+                label = _WAITING.get(str(reason), "Stopped: needs attention "
+                                     f"({reason or run.get('last_error_code') or 'unknown'})")
+                yours = reason in _WAITING
+            else:
+                label, yours = _STEPS.get(state, f"Working ({state})"), False
+            videos.append({"workflow_id": run.get("workflow_id"), "state": state,
+                           "label": label, "your_turn": yours,
+                           "since": run.get("updated_at"), "started": run.get("created_at")})
+        return videos
+
     def overview(self) -> dict[str, Any]:
         holds = self._live_holds()
         return {
+            "videos": self.videos_now(),
             "waiting": {reason: [c["case_id"] for c in holds if c.get("reason_code") == reason]
                         for reason in (SONGS_REASON, ART_REASON, APPROVAL_REASON)},
             "songs": self.songs(),
@@ -565,6 +607,12 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     from ..storage import digest_from_key, from_uri, get_verified
     from ..temporal import Phase
 
+    def runs() -> list[dict[str, Any]]:
+        panel = live.view("production-queue")["panels"]["runs"]
+        if panel.get("status") != "ok":
+            raise _refuse(503, "runs_unavailable", str(panel.get("reason")))
+        return list(panel["data"]["active"])
+
     def open_holds() -> list[dict[str, Any]]:
         panel = live.exceptions()["panels"]["open"]
         if panel.get("status") != "ok":
@@ -667,6 +715,6 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
             return {**asdict(started), "music_provider": music_provider}
 
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
-                  open_holds=open_holds, package=package, media=media,
+                  open_holds=open_holds, package=package, media=media, runs=runs,
                   import_art=import_art, start=start, edit=edit, reopen=reopen,
                   clock=clock or SystemClock())

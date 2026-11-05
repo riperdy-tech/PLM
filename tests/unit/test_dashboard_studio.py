@@ -350,3 +350,23 @@ def test_start_asks_for_suno_or_flow_music_and_shows_both_inboxes(tmp_path: Path
     studio.save_song("trk_2-cccc3333", WAV)
     assert (suno / "trk_2-cccc3333.wav").read_bytes() == WAV
     assert not (tmp_path / "music" / "trk_2-cccc3333.wav").exists()
+
+
+def test_videos_now_shows_work_in_progress_and_whose_turn_it_is(tmp_path: Path) -> None:
+    """A run that is rendering shows as working; a held run names the owner's step; a
+    published or learning run is not listed."""
+    studio, _ = _studio(tmp_path, [{"case_id": "c9", "reason_code": "THUMBNAIL_ART_AWAITED",
+                                    "pipeline": {"workflow_id": "pipeline.b",
+                                                 "run_state": "HELD"}}])
+    studio.runs = lambda: [
+        {"workflow_id": "pipeline.a", "state": "ASSEMBLING", "updated_at": "t1",
+         "created_at": "t0"},
+        {"workflow_id": "pipeline.b", "state": "HELD", "updated_at": "t2", "created_at": "t0"},
+        {"workflow_id": "pipeline.c", "state": "LEARNING", "updated_at": "t3",
+         "created_at": "t0"},
+    ]
+    videos = studio.overview()["videos"]
+    assert [(v["workflow_id"], v["your_turn"]) for v in videos] == [
+        ("pipeline.a", False), ("pipeline.b", True)]
+    assert videos[0]["label"].startswith("Building the playlist and rendering")
+    assert videos[1]["label"] == "Waiting for you: thumbnails (step 2)"

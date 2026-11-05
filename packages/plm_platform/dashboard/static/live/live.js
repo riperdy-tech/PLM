@@ -362,7 +362,8 @@ function actionButton(label, cls, run, { confirm: question, busy } = {}) {
     button.disabled = true;
     result.className = 'result';
     result.textContent = busy || 'Working...';
-    const out = await run();
+    studioBusy += 1;
+    const out = await run().finally(() => { studioBusy -= 1; });
     button.disabled = false;
     if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
     result.className = 'result done';
@@ -379,7 +380,8 @@ function uploadInput(accept, url) {
     if (!file) return;
     result.className = 'result';
     result.textContent = `uploading ${file.name}...`;
-    const out = await authedSend(url, 'PUT', file, 'application/octet-stream');
+    studioBusy += 1;
+    const out = await authedSend(url, 'PUT', file, 'application/octet-stream').finally(() => { studioBusy -= 1; });
     if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
     result.className = 'result done';
     result.textContent = `saved as ${out.body.saved}`;
@@ -558,8 +560,31 @@ async function renderStudio() {
           h('div', { class: 'row-actions' },
             startButton('Suno', 'suno'), startButton('Flow Music', 'flow_music')))
         : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
-  return h('div', {}, head, songsStep(s.songs, waiting, s.notes), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
+  return h('div', {}, head, videosNow(s.videos || []), songsStep(s.songs, waiting, s.notes), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
 }
+
+function videosNow(videos) {
+  const card = h('section', { class: 'step' }, h('div', { class: 'step-head' }, h('h2', {}, 'Your videos now'),
+    h('span', { class: 'muted' }, 'updates by itself every 20 seconds')));
+  if (!videos.length) { card.append(h('p', { class: 'muted' }, 'No video is being made. Press Start to begin one.')); return card; }
+  const when = (iso) => (iso ? new Date(iso).toLocaleString() : 'unknown');
+  for (const v of videos) {
+    card.append(h('div', { class: 'song' },
+      h('div', { class: 'step-head' }, h('strong', {}, v.label),
+        v.your_turn ? h('span', { class: 'badge badge-review' }, 'your turn') : h('span', { class: 'badge badge-state' }, 'working')),
+      h('p', { class: 'muted' }, `Since ${when(v.since)}. Started ${when(v.started)}. Run ${String(v.workflow_id || '').slice(9, 17)}`)));
+  }
+  return card;
+}
+
+// The Studio refreshes itself while nothing is being typed, picked or sent.
+let studioBusy = 0;
+setInterval(() => {
+  if (currentView !== 'studio' || studioBusy > 0 || document.hidden) return;
+  const active = document.activeElement;
+  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+  loadView('studio');
+}, 20000);
 
 // ------------------------------------------------------------------------ shell
 
