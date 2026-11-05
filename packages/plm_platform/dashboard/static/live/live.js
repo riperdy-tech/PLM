@@ -402,7 +402,18 @@ function songsStep(songs, waiting, notes) {
     card.append(h('p', { class: 'notice' }, 'The music inbox is not configured (PLM_FLOW_MUSIC_MANUAL_INBOX).'));
     return card;
   }
-  if (!songs.sheets.length) { card.append(h('p', { class: 'muted' }, 'No song is waiting.')); return card; }
+  if (!songs.sheets.length) {
+    if ((waiting.MANUAL_AUDIO_AWAITED || []).length) {
+      // Every song is saved but the run has not been told yet: offer Continue.
+      card.append(h('p', { class: 'saved' }, 'All songs are saved. Press Continue to send them to the run.'),
+        h('div', { class: 'row-actions' },
+          actionButton('Continue', 'btn-ok big', () => authedSend('/api/studio/songs/done', 'POST'),
+            { busy: 'Sending the songs to the run... P4 checks every file.' })));
+    } else {
+      card.append(h('p', { class: 'muted' }, 'No song is waiting.'));
+    }
+    return card;
+  }
   card.append(h('p', { class: 'muted' }, 'Make each song in the tool its sheet names (Suno or Flow Music) from its prompt, download it as WAV and upload it here. When every song is saved, press Continue.'));
   let missing = 0;
   for (const sheet of songs.sheets) {
