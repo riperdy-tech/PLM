@@ -15,8 +15,8 @@ command string. The steps:
   brand background image, encoded with ``libx264`` (profile preset and CRF, ``yuv420p``)
   plus ``aac`` audio into MP4 with ``+faststart``. Metadata is stripped and bit-exact
   flags are set so the bytes do not carry encoder timestamps.
-* **Still video.** The owner's thumbnail art scaled to cover the frame, centre-cropped and
-  held still (``-tune stillimage``) for exactly the audio master's length, converted to
+* **Still video.** The owner's thumbnail art scaled to cover the frame (once a second, then
+  repeated to the frame rate), centre-cropped and held still (``-tune stillimage``) for exactly the audio master's length, converted to
   TV-range BT.709 (a JPEG decodes as full-range ``yuvj420p`` otherwise), same codecs.
 * **Probe.** ``ffprobe -show_format -show_streams`` as JSON.
 * **Loudness.** The ``ebur128`` meter (BS.1770, true peak on) over the produced file's
@@ -241,11 +241,16 @@ class FFmpegToolchain:
         graph = (
             f"[0:v]scale={profile.width}:{profile.height}:force_original_aspect_ratio=increase:"
             f"flags=lanczos:out_range=tv:out_color_matrix=bt709,"
-            f"crop={profile.width}:{profile.height},setsar=1,format={profile.pixel_format}[v]"
+            f"crop={profile.width}:{profile.height},setsar=1,format={profile.pixel_format},"
+            f"fps={profile.fps}[v]"
         )
+        # The picture is read at one frame per second and scaled once per second, then
+        # repeated up to the profile's frame rate: scaling a large owner image for every
+        # output frame made a 24-minute video take about 40 minutes (measured 2026-11-06:
+        # 103 s vs 9 s per minute of video, byte-identical output).
         self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", "-y",
-            "-loop", "1", "-framerate", str(profile.fps), "-i", str(image),
+            "-loop", "1", "-framerate", "1", "-i", str(image),
             "-i", str(audio_master),
             "-filter_complex", graph, "-map", "[v]", "-map", "1:a",
             "-c:v", "libx264", "-preset", profile.x264_preset, "-tune", "stillimage",
