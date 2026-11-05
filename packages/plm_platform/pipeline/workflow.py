@@ -464,7 +464,10 @@ class PipelineWorkflow:
                     allowance = options.max_topup_rounds
                 rounds += 1
                 allowance -= 1
-                added = await self._top_up(rounds, shortages)
+                # A rewind's top-ups get their own keys: under the first assembly's keys
+                # P3, P4 and P5 would replay the earlier answers instead of new work.
+                added = await self._top_up(
+                    rounds if rerender == 0 else f"rr{rerender}.{rounds}", shortages)
                 if isinstance(added, list):
                     candidates.extend(c for c in added if c not in candidates)
                     break

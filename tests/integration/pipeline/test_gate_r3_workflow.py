@@ -624,3 +624,55 @@ async def test_a_song_taken_out_at_approval_is_replaced_before_the_new_package(
     assert steps.calls_for(Step.QA)[-1] == idempotency_key(workflow_id, "qa.rrr1s")
     assert steps.calls_for(Step.ASSEMBLE)[-1] == idempotency_key(workflow_id, "assemble.rr1")
     assert steps.calls_for(Step.UPLOAD) == []
+
+
+async def test_a_rewind_that_runs_short_tops_up_under_its_own_keys(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves: when the first assembly and a rewound assembly both run short, the
+    rewind's top-up uses new extend/generate/QA keys (``rr1.1``), so P3, P4 and P5 do new
+    work instead of replaying the first top-up's answers under ``r1``."""
+    import dataclasses
+
+    from plm_platform.pipeline.client import start_pipeline
+    from plm_platform.pipeline.http import PlaylistSupplyShort
+    from plm_platform.pipeline.types import StepRequest, StepResult
+
+    from tests.integration.pipeline.support import QUEUE
+
+    shortage = {"p3_package_id": "pkg-mock", "missing_seconds": 301,
+                "shortest_track_seconds": 150, "track_spec_ids": ["ts-1"], "cleared_count": 2}
+
+    class ShortSteps(MockPhaseSteps):
+        async def assemble(self, request: StepRequest) -> StepResult:
+            key = request.idempotency_key
+            if key.endswith((":assemble", ":assemble.rr1")):
+                self.calls.append((Step.ASSEMBLE.value, key))
+                raise PlaylistSupplyShort([shortage], [])
+            return await super().assemble(request)
+
+    steps = ShortSteps(_scripts())
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(
+            client, directive_id=directive_id, brand_id="gate_brand", task_queue=QUEUE,
+            options=dataclasses.replace(OPTIONS, require_publish_approval=True))
+        await wait_until(handle, lambda s: s.state == "HELD", "the first approval hold")
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="pia", role="production_owner",
+            evidence={"publish_approval_ref": "Studio: render again"}, rewind_to="assemble"))
+        await wait_until(
+            handle, lambda s: s.state == "HELD" and len(steps.calls_for(Step.EXTEND)) == 2,
+            "the second approval hold")
+        await handle.terminate(reason="R6 test: rewind top-up keys proven")
+
+    def key(name: str) -> str:
+        return idempotency_key(workflow_id, name)
+
+    assert steps.calls_for(Step.EXTEND) == [key("extend.r1.0"), key("extend.rrr1.1.0")]
+    assert key("generate.r1") in steps.calls_for(Step.GENERATE)
+    assert key("generate.rrr1.1") in steps.calls_for(Step.GENERATE)
+    assert key("qa.rrr1.1") in steps.calls_for(Step.QA)
+    assert steps.calls_for(Step.ASSEMBLE) == [
+        key("assemble"), key("assemble.r1"), key("assemble.rr1"), key("assemble.rr1.r1")]
+    assert steps.calls_for(Step.UPLOAD) == []
