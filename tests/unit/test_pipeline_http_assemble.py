@@ -244,7 +244,7 @@ def test_p3s_thumbnail_style_reaches_p6_and_a_package_awaiting_art_holds_the_run
 
     styled = dict(P3_PACKAGES["pkg_1"],
                   thumbnail_spec={"thumbnail_family": "electric_city_night"})
-    phases = _Phases({"c0": (200, {"media_package_id": "mpkg_art", "video_checksum": "a" * 64,
+    phases = _Phases({"c0": (200, {"media_package_id": "mpkg_aaaaaaaa", "video_checksum": "a" * 64,
                                    "status": "awaiting_thumbnail_art",
                                    "blocking_reason_codes": ["thumbnail_art_awaited"]})})
     original = P3_PACKAGES["pkg_1"]
@@ -257,4 +257,5 @@ def test_p3s_thumbnail_style_reaches_p6_and_a_package_awaiting_art_holds_the_run
     assert phases.p6_bodies[0]["thumbnail_family"] == "electric_city_night"
     assert held.value.hold_reason_code == "THUMBNAIL_ART_AWAITED"
     assert held.value.details["capability"] == "thumbnail.art"
-    assert "mpkg_art" in held.value.message
+    assert held.value.details["media_package_ids"] == ["mpkg_aaaaaaaa"]
+    assert "mpkg_aaaaaaaa" in held.value.message

@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from plm_contracts.seams import ExperimentLineage
 from sqlalchemy import select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from ..domain.enums import (
@@ -662,7 +663,7 @@ def replace_media_package_art(
                 render_report_json=json.dumps(render_report), manifest_hash=manifest_hash,
                 status=status.value, updated_at=now)
     )
-    return bool(result.rowcount)
+    return bool(cast(CursorResult[Any], result).rowcount)
 
 
 def update_media_package_status(

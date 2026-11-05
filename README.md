@@ -37,6 +37,21 @@ The architecture and every phase plan live in `docs/`:
   `PHASE_MAP.md` (the three numbering systems and the ARCH↔phase map),
   `DECISION_LOG.md`.
 - `docs/adr/` — the ADR template and one ADR per ruling (`R1`–`R20`).
+## Independent Windows WAV utility
+
+The separate [Suno WAV Studio](standalone/suno_wav_studio/README.md) desktop app
+runs without the PLM stack: authenticated catalog browsing (unofficial read API),
+normal authorized downloads, local media-to-WAV conversion and optional album
+mastering. The locally built Windows executable is at
+`standalone/suno_wav_studio/dist/SunoWavStudio.exe` (ignored by Git).
+It does not generate music, bypass download allowances or upload releases.
+
+The separate [SunoWavStudio_test](standalone/suno_wav_studio_test/README.md)
+comparison utility reproduces the older private video-URL / MP4-audio-extraction
+route, without altering the regular WAV app. The unofficial API and its impact
+on account limits are unverified; it is only an experiment, not a production
+provider or an approved R-stage gate.
+
 ## Where things live
 
 Tests in `tests/`, the single alembic chain in `migrations/`, specs and plans in

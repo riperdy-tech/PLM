@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
 from plm_contracts import Tri
-from sqlalchemy.engine import RowMapping
+from sqlalchemy.engine import CursorResult, RowMapping
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -825,7 +825,7 @@ def retire_arms_outside_namespace(session: Session, *, prefix: str) -> int:
                arms.c.status != ArmStatus.RETIRED.value)
         .values(status=ArmStatus.RETIRED.value, updated_at=sa.func.now())
     )
-    return int(result.rowcount or 0)
+    return int(cast(CursorResult[Any], result).rowcount or 0)
 
 
 def latest_scores(

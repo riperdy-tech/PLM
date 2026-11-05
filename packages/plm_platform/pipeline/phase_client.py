@@ -164,6 +164,13 @@ class ExternalWriteRefused(PhaseRequestRefused):
         }
         if self.hold_reason_code == BUDGET_HOLD_REASON:
             details["ledger_reason"] = self.guard_reason
+        if self.hold_reason_code == THUMBNAIL_ART_HOLD_REASON:
+            package_ids = self.body.get("media_package_ids")
+            if (isinstance(package_ids, list) and package_ids
+                    and all(isinstance(p, str) and
+                            re.fullmatch(r"mpkg_[0-9a-f]{8,64}", p) for p in package_ids)
+                    and len(set(package_ids)) == len(package_ids)):
+                details["media_package_ids"] = package_ids
         return details
 
 

@@ -599,7 +599,8 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 Phase.MEDIA, "/media/packages/assemble", 409,
                 f"{EXTERNAL_WRITE_CODE_PREFIX}record_intent",
                 f"thumbnail.art not performed: thumbnail_art_awaited "
-                f"(packages {', '.join(awaiting_art)} wait for the owner's thumbnail art)")
+                f"(packages {', '.join(awaiting_art)} wait for the owner's thumbnail art)",
+                body={"media_package_ids": awaiting_art})
         if not packages:
             raise ValidationFailure(f"assemble: no P3 package in {package_ids}")
         return StepResult(

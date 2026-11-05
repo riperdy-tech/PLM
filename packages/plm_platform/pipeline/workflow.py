@@ -117,6 +117,7 @@ RETRIES_HOLD_REASON: Final[str] = "STEP_RETRIES_EXHAUSTED"
 PLATFORM_FAULT_HOLD_REASON: Final[str] = "STEP_PLATFORM_FAULT"
 PUBLISH_APPROVAL_HOLD_REASON: Final[str] = "PUBLISH_APPROVAL_AWAITED"
 """The owner watches the finished package and approves its upload (hold-classes-v12)."""
+THUMBNAIL_ART_HOLD_REASON: Final[str] = "THUMBNAIL_ART_AWAITED"
 UNCLASSIFIED_WRITE_HOLD_REASON: Final[str] = "EXTERNAL_WRITE_REFUSED"
 SUPPLY_SHORT_FAILURE: Final[str] = "PlaylistSupplyShort"
 EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
@@ -703,13 +704,18 @@ class PipelineWorkflow:
         reason_code = failure.details.get("hold_reason_code")
         if not isinstance(reason_code, str) or not reason_code:
             reason_code = UNCLASSIFIED_WRITE_HOLD_REASON
-        details = {"step": step.value, "error": failure.message,
-                   "idempotency_key": idempotency_key(workflow.info().workflow_id,
-                                                      failure.key_name or step.value)}
+        details: dict[str, Any] = {"step": step.value, "error": failure.message,
+                                   "idempotency_key": idempotency_key(
+                                       workflow.info().workflow_id,
+                                       failure.key_name or step.value)}
         for name in ("capability", "guard_decision", "guard_reason", "ledger_reason",
                      "refusing_phase"):
             if failure.details.get(name) is not None:
                 details[name] = failure.details[name]
+        if reason_code == THUMBNAIL_ART_HOLD_REASON:
+            package_ids = failure.details.get("media_package_ids")
+            if isinstance(package_ids, list) and package_ids:
+                details["media_package_ids"] = package_ids
         guard_reason = failure.details.get("guard_reason")
         return await self._hold(
             step, [(STEP_ORIGIN_PHASE[step], reason_code, details)],

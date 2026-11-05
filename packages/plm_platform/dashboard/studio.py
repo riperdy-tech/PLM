@@ -324,14 +324,25 @@ class Studio:
     async def import_thumbnails(self, package_id: str) -> dict[str, Any]:
         """P6's import (checks, still video, release), then resume the run waiting on it."""
         folder = self._art_folder(package_id)
-        released = await asyncio.to_thread(self.import_art, package_id, folder)
         cases = [c for c in self._cases(ART_REASON)
-                 if package_id in json.dumps(c.get("details") or {})] or self._cases(ART_REASON)
-        resumed = [await self._resume(c["case_id"], "production_owner",
-                                      {"thumbnail_art_inbox_ref": f"{folder} (imported in the Studio)"},
-                                      f"thumbnail art for {package_id} imported in the Studio")
-                   for c in cases[:1]]
-        return {"package": released, "resumed": resumed}
+                 if package_id in self._package_ids(c)]
+        if not cases:
+            raise _refuse(409, "thumbnail_hold_not_found",
+                          f"no active thumbnail hold names {package_id}")
+        released = await asyncio.to_thread(self.import_art, package_id, folder)
+        resumed: list[dict[str, Any]] = []
+        waiting: set[str] = set()
+        for case in cases:
+            not_ready = [p for p in self._package_ids(case)
+                         if self.package(p).get("status") != "ready_for_publish"]
+            if not_ready:
+                waiting.update(not_ready)
+                continue
+            resumed.append(await self._resume(
+                case["case_id"], "production_owner",
+                {"thumbnail_art_inbox_ref": f"{folder} (imported in the Studio)"},
+                f"thumbnail art for {package_id} imported in the Studio"))
+        return {"package": released, "resumed": resumed, "waiting_for": sorted(waiting)}
 
     # -- review and approval ----------------------------------------------------------------
 

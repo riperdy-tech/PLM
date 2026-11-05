@@ -14,6 +14,58 @@ capability. Update it in the same change that alters a capability.
   [`reviews/2026-10-13-system-review-and-remediation-plan.md`](reviews/2026-10-13-system-review-and-remediation-plan.md),
   which has file:line references for every finding.
 
+## 2026-11-05 standalone Suno WAV Studio (outside the P1–P9 pipeline)
+
+`standalone/suno_wav_studio/` now contains a self-contained Tkinter Windows
+application (independent of PLM services and runtime), its source launcher,
+rebuild script, help/credential guide, and an ignored local executable at
+`standalone/suno_wav_studio/dist/SunoWavStudio.exe`. The packaged executable
+contains FFmpeg and FFprobe; file presence and PyInstaller build exit 0 were
+verified on the connected Windows PC. It takes a user-supplied Clerk cookie in
+memory, requests an authenticated Suno session, lists clips from an unofficial
+read-only feed endpoint or by IDs, lets the user select clips, uses the ordinary
+download authorization path (which may consume allowance), converts downloaded
+or user-selected local media to PCM WAV, and can make a crossfaded -14 LUFS-target
+album WAV. The legacy zero-quota video extraction endpoint is deliberately absent;
+there is no music generation, platform upload or PLM database write.
+
+Offline evidence: 7 standalone parser/FFmpeg tests passed, Ruff targeted checks
+passed, syntax validation succeeded. **No real login, API listing, download,
+account entitlement or GUI interaction was tested.** No formal R-stage gate was
+claimed or changed by this standalone utility. See its own README for caveats.
+
+## 2026-11-05 standalone Suno video-path comparison test (outside P1-P9)
+
+`standalone/suno_wav_studio_test/` adds a separate Tkinter GUI source tree for
+experimenting with the existing legacy `extract_audio_via_video` strategy:
+check an existing clip video URL, optionally request video generation, fetch
+the video stream into temporary MP4, then extract standard WAV with FFmpeg.
+The original `standalone/suno_wav_studio/` is unchanged and continues to use
+normal WAV download authorization. The test variant has no automatic music
+creation, upload, or PLM database write. Only user-confirmed video generation
+is possible. Offline test results: 2 mocked HTTP/local MP4-to-WAV tests passed,
+Ruff checks and Python syntax checks passed. **No real Suno login, video API
+request, quota/account effect, or live GUI test was performed.** The legacy
+video path is unsupported by Suno and may fail. No R-stage gate is claimed.
+
+## 2026-11-05 Studio thumbnail hold/package binding (local code-only)
+
+On branch `review/r6-live-adapters` (starting HEAD `1cfd6e9`), the P6 assemble
+adapter now carries the exact `media_package_ids` in its thumbnail-art refusal;
+the step exception and Temporal workflow forward that structured list into the
+persisted `THUMBNAIL_ART_AWAITED` case. Studio imports no longer fall back to
+resuming an unrelated art hold or relying on a text substring: only a currently
+HELD case naming the package is eligible. A multi-package hold resumes only
+after **every** named package is `ready_for_publish`. Cases created before this
+change without a structured package list deliberately require independent
+operator handling; they are not guessed from free-text error messages.
+
+Evidence: 29 focused dashboard/P6 assemble/workflow tests passed; full-repository
+Ruff and `mypy packages services` (486 source files) passed after typing-only
+`CursorResult` annotations on P1/P6 SQL UPDATE counts. These checks are local
+code/stand-in tests, **not** a Compose/Temporal hold/release run, FFmpeg/MinIO
+reconciliation, a real YouTube upload or a formal R6/R5 gate.
+
 ## Takeover audit and B02/B03/B04 follow-up (2026-10-29, Claude Code session)
 
 A new session took over from the ChatGPT/Nexus A/B session and audited before

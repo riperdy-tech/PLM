@@ -66,9 +66,12 @@ def _studio(tmp_path: Path, holds: list[dict[str, Any]],
          "granted_at": "2026-11-04T00:00:00+00:00", "expires_at": "2026-11-05T00:00:00+00:00"},
     ]), encoding="utf-8")
 
+    package_states: dict[str, str] = {}
+
     def importer(package_id: str, folder: Path) -> dict[str, Any]:
         if imported is not None:
             imported.append(package_id)
+        package_states[package_id] = "ready_for_publish"
         return {"media_package_id": package_id, "status": "ready_for_publish"}
 
     studio = Studio(
@@ -76,7 +79,7 @@ def _studio(tmp_path: Path, holds: list[dict[str, Any]],
                           notes_file=tmp_path / "studio-notes.json"),
         actions=actions,  # type: ignore[arg-type]
         open_holds=lambda: [{"pipeline": {"run_state": "HELD"}, **h} for h in holds],
-        package=lambda pid: {"status": status, "metadata_candidates": [
+        package=lambda pid: {"status": package_states.get(pid, status), "metadata_candidates": [
             {"title": "Working Late", "description": "D", "tags": ["focus music"]}],
             "thumbnails": [{"id": "art_a"}],
             "chapters": [{"song_id": f"cand_{n}", "title": f"T{n}",
@@ -122,7 +125,7 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
         tmp_path: Path) -> None:
     imported: list[str] = []
     studio, actions = _studio(tmp_path, [{"case_id": "c2", "reason_code": "THUMBNAIL_ART_AWAITED",
-                                          "details": {}}], imported)
+                                          "details": {"media_package_ids": [PKG]}}], imported)
     (job,) = studio.art_jobs()
     assert [v["letter"] for v in job["variants"]] == ["A", "B", "C"]
     assert job["variants"][0]["prompt"] == "prompt a"
@@ -142,6 +145,43 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
     assert imported == [PKG] and result["package"]["status"] == "ready_for_publish"
     (call,) = actions.calls
     assert call[1] == "c2" and "thumbnail_art_inbox_ref" in call[2]
+
+
+def test_thumbnail_import_never_resumes_an_unrelated_or_unbound_hold(
+        tmp_path: Path) -> None:
+    other = "mpkg_1111222233334444"
+    imported: list[str] = []
+    studio, actions = _studio(tmp_path, [
+        {"case_id": "unrelated", "reason_code": "THUMBNAIL_ART_AWAITED",
+         "details": {"media_package_ids": [other]}},
+        {"case_id": "legacy", "reason_code": "THUMBNAIL_ART_AWAITED",
+         "details": {"error": f"unstructured note mentioning {PKG}"}},
+    ], imported)
+    with pytest.raises(ActionRefused, match="thumbnail_hold_not_found"):
+        asyncio.run(studio.import_thumbnails(PKG))
+    assert imported == [] and actions.calls == []
+
+
+def test_thumbnail_import_waits_for_all_packages_in_the_same_hold(
+        tmp_path: Path) -> None:
+    other = "mpkg_1111222233334444"
+    studio, actions = _studio(tmp_path, [
+        {"case_id": "joint", "reason_code": "THUMBNAIL_ART_AWAITED",
+         "details": {"media_package_ids": [PKG, other]}},
+        {"case_id": "unrelated", "reason_code": "THUMBNAIL_ART_AWAITED",
+         "details": {"media_package_ids": ["mpkg_ffffffffffffffff"]}},
+    ])
+    other_folder = tmp_path / "art" / other
+    other_folder.mkdir()
+    (other_folder / "job.json").write_text(
+        (tmp_path / "art" / PKG / "job.json").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    first = asyncio.run(studio.import_thumbnails(PKG))
+    assert first["resumed"] == [] and first["waiting_for"] == [other]
+    assert actions.calls == []
+    second = asyncio.run(studio.import_thumbnails(other))
+    assert second["waiting_for"] == []
+    assert [call[1] for call in actions.calls] == ["joint"]
 
 
 def test_approval_grants_this_upload_for_two_hours_then_resumes(tmp_path: Path) -> None:
