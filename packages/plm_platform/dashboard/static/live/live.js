@@ -476,6 +476,60 @@ function noteList(notes, title) {
     notes.map((n) => h('p', { class: 'note' }, h('span', { class: 'muted' }, `${(n.at || '').slice(0, 16).replace('T', ' ')} `), n.note)));
 }
 
+// Pick A, B and C from every image saved for this video, or upload a new one; then the
+// video is made again from the new A and comes back here for approval.
+function pictureChooser(r, p, caseUrl, note) {
+  const lib = p.art_library || [];
+  const base = `/api/studio/thumbnails/${p.media_package_id}/library`;
+  const chosen = {};
+  const box = h('div', { class: 'chooser' }, h('label', {}, 'Pictures: click one for A, B and C (A is also the picture of the whole video), or upload a new one'));
+  for (const letter of ['A', 'B', 'C']) {
+    const info = (p.art_prompts || {})[letter] || {};
+    const row = h('div', { class: 'pick-row' });
+    const select = (path, img) => {
+      chosen[letter] = path;
+      for (const el of row.querySelectorAll('img')) el.classList.toggle('chosen', el === img);
+    };
+    const tile = (path, label) => {
+      const img = h('img', { src: `${base}/${path.split('/').map(encodeURIComponent).join('/')}`, alt: label, title: label });
+      img.addEventListener('click', () => select(path, img));
+      return img;
+    };
+    // Preselect the newest image named for this letter.
+    let first = null;
+    for (const item of lib) {
+      const img = tile(item.path, item.label);
+      row.append(img);
+      if (!first && item.letter === letter) first = [item.path, img];
+    }
+    if (first) select(...first);
+    const result = h('span', { class: 'result' });
+    const upload = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', onchange: async () => {
+      const file = upload.files && upload.files[0];
+      if (!file) return;
+      result.className = 'result';
+      result.textContent = `uploading ${file.name}...`;
+      studioBusy += 1;
+      const out = await authedSend(base, 'PUT', file, 'application/octet-stream').finally(() => { studioBusy -= 1; });
+      if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
+      const img = tile(out.body.path, file.name);
+      row.prepend(img);
+      select(out.body.path, img);
+      result.className = 'result done';
+      result.textContent = 'uploaded and chosen';
+      upload.value = '';
+    } });
+    box.append(h('div', { class: 'variant' },
+      h('strong', {}, `${letter}${info.text ? `: ${info.style_id} ("${info.text}")` : ''}`),
+      row,
+      h('div', { class: 'row-actions' }, info.prompt ? copyButton(info.prompt) : null, h('span', { class: 'muted' }, 'Upload new:'), upload, result)));
+  }
+  box.append(h('div', { class: 'row-actions' }, actionButton('Use these pictures and make the video again', 'btn-ok', () => postJson(`${caseUrl}/swap-art`, {
+    package_id: p.media_package_id, choices: { ...chosen }, note: note.value }),
+    { confirm: 'Use the chosen pictures? The video is made again from picture A (a few minutes) and comes back here for approval.', busy: 'Checking the pictures and making the video again... a few minutes.' })));
+  return box;
+}
+
 function changesPanel(r, p) {
   const caseUrl = `/api/studio/approvals/${r.case_id}/changes`;
   const note = h('textarea', { rows: 2, placeholder: 'Optional note: what should change and why (shown at the step it goes back to)' });
@@ -500,9 +554,7 @@ function changesPanel(r, p) {
     h('label', {}, 'Thumbnail shown first on YouTube (the video picture stays image A)'),
     h('div', { class: 'row-actions' }, thumb, actionButton('Use this thumbnail', 'btn', () => postJson(`${caseUrl}/thumbnail`, {
       package_id: p.media_package_id, thumbnail_id: thumb.value, note: note.value }))),
-    h('div', { class: 'row-actions' }, actionButton('New art', 'btn', () => postJson(`${caseUrl}/new-art`, {
-      package_id: p.media_package_id, note: note.value }),
-      { confirm: 'Send this video back to the thumbnail step for new art? Write in the note what to change.', busy: 'Sending back to the thumbnail step...' })),
+    pictureChooser(r, p, caseUrl, note),
     h('label', {}, 'Songs to replace'), songs,
     h('div', { class: 'row-actions' }, actionButton('Replace song', 'btn', () => postJson(`${caseUrl}/replace-songs`, {
       song_ids: picked(), note: note.value }),

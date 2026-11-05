@@ -137,6 +137,12 @@ class ResendSignalBody(BaseModel):
     actor: str
 
 
+class SwapArtBody(BaseModel):
+    package_id: str
+    choices: dict[str, str] = Field(description="A, B and C -> a path in the art library")
+    note: str = ""
+
+
 class StudioStartBody(BaseModel):
     music: str = Field(description="suno or flow_music: which tool the song prompts are for")
 
@@ -367,6 +373,24 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
                                       body: ThumbnailChangeBody) -> dict[str, Any]:
         result: dict[str, Any] = await asyncio.to_thread(guarded, lambda: studio.choose_thumbnail(
             case_id, body.package_id, body.thumbnail_id, body.note))
+        return result
+
+    @app.get("/api/studio/thumbnails/{package_id}/library/{rel:path}")
+    def studio_library_file(package_id: str, rel: str) -> Response:
+        data, kind = guarded(lambda: studio.library_file(package_id, rel))
+        return Response(content=data, media_type=kind)
+
+    @app.put("/api/studio/thumbnails/{package_id}/library", dependencies=[Depends(require_token)])
+    async def studio_library_upload(package_id: str, request: Request) -> dict[str, Any]:
+        data = await request.body()
+        added: dict[str, Any] = guarded(lambda: studio.add_to_library(package_id, data))
+        return added
+
+    @app.post("/api/studio/approvals/{case_id}/changes/swap-art",
+              dependencies=[Depends(require_token)])
+    async def studio_swap_art(case_id: str, body: SwapArtBody) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(lambda: studio.swap_art(
+            case_id, body.package_id, body.choices, body.note))
         return result
 
     @app.post("/api/studio/approvals/{case_id}/changes/new-art",

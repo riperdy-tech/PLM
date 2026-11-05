@@ -138,7 +138,8 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
     with pytest.raises(ActionRefused, match="thumbnail_job_unknown"):
         studio.save_art("../etc", "A", PNG)
     assert studio.save_art(PKG, "a", PNG)["saved"] == "A.png"
-    assert sorted(p.name for p in folder.iterdir()) == ["A.png", "job.json"]
+    assert sorted(p.name for p in folder.iterdir()) == ["A.png", "job.json", "replaced"]
+    assert [p.suffix for p in (folder / "replaced").iterdir()] == [".jpg"]  # kept, not deleted
     assert studio.art_file(PKG, "A") == (PNG, "image/png")
 
     result = asyncio.run(studio.import_thumbnails(PKG))
@@ -367,3 +368,46 @@ def test_videos_now_shows_work_in_progress_and_whose_turn_it_is(tmp_path: Path) 
         ("pipeline.a", False), ("pipeline.b", True)]
     assert videos[0]["label"].startswith("Building the playlist and rendering")
     assert videos[1]["label"] == "Waiting for you: thumbnails (step 2)"
+
+
+def test_pictures_are_chosen_from_every_saved_image_and_the_video_is_made_again(
+        tmp_path: Path) -> None:
+    """The review's picture chooser: every image ever saved for the package (earlier
+    versions, replaced ones, uploads) is offered and kept; choosing A, B and C reopens the
+    package and imports them (the video is made again), and the run stays in review."""
+    studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    folder = tmp_path / "art" / PKG
+    (folder / "previous-2026-11-04").mkdir()
+    for letter in "ABC":
+        (folder / "previous-2026-11-04" / f"{letter}.jpg").write_bytes(b"\xff\xd8\xff" + letter.encode())
+    reopened: list[str] = []
+    imported: list[dict[str, bytes]] = []
+    studio.reopen = lambda pid: reopened.append(pid) or {"status": "awaiting_thumbnail_art"}
+
+    def importer(pid: str, art_folder: Path) -> dict[str, Any]:
+        imported.append({f.stem: f.read_bytes() for f in art_folder.iterdir() if f.is_file()
+                         and f.suffix in (".png", ".jpg")})
+        return {"media_package_id": pid, "status": "ready_for_publish"}
+
+    studio.import_art = importer
+    new = studio.add_to_library(PKG, PNG)
+    assert new["path"].startswith("uploads/")
+    library = [i["path"] for i in studio.art_library(PKG)]
+    assert set(library) == {"previous-2026-11-04/A.jpg", "previous-2026-11-04/B.jpg",
+                            "previous-2026-11-04/C.jpg", new["path"]}
+    with pytest.raises(ActionRefused, match="art_not_in_library"):
+        studio.library_file(PKG, "../../write-authorizations.json")
+    with pytest.raises(ActionRefused, match="art_choice_missing"):
+        asyncio.run(studio.swap_art("c5", PKG, {"A": new["path"]}))
+
+    asyncio.run(studio.swap_art("c5", PKG, {"A": new["path"],
+                                           "B": "previous-2026-11-04/B.jpg",
+                                           "C": "previous-2026-11-04/C.jpg"}))
+    assert reopened == [PKG] and actions.calls == []  # still held for approval
+    assert imported[0]["A"] == PNG and imported[0]["B"] == b"\xff\xd8\xffB"
+    # Choosing again keeps every earlier image: the replaced A is moved, not deleted.
+    asyncio.run(studio.swap_art("c5", PKG, {"A": "previous-2026-11-04/A.jpg",
+                                           "B": "previous-2026-11-04/B.jpg",
+                                           "C": "previous-2026-11-04/C.jpg"}))
+    assert any(p.parent.name == "replaced" for p in folder.rglob("A-*.png"))
+    assert (folder / new["path"]).read_bytes() == PNG

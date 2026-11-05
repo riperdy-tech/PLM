@@ -123,6 +123,11 @@ input, select, textarea {
 .changes label { display: block; color: var(--muted); font-size: 12px; margin-top: 10px; }
 .changes input[type=text], .changes textarea { width: 100%; }
 .songs-pick { display: grid; gap: 4px; }
+.chooser { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 6px; }
+.pick-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.pick-row img { width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; border: 2px solid var(--border); cursor: pointer; opacity: 0.75; }
+.pick-row img:hover { opacity: 1; }
+.pick-row img.chosen { border-color: var(--emerald); opacity: 1; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35); }
 .pick { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); margin: 0; }
 .notes { border-left: 3px solid var(--amber); padding: 6px 10px; margin: 8px 0; }
 .note { margin: 4px 0; }

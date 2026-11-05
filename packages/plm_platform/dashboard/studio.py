@@ -387,11 +387,81 @@ class Studio:
         if suffix is None:
             raise _refuse(422, "not_an_image", "the file is not a PNG, JPEG or WebP image")
         for old in folder.iterdir():  # one file per letter: P6 reads A before a or art_a
-            if old.stem.upper() in (letter, f"ART_{letter}") and \
+            if old.is_file() and old.stem.upper() in (letter, f"ART_{letter}") and \
                     old.suffix.lower() in _ART_SUFFIXES:
-                old.unlink()
+                if old.read_bytes() == data:
+                    return {"saved": old.name, "bytes": len(data)}
+                kept = folder / "replaced"
+                kept.mkdir(exist_ok=True)
+                old.replace(kept / f"{letter}-{self.clock.now():%Y%m%dT%H%M%S}{old.suffix.lower()}")
         _write_atomic(folder / f"{letter}{suffix}", data)
         return {"saved": f"{letter}{suffix}", "bytes": len(data)}
+
+    # -- the art library: every image ever saved for a package ------------------------------
+
+    def art_library(self, package_id: str) -> list[dict[str, Any]]:
+        """Every image in the package's job folder and its subfolders (earlier versions,
+        replaced images, uploads), newest first; nothing in it is ever deleted."""
+        folder = self._art_folder(package_id)
+        items = []
+        for path in folder.rglob("*"):
+            if path.is_file() and path.suffix.lower() in _ART_SUFFIXES:
+                rel = path.relative_to(folder).as_posix()
+                letter = path.stem.upper()[:1] if path.stem.upper()[:1] in _LETTERS and (
+                    len(path.stem) == 1 or path.stem[1] in "-_") else None
+                items.append({"path": rel, "letter": letter,
+                              "label": rel if "/" in rel else f"current {rel}",
+                              "modified": path.stat().st_mtime})
+        return sorted(items, key=lambda i: -float(i["modified"]))
+
+    def _library_path(self, package_id: str, rel: str) -> Path:
+        folder = self._art_folder(package_id).resolve()
+        path = (folder / rel).resolve()
+        if folder not in path.parents or path.suffix.lower() not in _ART_SUFFIXES \
+                or not path.is_file():
+            raise _refuse(404, "art_not_in_library", f"{rel!r} is not an image of {package_id}")
+        return path
+
+    def library_file(self, package_id: str, rel: str) -> tuple[bytes, str]:
+        path = self._library_path(package_id, rel)
+        kind = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
+        return path.read_bytes(), kind
+
+    def add_to_library(self, package_id: str, data: bytes) -> dict[str, Any]:
+        """A new image for the package, kept in ``uploads/``; choosing it is a separate step."""
+        folder = self._art_folder(package_id)
+        suffix = _image_suffix(data)
+        if suffix is None:
+            raise _refuse(422, "not_an_image", "the file is not a PNG, JPEG or WebP image")
+        uploads = folder / "uploads"
+        uploads.mkdir(exist_ok=True)
+        name = f"{self.clock.now():%Y%m%dT%H%M%S%f}{suffix}"
+        _write_atomic(uploads / name, data)
+        return {"path": f"uploads/{name}", "bytes": len(data)}
+
+    async def swap_art(self, case_id: str, package_id: str, choices: dict[str, str],
+                       note: str = "") -> dict[str, Any]:
+        """The owner's pictures for A, B and C (each from the package's art library) replace
+        the package's art: P6 re-renders the video from A and the package comes back to
+        review. The run stays held for approval throughout."""
+        case = self._review_package(case_id, package_id)
+        if self.reopen is None:
+            raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
+        missing = [letter for letter in _LETTERS if not choices.get(letter)]
+        if missing:
+            raise _refuse(422, "art_choice_missing", f"choose a picture for {', '.join(missing)}")
+        picked = {letter: self._library_path(package_id, choices[letter]).read_bytes()
+                  for letter in _LETTERS}
+        for letter, data in picked.items():
+            self.save_art(package_id, letter, data)
+        self.reopen(package_id)
+        released = await asyncio.to_thread(self.import_art, package_id,
+                                           self._art_folder(package_id))
+        entry = self._add_note("swap_art", note or "pictures changed in the review",
+                               case_id=case_id, media_package_id=package_id,
+                               workflow_id=(case.get("pipeline") or {}).get("workflow_id"),
+                               choices={k: choices[k] for k in _LETTERS})
+        return {"package": released, "note": entry}
 
     async def import_thumbnails(self, package_id: str) -> dict[str, Any]:
         """P6's import (checks, still video, release), then resume the run waiting on it."""
@@ -438,6 +508,8 @@ class Studio:
                 "tags": meta.get("tags"),
                 "duration_seconds": pkg.get("video_duration_seconds"),
                 "thumbnails": [t.get("id") for t in pkg.get("thumbnails") or []],
+                "art_library": self._safe_library(package_id),
+                "art_prompts": self._job_prompts(package_id),
                 "chapters": len(pkg.get("chapters") or []),
                 "tracks": [{"song_id": c.get("song_id"), "title": c.get("title"),
                             "start": c.get("timestamp_str")}
@@ -462,6 +534,22 @@ class Studio:
             if thumb.get("id") == variant:
                 return self.media(str(thumb["uri"]), str(thumb["checksum"]))
         raise _refuse(404, "thumbnail_unknown", f"{package_id} has no thumbnail {variant}")
+
+    def _safe_library(self, package_id: str) -> list[dict[str, Any]]:
+        try:
+            return self.art_library(package_id)
+        except ActionRefused:
+            return []
+
+    def _job_prompts(self, package_id: str) -> dict[str, Any]:
+        try:
+            job = json.loads((self._art_folder(package_id) / "job.json").read_text(
+                encoding="utf-8"))
+        except (ActionRefused, OSError, ValueError):
+            return {}
+        return {letter: {"style_id": v.get("style_id"), "text": v.get("text"),
+                         "prompt": v.get("prompt")}
+                for v, letter in zip(job.get("variants") or [], _LETTERS, strict=False)}
 
     def _approval_case(self, case_id: str) -> dict[str, Any]:
         for case in self._cases(APPROVAL_REASON):
