@@ -98,10 +98,14 @@ class MediaRenderer:
     """Renders through a :class:`~.toolchain.MediaToolchain` into an artifact store."""
 
     def __init__(self, *, toolchain: MediaToolchain, store: ArtifactStore,
-                 profile: RenderProfile) -> None:
+                 profile: RenderProfile, still_placeholder: bool = False) -> None:
+        """``still_placeholder``: the video is the background held still instead of the
+        waveform visualiser, for a package whose video the owner's art replaces anyway
+        (the art inbox); the waveform took longer than the program it drew."""
         self.toolchain = toolchain
         self.store = store
         self.profile = profile
+        self.still_placeholder = still_placeholder
 
     def run_preflight(self, playlist: PlaylistSession, visual_session: VisualSession,
                       sources: Mapping[str, bytes], *,
@@ -214,12 +218,17 @@ class MediaRenderer:
                 # Not kept past the upload: an hour of 24-bit stereo is over a gigabyte.
                 audio = self._store(f"{root}/audio_master.wav",
                                     (work / "audio_master.wav").read_bytes(), "audio/wav")
-                self.toolchain.render_video_master(
-                    work / "audio_master.wav",
-                    VisualizerSpec(background_png=work / "background.png",
-                                   wave_color=str(visual_session.visual_plan_json
-                                                  ["visualizer"]["color"])),
-                    profile, work / "video_master.mp4")
+                if self.still_placeholder:
+                    self.toolchain.render_still_video(
+                        work / "audio_master.wav", work / "background.png", profile,
+                        work / "video_master.mp4")
+                else:
+                    self.toolchain.render_video_master(
+                        work / "audio_master.wav",
+                        VisualizerSpec(background_png=work / "background.png",
+                                       wave_color=str(visual_session.visual_plan_json
+                                                      ["visualizer"]["color"])),
+                        profile, work / "video_master.mp4")
             except MediaToolError as exc:
                 if exc.code == "render_timeout":
                     raise MediaInfrastructureError(exc.code, str(exc)) from exc

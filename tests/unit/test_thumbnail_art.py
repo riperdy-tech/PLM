@@ -166,6 +166,8 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
                 worker_id_factory=lambda: "w1", thumbnail_art_inbox=tmp_path)
             session.commit()
         assert pkg.status is PackageStatus.AWAITING_THUMBNAIL_ART
+        # The first render is a still placeholder: the owner's art replaces it.
+        assert "still" in toolchain.calls and "video" not in toolchain.calls
         folder = tmp_path / pkg.media_package_id
         job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
         assert job["variants"][0]["style_id"] == "monumental_minimal"
@@ -198,7 +200,7 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         assert [t["id"] for t in released.thumbnails] == list(ART_VARIANTS)
         assert all("/owner_art/" in t["uri"] for t in released.thumbnails)
         # The video is now art A held still over the same audio master (owner, 2026-11-04).
-        assert toolchain.calls.count("still") == 1
+        assert toolchain.calls.count("still") == 2  # the placeholder, then the art
         assert released.video_master_uri != pkg.video_master_uri
         assert "/owner_art/video_master" in released.video_master_uri
         assert released.video_checksum != pkg.video_checksum

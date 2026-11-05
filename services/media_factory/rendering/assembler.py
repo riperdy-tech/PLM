@@ -136,6 +136,7 @@ def assemble_media_package(
     before_render: Callable[[str, str, str], str] | None = None,
     render_attempt: int = 1,
     session_compilation: bool = False,
+    still_placeholder: bool = False,
     clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
@@ -261,7 +262,8 @@ def assemble_media_package(
     headline = meta_res.hooks[0]
     presentation = f"{playlist_concept}|{headline}"
     by_candidate = {m.candidate_id: m for m in track_manifests}
-    renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
+    renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile,
+                             still_placeholder=still_placeholder)
     claim_namespace: str | None = None
     if before_render is not None:
         # Commit the durable job and its single-worker claim before FFmpeg or
