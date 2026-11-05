@@ -261,6 +261,8 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         package_ids = require(policy, "package_ids", "policy_check outputs")
         only = request.inputs.get("track_spec_ids")
         wanted = None if only is None else {str(s) for s in only}
+        chosen = request.inputs.get("music_provider")
+        provider = None if chosen is None else str(chosen)
         p3, p4 = self._client(Phase.EXPERIMENTS), self._client(Phase.MUSIC)
         provider_ids: dict[str, str] = {}
         candidates: list[str] = []
@@ -285,7 +287,8 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                 execute_key = request_key(key, "execute", plan_id)
                 try:
                     run = p4.post(f"/music/plans/{plan_id}/execute",
-                                  idempotency_key=execute_key, body=spec)
+                                  idempotency_key=execute_key, body=spec,
+                                  params=None if provider is None else {"provider": provider})
                 except ExternalWriteRefused as refusal:
                     if refusal.hold_reason_code != MANUAL_AUDIO_HOLD_REASON:
                         raise

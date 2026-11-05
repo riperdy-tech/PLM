@@ -311,3 +311,42 @@ def test_a_song_swap_rewinds_the_run_without_its_songs_and_offers_the_old_art(
     assert jobs[new]["reuse_from"] == [PKG]
     assert studio.reuse_art(new, PKG)["copied"] == ["A.png"]
     assert (tmp_path / "art" / new / "A.png").read_bytes() == PNG
+
+
+def test_start_asks_for_suno_or_flow_music_and_shows_both_inboxes(tmp_path: Path) -> None:
+    """The Start choice: Suno or Flow Music becomes the run's P4 provider; a tool whose
+    inbox is not configured is refused before any run starts; sheets from both inboxes
+    are listed with their tool, and a WAV goes to the inbox of its sheet."""
+    started: list[str] = []
+
+    async def start(provider: str) -> dict[str, Any]:
+        started.append(provider)
+        return {"workflow_id": "pipeline.d", "music_provider": provider}
+
+    studio, _ = _studio(tmp_path, [])
+    studio.start = start
+    with pytest.raises(ActionRefused, match="music_inbox_not_configured"):
+        asyncio.run(studio.start_run("suno"))  # no Suno inbox yet
+    with pytest.raises(ActionRefused, match="music_tool_unknown"):
+        asyncio.run(studio.start_run("udio"))
+    assert started == []
+
+    suno = tmp_path / "suno"
+    suno.mkdir()
+    (suno / "trk_2.prompts.txt").write_text(
+        "PLM songs to make on suno.com for track trk_2\n\n"
+        "--- Song 1 ---\nSave as: trk_2-cccc3333.wav\nInstrumental: yes\n"
+        "Styles: lofi\n",
+        encoding="utf-8")
+    studio.paths = StudioPaths(music_inbox=tmp_path / "music", art_inbox=tmp_path / "art",
+                               grants_file=None, suno_inbox=suno)
+    asyncio.run(studio.start_run("suno"))
+    asyncio.run(studio.start_run("flow_music"))
+    assert started == ["suno_manual", "flow_music_manual"]
+
+    sheets = studio.songs()["sheets"]
+    assert [(s["source"], s["sheet"]) for s in sheets] == [
+        ("Flow Music", "trk_1.prompts.txt"), ("Suno", "trk_2.prompts.txt")]
+    studio.save_song("trk_2-cccc3333", WAV)
+    assert (suno / "trk_2-cccc3333.wav").read_bytes() == WAV
+    assert not (tmp_path / "music" / "trk_2-cccc3333.wav").exists()

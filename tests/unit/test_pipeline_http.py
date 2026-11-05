@@ -234,6 +234,7 @@ def test_generate_plans_executes_and_exports_every_candidate() -> None:
     assert result.outputs["external_writes"] == [{**receipt, "p3_package_id": "pkg-1"}]
     assert result.cost is None  # P4 reports credits, never money: no invented amount
 
+
     # A top-up generates only the specs it is given; P4 without a guard receipt is
     # recorded as an unreported write (its cost then stays unknown).
     p4_paths.clear()
@@ -522,3 +523,32 @@ def test_service_urls_default_to_compose_names_or_loopback_and_accept_overrides(
     assert len(urls) == 9
     with pytest.raises(Exception, match="PLM_SERVICE_URL__QA"):
         service_urls(env={"PLM_SERVICE_URL__QA": "api-qa:8005"}, dotenv_path=absent)
+
+
+def test_generate_asks_p4_for_the_song_tool_the_owner_chose_at_start() -> None:
+    """``music_provider`` (PipelineOptions, chosen in the Studio) goes to every execute as
+    the ``provider`` parameter; without it nothing is sent and P4 uses its default."""
+    sent: list[str | None] = []
+
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"track_specs": [{"track_spec_id": "ts-1"}]})
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/music/plans":
+            return httpx.Response(200, json={"plan_id": "plan-1"})
+        if request.url.path.endswith("/execute"):
+            sent.append(request.url.params.get("provider"))
+            return httpx.Response(200, json={
+                "status": "completed", "candidates": [{"candidate_id": "c-1"}],
+                "external_writes": [{"capability": "music.import", "idempotency_key": "k",
+                                     "decision": "execute", "reason": "authorized"}]})
+        return httpx.Response(200, json={"candidate": {}, "event": {}})
+
+    steps = HttpPhaseSteps({Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+                            Phase.MUSIC: _client(Phase.MUSIC, p4)})
+    for chosen in ("suno_manual", None):
+        inputs: dict[str, object] = {"policy_check": {"package_ids": ["pkg-1"]}}
+        if chosen is not None:
+            inputs["music_provider"] = chosen
+        asyncio.run(steps.generate(_request(Step.GENERATE, inputs)))
+    assert sent == ["suno_manual", None]

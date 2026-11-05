@@ -398,10 +398,10 @@ function songsStep(songs, waiting, notes) {
     return card;
   }
   if (!songs.sheets.length) { card.append(h('p', { class: 'muted' }, 'No song is waiting.')); return card; }
-  card.append(h('p', { class: 'muted' }, 'Make each song in Flow Music from its prompt, download it as WAV and upload it here. When every song is saved, press Continue.'));
+  card.append(h('p', { class: 'muted' }, 'Make each song in the tool its sheet names (Suno or Flow Music) from its prompt, download it as WAV and upload it here. When every song is saved, press Continue.'));
   let missing = 0;
   for (const sheet of songs.sheets) {
-    card.append(h('h3', {}, sheet.sheet));
+    card.append(h('h3', {}, `${sheet.source || ''} ${sheet.source ? '- ' : ''}${sheet.sheet}`));
     for (const song of sheet.songs) {
       if (!song.saved) missing += 1;
       card.append(h('div', { class: 'song' },
@@ -522,6 +522,13 @@ function reviewStep(reviews) {
   return card;
 }
 
+function startButton(label, music) {
+  return actionButton(`Option: ${label}`, 'btn-ok big',
+    () => authedSend('/api/studio/start', 'POST', JSON.stringify({ music }), 'application/json'),
+    { confirm: `Start a new video with ${label} song prompts? P2 picks what to make and the run begins.`,
+      busy: `Asking P2 for the next video and starting the run (${label} prompts)...` });
+}
+
 async function renderStudio() {
   const s = await getJson('/api/studio');
   const waiting = s.waiting || {};
@@ -531,8 +538,9 @@ async function renderStudio() {
     h('div', { class: 'step-head' },
       h('div', {}, h('h2', {}, 'Studio'), h('p', { class: 'muted' }, 'Start a video, then answer each step when it waits for you. Nothing is uploaded until you approve it.')),
       s.start_available
-        ? actionButton('Start a new video', 'btn-ok big', () => authedSend('/api/studio/start', 'POST'),
-          { confirm: 'Start a new video? P2 picks what to make and the run begins.', busy: 'Asking P2 for the next video and starting the run...' })
+        ? h('div', {}, h('strong', {}, 'Start a new video. Song prompts for:'),
+          h('div', { class: 'row-actions' },
+            startButton('Suno', 'suno'), startButton('Flow Music', 'flow_music')))
         : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
   return h('div', {}, head, songsStep(s.songs, waiting, s.notes), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
 }

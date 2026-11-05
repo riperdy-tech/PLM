@@ -447,3 +447,56 @@ def test_the_mix_balance_reads_as_a_mix_phrase() -> None:
         track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
         prompt="energy: low. mix balance: soft muted kick, warm round bass low in the mix."))
     assert styles == "low energy, mix: soft muted kick, warm round bass low in the mix"
+
+
+def test_a_run_picks_suno_or_flow_music_per_plan_on_a_manual_deployment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dashboard's Start choice: ``provider`` on execute writes the prompt sheet for
+    that tool into its own inbox, whatever the service default; anything but a manual
+    import provider is refused, and a non-manual deployment cannot be switched."""
+    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from tests.support.fake_minio import FakeMinio
+
+    suno, flow = tmp_path / "suno", tmp_path / "flow"
+    suno.mkdir()
+    flow.mkdir()
+    monkeypatch.setenv("PLM_SUNO_MANUAL_INBOX", str(suno))
+    monkeypatch.setenv("PLM_SUNO_PLAN_TIER", "pro")
+    monkeypatch.setenv("PLM_SUNO_ACCOUNT_REF", "acct")
+    monkeypatch.setenv("PLM_FLOW_MUSIC_MANUAL_INBOX", str(flow))
+    monkeypatch.setenv("PLM_FLOW_MUSIC_PLAN_TIER", "google_ai_pro")
+    monkeypatch.setenv("PLM_FLOW_MUSIC_ACCOUNT_REF", "acct")
+    platform = load_settings(env=dict(ENV))
+
+    def client_for(default: str) -> TestClient:
+        engine = create_music_engine(static_pool=True)
+        return TestClient(create_app(
+            session_factory=lambda: music_session(engine),
+            settings=load_music_factory_settings(platform=platform, default_provider=default),
+            storage=MinioArtifactStorage(platform, client=FakeMinio()),  # type: ignore[arg-type]
+            write_guard=_guard(FreeBudget()), clock=FixedClock(NOW)))
+
+    client = client_for("flow_music_manual")
+    plan = client.post("/music/plans", json=_spec(), headers=HEADERS).json()
+    url = f"/music/plans/{plan['plan_id']}/execute"
+    waiting = client.post(url, json=_spec(), params={"provider": "suno_manual"},
+                          headers={**HEADERS, "Idempotency-Key": "exec-suno"})
+    assert waiting.status_code == 409
+    assert waiting.json()["detail"]["reason"] == "manual_audio_awaited"
+    (sheet,) = suno.glob("*.prompts.txt")
+    assert "suno.com" in sheet.read_text(encoding="utf-8")
+    assert list(flow.glob("*.prompts.txt")) == []
+
+    refused = client.post(url, json=_spec(), params={"provider": "suno"},
+                          headers={**HEADERS, "Idempotency-Key": "exec-auto"})
+    assert refused.status_code == 422
+    assert refused.json()["detail"]["code"] == "provider_not_selectable"
+
+    mock = client_for("mock")
+    plan = mock.post("/music/plans", json=_spec(), headers=HEADERS).json()
+    locked = mock.post(f"/music/plans/{plan['plan_id']}/execute", json=_spec(),
+                       params={"provider": "flow_music_manual"},
+                       headers={**HEADERS, "Idempotency-Key": "exec-mock"})
+    assert locked.status_code == 409
+    assert locked.json()["detail"]["code"] == "provider_override_not_allowed"
