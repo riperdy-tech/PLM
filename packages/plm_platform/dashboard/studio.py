@@ -544,8 +544,7 @@ class Studio:
         case = self._review_package(case_id, package_id)
         if self.reopen is None:
             raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
-        if not note.strip():
-            raise _refuse(422, "note_required", "say what the new art should change")
+        note = note.strip() or "new art (no note)"
         reopened = self.reopen(package_id)
         entry = self._add_note("new_art", note, case_id=case_id, media_package_id=package_id,
                                workflow_id=(case.get("pipeline") or {}).get("workflow_id"))
@@ -556,8 +555,7 @@ class Studio:
         """Take songs out: the run goes back to assembly, which asks P3 for as many new
         songs (the songs step), then renders a new package."""
         case = self._approval_case(case_id)
-        if not note.strip():
-            raise _refuse(422, "note_required", "say what the new song should be like")
+        note = note.strip() or "replace these songs (no note)"
         members = {str(c) for p in (case.get("details") or {}).get("packages") or []
                    for c in p.get("candidate_ids") or []}
         chosen = sorted({str(s) for s in song_ids})

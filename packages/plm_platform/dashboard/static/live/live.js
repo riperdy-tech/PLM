@@ -478,7 +478,7 @@ function noteList(notes, title) {
 
 function changesPanel(r, p) {
   const caseUrl = `/api/studio/approvals/${r.case_id}/changes`;
-  const note = h('textarea', { rows: 2, placeholder: 'Your note: what should change and why' });
+  const note = h('textarea', { rows: 2, placeholder: 'Optional note: what should change and why (shown at the step it goes back to)' });
   const title = h('input', { type: 'text', maxlength: 100, value: p.title || '' });
   const description = h('textarea', { rows: 8 });
   description.value = p.description || '';
@@ -487,7 +487,7 @@ function changesPanel(r, p) {
   const songs = h('div', { class: 'songs-pick' }, (p.tracks || []).map((t) => h('label', { class: 'pick' },
     h('input', { type: 'checkbox', value: t.song_id }), ` ${t.start} ${t.title}`)));
   const picked = () => [...songs.querySelectorAll('input:checked')].map((i) => i.value);
-  return h('details', { class: 'changes' },
+  return h('details', { class: 'changes', 'data-key': `changes:${r.case_id}:${p.media_package_id}` },
     h('summary', {}, 'Request changes'),
     h('p', { class: 'muted' }, 'Text and thumbnail changes apply now and the video stays here for approval. New art goes back to the thumbnail step; a replaced song goes back to the songs step. Translations keep their own text.'),
     h('label', {}, 'Note'), note,
@@ -578,11 +578,20 @@ function videosNow(videos) {
 }
 
 // The Studio refreshes itself while nothing is being typed, picked or sent.
+// It never refreshes while a panel is open (Request changes), a field holds unsent text
+// or a chosen file, or anything is being sent; a reload keeps open panels open.
 let studioBusy = 0;
-setInterval(() => {
-  if (currentView !== 'studio' || studioBusy > 0 || document.hidden) return;
+function studioUntouched() {
+  const root = document.getElementById('view-root');
+  if (root.querySelector('details[open]')) return false;
+  for (const el of root.querySelectorAll('textarea, input[type="text"], input[type="file"], select')) {
+    if (el.type === 'file' ? el.files && el.files.length : el.value !== el.defaultValue) return false;
+  }
   const active = document.activeElement;
-  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+  return !(active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName));
+}
+setInterval(() => {
+  if (currentView !== 'studio' || studioBusy > 0 || document.hidden || !studioUntouched()) return;
   loadView('studio');
 }, 20000);
 
@@ -594,11 +603,13 @@ async function loadView(name) {
   const root = document.getElementById('view-root');
   try {
     if (name === 'studio') {
+      const wasOpen = new Set([...root.querySelectorAll('details[open][data-key]')].map((d) => d.dataset.key));
       const studioPill = document.getElementById('data-source-pill');
       studioPill.textContent = 'DATA SOURCE: LIVE';
       studioPill.className = 'pill pill-live';
       document.getElementById('generated-at').textContent = `updated ${new Date().toLocaleTimeString()}`;
       root.replaceChildren(await renderStudio());
+      for (const d of root.querySelectorAll('details[data-key]')) if (wasOpen.has(d.dataset.key)) d.open = true;
       return;
     }
     if (name === 'exceptions' || name === 'production-queue') reviewers = await getJson('/api/reviewers');

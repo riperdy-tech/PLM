@@ -277,13 +277,12 @@ def test_new_art_sends_the_package_back_to_the_thumbnail_step_with_the_note(
     studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
     reopened: list[str] = []
     studio.reopen = lambda pid: reopened.append(pid) or {"status": "awaiting_thumbnail_art"}
-    with pytest.raises(ActionRefused, match="note_required"):
-        studio.request_new_art("c5", PKG, "  ")
     studio.request_new_art("c5", PKG, "warmer light, bigger text")
     assert reopened == [PKG] and actions.calls == []
+    assert studio.request_new_art("c5", PKG, "  ")["note"]["note"] == "new art (no note)"
     studio.package = lambda pid: {"status": "awaiting_thumbnail_art"}
     (job,) = studio.art_jobs()
-    assert [n["note"] for n in job["notes"]] == ["warmer light, bigger text"]
+    assert [n["note"] for n in job["notes"]] == ["warmer light, bigger text", "new art (no note)"]
 
 
 def test_a_song_swap_rewinds_the_run_without_its_songs_and_offers_the_old_art(
@@ -291,8 +290,6 @@ def test_a_song_swap_rewinds_the_run_without_its_songs_and_offers_the_old_art(
     studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
     with pytest.raises(ActionRefused, match="song_not_in_package"):
         asyncio.run(studio.replace_songs("c5", ["cand_9"], "too loud"))
-    with pytest.raises(ActionRefused, match="note_required"):
-        asyncio.run(studio.replace_songs("c5", ["cand_1"], ""))
     asyncio.run(studio.replace_songs("c5", ["cand_1", "cand_1"], "too loud, make it calmer"))
     (call,) = actions.calls
     assert call[:2] == ("resume", "c5")
