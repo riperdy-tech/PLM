@@ -475,9 +475,12 @@ def cli_thumbnail_job(
     visual_world: str = typer.Option(..., "--visual-world", help="The package's P3 visual world"),
     thumbnail_family: str | None = typer.Option(
         None, "--thumbnail-family", help="P2's thumbnail style for variant A"),
+    rewrite: bool = typer.Option(
+        False, "--rewrite", help="Replace existing prompts (saved images move aside)"),
 ) -> None:
     """Write a package's thumbnail art prompts without changing its status
-    (an already published video's new art; a waiting package gets its job at assembly)."""
+    (an already published video's new art; a waiting package gets its job at assembly;
+    ``--rewrite`` replaces a waiting package's prompts after a new style guide)."""
     inbox = _art_inbox()
     with platform_session_factory()() as session:
         pkg = get_media_package_by_id(session, package_id)
@@ -490,7 +493,8 @@ def cli_thumbnail_job(
                        guide_version=guide.guide_version,
                        prompts=build_prompts(guide, package_id=package_id,
                                              thumbnail_family=thumbnail_family,
-                                             visual_world=visual_world))
+                                             visual_world=visual_world),
+                       rewrite=rewrite)
     typer.echo(f"Prompts: {folder / 'PROMPTS.md'}")
 
 

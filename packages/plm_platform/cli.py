@@ -977,12 +977,14 @@ def media_thumbnail_job(
     visual_world: str = typer.Option(..., "--visual-world", help="The package's P3 visual world"),
     thumbnail_family: str | None = typer.Option(
         None, "--thumbnail-family", help="P2's thumbnail style for variant A"),
+    rewrite: bool = typer.Option(
+        False, "--rewrite", help="Replace existing prompts (saved images move aside)"),
 ) -> None:
     """Write a package's Nano Banana Pro thumbnail prompts into the art inbox."""
     from media_factory.cli import cli_thumbnail_job
 
     cli_thumbnail_job(package_id=package_id, visual_world=visual_world,
-                      thumbnail_family=thumbnail_family)
+                      thumbnail_family=thumbnail_family, rewrite=rewrite)
 
 
 @media_app.command(name="thumbnail-import")

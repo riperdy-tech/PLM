@@ -8,9 +8,11 @@ keeps, and one scene per visual world. It is reviewed against each new scan
 (``scripts/thumbnail_trend_scan.py``); its ``guide_version`` is recorded on every job.
 
 Variant A uses the style P2 chose for the package (its ``thumbnail_family``), so P2 can
-learn from it; B and C use two other styles, so a YouTube "Test & Compare" run tests
-styles against each other. Every choice is a stable hash of the package id: the same
-package always gets the same prompts.
+learn from it; B and C use two other styles, each of a different ``look`` from A and
+from each other (an open-view room, a neon city, monumental scale, ...), with three
+different phrases, so a YouTube "Test & Compare" run tests genuinely different pictures
+(guide 2026-11-05: three variants of one dark room taught nothing). Every choice is a
+stable hash of the package id: the same package always gets the same prompts.
 """
 
 from __future__ import annotations
@@ -71,20 +73,35 @@ def _pick(options: list[str] | tuple[str, ...], *parts: str) -> str:
     return options[int.from_bytes(digest[:4], "big") % len(options)]
 
 
+def _look(guide: StyleGuide, style_id: str) -> str:
+    return str(guide.styles[style_id].get("look") or style_id)
+
+
 def build_prompts(guide: StyleGuide, *, package_id: str, thumbnail_family: str | None,
                   visual_world: str) -> list[ArtPrompt]:
     """Three prompts, one per art variant, each a different style."""
     first = thumbnail_family if thumbnail_family in guide.styles else DEFAULT_STYLE
     others = sorted((s for s in guide.styles if s != first),
                     key=lambda s: hashlib.sha256(f"{package_id}|{s}".encode()).hexdigest())
+    chosen = [first]
+    for style_id in others:  # a different look from every style already chosen
+        if len(chosen) < len(ART_VARIANTS) and _look(guide, style_id) not in {
+                _look(guide, c) for c in chosen}:
+            chosen.append(style_id)
+    for style_id in others:  # a guide with too few looks still yields three styles
+        if len(chosen) < len(ART_VARIANTS) and style_id not in chosen:
+            chosen.append(style_id)
     world = guide.worlds.get(visual_world, guide.default_world)
     rules = " ".join(guide.rules)
     prompts: list[ArtPrompt] = []
-    for variant_key, style_id in zip(ART_VARIANTS, (first, *others), strict=False):
+    used: set[str] = set()
+    for variant_key, style_id in zip(ART_VARIANTS, chosen, strict=False):
         style = guide.styles[style_id]
-        text = _pick(style["texts"], package_id, style_id, "text")
+        fresh = [t for t in style["texts"] if t.casefold() not in used] or style["texts"]
+        text = _pick(fresh, package_id, style_id, "text")
+        used.add(text.casefold())
         scene = style["prompt"].format(
-            scene=world["scene"], vista=world["vista"],
+            accent=world.get("accent", ""), vista=world["vista"],
             object=_pick(style.get("objects") or ["a plain unbranded desk lamp"],
                          package_id, style_id, "object"),
             background=_pick(guide.meme_backgrounds, package_id, "background"))

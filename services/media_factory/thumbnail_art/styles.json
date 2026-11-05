@@ -1,50 +1,56 @@
 {
   "schema_version": "thumbnail-styles-v1",
-  "guide_version": "2026-11-04",
+  "guide_version": "2026-11-05",
   "evidence": {
     "scan": "data/thumbnail_trends/2026-11-04 (scripts/thumbnail_trend_scan.py)",
     "method": "147 long-form (>= 20 min) videos from 8 focus-music searches published in the last 90 days, ranked by views per channel subscriber (floored at 1,000); top 30 reviewed, at most 2 per channel.",
-    "not_used": "Bright clickbait text over brains or faces (#3 MEMORIZE FASTER, #26 ADHD FOCUS) ranked, but they sell brainwave or medical claims this channel does not make."
+    "not_used": "Bright clickbait text over brains or faces (#3 MEMORIZE FASTER, #26 ADHD FOCUS) ranked, but they sell brainwave or medical claims this channel does not make.",
+    "v2_review": "2026-11-05: the owner's first art from guide 2026-11-04 compared with the top 30. The winners are nearly empty rooms where the window view fills most of the frame, bright golden-hour or clear blue-hour light, no person or one tiny distant figure, and text on open sky; and they spread over clearly different looks (open-view room, neon city, monumental scale, one-object meme, cozy cabin, hands from above). Our art was cluttered (drawings pinned on every wall), dark, showed a man up close with text across him, and A, B and C were three versions of one dark room with the same lettering. v2 makes every scene minimal and bright, keeps people out of the foreground, puts the text on open sky, gives each look its own lettering, and picks A, B and C from three different looks with three different phrases."
   },
   "rules": [
-    "16:9 landscape YouTube thumbnail that still reads clearly at phone size.",
+    "16:9 landscape YouTube thumbnail that still reads clearly at phone size: one clear subject, strong light-dark contrast, bright enough to read when small.",
+    "Minimal and uncluttered: no papers, posters, sketches or clutter on the walls or the desk; large calm empty areas.",
     "No other text, letters, numbers, logos or watermarks besides the phrase given.",
     "Every object is plain and unbranded: no brand names, logos or trademarks anywhere.",
-    "No real or famous person and no recognisable face; any person is seen from behind, from above or in silhouette.",
-    "One clear subject, strong contrast, uncluttered."
+    "No real or famous person and no recognisable face; at most hands, or one tiny distant figure; never a person in the foreground."
   ],
-  "text_policy": "Every phrase in texts is short and makes no claim about brainwaves, Hz, ADHD, memory or health; the visual styles keep the brand's charcoal, graphite, warm amber and cool white with muted electric accents (ADR-0044), except the deliberately bright meme style.",
+  "text_policy": "Every phrase in texts is short and makes no claim about brainwaves, Hz, ADHD, memory or health. The styles keep the brand's charcoal, graphite, warm amber and cool white (ADR-0044), except the neon city (saturated cyan and red neon, as the scan's cyberpunk winners #11, #12, #16) and the bright meme style.",
   "styles": {
     "cinematic_workspace_vista": {
-      "label": "Cinematic workspace with a view",
+      "label": "Open view from a minimal room",
+      "look": "open_view",
       "evidence_ranks": [2, 5, 7, 10, 13, 17, 20, 22, 27, 29, 30],
-      "prompt": "Photorealistic cinematic photograph of {scene}, in a minimal high-end interior with a floor-to-ceiling window that opens onto {vista}. A clean desk with an open laptop and a warm desk lamp sits in the lower third. Soft evening or blue-hour light, soft haze, deep shadows, shot on a wide 24 mm lens, charcoal and graphite tones with warm amber lamp light.",
-      "typography": "Centered across the upper middle, render the words \"{text}\" in thin, elegant, very widely letter-spaced capital letters in soft white, with a subtle glow so it stays legible against the view.",
+      "prompt": "Photorealistic wide cinematic photograph of a nearly empty, minimal modern room where a floor-to-ceiling window fills about 70 percent of the frame and opens onto {vista}. In the lower third, one simple desk with an open laptop and a small warm lamp, {accent}. Golden-hour or clear blue-hour light, a bright sky, strong warm-against-cool contrast, clean and calm, no people.",
+      "typography": "Across the open sky in the upper middle, render the words \"{text}\" in thin, elegant, very widely letter-spaced capital letters in soft white with a faint glow, large enough to read on a phone.",
       "texts": ["DEEP FOCUS", "CALM WORK", "QUIET FOCUS", "MINIMAL FLOW", "FOCUS MUSIC"]
     },
     "electric_city_night": {
-      "label": "Electric city at night",
+      "label": "Neon city at night",
+      "look": "neon_city",
       "evidence_ranks": [11, 12, 16, 24],
-      "prompt": "Cinematic night scene of {scene}, overlooking a vast rain-wet futuristic city with glowing towers. Muted electric cyan and warm amber light, volumetric fog, reflections on glass, a lone desk or terminal glowing in the foreground. Moody, high contrast, photorealistic digital art.",
-      "typography": "Render the words \"{text}\" large and bold in a condensed modern sans-serif, stacked on the left third, in bright white with a thin amber underline, so it reads instantly at small size.",
-      "texts": ["NIGHT PROTOCOL", "DEEP SIGNAL", "LATE SHIFT", "SYSTEM FOCUS", "DEEP WORK"]
+      "prompt": "Cinematic digital art of a vast rain-wet futuristic city at night seen from high above: glowing towers, a deep black sky, saturated cyan and red-magenta neon reflecting on wet streets, volumetric fog, very high contrast. One small lone silhouette or motorbike in the lower foreground, no face visible.",
+      "typography": "Render the words \"{text}\" huge and bold in a heavy condensed sans-serif, stacked across the left half, bright white with a red-magenta neon glow, filling about half the frame width.",
+      "texts": ["NIGHT PROTOCOL", "DEEP SIGNAL", "LATE SHIFT", "SYSTEM FOCUS", "DARK FOCUS"]
     },
     "over_shoulder_worker": {
-      "label": "Person working, seen from behind",
-      "evidence_ranks": [4, 6, 9],
-      "prompt": "Photorealistic moody photograph of a person deep in work at {scene}, seen from behind and slightly above so the face is not visible. Their hands are on a keyboard or they stand before a wall of sketches and notes. Dark room lit by a single warm lamp and the cool glow of a screen, shallow depth of field, cinematic grain.",
-      "typography": "Across the top, render the word \"{text}\" in thin, very widely letter-spaced capital letters in white.",
-      "texts": ["HYPERFOCUS", "LOCK IN", "DEEP WORK", "FLOW STATE"]
+      "label": "Hands at work, seen from above",
+      "look": "hands_top_down",
+      "evidence_ranks": [6, 4, 9],
+      "prompt": "Top-down photograph of a dark matte desk: two hands typing on a plain black keyboard, with only a closed notebook, a pen, wired earbuds and a cup of black coffee around them, neatly spaced. One soft light from above, rich deep blacks, minimal and orderly, no face.",
+      "typography": "Across the upper middle, render the words \"{text}\" in bold, very widely letter-spaced capital letters in white.",
+      "texts": ["ENTER DEEP FOCUS", "LOCK IN", "HYPERFOCUS", "FLOW STATE"]
     },
     "monumental_minimal": {
-      "label": "Monumental minimal architecture",
+      "label": "Monumental scale, one tiny figure",
+      "look": "monumental",
       "evidence_ranks": [8, 16, 18, 21, 23],
-      "prompt": "Epic minimalist cinematic image of {scene} rendered as vast brutalist architecture: an enormous structure or hall that dwarfs a single tiny human figure standing in the distance. Desert dusk or misty blue light, one warm light source, huge negative space, sense of silence and scale, photorealistic.",
-      "typography": "Render the word \"{text}\" in an elegant thin serif or wide-spaced capitals, small and centered in the empty space, in warm off-white.",
-      "texts": ["FOCUS", "STILLNESS", "DEEP SIGNAL", "SILENT HOURS"]
+      "prompt": "Epic minimalist cinematic image of an enormous brutalist structure rising over {vista}, dwarfing a single tiny human figure far away. Dusk light with one warm light source, huge empty negative space, a sense of silence and scale, photorealistic.",
+      "typography": "Render the word \"{text}\" in an elegant thin serif with wide letter spacing, centered in the empty sky, in warm off-white.",
+      "texts": ["FOCUS", "STILLNESS", "SILENT HOURS", "DEEP SIGNAL"]
     },
     "meme_object_lowercase": {
       "label": "One object, lowercase caption",
+      "look": "meme_object",
       "evidence_ranks": [19, 25],
       "prompt": "Clean product-style studio photograph of {object} centered on a plain {background} background, soft natural shadow, lots of empty space, no other objects, crisp and bright like an internet meme image.",
       "typography": "Below the object, render the text \"{text}\" in bold lowercase sans-serif letters ending with a period, in near-black, centered.",
@@ -52,22 +58,23 @@
       "objects": ["a pair of plain unbranded over-ear headphones", "a single steaming plain white ceramic coffee mug", "a plain unbranded matte black mechanical keyboard", "a simple brass desk lamp switched on", "a closed plain black notebook with a pen on top"]
     },
     "cozy_retreat_desk": {
-      "label": "Cozy retreat workstation",
+      "label": "Cozy cabin with a view",
+      "look": "cozy_cabin",
       "evidence_ranks": [14],
-      "prompt": "Photorealistic cozy photograph of {scene}, reimagined as a warm hideaway: a glowing desk setup with soft blankets, a crackling fireplace and a large window showing a snowy mountain valley at dusk. Warm amber interior light against cool blue outside, inviting and calm.",
-      "typography": "Render the words \"{text}\" in soft white, widely letter-spaced capitals, across the upper sky area.",
-      "texts": ["DEEP WORK", "SLOW FOCUS", "WARM FOCUS", "WINTER WORK"]
+      "prompt": "Photorealistic cozy photograph of a warm wooden cabin room at dusk: a crackling fireplace, soft blankets on a chair, a glowing laptop on a low wooden desk, and a large window onto a snowy valley with small village lights. Warm amber light inside against cool blue outside, inviting and uncluttered, no people.",
+      "typography": "Across the window's sky, render the words \"{text}\" in soft white, widely letter-spaced capitals.",
+      "texts": ["SLOW FOCUS", "WARM FOCUS", "WINTER WORK", "CABIN HOURS"]
     }
   },
   "worlds": {
-    "architect_studio_night": {"scene": "an architect's studio at night with drawings pinned on the walls", "vista": "a city skyline at blue hour"},
-    "drafting_table_dawn": {"scene": "a drafting table by a window at dawn", "vista": "misty mountains in first light"},
-    "minimal_desk_monolith": {"scene": "a single minimal desk beneath a dark stone monolith", "vista": "a calm sea under a pale sky"},
-    "observatory_workspace": {"scene": "a private observatory study with a large telescope beside the desk", "vista": "a star-filled night sky above snowy peaks"},
-    "server_hall_glow": {"scene": "a quiet workstation inside a glowing server hall", "vista": "a dark coastline at night"},
-    "circuit_grid_abstract": {"scene": "a workspace built into glowing circuit-like light lines", "vista": "an abstract landscape of light grids at dusk"},
-    "blueprint_hall": {"scene": "a long hall of blueprints and drafting tables", "vista": "a fjord under a moody overcast sky"}
+    "architect_studio_night": {"accent": "with one rolled blueprint beside the laptop", "vista": "a city skyline at blue hour with the last orange light on the horizon"},
+    "drafting_table_dawn": {"accent": "with a single sheet of drafting paper and a pencil", "vista": "misty mountains in first golden light"},
+    "minimal_desk_monolith": {"accent": "and nothing else on the desk", "vista": "a calm sea under a pale sunrise sky"},
+    "observatory_workspace": {"accent": "with a slim telescope by the window", "vista": "a star-filled night sky above snowy peaks"},
+    "server_hall_glow": {"accent": "with one small glowing server light in the corner", "vista": "a coastline at blue hour with city lights along the shore"},
+    "circuit_grid_abstract": {"accent": "with thin glowing light lines on the floor", "vista": "an abstract landscape of light grids at dusk"},
+    "blueprint_hall": {"accent": "with one rolled blueprint beside the laptop", "vista": "a fjord under a soft golden evening sky"}
   },
-  "default_world": {"scene": "a minimal modern workspace", "vista": "a calm ocean cliff at sunset"},
+  "default_world": {"accent": "and nothing else on the desk", "vista": "a calm ocean cliff at sunset"},
   "meme_backgrounds": ["white", "light warm grey", "soft beige"]
 }

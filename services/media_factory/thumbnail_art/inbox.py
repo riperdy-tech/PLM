@@ -52,13 +52,27 @@ def _letter(variant_key: str) -> str:
 
 
 def write_job(inbox: Path, *, package_id: str, title: str, guide_version: str,
-              prompts: list[ArtPrompt]) -> Path:
+              prompts: list[ArtPrompt], rewrite: bool = False) -> Path:
     """Write the package's job folder once; an existing job is never rewritten, so the
-    prompts the owner is already working from stay the ones the import expects."""
+    prompts the owner is already working from stay the ones the import expects.
+
+    ``rewrite`` (the owner's choice, e.g. after a new style guide) replaces the prompts of
+    a job whose art is not imported yet; images already saved for the old prompts are
+    moved to ``previous-<old guide version>/``, never deleted, so a stale image cannot
+    be imported against the new prompts."""
     folder = inbox / package_id
     job_path = folder / JOB_FILE
     if job_path.is_file():
-        return folder
+        if not rewrite:
+            return folder
+        old_version = str(read_job(folder).get("guide_version") or "unknown")
+        saved = [p for p in folder.iterdir()
+                 if p.is_file() and p.suffix.lower() in _SUFFIXES]
+        if saved:
+            keep = folder / f"previous-{old_version}"
+            keep.mkdir(exist_ok=True)
+            for path in saved:
+                path.replace(keep / path.name)
     folder.mkdir(parents=True, exist_ok=True)
     lines = [f"# Thumbnails for: {title}", "",
              f"Package `{package_id}`, style guide {guide_version}.", "",

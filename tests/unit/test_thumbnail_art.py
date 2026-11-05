@@ -55,22 +55,39 @@ def test_variant_a_is_p2s_style_and_b_c_are_two_other_styles() -> None:
     assert [p.variant_key for p in prompts] == list(ART_VARIANTS)
     assert prompts[0].style_id == "electric_city_night"
     assert len({p.style_id for p in prompts}) == 3
+    assert len({GUIDE.styles[p.style_id]["look"] for p in prompts}) == 3
+    assert len({p.text.casefold() for p in prompts}) == 3
     for p in prompts:
         assert p.text in GUIDE.styles[p.style_id]["texts"]
         assert f'"{p.text}"' in p.prompt
-        if p.style_id != "meme_object_lowercase":  # one object on a plain background
-            assert "observatory" in p.prompt
         assert all(rule in p.prompt for rule in GUIDE.rules)
+        assert "pinned" not in p.prompt and "{" not in p.prompt
     assert prompts == build_prompts(GUIDE, package_id="mpkg_1",
                                     thumbnail_family="electric_city_night",
                                     visual_world="observatory_workspace")
+
+
+def test_every_package_gets_three_different_looks_and_phrases() -> None:
+    """Guide 2026-11-05: across many packages and every A style, B and C never share a
+    look with A or each other, and no phrase repeats (two DEEP WORKs taught nothing)."""
+    for family in GUIDE.styles:
+        for n in range(40):
+            prompts = build_prompts(GUIDE, package_id=f"mpkg_{n:016x}",
+                                    thumbnail_family=family,
+                                    visual_world="architect_studio_night")
+            assert prompts[0].style_id == family
+            assert len({GUIDE.styles[p.style_id]["look"] for p in prompts}) == 3
+            assert len({p.text.casefold() for p in prompts}) == 3
+    vista = build_prompts(GUIDE, package_id="mpkg_1", thumbnail_family=DEFAULT_STYLE,
+                          visual_world="observatory_workspace")[0]
+    assert GUIDE.worlds["observatory_workspace"]["vista"] in vista.prompt
 
 
 def test_an_unknown_style_or_world_falls_back_to_the_guide_default() -> None:
     prompts = build_prompts(GUIDE, package_id="mpkg_2", thumbnail_family="illustrated_lofi",
                             visual_world="not_a_world")
     assert prompts[0].style_id == DEFAULT_STYLE
-    assert GUIDE.default_world["scene"] in prompts[0].prompt
+    assert GUIDE.default_world["vista"] in prompts[0].prompt
 
 
 def test_every_focus_template_thumbnail_family_is_a_guide_style() -> None:
@@ -110,6 +127,19 @@ def test_a_written_job_is_never_rewritten(tmp_path: Path) -> None:
     write_job(tmp_path, package_id="mpkg_3", title="Other", guide_version="g2",
               prompts=prompts[:1])
     assert (folder / "job.json").read_text(encoding="utf-8") == first
+
+
+def test_a_rewrite_replaces_the_prompts_and_moves_saved_images_aside(tmp_path: Path) -> None:
+    prompts = build_prompts(GUIDE, package_id="mpkg_4", thumbnail_family=None,
+                            visual_world="blueprint_hall")
+    folder = write_job(tmp_path, package_id="mpkg_4", title="T", guide_version="g1",
+                       prompts=prompts)
+    (folder / "A.jpg").write_bytes(b"old art")
+    write_job(tmp_path, package_id="mpkg_4", title="T", guide_version="g2",
+              prompts=prompts, rewrite=True)
+    assert json.loads((folder / "job.json").read_text(encoding="utf-8"))["guide_version"] == "g2"
+    assert not (folder / "A.jpg").exists()
+    assert (folder / "previous-g1" / "A.jpg").read_bytes() == b"old art"
 
 
 def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> None:
