@@ -20,6 +20,7 @@ limited to loopback origins without credentials.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
@@ -89,13 +90,23 @@ def _base_app(title: str, description: str, data_source: str) -> FastAPI:
     return app
 
 
-def _serve_static(app: FastAPI, directory: Path) -> None:
+def _serve_static(app: FastAPI, directory: Path, *, token: str | None = None) -> None:
+    """``token``: the service token, written into the page so its buttons work without
+    asking the owner for it. The dashboard listens on loopback only and allows loopback
+    origins only, so no website can read the page; the token never leaves this machine."""
     app.mount("/static", StaticFiles(directory=str(directory)), name="static")
     index_file = directory / "index.html"
 
     @app.get("/", response_class=HTMLResponse)
     def get_root() -> HTMLResponse:
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"), status_code=200)
+        page = index_file.read_text(encoding="utf-8")
+        if token:
+            page = page.replace(
+                "</head>",
+                f'  <meta name="plm-service-token" content="{html.escape(token, quote=True)}">'
+                "\n</head>", 1)
+        return HTMLResponse(content=page, status_code=200,
+                            headers={"Cache-Control": "no-store"})
 
 
 # ================================================================================= live
@@ -217,7 +228,9 @@ def create_live_app(
 
     if studio is not None:
         _studio_routes(app, studio, require_token)
-    _serve_static(app, LIVE_STATIC_DIR)
+    _serve_static(app, LIVE_STATIC_DIR, token=(
+        None if platform is None or platform.service_token is None
+        else platform.service_token.get_secret_value()))
     return app
 
 

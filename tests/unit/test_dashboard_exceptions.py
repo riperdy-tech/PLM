@@ -397,3 +397,22 @@ def test_a_resume_can_carry_a_rewind_and_the_songs_to_leave_out() -> None:
     assert isinstance(sent.payload, ResumeSignal)
     assert (sent.payload.rewind_to, sent.payload.exclude_candidates) == ("assemble",
                                                                        ("cand-b",))
+
+
+def test_the_page_carries_the_token_so_its_buttons_never_ask_for_it() -> None:
+    """The live page embeds the service token (loopback only), and a page served without
+    platform settings carries none."""
+    engine = create_dashboard_engine(schemas=("ops",))
+    factory = sessionmaker(bind=engine)
+    actions = ExceptionActions(factory, reviewers=REVIEWERS, signaller=None,
+                               clock=FixedClock(NOW))
+    live = LiveDashboard(ReadOnlyDatabase(factory), PhaseApis({}, token=None),
+                         reviewers=REVIEWERS)
+    settings = load_settings(env=PLATFORM_ENV)
+    assert settings.service_token is not None
+    page = TestClient(create_live_app(live, actions, platform=settings)).get("/")
+    token = settings.service_token.get_secret_value()
+    assert f'<meta name="plm-service-token" content="{token}">' in page.text
+    assert page.headers["cache-control"] == "no-store"
+    bare = TestClient(create_live_app(live, actions, platform=None)).get("/")
+    assert "plm-service-token" not in bare.text

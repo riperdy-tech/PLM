@@ -80,7 +80,12 @@ function panel(title, p, render) {
   return h('div', { class: 'card' }, h('h2', {}, title), h('div', { class: 'source' }, `source: ${p.source}`), render(p.data));
 }
 
-function readToken() { try { return sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; } }
+function readToken() {
+  // The page carries the token when the dashboard serves it locally (no prompt needed).
+  const meta = document.querySelector('meta[name="plm-service-token"]');
+  if (meta && meta.content) return meta.content;
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+}
 function storeToken(t) { try { sessionStorage.setItem(TOKEN_KEY, t); } catch (e) { /* unavailable */ } }
 
 async function getJson(url) {
