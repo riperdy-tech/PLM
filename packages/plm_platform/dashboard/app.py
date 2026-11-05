@@ -375,12 +375,12 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
             case_id, body.package_id, body.thumbnail_id, body.note))
         return result
 
-    @app.get("/api/studio/thumbnails/{package_id}/library/{rel:path}")
+    @app.get("/api/studio/art-library/{package_id}/{rel:path}")
     def studio_library_file(package_id: str, rel: str) -> Response:
         data, kind = guarded(lambda: studio.library_file(package_id, rel))
         return Response(content=data, media_type=kind)
 
-    @app.put("/api/studio/thumbnails/{package_id}/library", dependencies=[Depends(require_token)])
+    @app.put("/api/studio/art-library/{package_id}", dependencies=[Depends(require_token)])
     async def studio_library_upload(package_id: str, request: Request) -> dict[str, Any]:
         data = await request.body()
         added: dict[str, Any] = guarded(lambda: studio.add_to_library(package_id, data))

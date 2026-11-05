@@ -480,7 +480,7 @@ function noteList(notes, title) {
 // video is made again from the new A and comes back here for approval.
 function pictureChooser(r, p, caseUrl, note) {
   const lib = p.art_library || [];
-  const base = `/api/studio/thumbnails/${p.media_package_id}/library`;
+  const base = `/api/studio/art-library/${p.media_package_id}`;
   const chosen = {};
   const box = h('div', { class: 'chooser' }, h('label', {}, 'Pictures: click one for A, B and C (A is also the picture of the whole video), or upload a new one'));
   for (const letter of ['A', 'B', 'C']) {

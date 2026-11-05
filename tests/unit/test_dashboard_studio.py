@@ -411,3 +411,30 @@ def test_pictures_are_chosen_from_every_saved_image_and_the_video_is_made_again(
                                            "C": "previous-2026-11-04/C.jpg"}))
     assert any(p.parent.name == "replaced" for p in folder.rglob("A-*.png"))
     assert (folder / new["path"]).read_bytes() == PNG
+
+
+def test_the_web_routes_reach_the_art_library_and_the_letter_upload(tmp_path: Path) -> None:
+    """Through the app's real routes: a new picture goes to the art library and a letter
+    upload to A, B or C (the library upload once landed on the letter route and was
+    refused as art_letter_invalid)."""
+    from fastapi.testclient import TestClient
+    from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
+    from plm_platform.dashboard.app import create_live_app
+    from plm_platform.dashboard.live import LiveDashboard
+    from plm_platform.dashboard.sources import PhaseApis, ReadOnlyDatabase
+
+    from tests.support.c1_api import PLATFORM_ENV, SEAM_TOKEN
+
+    studio, _ = _studio(tmp_path, [])
+    live = LiveDashboard(ReadOnlyDatabase(None), PhaseApis({}, token=None), reviewers=None)
+    client = TestClient(create_live_app(live, studio.actions,  # type: ignore[arg-type]
+                                        platform=load_settings(env=PLATFORM_ENV),
+                                        studio=studio))
+    auth = {SERVICE_TOKEN_HEADER: SEAM_TOKEN}
+    added = client.put(f"/api/studio/art-library/{PKG}", content=PNG, headers=auth)
+    assert added.status_code == 200, added.text
+    path = added.json()["path"]
+    assert client.get(f"/api/studio/art-library/{PKG}/{path}").content == PNG
+    letter = client.put(f"/api/studio/thumbnails/{PKG}/B", content=PNG, headers=auth)
+    assert letter.status_code == 200 and letter.json()["saved"] == "B.png"
+    assert client.put(f"/api/studio/art-library/{PKG}", content=PNG).status_code == 401
