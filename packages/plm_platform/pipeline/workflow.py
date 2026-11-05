@@ -280,7 +280,7 @@ class PipelineWorkflow:
             return self._outcome()
         await self._move(PipelineState.POLICY_CHECKED, step=Step.POLICY_CHECK, done=policy)
 
-        generated = await self._step(Step.GENERATE, {"policy_check": policy.result.outputs},
+        generated = await self._step(Step.GENERATE, {**self._music(), "policy_check": policy.result.outputs},
                                      enter=PipelineState.GENERATING)
         if generated is None:
             return self._outcome()
@@ -523,7 +523,7 @@ class PipelineWorkflow:
             spec_ids.extend(str(s) for s in extended.result.outputs.get("track_spec_ids") or [])
             packages.append(package_id)
         generated = await self._step(
-            Step.GENERATE, {"policy_check": {"package_ids": packages},
+            Step.GENERATE, {**self._music(), "policy_check": {"package_ids": packages},
                             "track_spec_ids": spec_ids},
             key_name=f"{Step.GENERATE.value}.r{round_no}")
         if generated is None:
@@ -547,6 +547,12 @@ class PipelineWorkflow:
             Step.ASSEMBLE, [(STEP_ORIGIN_PHASE[Step.ASSEMBLE], SUPPLY_HOLD_REASON, details)],
             error_code="playlist_supply_short",
             error_detail=f"cleared supply still short after {rounds} top-up round(s) ({why})")
+
+    def _music(self) -> dict[str, Any]:
+        """The owner's song tool for this run, passed to every generate step."""
+        assert self._input is not None
+        provider = self._input.options.music_provider
+        return {} if provider is None else {"music_provider": provider}
 
     async def _approval_hold(self, assembled: _Done) -> bool:
         """Wait for the owner's approval of the packages before uploading them. A resume

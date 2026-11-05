@@ -126,6 +126,10 @@ class ResendSignalBody(BaseModel):
     actor: str
 
 
+class StudioStartBody(BaseModel):
+    music: str = Field(description="suno or flow_music: which tool the song prompts are for")
+
+
 def _http(refused: ActionRefused) -> HTTPException:
     return HTTPException(status_code=refused.status_code, detail=refused.error.model_dump())
 
@@ -287,8 +291,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
                 **await asyncio.to_thread(guarded, studio.overview)}
 
     @app.post("/api/studio/start", dependencies=[Depends(require_token)])
-    async def studio_start() -> dict[str, Any]:
-        return {"started": await guarded_async(studio.start_run)}
+    async def studio_start(body: StudioStartBody) -> dict[str, Any]:
+        return {"started": await guarded_async(lambda: studio.start_run(body.music))}
 
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:

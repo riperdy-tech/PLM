@@ -65,6 +65,9 @@ class PipelineOptions:
     topup_spare_tracks: int = 1
     """Recordings asked for beyond ``ceil(missing seconds / shortest track)``, so one P5
     rejection does not cost a whole round."""
+    music_provider: str | None = None
+    """The P4 provider that makes this run's songs (``suno_manual`` or
+    ``flow_music_manual``, the owner's choice at Start); ``None``: P4's default."""
     require_publish_approval: bool = True
     """Hold every package as ``PUBLISH_APPROVAL_AWAITED`` before the upload step until the
     owner approves it (owner decision 2026-11-05)."""

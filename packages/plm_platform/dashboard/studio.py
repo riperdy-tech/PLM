@@ -50,6 +50,9 @@ APPROVAL_CAPABILITIES: Final[tuple[str, ...]] = (
 SONGS_REASON: Final[str] = "MANUAL_AUDIO_AWAITED"
 ART_REASON: Final[str] = "THUMBNAIL_ART_AWAITED"
 APPROVAL_REASON: Final[str] = "PUBLISH_APPROVAL_AWAITED"
+MUSIC_PROVIDERS: Final[dict[str, str]] = {"suno": "suno_manual",
+                                          "flow_music": "flow_music_manual"}
+"""The owner's choice at Start -> the P4 provider that writes the song prompts."""
 _STEM: Final = re.compile(r"\A[A-Za-z0-9_-]{1,120}\Z")
 _PACKAGE: Final = re.compile(r"\Ampkg_[0-9a-f]{8,64}\Z")
 _SAVE_AS: Final = re.compile(r"^Save as: ([A-Za-z0-9_-]+)\.wav$", re.MULTILINE)
@@ -65,28 +68,41 @@ def _env(name: str, env: Mapping[str, str], dotenv: Mapping[str, str]) -> str | 
 @dataclass(frozen=True, slots=True)
 class StudioPaths:
     music_inbox: Path | None
+    """The Flow Music inbox (``PLM_FLOW_MUSIC_MANUAL_INBOX``)."""
     art_inbox: Path | None
     grants_file: Path | None
     notes_file: Path | None = None
     """The owner's review notes (``PLM_STUDIO_NOTES_FILE``, default
     ``data/studio-notes.json``)."""
+    suno_inbox: Path | None = None
+    """The Suno inbox (``PLM_SUNO_MANUAL_INBOX``)."""
+
+    def music_inboxes(self) -> list[tuple[str, Path]]:
+        """Each configured song inbox with the tool its sheets are for."""
+        found: list[tuple[str, Path]] = []
+        for source, inbox in (("Flow Music", self.music_inbox), ("Suno", self.suno_inbox)):
+            if inbox is not None and inbox.is_dir() and all(
+                    inbox.resolve() != seen.resolve() for _, seen in found):
+                found.append((source, inbox))
+        return found
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None,
                  dotenv_path: str | Path = ".env") -> StudioPaths:
-        """The inboxes and grant file the services use (process env, then ``.env``). The
-        Flow Music inbox wins over the Suno one, as in P4."""
+        """The inboxes and grant file the services use (process env, then ``.env``). Both
+        song inboxes: the owner picks Suno or Flow Music when starting a run."""
         process = os.environ if env is None else env
         dotenv = load_env_file(dotenv_path)
-        music = (_env("PLM_FLOW_MUSIC_MANUAL_INBOX", process, dotenv)
-                 or _env("PLM_SUNO_MANUAL_INBOX", process, dotenv))
+        music = _env("PLM_FLOW_MUSIC_MANUAL_INBOX", process, dotenv)
+        suno = _env("PLM_SUNO_MANUAL_INBOX", process, dotenv)
         art = _env("PLM_THUMBNAIL_ART_INBOX", process, dotenv)
         grants = _env("PLM_WRITE_AUTHORIZATIONS_FILE", process, dotenv)
         notes = _env("PLM_STUDIO_NOTES_FILE", process, dotenv) or "data/studio-notes.json"
         return cls(music_inbox=None if music is None else Path(music),
                    art_inbox=None if art is None else Path(art),
                    grants_file=None if grants is None else Path(grants),
-                   notes_file=Path(notes))
+                   notes_file=Path(notes),
+                   suno_inbox=None if suno is None else Path(suno))
 
 
 def _refuse(status: int, code: str, message: str) -> ActionRefused:
@@ -124,8 +140,9 @@ class Studio:
     """Stored bytes by ``(uri, checksum)``, verified."""
     import_art: Callable[[str, Path], dict[str, Any]]
     """P6's importer for one package's folder; raises on refusal."""
-    start: Callable[[], Any] | None = None
-    """Starts a new run (async); ``None``: the Start button is refused."""
+    start: Callable[[str], Any] | None = None
+    """Starts a new run (async) whose songs come from the named P4 provider
+    (:data:`MUSIC_PROVIDERS`); ``None``: the Start button is refused."""
     edit: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
     """P6's review edit of one package (``media_factory.review_edits.edit_presentation``
     keyword arguments); raises on refusal."""
@@ -183,17 +200,28 @@ class Studio:
 
     # -- songs ------------------------------------------------------------------------------
 
-    def _music_inbox(self) -> Path:
-        if self.paths.music_inbox is None or not self.paths.music_inbox.is_dir():
+    def _music_inboxes(self) -> list[tuple[str, Path]]:
+        inboxes = self.paths.music_inboxes()
+        if not inboxes:
             raise _refuse(503, "music_inbox_not_configured",
-                          "PLM_FLOW_MUSIC_MANUAL_INBOX is not set or not a folder")
-        return self.paths.music_inbox
+                          "neither PLM_FLOW_MUSIC_MANUAL_INBOX nor PLM_SUNO_MANUAL_INBOX is a folder")
+        return inboxes
 
     def songs(self) -> dict[str, Any]:
-        """Every prompt sheet in the music inbox with a song still missing."""
-        if self.paths.music_inbox is None or not self.paths.music_inbox.is_dir():
+        """Every prompt sheet in the song inboxes (Flow Music and Suno) with a song still
+        missing, each naming the tool it is for."""
+        inboxes = self.paths.music_inboxes()
+        if not inboxes:
             return {"configured": False, "sheets": []}
-        inbox = self.paths.music_inbox
+        sheets = []
+        for source, inbox in inboxes:
+            sheets += self._sheets(source, inbox)
+        return {"configured": True, "inbox": str(inboxes[0][1]),
+                "inboxes": {source: str(inbox) for source, inbox in inboxes},
+                "sheets": sheets}
+
+    @staticmethod
+    def _sheets(source: str, inbox: Path) -> list[dict[str, Any]]:
         sheets = []
         for sheet in sorted(inbox.glob("*.prompts.txt")):
             text = sheet.read_text(encoding="utf-8")
@@ -209,22 +237,24 @@ class Studio:
                               "lyrics_needed": "Instrumental: no" in block,
                               "lyrics_saved": (inbox / f"{stem}.lyrics.txt").is_file()})
             if songs and not all(s["saved"] for s in songs):
-                sheets.append({"sheet": sheet.name, "header": header, "songs": songs})
-        return {"configured": True, "inbox": str(inbox), "sheets": sheets}
+                sheets.append({"sheet": sheet.name, "source": source, "inbox": str(inbox),
+                               "header": header, "songs": songs})
+        return sheets
 
     def save_song(self, stem: str, data: bytes) -> dict[str, Any]:
-        inbox = self._music_inbox()
-        wanted = {s["stem"] for sheet in self.songs()["sheets"] for s in sheet["songs"]}
+        self._music_inboxes()
+        wanted = {s["stem"]: Path(sheet["inbox"]) for sheet in self.songs()["sheets"]
+                  for s in sheet["songs"]}
         if _STEM.match(stem) is None or stem not in wanted:
             raise _refuse(404, "song_not_awaited", f"no waiting prompt sheet names {stem}.wav")
         if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
             raise _refuse(422, "not_a_wav", "the file is not a WAV (download it as WAV)")
-        _write_atomic(inbox / f"{stem}.wav", data)
+        _write_atomic(wanted[stem] / f"{stem}.wav", data)
         return {"saved": f"{stem}.wav", "bytes": len(data)}
 
     async def songs_done(self) -> list[dict[str, Any]]:
         """Resume every run waiting for songs; P4 then checks every file again."""
-        inbox = self._music_inbox()
+        inbox = ", ".join(str(path) for _, path in self._music_inboxes())
         cases = self._cases(SONGS_REASON)
         if not cases:
             raise _refuse(409, "no_run_waiting_for_songs", "no run is waiting for songs")
@@ -499,10 +529,20 @@ class Studio:
         return await self.actions.reject(case_id, actor=OWNER, role="production_owner",
                                          notes="rejected in the Studio")
 
-    async def start_run(self) -> Any:
+    async def start_run(self, music: str) -> Any:
+        """Start a run whose song prompts are for ``music`` (``suno`` or ``flow_music``);
+        its inbox must be configured, or nobody could hand the songs in."""
         if self.start is None:
             raise _refuse(503, "start_not_configured", "starting runs is not configured")
-        return await self.start()
+        if music not in MUSIC_PROVIDERS:
+            raise _refuse(422, "music_tool_unknown",
+                          f"choose one of {sorted(MUSIC_PROVIDERS)}, not {music!r}")
+        source = {"suno": "Suno", "flow_music": "Flow Music"}[music]
+        if source not in dict(self.paths.music_inboxes()):
+            raise _refuse(503, "music_inbox_not_configured",
+                          f"the {source} inbox is not configured: set "
+                          f"{'PLM_SUNO_MANUAL_INBOX' if music == 'suno' else 'PLM_FLOW_MUSIC_MANUAL_INBOX'}")
+        return await self.start(MUSIC_PROVIDERS[music])
 
 
 def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
@@ -593,11 +633,12 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
 
-        async def start() -> dict[str, Any]:
+        async def start(music_provider: str) -> dict[str, Any]:
             from dataclasses import asdict
 
             from ..pipeline.config import load_pipeline_config
             from ..pipeline.start import RunNotStarted, start_new_run
+            from ..pipeline.types import PipelineOptions
             from ..temporal import connect_client
 
             config = load_pipeline_config(dotenv_path=dotenv_path)
@@ -608,10 +649,11 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
             try:
                 started = await start_new_run(
                     await connect_client(platform), ar_url=urls[Phase.AR], token=token,
-                    brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now())
+                    brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now(),
+                    options=PipelineOptions(music_provider=music_provider))
             except RunNotStarted as exc:
                 raise _refuse(409, exc.code, str(exc)) from exc
-            return asdict(started)
+            return {**asdict(started), "music_provider": music_provider}
 
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media,

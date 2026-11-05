@@ -16,7 +16,7 @@ key, so the same execute imports once the files are there.
 from collections.abc import Callable, Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from plm_contracts import ErrorShape
 from plm_platform.clock import Clock, SystemClock
@@ -46,6 +46,7 @@ from ..generation.engine import GenerationEngine, GenerationPlanSpecMismatch
 from ..generation.planner import GenerationPlanCapacityError, plan_generation
 from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
+from ..providers.adapters import get_provider_adapter
 from ..providers.registry import list_providers
 from ..providers.suno_manual import IMPORT_CAPABILITY
 from ..storage.artifacts import ArtifactStorageProtocol, ArtifactStorageUnavailable
@@ -59,6 +60,9 @@ from ..storage.repositories import (
 )
 from .events import CandidateExportError, build_candidate_ready_event
 from .service_token import require_service_token
+
+MANUAL_PROVIDERS = frozenset({"suno_manual", "flow_music_manual"})
+"""The owner-import providers a run may choose between (the dashboard Start)."""
 
 __all__ = ["build_router"]
 
@@ -255,6 +259,7 @@ def build_router(
         request: Request,
         session: Annotated[Session, Depends(_require_session)],
         idempotency_key: IdempotencyKeyHeader = None,
+        provider: Annotated[str | None, Query()] = None,
     ) -> JSONResponse:
         """Execute a planned generation run.
 
@@ -263,12 +268,30 @@ def build_router(
         409 ``external_write_<decision>`` with ``detail.reason`` (the guard's code,
         e.g. ``budget_ledger_unavailable``, ``no_authorization``, ``policy_dry_run``,
         ``exhausted``); work done before the stop is kept, and re-executing resumes.
+
+        ``provider`` picks the owner's song tool for this plan instead of the service's
+        default: only a manual import provider (``suno_manual``, ``flow_music_manual``)
+        and only when the default is itself a manual import (a deployment on the mock or
+        the automated client cannot be switched to the owner's inbox from a request).
         """
+        if provider is not None:
+            if provider not in MANUAL_PROVIDERS:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail=ErrorShape(
+                                        code="provider_not_selectable", field_paths=["provider"],
+                                        message=f"choose one of {sorted(MANUAL_PROVIDERS)}",
+                                    ).model_dump())
+            if settings.default_provider not in MANUAL_PROVIDERS:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ErrorShape(
+                    code="provider_override_not_allowed", field_paths=["provider"],
+                    message=f"the service runs {settings.default_provider!r}, not a manual "
+                            "import; the song tool cannot be chosen per run",
+                ).model_dump())
         return _idempotent(session, request, idempotency_key, spec_payload,
-                           lambda: _execute(plan_id, spec_payload, session))
+                           lambda: _execute(plan_id, spec_payload, session, provider))
 
     def _execute(plan_id: str, spec_payload: dict[str, Any],
-                 session: Session) -> tuple[int, Any]:
+                 session: Session, provider: str | None = None) -> tuple[int, Any]:
         plan = get_generation_plan(session, plan_id)
         if plan is None:
             raise HTTPException(
@@ -305,6 +328,7 @@ def build_router(
                 plan=plan,
                 variants=variants,
                 spec=spec,
+                provider_adapter=None if provider is None else get_provider_adapter(provider),
                 # Paid calls commit their SUBMITTED and settled attempts, so a
                 # later failure in this request cannot erase a provider job.
                 checkpoint=session.commit,
