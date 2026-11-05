@@ -1,6 +1,6 @@
 {
   "schema_version": "thumbnail-styles-v1",
-  "guide_version": "2026-11-05",
+  "guide_version": "2026-11-06",
   "evidence": {
     "scan": "data/thumbnail_trends/2026-11-04 (scripts/thumbnail_trend_scan.py)",
     "method": "147 long-form (>= 20 min) videos from 8 focus-music searches published in the last 90 days, ranked by views per channel subscriber (floored at 1,000); top 30 reviewed, at most 2 per channel.",
@@ -14,7 +14,7 @@
     "Every object is plain and unbranded: no brand names, logos or trademarks anywhere.",
     "No real or famous person and no recognisable face; at most hands, or one tiny distant figure; never a person in the foreground."
   ],
-  "text_policy": "Every phrase in texts is short and makes no claim about brainwaves, Hz, ADHD, memory or health. The styles keep the brand's charcoal, graphite, warm amber and cool white (ADR-0044), except the neon city (saturated cyan and red neon, as the scan's cyberpunk winners #11, #12, #16) and the bright meme style.",
+  "text_policy": "Every phrase in texts is short, names focus or work (the channel is focus music for work, ADR-0044; mood words such as stillness or slow read as sleep or meditation), and makes no claim about brainwaves, Hz, ADHD, memory or health. The styles keep the brand's charcoal, graphite, warm amber and cool white (ADR-0044), except the neon city (saturated cyan and red neon, as the scan's cyberpunk winners #11, #12, #16) and the bright meme style.",
   "styles": {
     "cinematic_workspace_vista": {
       "label": "Open view from a minimal room",
@@ -30,7 +30,7 @@
       "evidence_ranks": [11, 12, 16, 24],
       "prompt": "Cinematic digital art of a vast rain-wet futuristic city at night seen from high above: glowing towers, a deep black sky, saturated cyan and red-magenta neon reflecting on wet streets, volumetric fog, very high contrast. One small lone silhouette or motorbike in the lower foreground, no face visible.",
       "typography": "Render the words \"{text}\" huge and bold in a heavy condensed sans-serif, stacked across the left half, bright white with a red-magenta neon glow, filling about half the frame width.",
-      "texts": ["NIGHT PROTOCOL", "DEEP SIGNAL", "LATE SHIFT", "SYSTEM FOCUS", "DARK FOCUS"]
+      "texts": ["NIGHT FOCUS", "DEEP WORK", "LATE SHIFT WORK", "SYSTEM FOCUS", "DARK FOCUS"]
     },
     "over_shoulder_worker": {
       "label": "Hands at work, seen from above",
@@ -46,7 +46,7 @@
       "evidence_ranks": [8, 16, 18, 21, 23],
       "prompt": "Epic minimalist cinematic image of an enormous brutalist structure rising over {vista}, dwarfing a single tiny human figure far away. Dusk light with one warm light source, huge empty negative space, a sense of silence and scale, photorealistic.",
       "typography": "Render the word \"{text}\" in an elegant thin serif with wide letter spacing, centered in the empty sky, in warm off-white.",
-      "texts": ["FOCUS", "STILLNESS", "SILENT HOURS", "DEEP SIGNAL"]
+      "texts": ["FOCUS", "DEEP FOCUS", "FOCUS MODE", "FLOW STATE"]
     },
     "meme_object_lowercase": {
       "label": "One object, lowercase caption",
@@ -63,7 +63,7 @@
       "evidence_ranks": [14],
       "prompt": "Photorealistic cozy photograph of a warm wooden cabin room at dusk: a crackling fireplace, soft blankets on a chair, a glowing laptop on a low wooden desk, and a large window onto a snowy valley with small village lights. Warm amber light inside against cool blue outside, inviting and uncluttered, no people.",
       "typography": "Across the window's sky, render the words \"{text}\" in soft white, widely letter-spaced capitals.",
-      "texts": ["SLOW FOCUS", "WARM FOCUS", "WINTER WORK", "CABIN HOURS"]
+      "texts": ["WARM FOCUS", "DEEP WORK", "CABIN FOCUS", "FOCUS & WORK"]
     }
   },
   "worlds": {

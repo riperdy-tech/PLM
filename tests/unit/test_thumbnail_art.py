@@ -259,3 +259,12 @@ def test_a_still_video_that_fails_qa_keeps_the_package_waiting(tmp_path: Path) -
             assert still.video_checksum == pkg.video_checksum
     finally:
         engine.dispose()
+
+
+def test_every_phrase_says_focus_or_work() -> None:
+    """The channel is focus music for work (ADR-0044): 'STILLNESS' or 'SILENT HOURS'
+    read as sleep or meditation, so every phrase names focus, work, flow or locking in."""
+    words = ("focus", "work", "flow", "lock in", "distraction", "hour")
+    for style_id, style in GUIDE.styles.items():
+        for text in style["texts"]:
+            assert any(w in text.casefold() for w in words), (style_id, text)
