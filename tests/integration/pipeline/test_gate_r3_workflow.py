@@ -565,3 +565,62 @@ async def test_the_upload_waits_for_the_owner_approval_of_the_package(
         await handle.terminate(reason="R6 test: approval proven")
 
     assert steps.calls_for(Step.UPLOAD) == [idempotency_key(workflow_id, "upload")]
+
+
+async def test_a_song_taken_out_at_approval_is_replaced_before_the_new_package(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves (Studio "Replace song"): a resume of the approval hold with
+    ``rewind_to="assemble"`` and ``exclude_candidates`` asks P3 for one new song per song
+    taken out (its own extend/generate/QA keys), assembles again without the removed song
+    and with the new one, and holds for approval again before any upload."""
+    import dataclasses
+
+    from plm_platform.pipeline.client import start_pipeline
+    from plm_platform.pipeline.types import StepRequest, StepResult
+
+    from tests.integration.pipeline.support import QUEUE
+
+    class SwapSteps(MockPhaseSteps):
+        def __init__(self, scripts: dict[Step, ScriptedStep]) -> None:
+            super().__init__(scripts)
+            self.assemble_inputs: list[list[str]] = []
+
+        async def generate(self, request: StepRequest) -> StepResult:
+            if "rrr1s" in request.idempotency_key:
+                self.calls.append((Step.GENERATE.value, request.idempotency_key))
+                return StepResult(outputs={"candidate_ids": ["cand-new"]})
+            return await super().generate(request)
+
+        async def assemble(self, request: StepRequest) -> StepResult:
+            self.assemble_inputs.append(list(request.inputs["generate"]["candidate_ids"]))
+            return await super().assemble(request)
+
+    steps = SwapSteps(_scripts(
+        generate=ScriptedStep(outputs={"candidate_ids": ["cand-a", "cand-b"]}),
+        assemble=ScriptedStep(outputs={
+            "media_package_ids": ["media-mock"],
+            "packages": [{"media_package_id": "media-mock", "p3_package_id": "p3-1",
+                          "candidate_ids": ["cand-a", "cand-b"]}]})))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(
+            client, directive_id=directive_id, brand_id="gate_brand", task_queue=QUEUE,
+            options=dataclasses.replace(OPTIONS, require_publish_approval=True))
+        await wait_until(handle, lambda s: s.state == "HELD", "the first approval hold")
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="pia", role="production_owner",
+            evidence={"publish_approval_ref": "Studio: replace cand-b"},
+            rewind_to="assemble", exclude_candidates=("cand-b", "not-in-package")))
+        second = await wait_until(
+            handle, lambda s: s.state == "HELD" and len(steps.assemble_inputs) == 2,
+            "the second approval hold")
+        assert second.held_from == "PACKAGED"
+        await handle.terminate(reason="R6 test: song swap proven")
+
+    assert steps.assemble_inputs == [["cand-a", "cand-b"], ["cand-a", "cand-new"]]
+    assert steps.calls_for(Step.EXTEND) == [idempotency_key(workflow_id, "extend.rrr1s.0")]
+    assert idempotency_key(workflow_id, "generate.rrr1s") in steps.calls_for(Step.GENERATE)
+    assert steps.calls_for(Step.QA)[-1] == idempotency_key(workflow_id, "qa.rrr1s")
+    assert steps.calls_for(Step.ASSEMBLE)[-1] == idempotency_key(workflow_id, "assemble.rr1")
+    assert steps.calls_for(Step.UPLOAD) == []

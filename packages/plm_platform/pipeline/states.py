@@ -100,7 +100,9 @@ _FORWARD: Final[dict[PipelineState, frozenset[PipelineState]]] = {
     PipelineState.QA: frozenset({PipelineState.PASSED, PipelineState.REJECTED}),
     PipelineState.PASSED: frozenset({PipelineState.ASSEMBLING}),
     PipelineState.ASSEMBLING: frozenset({PipelineState.PACKAGED}),
-    PipelineState.PACKAGED: frozenset({PipelineState.UPLOADING}),
+    # Back to ASSEMBLING: the owner's approval hold rewound before any upload (a song
+    # taken out, ResumeSignal.exclude_candidates).
+    PipelineState.PACKAGED: frozenset({PipelineState.UPLOADING, PipelineState.ASSEMBLING}),
     # Back to ASSEMBLING: a held upload rewound to re-render (ResumeSignal.rewind_to).
     PipelineState.UPLOADING: frozenset({PipelineState.PROCESSING, PipelineState.ASSEMBLING}),
     PipelineState.PROCESSING: frozenset({PipelineState.PUBLISHED}),

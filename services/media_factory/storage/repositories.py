@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -61,6 +62,9 @@ __all__ = [
     "list_playlist_tracks",
     "list_thumbnail_variants",
     "list_visual_assets",
+    "reopen_media_package_art",
+    "replace_media_package_art",
+    "update_media_package_presentation",
     "update_media_package_status",
     "update_playlist_session_status",
     "update_render_job_status",
@@ -681,3 +685,54 @@ def update_media_package_status(
         .where(media_packages_table.c.media_package_id == package_id)
         .values(**values)
     )
+
+
+def update_media_package_presentation(
+    session: Session,
+    package_id: str,
+    *,
+    metadata_candidates: list[dict[str, Any]],
+    thumbnails: list[dict[str, Any]],
+    expected_status: PackageStatus,
+    now: datetime,
+) -> bool:
+    """Replace the package's metadata candidates and the order of its thumbnails (the
+    owner's review edits), only while it is ``expected_status``; ``False`` when another
+    writer moved it first. The video, its checksum and the manifest hash are untouched."""
+    result = session.execute(
+        media_packages_table.update()
+        .where(media_packages_table.c.media_package_id == package_id,
+               media_packages_table.c.status == expected_status.value)
+        .values(metadata_candidates_json=json.dumps(metadata_candidates),
+                thumbnails_json=json.dumps(thumbnails), updated_at=now)
+    )
+    return bool(getattr(result, "rowcount", 0))
+
+
+def reopen_media_package_art(
+    session: Session,
+    package_id: str,
+    *,
+    variant_keys: Sequence[str],
+    expected_status: PackageStatus,
+    status: PackageStatus,
+    now: datetime,
+) -> bool:
+    """Send a package back to wait for new art: move it from ``expected_status`` to
+    ``status`` and forget its imported art variants so the next import stores the new
+    images instead of refusing them as a conflict. ``False`` when it was not
+    ``expected_status``."""
+    moved = session.execute(
+        media_packages_table.update()
+        .where(media_packages_table.c.media_package_id == package_id,
+               media_packages_table.c.status == expected_status.value)
+        .values(status=status.value, updated_at=now)
+    )
+    if not getattr(moved, "rowcount", 0):
+        return False
+    session.execute(
+        thumbnail_variants_table.delete()
+        .where(thumbnail_variants_table.c.media_package_id == package_id,
+               thumbnail_variants_table.c.variant_key.in_(list(variant_keys)))
+    )
+    return True

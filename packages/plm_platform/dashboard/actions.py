@@ -263,7 +263,11 @@ class ExceptionActions:
     # -- public actions -------------------------------------------------------------------
 
     async def resume(self, case_id: str, *, actor: str, role: str | None,
-                     evidence: Mapping[str, str], notes: str) -> dict[str, Any]:
+                     evidence: Mapping[str, str], notes: str,
+                     rewind_to: str | None = None,
+                     exclude_candidates: tuple[str, ...] = ()) -> dict[str, Any]:
+        """Resume the case; ``rewind_to``/``exclude_candidates`` ride on the pipeline's
+        resume signal (an approval hold sent back to assembly, see ``ResumeSignal``)."""
         def decide(session: Session, case: ExceptionCase) -> ExceptionCase:
             try:
                 return self._queue.resolve(
@@ -276,7 +280,8 @@ class ExceptionActions:
 
         case = await asyncio.to_thread(self._decide, case_id, decide)
         signal = await self._signal_after(case, ResumeSignal(
-            actor=actor, role=role, evidence=dict(evidence)), "resume")
+            actor=actor, role=role, evidence=dict(evidence), rewind_to=rewind_to,
+            exclude_candidates=tuple(exclude_candidates)), "resume")
         return self._answer(case, signal)
 
     async def external_resolution(self, case_id: str, *, actor: str, role: str | None,

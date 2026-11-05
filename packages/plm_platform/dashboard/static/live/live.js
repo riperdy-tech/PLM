@@ -389,8 +389,10 @@ function stepCard(title, waitingCount) {
       waitingCount ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, 'nothing waiting')));
 }
 
-function songsStep(songs, waiting) {
+function songsStep(songs, waiting, notes) {
   const card = stepCard('1. Songs', (waiting.MANUAL_AUDIO_AWAITED || []).length);
+  const swaps = noteList((notes || []).filter((n) => n.kind === 'replace_song').slice(-3), 'Your notes for replaced songs');
+  if (swaps) card.append(swaps);
   if (!songs.configured) {
     card.append(h('p', { class: 'notice' }, 'The music inbox is not configured (PLM_FLOW_MUSIC_MANUAL_INBOX).'));
     return card;
@@ -422,6 +424,12 @@ function thumbnailsStep(jobs, waiting) {
   card.append(h('p', { class: 'muted' }, 'Make each image in Nano Banana Pro (16:9, full size) and upload it. Image A is also the picture of the whole video. Import checks all three and renders the video; it can take a few minutes.'));
   for (const job of jobs) {
     card.append(h('h3', {}, job.title || job.media_package_id));
+    const jobNotes = noteList(job.notes, 'Your note for the new art');
+    if (jobNotes) card.append(jobNotes);
+    for (const from of job.reuse_from || []) {
+      card.append(h('div', { class: 'row-actions' }, actionButton(`Reuse the images of the previous version`, 'btn',
+        () => postJson(`/api/studio/thumbnails/${job.media_package_id}/reuse`, { from_package_id: from }))));
+    }
     for (const v of job.variants) {
       const url = `/api/studio/thumbnails/${job.media_package_id}/${v.letter}`;
       card.append(h('div', { class: 'variant' },
@@ -440,6 +448,49 @@ function thumbnailsStep(jobs, waiting) {
   return card;
 }
 
+function postJson(url, payload) {
+  return authedSend(url, 'POST', JSON.stringify(payload), 'application/json');
+}
+
+function noteList(notes, title) {
+  if (!notes || !notes.length) return null;
+  return h('div', { class: 'notes' }, h('strong', {}, title),
+    notes.map((n) => h('p', { class: 'note' }, h('span', { class: 'muted' }, `${(n.at || '').slice(0, 16).replace('T', ' ')} `), n.note)));
+}
+
+function changesPanel(r, p) {
+  const caseUrl = `/api/studio/approvals/${r.case_id}/changes`;
+  const note = h('textarea', { rows: 2, placeholder: 'Your note: what should change and why' });
+  const title = h('input', { type: 'text', maxlength: 100, value: p.title || '' });
+  const description = h('textarea', { rows: 8 });
+  description.value = p.description || '';
+  const tags = h('input', { type: 'text', value: (p.tags || []).join(', ') });
+  const thumb = h('select', {}, p.thumbnails.map((t, i) => h('option', { value: t }, i === 0 ? `${t} (now first)` : t)));
+  const songs = h('div', { class: 'songs-pick' }, (p.tracks || []).map((t) => h('label', { class: 'pick' },
+    h('input', { type: 'checkbox', value: t.song_id }), ` ${t.start} ${t.title}`)));
+  const picked = () => [...songs.querySelectorAll('input:checked')].map((i) => i.value);
+  return h('details', { class: 'changes' },
+    h('summary', {}, 'Request changes'),
+    h('p', { class: 'muted' }, 'Text and thumbnail changes apply now and the video stays here for approval. New art goes back to the thumbnail step; a replaced song goes back to the songs step. Translations keep their own text.'),
+    h('label', {}, 'Note'), note,
+    h('label', {}, 'Title'), title,
+    h('label', {}, 'Description (keep every chapter line)'), description,
+    h('label', {}, 'Tags (comma separated)'), tags,
+    h('div', { class: 'row-actions' }, actionButton('Save text', 'btn-ok', () => postJson(`${caseUrl}/text`, {
+      package_id: p.media_package_id, title: title.value, description: description.value,
+      tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean), note: note.value }))),
+    h('label', {}, 'Thumbnail shown first on YouTube (the video picture stays image A)'),
+    h('div', { class: 'row-actions' }, thumb, actionButton('Use this thumbnail', 'btn', () => postJson(`${caseUrl}/thumbnail`, {
+      package_id: p.media_package_id, thumbnail_id: thumb.value, note: note.value }))),
+    h('div', { class: 'row-actions' }, actionButton('New art', 'btn', () => postJson(`${caseUrl}/new-art`, {
+      package_id: p.media_package_id, note: note.value }),
+      { confirm: 'Send this video back to the thumbnail step for new art? Write in the note what to change.', busy: 'Sending back to the thumbnail step...' })),
+    h('label', {}, 'Songs to replace'), songs,
+    h('div', { class: 'row-actions' }, actionButton('Replace song', 'btn', () => postJson(`${caseUrl}/replace-songs`, {
+      song_ids: picked(), note: note.value }),
+      { confirm: 'Replace the ticked songs? The run goes back to make new ones, then the video is made again. Write in the note what the new song should be like.', busy: 'Sending the run back for new songs...' })));
+}
+
 function reviewStep(reviews) {
   const card = stepCard('3. Review and upload', reviews.length);
   if (!reviews.length) { card.append(h('p', { class: 'muted' }, 'No video is waiting for approval.')); return card; }
@@ -456,8 +507,12 @@ function reviewStep(reviews) {
             h('p', { class: 'muted' }, `${Math.round((p.duration_seconds || 0) / 60)} min, ${p.chapters} chapters`))),
         h('strong', {}, 'Title'), h('div', { class: 'prompt' }, p.title || ''),
         h('strong', {}, 'Description'), h('div', { class: 'prompt' }, p.description || ''),
-        h('p', { class: 'muted' }, `Tags: ${(p.tags || []).join(', ')}`)));
+        h('p', { class: 'muted' }, `Tags: ${(p.tags || []).join(', ')}`),
+        p.status === 'ready_for_publish' ? changesPanel(r, p)
+          : h('p', { class: 'notice' }, 'Waiting for new art in the thumbnail step before it can be approved.')));
     }
+    const history = noteList(r.notes, 'Your notes on this video');
+    if (history) card.append(history);
     card.append(h('div', { class: 'row-actions' },
       actionButton('Approve and upload to YouTube', 'btn-ok big', () => authedSend(`/api/studio/approvals/${r.case_id}/approve`, 'POST'),
         { confirm: 'Upload this video to YouTube now? This publishes it on your channel.', busy: 'Granting the upload and resuming the run...' }),
@@ -479,7 +534,7 @@ async function renderStudio() {
         ? actionButton('Start a new video', 'btn-ok big', () => authedSend('/api/studio/start', 'POST'),
           { confirm: 'Start a new video? P2 picks what to make and the run begins.', busy: 'Asking P2 for the next video and starting the run...' })
         : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
-  return h('div', {}, head, songsStep(s.songs, waiting), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
+  return h('div', {}, head, songsStep(s.songs, waiting, s.notes), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
 }
 
 // ------------------------------------------------------------------------ shell

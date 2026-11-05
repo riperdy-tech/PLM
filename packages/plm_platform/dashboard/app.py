@@ -237,6 +237,34 @@ def _range(request: Request, data: bytes, media_type: str) -> Response:
                              "Content-Range": f"bytes {start}-{end}/{total}"})
 
 
+class TextChangeBody(BaseModel):
+    package_id: str
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    note: str = ""
+
+
+class ThumbnailChangeBody(BaseModel):
+    package_id: str
+    thumbnail_id: str
+    note: str = ""
+
+
+class NewArtBody(BaseModel):
+    package_id: str
+    note: str
+
+
+class ReplaceSongsBody(BaseModel):
+    song_ids: list[str]
+    note: str
+
+
+class ReuseArtBody(BaseModel):
+    from_package_id: str
+
+
 def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     """The Studio (``dashboard.studio``): reads are open like the views, every write
     needs the service token."""
@@ -306,6 +334,42 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     @app.post("/api/studio/approvals/{case_id}/approve", dependencies=[Depends(require_token)])
     async def studio_approve(case_id: str) -> dict[str, Any]:
         result: dict[str, Any] = await guarded_async(lambda: studio.approve(case_id))
+        return result
+
+    @app.post("/api/studio/approvals/{case_id}/changes/text",
+              dependencies=[Depends(require_token)])
+    async def studio_change_text(case_id: str, body: TextChangeBody) -> dict[str, Any]:
+        result: dict[str, Any] = await asyncio.to_thread(guarded, lambda: studio.edit_text(
+            case_id, body.package_id, title=body.title, description=body.description,
+            tags=body.tags, note=body.note))
+        return result
+
+    @app.post("/api/studio/approvals/{case_id}/changes/thumbnail",
+              dependencies=[Depends(require_token)])
+    async def studio_change_thumbnail(case_id: str,
+                                      body: ThumbnailChangeBody) -> dict[str, Any]:
+        result: dict[str, Any] = await asyncio.to_thread(guarded, lambda: studio.choose_thumbnail(
+            case_id, body.package_id, body.thumbnail_id, body.note))
+        return result
+
+    @app.post("/api/studio/approvals/{case_id}/changes/new-art",
+              dependencies=[Depends(require_token)])
+    async def studio_change_art(case_id: str, body: NewArtBody) -> dict[str, Any]:
+        result: dict[str, Any] = await asyncio.to_thread(guarded, lambda: studio.request_new_art(
+            case_id, body.package_id, body.note))
+        return result
+
+    @app.post("/api/studio/approvals/{case_id}/changes/replace-songs",
+              dependencies=[Depends(require_token)])
+    async def studio_change_songs(case_id: str, body: ReplaceSongsBody) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(
+            lambda: studio.replace_songs(case_id, body.song_ids, body.note))
+        return result
+
+    @app.post("/api/studio/thumbnails/{package_id}/reuse", dependencies=[Depends(require_token)])
+    async def studio_reuse_art(package_id: str, body: ReuseArtBody) -> dict[str, Any]:
+        result: dict[str, Any] = guarded(lambda: studio.reuse_art(package_id,
+                                                                  body.from_package_id))
         return result
 
     @app.post("/api/studio/approvals/{case_id}/reject", dependencies=[Depends(require_token)])

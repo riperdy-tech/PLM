@@ -118,6 +118,14 @@ input, select, textarea {
 .review-media { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
 .review-media video { width: 100%; border-radius: 10px; background: #000; }
 .big { font-size: 15px; padding: 10px 18px; }
+.changes { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 10px; }
+.changes summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+.changes label { display: block; color: var(--muted); font-size: 12px; margin-top: 10px; }
+.changes input[type=text], .changes textarea { width: 100%; }
+.songs-pick { display: grid; gap: 4px; }
+.pick { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); margin: 0; }
+.notes { border-left: 3px solid var(--amber); padding: 6px 10px; margin: 8px 0; }
+.note { margin: 4px 0; }
 
 @media (max-width: 640px) {
   .app { padding: 12px 16px 32px; }

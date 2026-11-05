@@ -13,6 +13,12 @@ answer, so nothing needs a folder, a command or a hand-typed evidence reference:
   title, description). Approve writes the owner's YouTube grants for this upload,
   expiring in :data:`APPROVAL_GRANT_HOURS` hours, and resumes the run, which uploads it.
   Reject ends the run.
+* **Request changes** (at the review): a new title, description or tags, or another
+  thumbnail first, apply at once and the package stays in review; new art sends the
+  package back to the thumbnail step (the next import renders the video again); a song
+  taken out sends the run back to assembly, which asks for a new song in the songs step.
+  The owner's note is kept (:attr:`StudioPaths.notes_file`) and shown in the step the
+  change went back to.
 
 Every resume goes through :class:`~.actions.ExceptionActions` as :data:`OWNER` (who must
 hold the hold's reviewer role in the dashboard's reviewer file), with the evidence the
@@ -61,6 +67,9 @@ class StudioPaths:
     music_inbox: Path | None
     art_inbox: Path | None
     grants_file: Path | None
+    notes_file: Path | None = None
+    """The owner's review notes (``PLM_STUDIO_NOTES_FILE``, default
+    ``data/studio-notes.json``)."""
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None,
@@ -73,9 +82,11 @@ class StudioPaths:
                  or _env("PLM_SUNO_MANUAL_INBOX", process, dotenv))
         art = _env("PLM_THUMBNAIL_ART_INBOX", process, dotenv)
         grants = _env("PLM_WRITE_AUTHORIZATIONS_FILE", process, dotenv)
+        notes = _env("PLM_STUDIO_NOTES_FILE", process, dotenv) or "data/studio-notes.json"
         return cls(music_inbox=None if music is None else Path(music),
                    art_inbox=None if art is None else Path(art),
-                   grants_file=None if grants is None else Path(grants))
+                   grants_file=None if grants is None else Path(grants),
+                   notes_file=Path(notes))
 
 
 def _refuse(status: int, code: str, message: str) -> ActionRefused:
@@ -115,6 +126,11 @@ class Studio:
     """P6's importer for one package's folder; raises on refusal."""
     start: Callable[[], Any] | None = None
     """Starts a new run (async); ``None``: the Start button is refused."""
+    edit: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
+    """P6's review edit of one package (``media_factory.review_edits.edit_presentation``
+    keyword arguments); raises on refusal."""
+    reopen: Callable[[str], dict[str, Any]] | None = None
+    """P6's reopen of one package for new art (``review_edits.reopen_art``)."""
     clock: Clock = field(default_factory=SystemClock)
     _video_cache: dict[str, bytes] = field(default_factory=dict)
 
@@ -137,13 +153,33 @@ class Studio:
             "songs": self.songs(),
             "thumbnails": self.art_jobs(),
             "reviews": [self.review(c) for c in holds if c.get("reason_code") == APPROVAL_REASON],
+            "notes": self.notes()[-20:],
             "start_available": self.start is not None,
         }
 
     async def _resume(self, case_id: str, role: str, evidence: dict[str, str],
-                      notes: str) -> dict[str, Any]:
+                      notes: str, **signal: Any) -> dict[str, Any]:
         return await self.actions.resume(case_id, actor=OWNER, role=role, evidence=evidence,
-                                         notes=notes)
+                                         notes=notes, **signal)
+
+    # -- notes ------------------------------------------------------------------------------
+
+    def notes(self) -> list[dict[str, Any]]:
+        path = self.paths.notes_file
+        if path is None or not path.is_file():
+            return []
+        loaded: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8"))
+        return loaded
+
+    def _add_note(self, kind: str, note: str, **about: Any) -> dict[str, Any]:
+        entry = {"at": self.clock.now().isoformat(), "kind": kind,
+                 "note": note.strip(), **about}
+        path = self.paths.notes_file
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(path, (json.dumps([*self.notes(), entry][-200:], indent=2)
+                                 + "\n").encode("utf-8"))
+        return entry
 
     # -- songs ------------------------------------------------------------------------------
 
@@ -230,8 +266,36 @@ class Studio:
                                  "text": variant.get("text"), "prompt": variant.get("prompt"),
                                  "saved": sorted(saved)})
             jobs.append({"media_package_id": package_id, "title": job.get("title"),
-                         "status": status, "variants": variants})
+                         "status": status, "variants": variants,
+                         "notes": [n for n in self.notes()
+                                   if n.get("media_package_id") == package_id
+                                   and n.get("kind") == "new_art"],
+                         "reuse_from": self._reuse_candidates(package_id)})
         return jobs
+
+    def _reuse_candidates(self, package_id: str) -> list[str]:
+        """Earlier packages of the same run whose art can be copied here (a song swap
+        renders a new package, which asks for art again)."""
+        mine = [n for n in self.notes() if n.get("kind") == "replace_song"]
+        return [str(n["media_package_id"]) for n in mine
+                if n.get("media_package_id") not in (None, package_id)
+                and self.paths.art_inbox is not None
+                and (self.paths.art_inbox / str(n["media_package_id"])).is_dir()][-1:]
+
+    def reuse_art(self, package_id: str, from_package_id: str) -> dict[str, Any]:
+        """Copy A, B and C from an earlier package's job folder into this one."""
+        folder = self._art_folder(package_id)
+        source = self._art_folder(from_package_id)
+        copied = []
+        for letter in _LETTERS:
+            try:
+                data, _ = self.art_file(from_package_id, letter)
+            except ActionRefused:
+                continue
+            copied.append(self.save_art(package_id, letter, data)["saved"])
+        if not copied:
+            raise _refuse(404, "art_not_saved", f"{source} holds no A, B or C to reuse")
+        return {"copied": copied, "into": str(folder)}
 
     def art_file(self, package_id: str, letter: str) -> tuple[bytes, str]:
         folder = self._art_folder(package_id)
@@ -292,9 +356,14 @@ class Studio:
                 "duration_seconds": pkg.get("video_duration_seconds"),
                 "thumbnails": [t.get("id") for t in pkg.get("thumbnails") or []],
                 "chapters": len(pkg.get("chapters") or []),
+                "tracks": [{"song_id": c.get("song_id"), "title": c.get("title"),
+                            "start": c.get("timestamp_str")}
+                           for c in pkg.get("chapters") or []],
             })
-        return {"case_id": case["case_id"], "packages": packages,
-                "workflow_id": (case.get("pipeline") or {}).get("workflow_id")}
+        workflow_id = (case.get("pipeline") or {}).get("workflow_id")
+        return {"case_id": case["case_id"], "packages": packages, "workflow_id": workflow_id,
+                "notes": [n for n in self.notes() if n.get("case_id") == case["case_id"]
+                          or (workflow_id and n.get("workflow_id") == workflow_id)]}
 
     def video(self, package_id: str) -> bytes:
         if package_id not in self._video_cache:
@@ -339,6 +408,11 @@ class Studio:
         """The owner's approval: grant this upload, then resume the run."""
         case = self._approval_case(case_id)
         package_ids = self._package_ids(case)
+        waiting = [p for p in package_ids
+                   if self.package(p).get("status") != "ready_for_publish"]
+        if waiting:
+            raise _refuse(409, "package_not_ready",
+                          f"{', '.join(waiting)} is not ready (new art still to import)")
         expires = self._write_grants(case_id, package_ids)
         answer = await self._resume(
             case_id, "production_owner",
@@ -346,6 +420,79 @@ class Studio:
                                      f"YouTube grants until {expires.isoformat()}"},
             "approved for upload in the Studio")
         return {**answer, "grants_expire_at": expires.isoformat()}
+
+    # -- change requests (at the review) -----------------------------------------------------
+
+    def _review_package(self, case_id: str, package_id: str) -> dict[str, Any]:
+        case = self._approval_case(case_id)
+        if package_id not in self._package_ids(case):
+            raise _refuse(404, "package_not_in_review",
+                          f"{package_id} is not part of approval {case_id}")
+        return case
+
+    def edit_text(self, case_id: str, package_id: str, *, title: str | None,
+                  description: str | None, tags: list[str] | None,
+                  note: str = "") -> dict[str, Any]:
+        """A new title, description or tags: applied at once; the package stays in review."""
+        case = self._review_package(case_id, package_id)
+        if self.edit is None:
+            raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
+        changed = self.edit(package_id, {"title": title, "description": description,
+                                         "tags": tags})
+        self._add_note("edit_text", note or "title/description/tags edited",
+                       case_id=case_id, media_package_id=package_id,
+                       workflow_id=(case.get("pipeline") or {}).get("workflow_id"))
+        return changed
+
+    def choose_thumbnail(self, case_id: str, package_id: str, thumbnail_id: str,
+                         note: str = "") -> dict[str, Any]:
+        """Offer another thumbnail first (the video picture stays image A)."""
+        case = self._review_package(case_id, package_id)
+        if self.edit is None:
+            raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
+        changed = self.edit(package_id, {"thumbnail_id": thumbnail_id})
+        self._add_note("choose_thumbnail", note or f"thumbnail {thumbnail_id} first",
+                       case_id=case_id, media_package_id=package_id,
+                       workflow_id=(case.get("pipeline") or {}).get("workflow_id"))
+        return changed
+
+    def request_new_art(self, case_id: str, package_id: str, note: str) -> dict[str, Any]:
+        """Back to the thumbnail step for this package; the run stays held at approval."""
+        case = self._review_package(case_id, package_id)
+        if self.reopen is None:
+            raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
+        if not note.strip():
+            raise _refuse(422, "note_required", "say what the new art should change")
+        reopened = self.reopen(package_id)
+        entry = self._add_note("new_art", note, case_id=case_id, media_package_id=package_id,
+                               workflow_id=(case.get("pipeline") or {}).get("workflow_id"))
+        return {"package": reopened, "note": entry}
+
+    async def replace_songs(self, case_id: str, song_ids: list[str],
+                            note: str) -> dict[str, Any]:
+        """Take songs out: the run goes back to assembly, which asks P3 for as many new
+        songs (the songs step), then renders a new package."""
+        case = self._approval_case(case_id)
+        if not note.strip():
+            raise _refuse(422, "note_required", "say what the new song should be like")
+        members = {str(c) for p in (case.get("details") or {}).get("packages") or []
+                   for c in p.get("candidate_ids") or []}
+        chosen = sorted({str(s) for s in song_ids})
+        unknown = [s for s in chosen if s not in members]
+        if not chosen or unknown:
+            raise _refuse(422, "song_not_in_package",
+                          f"choose songs of this package (unknown: {', '.join(unknown)})")
+        workflow_id = (case.get("pipeline") or {}).get("workflow_id")
+        entry = self._add_note("replace_song", note, case_id=case_id,
+                               workflow_id=workflow_id, song_ids=chosen,
+                               media_package_id=next(iter(self._package_ids(case)), None))
+        answer = await self._resume(
+            case_id, "production_owner",
+            {"publish_approval_ref": f"changes requested in the Studio: replace "
+                                     f"{', '.join(chosen)}"},
+            f"replace song(s) {', '.join(chosen)}: {note.strip()}",
+            rewind_to="assemble", exclude_candidates=tuple(chosen))
+        return {**answer, "note": entry}
 
     async def reject(self, case_id: str) -> dict[str, Any]:
         self._approval_case(case_id)
@@ -411,6 +558,37 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
         return {"media_package_id": pkg.media_package_id, "status": pkg.status.value,
                 "video_master_uri": pkg.video_master_uri}
 
+    def _p6(change: Callable[..., Any], package_id: str, **kwargs: Any) -> dict[str, Any]:
+        if platform is None:
+            raise _refuse(503, "settings_unavailable", "the platform settings did not load")
+        from media_factory.errors import MediaAssemblyError
+
+        from ..db import build_engine, session_factory
+
+        engine = build_engine(platform)
+        try:
+            with session_factory(engine)() as session:
+                try:
+                    pkg = change(session, package_id, now=(clock or SystemClock()).now(),
+                                 **kwargs)
+                except MediaAssemblyError as exc:
+                    session.rollback()
+                    raise _refuse(422, exc.code, str(exc)) from exc
+                session.commit()
+        finally:
+            engine.dispose()
+        return {"media_package_id": pkg.media_package_id, "status": pkg.status.value}
+
+    def edit(package_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        from media_factory.review_edits import edit_presentation
+
+        return _p6(edit_presentation, package_id, **changes)
+
+    def reopen(package_id: str) -> dict[str, Any]:
+        from media_factory.review_edits import reopen_art
+
+        return _p6(reopen_art, package_id)
+
     start = None
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
@@ -437,4 +615,5 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
 
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media,
-                  import_art=import_art, start=start, clock=clock or SystemClock())
+                  import_art=import_art, start=start, edit=edit, reopen=reopen,
+                  clock=clock or SystemClock())

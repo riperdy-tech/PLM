@@ -236,12 +236,17 @@ class ResumeSignal:
 
     ``rewind_to="assemble"`` on a hold of the upload step (nothing is published yet)
     assembles the run's packages again instead of retrying the upload, so P6 re-renders
-    a package whose presentation changed since. Ignored on any other hold."""
+    a package whose presentation changed since. Ignored on any other hold.
+
+    ``exclude_candidates`` (with that rewind, from the approval hold) are songs the owner
+    took out: they are never offered to P6 again, and P3 is asked for as many new songs
+    for their packages before the packages are assembled again."""
 
     actor: str
     role: str | None
     evidence: dict[str, str] = field(default_factory=dict)
     rewind_to: str | None = None
+    exclude_candidates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

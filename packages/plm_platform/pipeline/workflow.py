@@ -214,6 +214,10 @@ class PipelineWorkflow:
         self._rewind = False
         self._candidates: list[str] | None = None
         """Every candidate assembly was offered, top-ups included, for a rewind."""
+        self._last_packages: list[dict[str, Any]] = []
+        """The packages the approval hold showed the owner (P3 package -> candidates)."""
+        self._swap: dict[str, list[str]] = {}
+        """P3 package -> songs the owner took out at the approval hold, to replace."""
         self._receipts: list[dict[str, Any]] = []
         """Every external write the phases reported, for the cost read at the outcome."""
 
@@ -415,6 +419,20 @@ class PipelineWorkflow:
         allowance = options.max_topup_rounds
         base = Step.ASSEMBLE.value if rerender == 0 else f"{Step.ASSEMBLE.value}.rr{rerender}"
         await self._move(PipelineState.ASSEMBLING)
+        if self._swap:
+            # The owner took songs out at the approval hold: drop them for good and ask
+            # P3 for as many new ones per package, under this rewind's own keys.
+            swap, self._swap = self._swap, {}
+            removed = {c for songs in swap.values() for c in songs}
+            candidates[:] = [c for c in candidates if c not in removed]
+            added = await self._top_up(f"rr{rerender}s", [{"p3_package_id": p} for p in swap],
+                                       counts={p: len(songs) for p, songs in swap.items()})
+            if added is None:
+                return None
+            if isinstance(added, list):
+                candidates.extend(c for c in added if c not in candidates)
+            # "extension_limit": assemble without replacements; a short playlist then
+            # takes the normal top-up and supply-hold path.
         while True:
             key_name = base if rounds == 0 else f"{base}.r{rounds}"
             inputs = {"policy_check": policy.result.outputs,
@@ -455,8 +473,8 @@ class PipelineWorkflow:
                 # P3 refused to extend further: hold now, whatever rounds were left.
                 allowance = 0
 
-    async def _top_up(self, round_no: int,
-                      shortages: list[dict[str, Any]]) -> list[str] | str | None:
+    async def _top_up(self, round_no: int | str, shortages: list[dict[str, Any]], *,
+                      counts: dict[str, int] | None = None) -> list[str] | str | None:
         """One round: extend each short package, generate the new specs, QA them.
 
         Returns the new candidate ids; ``"extension_limit"`` when P3 refused to add more
@@ -467,17 +485,23 @@ class PipelineWorkflow:
         packages: list[str] = []
         for index, shortage in enumerate(shortages):
             package_id = str(shortage.get("p3_package_id"))
+            if counts is not None:
+                count = counts[package_id]
+            else:
+                count = None
             missing = shortage.get("missing_seconds")
             shortest = shortage.get("shortest_track_seconds")
-            if not isinstance(missing, int) or not isinstance(shortest, int) or (
-                    missing <= 0 or shortest <= 0):
+            if count is None and (not isinstance(missing, int) or not isinstance(shortest, int)
+                                  or missing <= 0 or shortest <= 0):
                 failure = _Failure(type="ValidationFailure", attempt=0, non_retryable=True,
                                    message=f"short package {package_id}: missing {missing!r} "
                                            f"or shortest track {shortest!r} is unusable")
                 await self._fail(Step.ASSEMBLE, failure)
                 return None
-            inputs = {"p3_package_id": package_id,
-                      "count": topup_count(missing, shortest, spare)}
+            if count is None:
+                assert isinstance(missing, int) and isinstance(shortest, int)
+                count = topup_count(missing, shortest, spare)
+            inputs = {"p3_package_id": package_id, "count": count}
             extended = await self._attempt(Step.EXTEND, inputs,
                                            key_name=f"{Step.EXTEND.value}.r{round_no}.{index}")
             if extended is None:
@@ -525,6 +549,7 @@ class PipelineWorkflow:
         """Wait for the owner's approval of the packages before uploading them. A resume
         with ``rewind_to=assemble`` re-renders instead (the next upload attempt rewinds)."""
         outputs = assembled.result.outputs
+        self._last_packages = [p for p in outputs.get("packages") or [] if isinstance(p, dict)]
         details = {"media_package_ids": list(outputs.get("media_package_ids") or []),
                    "packages": list(outputs.get("packages") or []),
                    "rule": "nothing is uploaded until the owner has watched it and approved"}
@@ -761,6 +786,15 @@ class PipelineWorkflow:
                     if not self._rewind:
                         workflow.logger.warning("rewind to %r ignored on a %s hold",
                                                 rewind, step.value)
+                    excluded = set(getattr(signal, "exclude_candidates", ()) or ())
+                    if self._rewind and excluded:
+                        self._swap = {
+                            str(p.get("p3_package_id")): songs
+                            for p in self._last_packages
+                            if (songs := sorted(excluded & {str(c) for c in
+                                                            p.get("candidate_ids") or []}))}
+                        summary["exclude_candidates"] = sorted(
+                            c for songs in self._swap.values() for c in songs)
                 await self._move(held_from, outputs=summary, hold_case_ids=self._open_cases)
                 self._open_cases = ()
                 if self._signals:

@@ -377,3 +377,23 @@ def test_case_detail_carries_the_decision_history(harness: Harness) -> None:
     assert [(e["event_type"], e["decision_code"]) for e in detail["history"]] == [
         ("RAISED", None), ("RESUME_REFUSED", "evidence_missing")]
     assert detail["history"][1]["actor"] == "rita"
+
+
+def test_a_resume_can_carry_a_rewind_and_the_songs_to_leave_out() -> None:
+    """The Studio's "Replace song": the resume signal the dashboard sends carries
+    ``rewind_to`` and ``exclude_candidates`` (the workflow honours them on the approval
+    hold); a plain resume sends neither."""
+    import asyncio
+
+    signaller = FakeSignaller()
+    h = _harness(signaller=signaller)
+    actions = ExceptionActions(h.factory, reviewers=REVIEWERS, signaller=signaller,
+                               clock=FixedClock(NOW))
+    first = _pipeline_hold(h, "UNKNOWN_COMMERCIAL_LICENSE")
+    asyncio.run(actions.resume(first.id, actor="rita", role="rights_reviewer",
+                               evidence=_evidence(first), notes="swap",
+                               rewind_to="assemble", exclude_candidates=("cand-b",)))
+    (sent,) = signaller.sent
+    assert isinstance(sent.payload, ResumeSignal)
+    assert (sent.payload.rewind_to, sent.payload.exclude_candidates) == ("assemble",
+                                                                       ("cand-b",))

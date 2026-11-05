@@ -31,8 +31,9 @@ class FakeActions:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
     async def resume(self, case_id: str, *, actor: str, role: str | None,
-                     evidence: dict[str, str], notes: str) -> dict[str, Any]:
-        self.calls.append(("resume", case_id, {"actor": actor, "role": role, **evidence}))
+                     evidence: dict[str, str], notes: str, **signal: Any) -> dict[str, Any]:
+        self.calls.append(("resume", case_id, {"actor": actor, "role": role, "notes": notes,
+                                               **evidence, **signal}))
         return {"case": {"case_id": case_id}}
 
     async def reject(self, case_id: str, *, actor: str, role: str | None,
@@ -42,7 +43,8 @@ class FakeActions:
 
 
 def _studio(tmp_path: Path, holds: list[dict[str, Any]],
-            imported: list[str] | None = None) -> tuple[Studio, FakeActions]:
+            imported: list[str] | None = None,
+            status: str = "awaiting_thumbnail_art") -> tuple[Studio, FakeActions]:
     music, art = tmp_path / "music", tmp_path / "art"
     music.mkdir()
     (art / PKG).mkdir(parents=True)
@@ -70,12 +72,15 @@ def _studio(tmp_path: Path, holds: list[dict[str, Any]],
         return {"media_package_id": package_id, "status": "ready_for_publish"}
 
     studio = Studio(
-        paths=StudioPaths(music_inbox=music, art_inbox=art, grants_file=grants),
+        paths=StudioPaths(music_inbox=music, art_inbox=art, grants_file=grants,
+                          notes_file=tmp_path / "studio-notes.json"),
         actions=actions,  # type: ignore[arg-type]
         open_holds=lambda: [{"pipeline": {"run_state": "HELD"}, **h} for h in holds],
-        package=lambda pid: {"status": "awaiting_thumbnail_art", "metadata_candidates": [
+        package=lambda pid: {"status": status, "metadata_candidates": [
             {"title": "Working Late", "description": "D", "tags": ["focus music"]}],
-            "thumbnails": [{"id": "art_a"}], "chapters": [{}, {}, {}],
+            "thumbnails": [{"id": "art_a"}],
+            "chapters": [{"song_id": f"cand_{n}", "title": f"T{n}",
+                          "timestamp_str": f"0{n}:00"} for n in range(3)],
             "video_duration_seconds": 1425.8},
         media=lambda uri, checksum: b"",
         import_art=importer, clock=FixedClock(NOW))
@@ -143,7 +148,7 @@ def test_approval_grants_this_upload_for_two_hours_then_resumes(tmp_path: Path) 
     hold = {"case_id": "c3", "reason_code": "PUBLISH_APPROVAL_AWAITED",
             "details": {"media_package_ids": [PKG]},
             "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
-    studio, actions = _studio(tmp_path, [hold])
+    studio, actions = _studio(tmp_path, [hold], status="ready_for_publish")
     (review,) = studio.overview()["reviews"]
     assert review["packages"][0]["title"] == "Working Late"
     assert review["packages"][0]["chapters"] == 3
@@ -171,7 +176,7 @@ def test_an_approval_without_a_grant_file_is_refused_and_resumes_nothing(
         tmp_path: Path) -> None:
     hold = {"case_id": "c4", "reason_code": "PUBLISH_APPROVAL_AWAITED",
             "details": {"media_package_ids": [PKG]}}
-    studio, actions = _studio(tmp_path, [hold])
+    studio, actions = _studio(tmp_path, [hold], status="ready_for_publish")
     studio.paths = StudioPaths(music_inbox=None, art_inbox=None, grants_file=None)
     with pytest.raises(ActionRefused, match="grants_file_not_configured"):
         asyncio.run(studio.approve("c4"))
@@ -193,3 +198,76 @@ def test_video_is_served_whole_or_by_the_range_the_player_asks_for() -> None:
     tail = _range(_request("bytes=90-"), data, "video/mp4")
     assert tail.body == data[90:]
     assert _range(_request("bytes=200-"), data, "video/mp4").status_code == 416
+
+
+APPROVAL = {"case_id": "c5", "reason_code": "PUBLISH_APPROVAL_AWAITED",
+            "details": {"media_package_ids": [PKG],
+                        "packages": [{"media_package_id": PKG, "p3_package_id": "p3",
+                                      "candidate_ids": ["cand_0", "cand_1", "cand_2"]}]},
+            "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
+
+
+def test_an_approval_waits_until_every_package_is_ready(tmp_path: Path) -> None:
+    studio, actions = _studio(tmp_path, [APPROVAL])  # the package waits for new art
+    with pytest.raises(ActionRefused, match="package_not_ready"):
+        asyncio.run(studio.approve("c5"))
+    assert actions.calls == []
+
+
+def test_text_and_thumbnail_changes_apply_now_and_keep_the_review(tmp_path: Path) -> None:
+    studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    edits: list[tuple[str, dict[str, Any]]] = []
+    studio.edit = lambda pid, changes: edits.append((pid, changes)) or {"media_package_id": pid}
+    studio.edit_text("c5", PKG, title="New title", description=None, tags=["a"],
+                     note="shorter title")
+    studio.choose_thumbnail("c5", PKG, "art_b")
+    assert edits == [(PKG, {"title": "New title", "description": None, "tags": ["a"]}),
+                     (PKG, {"thumbnail_id": "art_b"})]
+    assert actions.calls == []  # still waiting for approval
+    with pytest.raises(ActionRefused, match="package_not_in_review"):
+        studio.edit_text("c5", "mpkg_00000000", title="x", description=None, tags=None)
+    (review,) = studio.overview()["reviews"]
+    assert [n["kind"] for n in review["notes"]] == ["edit_text", "choose_thumbnail"]
+    assert review["packages"][0]["tracks"][1] == {"song_id": "cand_1", "title": "T1",
+                                                  "start": "01:00"}
+
+
+def test_new_art_sends_the_package_back_to_the_thumbnail_step_with_the_note(
+        tmp_path: Path) -> None:
+    studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    reopened: list[str] = []
+    studio.reopen = lambda pid: reopened.append(pid) or {"status": "awaiting_thumbnail_art"}
+    with pytest.raises(ActionRefused, match="note_required"):
+        studio.request_new_art("c5", PKG, "  ")
+    studio.request_new_art("c5", PKG, "warmer light, bigger text")
+    assert reopened == [PKG] and actions.calls == []
+    studio.package = lambda pid: {"status": "awaiting_thumbnail_art"}
+    (job,) = studio.art_jobs()
+    assert [n["note"] for n in job["notes"]] == ["warmer light, bigger text"]
+
+
+def test_a_song_swap_rewinds_the_run_without_its_songs_and_offers_the_old_art(
+        tmp_path: Path) -> None:
+    studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    with pytest.raises(ActionRefused, match="song_not_in_package"):
+        asyncio.run(studio.replace_songs("c5", ["cand_9"], "too loud"))
+    with pytest.raises(ActionRefused, match="note_required"):
+        asyncio.run(studio.replace_songs("c5", ["cand_1"], ""))
+    asyncio.run(studio.replace_songs("c5", ["cand_1", "cand_1"], "too loud, make it calmer"))
+    (call,) = actions.calls
+    assert call[:2] == ("resume", "c5")
+    assert call[2]["rewind_to"] == "assemble"
+    assert call[2]["exclude_candidates"] == ("cand_1",)
+    assert "publish_approval_ref" in call[2] and "too loud" in call[2]["notes"]
+
+    # The rewind renders a new package, which asks for art again: the old art is offered.
+    new = "mpkg_1111222233334444"
+    (tmp_path / "art" / new).mkdir()
+    (tmp_path / "art" / new / "job.json").write_text(
+        (tmp_path / "art" / PKG / "job.json").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "art" / PKG / "A.png").write_bytes(PNG)
+    studio.package = lambda pid: {"status": "awaiting_thumbnail_art"}
+    jobs = {j["media_package_id"]: j for j in studio.art_jobs()}
+    assert jobs[new]["reuse_from"] == [PKG]
+    assert studio.reuse_art(new, PKG)["copied"] == ["A.png"]
+    assert (tmp_path / "art" / new / "A.png").read_bytes() == PNG
