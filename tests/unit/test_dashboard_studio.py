@@ -400,15 +400,22 @@ def test_pictures_are_chosen_from_every_saved_image_and_the_video_is_made_again(
     with pytest.raises(ActionRefused, match="art_choice_missing"):
         asyncio.run(studio.swap_art("c5", PKG, {"A": new["path"]}))
 
-    asyncio.run(studio.swap_art("c5", PKG, {"A": new["path"],
-                                           "B": "previous-2026-11-04/B.jpg",
-                                           "C": "previous-2026-11-04/C.jpg"}))
+    async def swap_and_finish(choices: dict[str, str]) -> None:
+        await studio.swap_art("c5", PKG, choices)
+        assert studio.remakes()[PKG]["state"] == "running"  # shown while it renders
+        studio.package = lambda pid: {"status": "awaiting_thumbnail_art"}
+        assert PKG not in [j["media_package_id"] for j in studio.art_jobs()]
+        await asyncio.gather(*studio._tasks)
+        assert PKG not in studio.remakes()
+
+    asyncio.run(swap_and_finish({"A": new["path"], "B": "previous-2026-11-04/B.jpg",
+                                 "C": "previous-2026-11-04/C.jpg"}))
     assert reopened == [PKG] and actions.calls == []  # still held for approval
     assert imported[0]["A"] == PNG and imported[0]["B"] == b"\xff\xd8\xffB"
     # Choosing again keeps every earlier image: the replaced A is moved, not deleted.
-    asyncio.run(studio.swap_art("c5", PKG, {"A": "previous-2026-11-04/A.jpg",
-                                           "B": "previous-2026-11-04/B.jpg",
-                                           "C": "previous-2026-11-04/C.jpg"}))
+    asyncio.run(swap_and_finish({"A": "previous-2026-11-04/A.jpg",
+                                 "B": "previous-2026-11-04/B.jpg",
+                                 "C": "previous-2026-11-04/C.jpg"}))
     assert any(p.parent.name == "replaced" for p in folder.rglob("A-*.png"))
     assert (folder / new["path"]).read_bytes() == PNG
 
@@ -438,3 +445,30 @@ def test_the_web_routes_reach_the_art_library_and_the_letter_upload(tmp_path: Pa
     letter = client.put(f"/api/studio/thumbnails/{PKG}/B", content=PNG, headers=auth)
     assert letter.status_code == 200 and letter.json()["saved"] == "B.png"
     assert client.put(f"/api/studio/art-library/{PKG}", content=PNG).status_code == 401
+
+
+def test_a_failed_remake_is_shown_and_can_be_imported_again_from_step_2(
+        tmp_path: Path) -> None:
+    studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    folder = tmp_path / "art" / PKG
+    for letter in "ABC":
+        (folder / f"{letter}.png").write_bytes(PNG)
+    studio.reopen = lambda pid: {"status": "awaiting_thumbnail_art"}
+
+    def broken(pid: str, art_folder: Path) -> dict[str, Any]:
+        raise ActionRefused(422, "thumbnail_art_invalid", "art_a: 1024 px wide")
+
+    studio.import_art = broken
+
+    async def swap() -> None:
+        await studio.swap_art("c5", PKG, {k: f"{k}.png" for k in "ABC"})
+        await asyncio.gather(*studio._tasks)
+
+    asyncio.run(swap())
+    assert studio.remakes()[PKG] == {**studio.remakes()[PKG], "state": "failed",
+                                     "error": "art_a: 1024 px wide"}
+    # Step 2's Import works for a package reopened at the review (no art hold).
+    studio.import_art = lambda pid, art_folder: {"media_package_id": pid,
+                                                 "status": "ready_for_publish"}
+    result = asyncio.run(studio.import_thumbnails(PKG))
+    assert result["package"]["status"] == "ready_for_publish" and actions.calls == []

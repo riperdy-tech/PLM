@@ -526,7 +526,7 @@ function pictureChooser(r, p, caseUrl, note) {
   }
   box.append(h('div', { class: 'row-actions' }, actionButton('Use these pictures and make the video again', 'btn-ok', () => postJson(`${caseUrl}/swap-art`, {
     package_id: p.media_package_id, choices: { ...chosen }, note: note.value }),
-    { confirm: 'Use the chosen pictures? The video is made again from picture A (a few minutes) and comes back here for approval.', busy: 'Checking the pictures and making the video again... a few minutes.' })));
+    { confirm: 'Use the chosen pictures? The video is made again from picture A (a few minutes) and comes back here for approval.', busy: 'Starting...' })));
   return box;
 }
 
@@ -579,7 +579,7 @@ function reviewStep(reviews) {
         h('strong', {}, 'Description'), h('div', { class: 'prompt' }, p.description || ''),
         h('p', { class: 'muted' }, `Tags: ${(p.tags || []).join(', ')}`),
         p.status === 'ready_for_publish' ? changesPanel(r, p)
-          : h('p', { class: 'notice' }, 'Waiting for new art in the thumbnail step before it can be approved.')));
+          : remakeLine((remakesNow || {})[p.media_package_id])));
     }
     const history = noteList(r.notes, 'Your notes on this video');
     if (history) card.append(history);
@@ -599,8 +599,20 @@ function startButton(label, music) {
       busy: `Asking P2 for the next video and starting the run (${label} prompts)...` });
 }
 
+let remakesNow = {};
+function remakeLine(remake) {
+  if (remake && remake.state === 'running') {
+    return h('p', { class: 'notice' }, `Making the video again with your new pictures, since ${new Date(remake.since).toLocaleTimeString()}. This takes several minutes; it keeps going if you close or refresh the page.`);
+  }
+  if (remake && remake.state === 'failed') {
+    return h('p', { class: 'result refused' }, `Making the video again failed: ${remake.error}. Fix the pictures in step 2 and press Import there.`);
+  }
+  return h('p', { class: 'notice' }, 'Waiting for new art in the thumbnail step before it can be approved.');
+}
+
 async function renderStudio() {
   const s = await getJson('/api/studio');
+  remakesNow = s.remakes || {};
   const waiting = s.waiting || {};
   const count = Object.values(waiting).reduce((n, ids) => n + ids.length, 0);
   document.getElementById('studio-count').textContent = count ? `(${count})` : '';

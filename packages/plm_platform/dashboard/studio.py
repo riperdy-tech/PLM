@@ -167,6 +167,9 @@ class Studio:
     """The pipeline's active runs (the production-queue view); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
     _video_cache: dict[str, bytes] = field(default_factory=dict)
+    _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Remakes running or ended in this dashboard: package -> since, state, error."""
+    _tasks: set[Any] = field(default_factory=set)
 
     # -- holds ------------------------------------------------------------------------------
 
@@ -212,6 +215,7 @@ class Studio:
             "songs": self.songs(),
             "thumbnails": self.art_jobs(),
             "reviews": [self.review(c) for c in holds if c.get("reason_code") == APPROVAL_REASON],
+            "remakes": self.remakes(),
             "notes": self.notes()[-20:],
             "start_available": self.start is not None,
         }
@@ -328,6 +332,8 @@ class Studio:
             except Exception:  # noqa: BLE001 - an unreadable package is shown as unknown
                 status = None
             if status not in ("awaiting_thumbnail_art", None):
+                continue
+            if (self._remakes.get(package_id) or {}).get("state") == "running":
                 continue
             job = json.loads(job_file.read_text(encoding="utf-8"))
             variants = []
@@ -450,24 +456,50 @@ class Studio:
         missing = [letter for letter in _LETTERS if not choices.get(letter)]
         if missing:
             raise _refuse(422, "art_choice_missing", f"choose a picture for {', '.join(missing)}")
+        if (self._remakes.get(package_id) or {}).get("state") == "running":
+            raise _refuse(409, "remake_running", f"{package_id} is already being made again")
         picked = {letter: self._library_path(package_id, choices[letter]).read_bytes()
                   for letter in _LETTERS}
         for letter, data in picked.items():
             self.save_art(package_id, letter, data)
         self.reopen(package_id)
-        released = await asyncio.to_thread(self.import_art, package_id,
-                                           self._art_folder(package_id))
         entry = self._add_note("swap_art", note or "pictures changed in the review",
                                case_id=case_id, media_package_id=package_id,
                                workflow_id=(case.get("pipeline") or {}).get("workflow_id"),
                                choices={k: choices[k] for k in _LETTERS})
-        return {"package": released, "note": entry}
+        # The render takes minutes: it runs on its own, so closing or refreshing the page
+        # cannot lose it, and the Studio shows it until it is done.
+        self._remakes[package_id] = {"since": self.clock.now().isoformat(),
+                                     "state": "running", "error": None}
+        task = asyncio.create_task(self._remake(package_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return {"remaking": package_id, "note": entry}
+
+    async def _remake(self, package_id: str) -> None:
+        try:
+            await asyncio.to_thread(self.import_art, package_id, self._art_folder(package_id))
+        except Exception as exc:  # noqa: BLE001 - shown in the Studio, never swallowed
+            message = exc.error.message if isinstance(exc, ActionRefused) else str(exc)
+            self._remakes[package_id].update(state="failed", error=message)
+        else:
+            self._remakes[package_id].update(state="done")
+
+    def remakes(self) -> dict[str, dict[str, Any]]:
+        return {k: dict(v) for k, v in self._remakes.items() if v["state"] != "done"}
 
     async def import_thumbnails(self, package_id: str) -> dict[str, Any]:
         """P6's import (checks, still video, release), then resume the run waiting on it."""
         folder = self._art_folder(package_id)
         cases = [c for c in self._cases(ART_REASON)
                  if package_id in self._package_ids(c)]
+        in_review = [c for c in self._cases(APPROVAL_REASON)
+                     if package_id in self._package_ids(c)]
+        if not cases and in_review:
+            # Reopened at the review (its remake was interrupted): import it again; the
+            # run is still held for approval, so nothing is resumed.
+            released = await asyncio.to_thread(self.import_art, package_id, folder)
+            return {"package": released, "resumed": [], "waiting_for": []}
         if not cases:
             raise _refuse(409, "thumbnail_hold_not_found",
                           f"no active thumbnail hold names {package_id}")
