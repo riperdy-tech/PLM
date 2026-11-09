@@ -497,7 +497,11 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
             "visual_profile": str(require(visual, "visual_world", f"{where} visual spec")),
             "playlist_concept": concept,
             "track_spec_ids": {str(require(s, "track_spec_id", where)) for s in specs},
-            "shortest_track_seconds": int(min(track_minimums)),
+            # Sizes a top-up: P3's planned track length when it declares one (owner
+            # 2026-11-09: the 90 s minimum of a hand-made song asked for 43 songs where
+            # about 18 were needed); else the smallest declared track minimum.
+            "shortest_track_seconds": int(playlist.get("planned_track_duration_seconds")
+                                          or min(track_minimums)),
         }
 
     def _cleared_track_specs(self, candidate_ids: list[Any], key: str) -> dict[str, str]:

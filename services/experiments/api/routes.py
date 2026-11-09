@@ -465,9 +465,12 @@ def build_router(
         """Top a package up with ``count`` more distinct track specs (R5).
 
         For a playlist P6 refused as ``playlist_supply_short``. ``req.idempotency_key``
-        names the top-up: replaying it returns the same specs; the same key with another
-        count is 409 ``idempotency_key_reused``; more than the package's declared
-        ``max_extension_track_count`` in total is 409 ``package_extension_limit_exceeded``.
+        names the top-up: replaying it returns the same specs; the same key asking for
+        fewer specs than it added is 409 ``idempotency_key_reused``. A top-up larger than
+        what the package's declared ``max_extension_track_count`` still allows adds what
+        it allows (owner 2026-11-09: a top-up sized from the shortest declared track asked
+        for 43 songs and was refused outright, leaving the run with none); with nothing
+        left it is 409 ``package_extension_limit_exceeded``.
         """
 
         def operation() -> tuple[int, Any]:
@@ -477,7 +480,7 @@ def build_router(
                 session, package_id, req.idempotency_key
             )
             if existing is not None:
-                if existing.track_count != req.count:
+                if existing.track_count > req.count:
                     raise HTTPException(
                         status_code=409,
                         detail=ErrorShape(
@@ -494,8 +497,11 @@ def build_router(
                 total = package.extension_track_count
             else:
                 try:
+                    bound = package.playlist_spec.max_extension_track_count
+                    left = bound - package.extension_track_count
                     extension, specs = extend_package(
-                        package, count=req.count, idempotency_key=req.idempotency_key,
+                        package, count=min(req.count, left) if left > 0 else req.count,
+                        idempotency_key=req.idempotency_key,
                         created_at=service_clock.now(),
                     )
                 except PackageExtensionError as err:

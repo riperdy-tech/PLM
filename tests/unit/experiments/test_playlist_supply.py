@@ -261,13 +261,15 @@ def test_extend_is_idempotent_by_key_and_bounded() -> None:
     assert reused.status_code == 409
     assert reused.json()["detail"]["code"] == "idempotency_key_reused"
 
+    # Asking for more than is left adds what is left (2 of 3); the replay under the same
+    # key returns those two again, for the larger or the granted count.
     over = client.post(url, headers=HEADERS, json={"count": 3, "idempotency_key": "top-up-2"})
-    assert over.status_code == 409
-    assert over.json()["detail"]["code"] == "package_extension_limit_exceeded"
-
+    assert over.status_code == 200
+    assert len(over.json()["track_specs"]) == 2
+    assert over.json()["remaining_extension_track_count"] == 0
     rest = client.post(url, headers=HEADERS, json={"count": 2, "idempotency_key": "top-up-2"})
     assert rest.status_code == 200
-    assert rest.json()["remaining_extension_track_count"] == 0
+    assert rest.json()["track_specs"] == over.json()["track_specs"]
     assert client.post(url, headers=HEADERS, json={"count": 1, "idempotency_key": "top-up-3"}
                        ).json()["detail"]["code"] == "package_extension_limit_exceeded"
 
