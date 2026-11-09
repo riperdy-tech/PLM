@@ -37,6 +37,11 @@ class CycleCreateRequest(_Frozen):
     activation_state: ChannelActivationState | None = None
     random_seed: int | None = None
     unavailable_capabilities: list[str] = Field(default_factory=list)
+    subgenre: str | None = Field(default=None, min_length=1)
+    """The owner's choice of sub-style: only arms of it may be selected (2026-11-09)."""
+    avoid_subgenres: list[str] = Field(default_factory=list)
+    """Sub-styles the latest videos used (P3's record, which knows the sub-style P3 chose
+    for an arm that names none); arms of them are skipped like P2's own recent picks."""
 
     @field_validator("as_of")
     @classmethod

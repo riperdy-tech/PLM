@@ -79,3 +79,27 @@ def test_a_cycle_that_selects_nothing_starts_no_run(monkeypatch: pytest.MonkeyPa
             object(), ar_url="http://p2", token="t", brand_id="b",  # type: ignore[arg-type]
             policy_version="p2-v1", now=NOW,
             transport=_p2(1, [{"directive_id": "d", "decision_id": "other"}], [])))
+
+
+
+def test_an_owner_chosen_sub_style_goes_to_the_p2_cycle(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_start(client: Any, *, directive_id: str, brand_id: str,
+                         options: Any = None) -> _Handle:
+        return _Handle(f"pipeline.{directive_id}")
+
+    monkeypatch.setattr(start_module, "start_pipeline", fake_start)
+    monkeypatch.setattr(start_module, "pipeline_workflow_id", lambda d: f"pipeline.{d}")
+    seen: list[httpx.Request] = []
+    queued = [{"directive_id": "dir_1", "decision_id": "dec_1", "arm_id": "arm_mp"}]
+    asyncio.run(start_new_run(
+        object(), ar_url="http://p2", token="t", brand_id="longform_signal",  # type: ignore[arg-type]
+        policy_version="p2-v1", now=NOW, subgenre="minimal_pulse",
+        transport=_p2(1, queued, seen)))
+    assert json.loads(seen[0].content)["subgenre"] == "minimal_pulse"
+    asyncio.run(start_new_run(
+        object(), ar_url="http://p2", token="t", brand_id="longform_signal",  # type: ignore[arg-type]
+        policy_version="p2-v1", now=NOW, avoid_subgenres=("minimal_pulse",),
+        transport=_p2(1, queued, seen)))
+    body = json.loads(seen[-3].content)
+    assert body["avoid_subgenres"] == ["minimal_pulse"] and "subgenre" not in body

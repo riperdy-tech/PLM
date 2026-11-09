@@ -57,6 +57,7 @@ from ..playlist.catalog import (
 )
 from ..playlist.diversity import check_album_texture
 from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
+from ..playlist.sound_variance import check_sound_variance
 from ..playlist.variation import check_upload_variation, variation_fingerprint
 from ..visuals.planner import BrandProfile, plan_visual_session
 from .profiles import RenderProfile, render_profile
@@ -223,6 +224,16 @@ def assemble_media_package(
     texture_report["evidence"] = catalog_report.pop("evidence")
     texture_report["catalog"] = {
         **catalog_report,
+        "coverage": "complete" if recorded is not None else "not_configured",
+    }
+    # Owner 2026-11-09: no shared recording is not enough; a video must not sound like
+    # the last ones either. A warning for the owner's review, never a block.
+    texture_report["sound_variance"] = {
+        **check_sound_variance(evidence.get("track_signatures")
+                               if isinstance(evidence := texture_report["evidence"], dict)
+                               else None,
+                               current_release_manifest_id=rel_id,
+                               history=recorded if recorded is not None else ()),
         "coverage": "complete" if recorded is not None else "not_configured",
     }
     # Packaging must not feel like the brand's last uploads (growth spec, rank 1): the

@@ -140,6 +140,31 @@ def _image_suffix(data: bytes) -> str | None:
     return None
 
 
+STYLE_LABELS: Final[dict[str, str]] = {
+    "future_garage_focus": "Future garage",
+    "soft_cyber_electronica": "Soft cyber electronica",
+    "minimal_pulse": "Minimal pulse",
+    "ambient_breakbeat": "Ambient breakbeat",
+    "downtempo_synth": "Downtempo synth",
+    "deep_work_chillstep": "Deep-work chillstep",
+    "restrained_retro_future": "Restrained retro-future",
+    "organic_electronic": "Organic electronic",
+    "piano_synth_concentration": "Piano & synth concentration",
+}
+"""Display names of the focus sub-styles (P1 ontology / P3 palettes)."""
+STYLE_MEMORY: Final[int] = 2
+"""How many of the latest videos' sub-styles "let P2 pick" avoids (P2's SUBGENRE_MEMORY)."""
+
+
+def _sounds_like(pkg: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """P6's sound-variance warning (``render_report.album_texture.sound_variance``): the
+    recent videos this one sounds like, for the owner's review."""
+    report = pkg.get("render_report")
+    texture = report.get("album_texture") if isinstance(report, dict) else None
+    variance = texture.get("sound_variance") if isinstance(texture, dict) else None
+    found = variance.get("too_similar") if isinstance(variance, dict) else None
+    return [dict(f) for f in found if isinstance(f, dict)] if isinstance(found, list) else []
+
 @dataclass
 class Studio:
     """The owner's steps (see module docstring). Collaborators are injected so the
@@ -155,9 +180,14 @@ class Studio:
     """Stored bytes by ``(uri, checksum)``, verified."""
     import_art: Callable[[str, Path], dict[str, Any]]
     """P6's importer for one package's folder; raises on refusal."""
-    start: Callable[[str], Any] | None = None
+    start: Callable[[str, str | None, tuple[str, ...]], Any] | None = None
     """Starts a new run (async) whose songs come from the named P4 provider
-    (:data:`MUSIC_PROVIDERS`); ``None``: the Start button is refused."""
+    (:data:`MUSIC_PROVIDERS`), of the owner's sub-style or P2's pick (``None``);
+    ``None`` here: the Start button is refused."""
+    styles: Callable[[], dict[str, Any]] | None = None
+    """``{"available": [sub-style], "recent": [{"subgenre", "at"}]}``: the sub-styles P2
+    has a usable arm for, and the sub-styles P3 used for the latest videos (newest
+    first)."""
     edit: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
     """P6's review edit of one package (``media_factory.review_edits.edit_presentation``
     keyword arguments); raises on refusal."""
@@ -218,7 +248,20 @@ class Studio:
             "remakes": self.remakes(),
             "notes": self.notes()[-20:],
             "start_available": self.start is not None,
+            "styles": self.style_choices(),
         }
+
+    def style_choices(self) -> dict[str, Any]:
+        """The Start button's sub-style picker: what can be chosen, and what the last
+        videos used (owner 2026-11-09: videos must not sound alike one to the next)."""
+        if self.styles is None:
+            return {"available": [], "recent": [], "labels": STYLE_LABELS}
+        try:
+            found = self.styles()
+        except Exception as exc:  # noqa: BLE001 - the picker degrades to "P2 picks"
+            return {"available": [], "recent": [], "labels": STYLE_LABELS,
+                    "error": str(exc)}
+        return {**found, "labels": STYLE_LABELS}
 
     async def _resume(self, case_id: str, role: str, evidence: dict[str, str],
                       notes: str, **signal: Any) -> dict[str, Any]:
@@ -546,6 +589,7 @@ class Studio:
                 "tracks": [{"song_id": c.get("song_id"), "title": c.get("title"),
                             "start": c.get("timestamp_str")}
                            for c in pkg.get("chapters") or []],
+                "sounds_like": _sounds_like(pkg),
             })
         workflow_id = (case.get("pipeline") or {}).get("workflow_id")
         return {"case_id": case["case_id"], "packages": packages, "workflow_id": workflow_id,
@@ -700,9 +744,10 @@ class Studio:
         return await self.actions.reject(case_id, actor=OWNER, role="production_owner",
                                          notes="rejected in the Studio")
 
-    async def start_run(self, music: str) -> Any:
+    async def start_run(self, music: str, subgenre: str | None = None) -> Any:
         """Start a run whose song prompts are for ``music`` (``suno`` or ``flow_music``);
-        its inbox must be configured, or nobody could hand the songs in."""
+        its inbox must be configured, or nobody could hand the songs in. ``subgenre`` is
+        the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick."""
         if self.start is None:
             raise _refuse(503, "start_not_configured", "starting runs is not configured")
         if music not in MUSIC_PROVIDERS:
@@ -713,7 +758,21 @@ class Studio:
             raise _refuse(503, "music_inbox_not_configured",
                           f"the {source} inbox is not configured: set "
                           f"{'PLM_SUNO_MANUAL_INBOX' if music == 'suno' else 'PLM_FLOW_MUSIC_MANUAL_INBOX'}")
-        return await self.start(MUSIC_PROVIDERS[music])
+        if subgenre is not None:
+            available = self.style_choices().get("available") or []
+            if subgenre not in available:
+                raise _refuse(422, "style_unavailable",
+                              f"P2 has no usable arm for {subgenre!r}; choose one of "
+                              f"{', '.join(available) or 'none'}, or let P2 pick")
+        avoid: tuple[str, ...] = ()
+        if subgenre is None:  # P2 picks: away from the last videos' sub-styles
+            seen: list[str] = []
+            for item in self.style_choices().get("recent") or []:
+                name = item.get("subgenre") if isinstance(item, dict) else None
+                if name and name not in seen:
+                    seen.append(name)
+            avoid = tuple(seen[:STYLE_MEMORY])
+        return await self.start(MUSIC_PROVIDERS[music], subgenre, avoid)
 
 
 def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
@@ -810,7 +869,8 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
 
-        async def start(music_provider: str) -> dict[str, Any]:
+        async def start(music_provider: str, subgenre: str | None,
+                        avoid: tuple[str, ...]) -> dict[str, Any]:
             from dataclasses import asdict
 
             from ..pipeline.config import load_pipeline_config
@@ -827,12 +887,48 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
                 started = await start_new_run(
                     await connect_client(platform), ar_url=urls[Phase.AR], token=token,
                     brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now(),
-                    options=PipelineOptions(music_provider=music_provider))
+                    options=PipelineOptions(music_provider=music_provider),
+                    subgenre=subgenre, avoid_subgenres=avoid)
             except RunNotStarted as exc:
                 raise _refuse(409, exc.code, str(exc)) from exc
-            return {**asdict(started), "music_provider": music_provider}
+            return {**asdict(started), "music_provider": music_provider,
+                    "subgenre": subgenre, "avoided": list(avoid)}
+
+    def styles() -> dict[str, Any]:
+        if platform is None:
+            raise _refuse(503, "settings_unavailable", "the platform settings did not load")
+        import sqlalchemy as sa
+
+        from ..db import build_engine
+
+        brand = (os.environ.get("PLM_STUDIO_BRAND_ID")
+                 or load_env_file(dotenv_path).get("PLM_STUDIO_BRAND_ID") or "longform_signal")
+        engine = build_engine(platform)
+        try:
+            with engine.connect() as conn:
+                available = conn.execute(sa.text(
+                    "select distinct m.taxonomy_json::json->>'subgenre' "
+                    "from market.market_arms m "
+                    "left join ar.ar_content_arm_state s on s.arm_id = m.arm_id "
+                    "where m.brand_id = :brand "
+                    "and m.taxonomy_json::json->>'subgenre' is not null "
+                    "and coalesce(s.status, 'candidate') in ('candidate', 'active') "
+                    "order by 1"), {"brand": brand}).scalars().all()
+                # P3's record: it knows the sub-style it chose for an arm naming none.
+                recent = conn.execute(sa.text(
+                    "select g.subgenre, e.created_at from experiments.experiments e "
+                    "join experiments.content_genomes g "
+                    "on g.fingerprint = e.base_genome_fingerprint "
+                    "where g.genre = 'focus_electronic' and g.subgenre is not null "
+                    "and e.created_at <= now() "
+                    "order by e.created_at desc limit 5")).all()
+        finally:
+            engine.dispose()
+        return {"available": [s for s in available if s and s != "none"],
+                "recent": [{"subgenre": r[0], "at": r[1].isoformat()} for r in recent]}
 
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media, runs=runs,
-                  import_art=import_art, start=start, edit=edit, reopen=reopen,
+                  import_art=import_art, start=start, styles=styles, edit=edit,
+                  reopen=reopen,
                   clock=clock or SystemClock())

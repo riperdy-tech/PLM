@@ -36,4 +36,7 @@ def test_reason_codes_are_the_spec_nine_plus_the_nine_this_build_requires() -> N
         "MARKET_REGIME_CHANGE_SUSPECTED", "INSUFFICIENT_ELIGIBLE_ARMS",
         "PROVIDER_CAPABILITY_UNAVAILABLE", "MANUAL_OVERRIDE", "FATIGUE_COOLDOWN",
         "WEAK_POSTERIOR", "IDENTITY_UNDECLARED",
+        # owner 2026-11-09: sub-style choice and memory across videos
+        "OWNER_SUBGENRE_CHOICE", "OWNER_SUBGENRE_UNAVAILABLE", "SUBGENRE_RECENTLY_USED",
+        "SUBGENRE_MEMORY_RELAXED",
     }

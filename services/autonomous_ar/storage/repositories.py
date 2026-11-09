@@ -102,6 +102,7 @@ __all__ = [
     "load_reward_observation_by_key",
     "load_similarity",
     "load_terminal_update",
+    "recent_directive_subgenres",
     "record_selection",
     "replace_baselines",
     "replace_similarity",
@@ -939,3 +940,27 @@ def set_channel_state(session: Session, *, brand_id: str, activation_state: str,
                         .where(ar_channel_state.c.id == existing)
                         .values(activation_state=activation_state, updated_at=now,
                                 reason=reason, updated_by=updated_by))
+
+
+def recent_directive_subgenres(session: Session, *, brand_id: str, limit: int,
+                               now: datetime) -> list[str | None]:
+    """The sub-style of the brand's ``limit`` latest directives from AUTONOMOUS cycles,
+    newest first (``None`` for a directive whose brief names none). A directive dated
+    after ``now`` (a test run against a shared database with a fixed clock) is not a
+    recent pick."""
+    rows = session.execute(
+        sa.select(ar_production_directive.c.brief_json)
+        .join(ar_allocation_decision,
+              ar_allocation_decision.c.id == ar_production_directive.c.decision_id)
+        .join(ar_allocation_cycle, ar_allocation_cycle.c.id == ar_allocation_decision.c.cycle_id)
+        .where(ar_allocation_cycle.c.brand_id == brand_id,
+               ar_allocation_cycle.c.activation_state == "AUTONOMOUS",
+               ar_production_directive.c.created_at <= now)
+        .order_by(ar_production_directive.c.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    found: list[str | None] = []
+    for brief in rows:
+        value = brief.get("subgenre") if isinstance(brief, dict) else None
+        found.append(str(value) if value else None)
+    return found

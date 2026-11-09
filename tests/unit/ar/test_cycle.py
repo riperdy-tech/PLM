@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts import AllocationType
+from plm_contracts import AllocationType, ChannelActivationState
 
 from services.autonomous_ar.config import load_ar_settings
 from services.autonomous_ar.decisioning.cycle import (
@@ -41,6 +41,7 @@ from services.autonomous_ar.storage.models import ar_allocation_cycle
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
+AUTONOMOUS = ChannelActivationState.AUTONOMOUS
 SETTINGS = load_ar_settings()
 FULL = {name: 60.0 for name in
         ("demand", "growth", "competitor_velocity", "competition", "audience_quality",
@@ -367,3 +368,98 @@ def test_exposure_decays_from_the_last_selection() -> None:
     assert decayed_exposure(4.0, NOW, now=NOW + timedelta(days=14), half_life_days=14.0) == 2.0
     assert decayed_exposure(4.0, None, now=NOW, half_life_days=14.0) == 4.0
     assert decayed_exposure(4.0, NOW + timedelta(days=1), now=NOW, half_life_days=14.0) == 4.0
+
+
+def _focus_arm(arm_id: str, subgenre: str, *, score: float) -> ContentArm:
+    return ContentArm(
+        arm_id=arm_id,
+        dimensions=ArmDimensions(genre="focus_electronic", subgenre=subgenre,
+                                 use_cases=("study_focus",), language=None,
+                                 vocal_mode="instrumental"),
+        p1_score=score, p1_confidence=0.7, component_scores=dict(FULL),
+        observation_count=5, source_count=2, as_of=NOW, score_version="p1-v1",
+        freshness_seconds=0.0,
+    )
+
+
+FOCUS_ARMS = (
+    _focus_arm("fg-1", "future_garage_focus", score=95.0),
+    _focus_arm("fg-2", "future_garage_focus", score=94.0),
+    _focus_arm("fg-3", "future_garage_focus", score=93.0),
+    _focus_arm("mp-1", "minimal_pulse", score=70.0),
+    _focus_arm("ch-1", "deep_work_chillstep", score=60.0),
+)
+
+
+def _picked_subgenre(result: object) -> str | None:
+    directives = result.directives  # type: ignore[attr-defined]
+    assert len(directives) == 1
+    return {arm.arm_id: arm.dimensions.subgenre for arm in FOCUS_ARMS}[directives[0].arm_id]
+
+
+def test_the_owner_chosen_sub_style_is_the_only_one_eligible() -> None:
+    """Studio Start with a sub-style: P2 still picks the arm, but only among that
+    sub-style's arms, and the cycle says the owner chose it."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        result = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="deep_work_chillstep",
+                              activation_state=AUTONOMOUS),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW)
+        assert _picked_subgenre(result) == "deep_work_chillstep"
+        assert ReasonCode.OWNER_SUBGENRE_CHOICE.value in result.warnings
+        missing = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="organic_electronic",
+                              activation_state=AUTONOMOUS, as_of=NOW + timedelta(days=1)),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW + timedelta(days=1))
+        assert missing.directives == ()
+        assert ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value in missing.warnings
+
+
+def test_autonomous_picks_rotate_sub_styles_even_when_one_has_many_arms() -> None:
+    """Owner 2026-11-09: future garage has three strong arms, so arm cooldowns alone let
+    P2 pick it again and again. The last two picks' sub-styles are skipped instead."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        picked = []
+        for day in range(4):
+            at = NOW + timedelta(days=5 * day)
+            result = run_allocation_cycle(
+                session, _request(slot_count=1, activation_state=AUTONOMOUS, as_of=at),
+                settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=at)
+            picked.append(_picked_subgenre(result))
+            if day:
+                assert ReasonCode.SUBGENRE_RECENTLY_USED.value in result.warnings
+        assert picked[0] != picked[1] != picked[2] != picked[0]
+        assert picked[3] == picked[0]  # three sub-styles: the fourth comes round again
+
+
+def test_the_memory_gives_way_when_only_recent_sub_styles_are_left() -> None:
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        only_garage = FOCUS_ARMS[:3]
+        run_allocation_cycle(session, _request(slot_count=1, activation_state=AUTONOMOUS),
+                             settings=SETTINGS, market=_snapshot(*only_garage), now=NOW)
+        later = NOW + timedelta(days=5)
+        result = run_allocation_cycle(
+            session, _request(slot_count=1, activation_state=AUTONOMOUS, as_of=later),
+            settings=SETTINGS, market=_snapshot(*only_garage), now=later)
+        assert len(result.directives) == 1
+        assert ReasonCode.SUBGENRE_MEMORY_RELAXED.value in result.warnings
+
+
+def test_sub_styles_the_studio_names_as_recent_are_avoided_too() -> None:
+    """P3 knows the sub-style it chose for an arm that names none; the Studio passes the
+    latest videos' sub-styles so P2 skips them although its own picks named none."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        result = run_allocation_cycle(
+            session, _request(slot_count=1, activation_state=AUTONOMOUS,
+                              avoid_subgenres=("future_garage_focus", "minimal_pulse")),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW)
+        assert _picked_subgenre(result) == "deep_work_chillstep"
+        assert ReasonCode.SUBGENRE_RECENTLY_USED.value in result.warnings

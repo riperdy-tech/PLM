@@ -90,6 +90,11 @@ class ReasonCode(StrEnum):
     FATIGUE_COOLDOWN = "FATIGUE_COOLDOWN"            # §26
     WEAK_POSTERIOR = "WEAK_POSTERIOR"                # §38 retirement evidence
     IDENTITY_UNDECLARED = "IDENTITY_UNDECLARED"      # ADR-0044: brand has no identity spec
+    # Owner 2026-11-09: videos must not sound alike from one to the next.
+    OWNER_SUBGENRE_CHOICE = "OWNER_SUBGENRE_CHOICE"  # the owner chose the sub-style
+    OWNER_SUBGENRE_UNAVAILABLE = "OWNER_SUBGENRE_UNAVAILABLE"  # no eligible arm of it
+    SUBGENRE_RECENTLY_USED = "SUBGENRE_RECENTLY_USED"  # skipped: used by the last picks
+    SUBGENRE_MEMORY_RELAXED = "SUBGENRE_MEMORY_RELAXED"  # only recent sub-styles were left
 
 
 class OverrideAction(StrEnum):

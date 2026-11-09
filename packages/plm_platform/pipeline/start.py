@@ -59,17 +59,27 @@ async def start_new_run(
     now: datetime,
     budget: float = 10.0,
     options: PipelineOptions | None = None,
+    subgenre: str | None = None,
+    avoid_subgenres: tuple[str, ...] = (),
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> StartedRun:
     """Run one AUTONOMOUS P2 cycle for ``brand_id`` at ``now`` and start the pipeline for
-    the directive it queued. Raises :class:`RunNotStarted` when P2 selects nothing."""
+    the directive it queued. ``subgenre`` is the owner's choice of sub-style (P2 picks
+    the arm among that sub-style's); ``avoid_subgenres`` are the latest videos'
+    sub-styles, which P2 skips when it picks. Raises :class:`RunNotStarted` when P2 selects
+    nothing."""
     headers: Mapping[str, str] = {SERVICE_TOKEN_HEADER: token}
     async with httpx.AsyncClient(base_url=ar_url, headers=dict(headers), timeout=60.0,
                                  transport=transport) as p2:
-        cycle = _json(await p2.post("/ar/cycles", json={
+        body: dict[str, Any] = {
             "brand_id": brand_id, "slot_count": 1, "budget": budget,
             "as_of": now.isoformat(), "policy_version": policy_version,
-            "activation_state": "AUTONOMOUS"}), "POST /ar/cycles")
+            "activation_state": "AUTONOMOUS"}
+        if subgenre is not None:
+            body["subgenre"] = subgenre
+        if avoid_subgenres:
+            body["avoid_subgenres"] = list(avoid_subgenres)
+        cycle = _json(await p2.post("/ar/cycles", json=body), "POST /ar/cycles")
         cycle_id = str(cycle["cycle_id"])
         if int(cycle.get("selected_count") or 0) < 1:
             raise RunNotStarted("nothing_selected", f"cycle {cycle_id} selected no arm "

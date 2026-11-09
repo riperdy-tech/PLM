@@ -63,6 +63,11 @@ class CycleRequest:
     activation_state: ChannelActivationState | None = None
     random_seed: int | None = None
     unavailable_capabilities: tuple[str, ...] = ()
+    subgenre: str | None = None
+    """The owner's choice of sub-style (Studio Start): only its arms are eligible."""
+    avoid_subgenres: tuple[str, ...] = ()
+    """Sub-styles the latest videos used per P3 (Studio Start, "let P2 pick"): avoided
+    together with the sub-styles of P2's own latest picks."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +105,47 @@ def _row_to_directive(row: Any) -> ProductionDirective:
         expires_at=row["expires_at"], exploration_fraction=row["exploration_fraction"],
         value_model=row["value_model"], outcome_horizon=row["outcome_horizon"],
     )
+
+
+SUBGENRE_MEMORY: int = 2
+"""How many of the brand's latest autonomous picks name sub-styles the next pick avoids
+(owner 2026-11-09: videos must not sound alike from one to the next). Arm cooldowns alone
+did not do it: several arms share a sub-style, so P2 kept picking future garage."""
+
+
+def _subgenre_of(arm: ContentArm | None) -> str | None:
+    if arm is None:
+        return None
+    return arm.dimensions.subgenre or None
+
+
+def _apply_subgenre_rules(session: Any, request: CycleRequest, arms: dict[str, ContentArm],
+                          eligible_ids: set[str], activation: ChannelActivationState,
+                          warnings: list[str], *, now: datetime) -> None:
+    """Narrow ``eligible_ids`` in place: to the owner's chosen sub-style, or else away
+    from the sub-styles of the brand's last :data:`SUBGENRE_MEMORY` autonomous picks
+    (kept when nothing else is eligible). Every narrowing is a cycle warning."""
+    if request.subgenre is not None:
+        warnings.append(ReasonCode.OWNER_SUBGENRE_CHOICE.value)
+        chosen = {a for a in eligible_ids if _subgenre_of(arms.get(a)) == request.subgenre}
+        if not chosen:
+            warnings.append(ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value)
+        eligible_ids.intersection_update(chosen)
+        return
+    if activation is not ChannelActivationState.AUTONOMOUS:
+        return
+    recent = {s for s in repositories.recent_directive_subgenres(
+        session, brand_id=request.brand_id, limit=SUBGENRE_MEMORY, now=now) if s}
+    recent.update(s for s in request.avoid_subgenres if s)
+    if not recent:
+        return
+    fresh = {a for a in eligible_ids if _subgenre_of(arms.get(a)) not in recent}
+    if fresh:
+        if fresh != eligible_ids:
+            warnings.append(ReasonCode.SUBGENRE_RECENTLY_USED.value)
+        eligible_ids.intersection_update(fresh)
+    elif eligible_ids:
+        warnings.append(ReasonCode.SUBGENRE_MEMORY_RELAXED.value)
 
 
 def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
@@ -239,6 +285,7 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         selection_recency[arm_id] = decayed_exposure(
             repositories.load_exposure_score(session, arm_id), last, now=now,
             half_life_days=policy.fatigue.decay_half_life_days)
+    _apply_subgenre_rules(session, request, arms, eligible_ids, activation, warnings, now=now)
     snapshot_arms = tuple(arm for arm in market.arms if arm.arm_id in eligible_ids)
     regime_shift = False
     for arm in snapshot_arms:

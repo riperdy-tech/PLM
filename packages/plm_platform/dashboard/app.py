@@ -145,6 +145,9 @@ class SwapArtBody(BaseModel):
 
 class StudioStartBody(BaseModel):
     music: str = Field(description="suno or flow_music: which tool the song prompts are for")
+    subgenre: str | None = Field(
+        default=None, description="the owner's sub-style; none: P2 picks (and avoids the "
+                                  "sub-styles of the last picks)")
 
 
 def _http(refused: ActionRefused) -> HTTPException:
@@ -311,7 +314,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.post("/api/studio/start", dependencies=[Depends(require_token)])
     async def studio_start(body: StudioStartBody) -> dict[str, Any]:
-        return {"started": await guarded_async(lambda: studio.start_run(body.music))}
+        return {"started": await guarded_async(
+            lambda: studio.start_run(body.music, body.subgenre))}
 
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:

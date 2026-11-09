@@ -317,7 +317,8 @@ def test_start_asks_for_suno_or_flow_music_and_shows_both_inboxes(tmp_path: Path
     are listed with their tool, and a WAV goes to the inbox of its sheet."""
     started: list[str] = []
 
-    async def start(provider: str) -> dict[str, Any]:
+    async def start(provider: str, subgenre: str | None,
+                    avoid: tuple[str, ...]) -> dict[str, Any]:
         started.append(provider)
         return {"workflow_id": "pipeline.d", "music_provider": provider}
 
@@ -472,3 +473,62 @@ def test_a_failed_remake_is_shown_and_can_be_imported_again_from_step_2(
                                                  "status": "ready_for_publish"}
     result = asyncio.run(studio.import_thumbnails(PKG))
     assert result["package"]["status"] == "ready_for_publish" and actions.calls == []
+
+
+def test_start_offers_the_styles_p2_can_pick_and_passes_the_owner_choice(
+        tmp_path: Path) -> None:
+    """Owner 2026-11-09: choose the sub-style at Start, or let P2 pick. Only sub-styles
+    P2 has a usable arm for can be chosen; the picker shows the last videos' styles."""
+    calls: list[tuple[str, str | None, tuple[str, ...]]] = []
+
+    async def start(provider: str, subgenre: str | None,
+                    avoid: tuple[str, ...]) -> dict[str, Any]:
+        calls.append((provider, subgenre, avoid))
+        return {"workflow_id": "pipeline.d"}
+
+    studio, _ = _studio(tmp_path, [])
+    studio.start = start
+    studio.styles = lambda: {"available": ["deep_work_chillstep", "minimal_pulse"],
+                             "recent": [{"subgenre": "future_garage_focus",
+                                         "at": "2026-11-05T11:36:29+00:00"},
+                                        {"subgenre": "future_garage_focus",
+                                         "at": "2026-11-05T11:25:10+00:00"},
+                                        {"subgenre": "deep_work_chillstep",
+                                         "at": "2026-11-01T09:54:17+00:00"},
+                                        {"subgenre": "minimal_pulse",
+                                         "at": "2026-11-01T09:00:00+00:00"}]}
+    choices = studio.overview()["styles"]
+    assert choices["available"] == ["deep_work_chillstep", "minimal_pulse"]
+    assert choices["labels"]["future_garage_focus"] == "Future garage"
+    assert choices["recent"][0]["subgenre"] == "future_garage_focus"
+
+    asyncio.run(studio.start_run("flow_music", "minimal_pulse"))
+    asyncio.run(studio.start_run("flow_music"))
+    # The owner's choice goes as is; "let P2 pick" avoids the last two videos' styles.
+    assert calls == [("flow_music_manual", "minimal_pulse", ()),
+                     ("flow_music_manual", None,
+                      ("future_garage_focus", "deep_work_chillstep"))]
+    with pytest.raises(ActionRefused, match="style_unavailable"):
+        asyncio.run(studio.start_run("flow_music", "organic_electronic"))
+
+    def broken() -> dict[str, Any]:
+        raise RuntimeError("database down")
+
+    studio.styles = broken
+    assert studio.overview()["styles"]["error"] == "database down"
+    with pytest.raises(ActionRefused, match="style_unavailable"):
+        asyncio.run(studio.start_run("flow_music", "minimal_pulse"))
+    assert len(calls) == 2
+
+
+def test_the_review_shows_which_recent_videos_this_one_sounds_like(tmp_path: Path) -> None:
+    studio, _ = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
+    base = studio.package
+    close = {"media_package_id": "mpkg_old", "title": "Late Desk", "similarity": 0.96}
+    studio.package = lambda pid: {**base(pid), "render_report": {"album_texture": {
+        "sound_variance": {"too_similar": [close], "compared": [close]}}}}
+    (review,) = studio.overview()["reviews"]
+    assert review["packages"][0]["sounds_like"] == [close]
+    studio.package = base
+    (review,) = studio.overview()["reviews"]
+    assert review["packages"][0]["sounds_like"] == []

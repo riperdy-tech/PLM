@@ -578,6 +578,10 @@ function reviewStep(reviews) {
         h('strong', {}, 'Title'), h('div', { class: 'prompt' }, p.title || ''),
         h('strong', {}, 'Description'), h('div', { class: 'prompt' }, p.description || ''),
         h('p', { class: 'muted' }, `Tags: ${(p.tags || []).join(', ')}`),
+        (p.sounds_like || []).length ? h('p', { class: 'notice' },
+          `Sounds close to your recent video${p.sounds_like.length > 1 ? 's' : ''}: ` +
+          p.sounds_like.map((v) => `"${v.title || v.media_package_id}" (${Math.round(v.similarity * 100)}% alike)`).join(', ') +
+          '. Listen before approving; Replace song in Request changes can make it differ.') : null,
         p.status === 'ready_for_publish' ? changesPanel(r, p)
           : remakeLine((remakesNow || {})[p.media_package_id])));
     }
@@ -592,10 +596,29 @@ function reviewStep(reviews) {
   return card;
 }
 
+let styleSelect = null;
+function styleName(styles, id) { return (styles.labels || {})[id] || id || 'no sub-style'; }
+
+function stylePicker(styles) {
+  const keep = styleSelect ? styleSelect.value : '';
+  styleSelect = h('select', {},
+    h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
+    (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
+  styleSelect.value = (styles.available || []).includes(keep) ? keep : '';
+  const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
+  return h('div', {},
+    h('div', { class: 'row-actions' }, h('strong', {}, 'Style:'), styleSelect),
+    h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
+    styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null);
+}
+
 function startButton(label, music) {
   return actionButton(`Option: ${label}`, 'btn-ok big',
-    () => authedSend('/api/studio/start', 'POST', JSON.stringify({ music }), 'application/json'),
-    { confirm: `Start a new video with ${label} song prompts? P2 picks what to make and the run begins.`,
+    () => {
+      const subgenre = styleSelect && styleSelect.value ? styleSelect.value : null;
+      return authedSend('/api/studio/start', 'POST', JSON.stringify({ music, subgenre }), 'application/json');
+    },
+    { confirm: `Start a new video with ${label} song prompts? The run begins with the style shown.`,
       busy: `Asking P2 for the next video and starting the run (${label} prompts)...` });
 }
 
@@ -620,7 +643,7 @@ async function renderStudio() {
     h('div', { class: 'step-head' },
       h('div', {}, h('h2', {}, 'Studio'), h('p', { class: 'muted' }, 'Start a video, then answer each step when it waits for you. Nothing is uploaded until you approve it.')),
       s.start_available
-        ? h('div', {}, h('strong', {}, 'Start a new video. Song prompts for:'),
+        ? h('div', {}, stylePicker(s.styles || {}), h('strong', {}, 'Start a new video. Song prompts for:'),
           h('div', { class: 'row-actions' },
             startButton('Suno', 'suno'), startButton('Flow Music', 'flow_music')))
         : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
