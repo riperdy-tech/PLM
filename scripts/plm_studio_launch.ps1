@@ -90,7 +90,9 @@ function Invoke-Native([string]$File, [string[]]$Arguments) {
     # Runs a console program without a window; returns its exit code, logs its output.
     $out = Join-Path $env:TEMP ('plm-launch-{0}.out' -f [guid]::NewGuid())
     $err = "$out.err"
-    $p = Start-Process -FilePath $File -ArgumentList $Arguments -NoNewWindow -PassThru `
+    # Start-Process joins arguments with spaces and does not quote them.
+    $quoted = ($Arguments | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+    $p = Start-Process -FilePath $File -ArgumentList $quoted -NoNewWindow -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
     $null = $p.Handle  # without the handle, ExitCode stays empty for Start-Process
     while (-not $p.HasExited) { Start-Sleep -Milliseconds 250; [System.Windows.Forms.Application]::DoEvents() }
@@ -169,7 +171,7 @@ try {
         Set-Status 'Freeing the reserved ports (administrator prompt)...'
         try {
             $fix = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
-                -ArgumentList '-NoProfile', '-Command', 'net stop winnat; net start winnat'
+                -ArgumentList '-NoProfile -Command "net stop winnat; net start winnat"'
             Write-Log "winnat restart exit code $($fix.ExitCode)"
         } catch {
             Stop-WithError 'The administrator prompt was declined, so the ports are still reserved. In an administrator PowerShell run: net stop winnat, then net start winnat.'
