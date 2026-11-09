@@ -22,7 +22,7 @@ from ..artifacts import ArtifactStore
 from ..domain.enums import PackageStatus
 from ..domain.models import MediaPackage, ThumbnailVariant
 from ..errors import MediaAssemblyError
-from ..rendering.profiles import render_profile
+from ..rendering.profiles import STILL_VIDEO_PROFILES, render_profile
 from ..rendering.qa import post_render_qa
 from ..rendering.toolchain import MediaToolchain, MediaToolError
 from ..storage.repositories import (
@@ -113,7 +113,7 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
                         variant_key: str, art: Path) -> dict[str, Any]:
     """``art`` (the owner's original file, not the 1280 px thumbnail) held still over the
     package's audio master, QA'd, then stored; refused, with nothing stored, unless QA holds."""
-    profile = render_profile(pkg.render_profile)
+    profile = render_profile(STILL_VIDEO_PROFILES.get(pkg.render_profile, pkg.render_profile))
     report = dict(pkg.render_report)
     timeline = float(report["timeline_seconds"])
     low, high = report["sequencing"]["window_seconds"]
@@ -141,7 +141,8 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
             f"video_master.{profile.container}", out.read_bytes(), content_type="video/mp4")
     duration = probe.duration_seconds if probe.duration_seconds is not None else timeline
     report["video_pipeline"] = {
-        "still_image": {"variant_key": variant_key, "source": art.name},
+        "still_image": {"variant_key": variant_key, "source": art.name,
+                        "render_profile": profile.name},
         "replaced": {"video_pipeline": pkg.render_report.get("video_pipeline"),
                      "video_master": pkg.render_report.get("video_master")},
     }

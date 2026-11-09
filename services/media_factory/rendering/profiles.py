@@ -58,9 +58,18 @@ RENDER_PROFILES: Final = MappingProxyType({
         RenderProfile(name="yt_longform_1080p_v1", width=1920, height=1080, fps=30),
         RenderProfile(name="preview_360p_v1", width=640, height=360, fps=15,
                       x264_preset="ultrafast", x264_crf=30, audio_bitrate="128k"),
+        RenderProfile(name="yt_still_1440p_v1", width=2560, height=1440, fps=30),
     )
 })
 """Every profile a request may name."""
+
+STILL_VIDEO_PROFILES: Final = MappingProxyType({
+    "yt_longform_1080p_v1": "yt_still_1440p_v1",
+})
+"""The profile the owner's-art still video is rendered at, per package profile (owner
+2026-11-09: the picture looked soft). The owner's art is larger than 1440p (2752x1536 so
+far), and YouTube streams uploads of 1440p and above with its higher-bitrate codecs, so
+even 1080p playback is sharper. A profile not listed renders at itself."""
 
 
 def render_profile(name: str) -> RenderProfile:

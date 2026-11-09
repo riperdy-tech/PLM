@@ -208,6 +208,7 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         assert released.manifest_hash != pkg.manifest_hash
         still = released.render_report["video_pipeline"]["still_image"]
         assert still["variant_key"] == "art_a" and still["source"] == "A.png"
+        assert still["render_profile"] == "preview_360p_v1"  # unmapped: renders at itself
         assert released.render_report["video_master"]["checksum"] == released.video_checksum
         assert released.render_report["qa"]["passed"] is True
         assert store.get(released.video_master_uri).startswith(b"STAND-IN STILL VIDEO")
@@ -270,3 +271,13 @@ def test_every_phrase_says_focus_or_work() -> None:
     for style_id, style in GUIDE.styles.items():
         for text in style["texts"]:
             assert any(w in text.casefold() for w in words), (style_id, text)
+
+
+def test_the_longform_still_video_renders_at_1440p() -> None:
+    """Owner 2026-11-09: the picture looked soft. The art (2752x1536) is held still at
+    1440p, which YouTube streams with its higher-bitrate codecs."""
+    from media_factory.rendering.profiles import STILL_VIDEO_PROFILES, render_profile
+
+    still = render_profile(STILL_VIDEO_PROFILES["yt_longform_1080p_v1"])
+    assert (still.width, still.height) == (2560, 1440)
+    assert still.x264_crf <= 20 and still.audio_bitrate == "192k"
