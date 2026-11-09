@@ -92,7 +92,9 @@ function Invoke-Native([string]$File, [string[]]$Arguments) {
     $err = "$out.err"
     $p = Start-Process -FilePath $File -ArgumentList $Arguments -NoNewWindow -PassThru `
         -RedirectStandardOutput $out -RedirectStandardError $err
+    $null = $p.Handle  # without the handle, ExitCode stays empty for Start-Process
     while (-not $p.HasExited) { Start-Sleep -Milliseconds 250; [System.Windows.Forms.Application]::DoEvents() }
+    $p.WaitForExit()
     $text = ''
     foreach ($f in @($out, $err)) {
         if (Test-Path $f) { $text += (Get-Content $f -Raw -ErrorAction SilentlyContinue); Remove-Item $f -Force }
