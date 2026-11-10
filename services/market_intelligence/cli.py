@@ -365,8 +365,9 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     The corpus is the multi-profile one (six videos over two taxonomy profiles): §16's
     arm support floor is two videos per profile, so the two-video corpus could form no
     arm and an ``ENV=ci`` run scored nothing (R5: P2 then had no opportunity to
-    allocate). Both profiles are focus electronic (ADR-0044): P2 blocks any arm outside
-    the brand's identity, so the older lofi/R&B corpus left R5 nothing to allocate.
+    allocate). Both profiles lie inside the brand's focus identity (ADR-0044: P2 blocks
+    any arm outside it, so the older lofi/R&B corpus left R5 nothing to allocate) and
+    differ enough that P2 does not cluster them into one slot.
     """
     from plm_platform.config import Env, Secret
 

@@ -22,7 +22,9 @@ import pytest
 from plm_platform.config import load_settings
 from plm_platform.testing.mock_outcomes import load_mock_outcome_model
 
+from services.autonomous_ar.config import ARSettings
 from services.autonomous_ar.domain.arm import ArmDimensions
+from services.autonomous_ar.modeling.similarity import arm_similarity
 from services.autonomous_ar.policy.identity import load_brand_identities
 from services.market_intelligence.cli import _production_connector
 from services.market_intelligence.config import load_market_settings
@@ -69,18 +71,22 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
     # P2 blocks an arm outside the brand's identity (ADR-0044) before it allocates, so
     # every arm the CI corpus forms must be one the brand may produce.
     identity = load_brand_identities()["longform_signal"]
+    dims = {arm.arm_id: ArmDimensions(
+        genre=arm.profile.genre, subgenre=arm.profile.subgenre, moods=arm.profile.mood,
+        use_cases=(arm.profile.use_case,) if arm.profile.use_case else (),
+        language=arm.profile.language, vocal_mode=arm.profile.vocal_mode,
+        duration_bucket=arm.profile.duration_bucket, visual_world=arm.profile.visual_world,
+        title_archetype=arm.profile.title_archetype) for arm in arms}
     for arm in arms:
-        dims = ArmDimensions(
-            genre=arm.profile.genre, subgenre=arm.profile.subgenre,
-            use_cases=(arm.profile.use_case,) if arm.profile.use_case else (),
-            vocal_mode=arm.profile.vocal_mode, duration_bucket=arm.profile.duration_bucket)
-        assert identity.admits(dims), arm.profile
+        assert identity.admits(dims[arm.arm_id]), arm.profile
     # R5's synthetic outcomes must name the IDs P1 now actually creates. Taxonomy v3
     # IDs are digests of the profile, so the two fixture profiles are found by profile.
-    by_profile = {(arm.profile.subgenre, arm.profile.use_case, arm.profile.duration_bucket):
-                  arm.arm_id for arm in arms}
-    strong = by_profile[(None, "study_focus", "45_75m")]
-    weak = by_profile[("future_garage_focus", "study_focus", "45_75m")]
+    by_profile = {(arm.profile.subgenre, arm.profile.mood): arm.arm_id for arm in arms}
+    strong = by_profile[(None, ("dreamy",))]
+    weak = by_profile[("future_garage_focus", ("melancholic",))]
+    # P2 caps a cluster of similar arms at one of R5's three slots: the first cycle can
+    # allocate both arms only when they are not one cluster.
+    assert arm_similarity(dims[strong], dims[weak]) < ARSettings().similarity_threshold
     model = load_mock_outcome_model(
         Path(__file__).resolve().parents[3] / "config/dev/mock_outcomes.json",
     )

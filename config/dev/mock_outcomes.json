@@ -1,5 +1,5 @@
 {
-  "_comment": "The deterministic mock outcome model (plm_platform.testing.mock_outcomes) behind P7's mock YouTube Analytics source and P8's mock distributor statements. A simulation for the local stack, labelled mock everywhere; never evidence about a real audience. arm_effects pins an arm's true effect; any other arm gets a seeded effect inside effect_range. The pinned v1 arms and the taxonomy-v2 and v3 (default since 2026-11-01) arm aliases represent the same two profiles in P1's ENV=ci fixture corpus; historical v1 simulations remain replayable. Since ADR-0044 the CI corpus is focus electronic (P2 blocks the lofi and R&B arms): the last two ids are its plain focus-electronic arm (strong) and its future-garage arm (weak). Gate R5 (tests/integration/test_r5_full_chain.py) needs one clearly stronger arm, and the stronger one is the arm P1 scores lower, so learning has to overturn the prior.",
+  "_comment": "The deterministic mock outcome model (plm_platform.testing.mock_outcomes) behind P7's mock YouTube Analytics source and P8's mock distributor statements. A simulation for the local stack, labelled mock everywhere; never evidence about a real audience. arm_effects pins an arm's true effect; any other arm gets a seeded effect inside effect_range. The pinned v1 arms and the taxonomy-v2 and v3 (default since 2026-11-01) arm aliases represent the same two profiles in P1's ENV=ci fixture corpus; historical v1 simulations remain replayable. Since ADR-0044 the CI corpus is focus electronic (P2 blocks the lofi and R&B arms): the last two ids are its dreamy study-focus arm with no named genre (strong) and its melancholic future-garage arm (weak), different enough that P2 does not cluster them. Gate R5 (tests/integration/test_r5_full_chain.py) needs one clearly stronger arm, and the stronger one is the arm P1 scores lower, so learning has to overturn the prior.",
   "model_version": "mock-outcomes-v1",
   "currency": "USD",
   "views_per_day": "120",
@@ -18,8 +18,8 @@
     "p1_taxonomy_v2_rnb_45_75m": "0.25",
     "p1_taxonomy_v3_lofi_stu_ebf8eeba39255f7f4992472b576cb16206c6430e": "1.4",
     "p1_taxonomy_v3_rnb_45_7_972914fe4461f4f2de1a2776957f3ab1c45d3f93": "0.25",
-    "p1_taxonomy_v3_focus_el_b748ca5f0147741ad752f4bd127a877bcf2d6a02": "1.4",
-    "p1_taxonomy_v3_focus_el_e8118cc4040fb0224d2cf6bcfa783c81edbb111b": "0.25"
+    "p1_taxonomy_v3_study_fo_409bb249c7483e51f55fe663994235297c7d4883": "1.4",
+    "p1_taxonomy_v3_focus_el_0abab50312ebec19352c07fedb4de79f14580bd5": "0.25"
   },
   "effect_range": ["0.5", "1.5"]
 }
