@@ -56,7 +56,8 @@ def _fraction_for(policy: PolicyConfig, allocation_type: AllocationType) -> floa
 def build_directives(portfolio: Portfolio, *, cycle_id: str, policy: PolicyConfig,
                      posteriors: Mapping[str, PosteriorState], arms: Mapping[str, ContentArm],
                      settings: ARSettings, expires_at: datetime, budget_share: float,
-                     cycle_budget: float) -> tuple[ProductionDirective, ...]:
+                     cycle_budget: float,
+                     duration_bucket: str | None = None) -> tuple[ProductionDirective, ...]:
     """One directive per selection, portfolio order; priority = 1..n (P3 sorts on it).
 
     ADR-0023 #1: the cycle owns the ceiling, each directive carries its share. The walk
@@ -88,7 +89,9 @@ def build_directives(portfolio: Portfolio, *, cycle_id: str, policy: PolicyConfi
                 mood=arm.dimensions.moods,
                 use_case=arm.dimensions.use_cases, language=arm.dimensions.language,
                 vocal_mode=arm.dimensions.vocal_mode,
-                duration_bucket=arm.dimensions.duration_bucket,
+                # The owner's length only (CycleRequest.duration_bucket): the arm's
+                # bucket comes from P1 title words, not from a choice of length.
+                duration_bucket=duration_bucket,
                 visual_world=arm.dimensions.visual_world,
             ),
             expected_value=min(1.0, max(0.0, selection.sample.posterior_expected_reward)),

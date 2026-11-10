@@ -61,6 +61,7 @@ async def start_new_run(
     options: PipelineOptions | None = None,
     subgenre: str | None = None,
     avoid_subgenres: tuple[str, ...] = (),
+    duration_bucket: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> StartedRun:
     """Run one AUTONOMOUS P2 cycle for ``brand_id`` at ``now`` and start the pipeline for
@@ -79,6 +80,8 @@ async def start_new_run(
             body["subgenre"] = subgenre
         if avoid_subgenres:
             body["avoid_subgenres"] = list(avoid_subgenres)
+        if duration_bucket is not None:
+            body["duration_bucket"] = duration_bucket
         cycle = _json(await p2.post("/ar/cycles", json=body), "POST /ar/cycles")
         cycle_id = str(cycle["cycle_id"])
         if int(cycle.get("selected_count") or 0) < 1:

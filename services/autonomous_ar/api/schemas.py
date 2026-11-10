@@ -42,6 +42,8 @@ class CycleCreateRequest(_Frozen):
     avoid_subgenres: list[str] = Field(default_factory=list)
     """Sub-styles the latest videos used (P3's record, which knows the sub-style P3 chose
     for an arm that names none); arms of them are skipped like P2's own recent picks."""
+    duration_bucket: str | None = Field(default=None, min_length=1)
+    """The owner's video length (a P3 bucket, e.g. ``90_120m``); none: P3's default."""
 
     @field_validator("as_of")
     @classmethod

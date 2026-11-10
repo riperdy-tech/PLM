@@ -463,3 +463,31 @@ def test_sub_styles_the_studio_names_as_recent_are_avoided_too() -> None:
             settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW)
         assert _picked_subgenre(result) == "deep_work_chillstep"
         assert ReasonCode.SUBGENRE_RECENTLY_USED.value in result.warnings
+
+
+def test_only_the_owners_length_choice_reaches_the_brief() -> None:
+    """Studio Start with a length (owner 2026-11-10): the brief carries it. An arm's own
+    bucket (from P1 title words) never does, so a run without a choice gets P3's default."""
+    long_arm = ContentArm(
+        arm_id="long-1",
+        dimensions=ArmDimensions(genre="focus_electronic", subgenre="minimal_pulse",
+                                 use_cases=("study_focus",), language=None,
+                                 vocal_mode="instrumental", duration_bucket="45_75m"),
+        p1_score=90.0, p1_confidence=0.7, component_scores=dict(FULL),
+        observation_count=5, source_count=2, as_of=NOW, score_version="p1-v1",
+        freshness_seconds=0.0)
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        chosen = run_allocation_cycle(
+            session, _request(slot_count=1, activation_state=AUTONOMOUS,
+                              duration_bucket="90_120m"),
+            settings=SETTINGS, market=_snapshot(long_arm), now=NOW)
+        assert chosen.directives[0].brief.duration_bucket == "90_120m"
+    with ar_session(create_ar_engine()) as session:
+        _seed_policy(session)
+        unchosen = run_allocation_cycle(
+            session, _request(slot_count=1, activation_state=AUTONOMOUS),
+            settings=SETTINGS, market=_snapshot(long_arm), now=NOW)
+        assert unchosen.directives[0].arm_id == "long-1"
+        assert unchosen.directives[0].brief.duration_bucket is None

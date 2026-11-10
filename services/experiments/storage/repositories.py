@@ -330,7 +330,35 @@ def recent_visual_worlds(session: Session, *, genre: str, limit: int = 3) -> tup
         .order_by(experiments_table.c.created_at.desc(), visual_specs_table.c.visual_spec_id)
         .limit(limit)
     ).scalars().all()
-    return tuple(str(row) for row in rows)
+    worlds = [str(row) for row in rows]
+    for world in recent_packaged_visual_worlds(session, limit=limit):
+        if world not in worlds:
+            worlds.append(world)
+    return tuple(worlds)
+
+
+def recent_packaged_visual_worlds(session: Session, *, limit: int = 3) -> tuple[str, ...]:
+    """The visual worlds P6 recorded for its latest ``limit`` ready or published packages,
+    newest first.
+
+    P6's upload variation check compares with its own last packages, which include videos
+    P3 never designed: a session compilation used blueprint_hall, and the next run, given
+    it again by P3, was refused (2026-11-09). P3 avoids these too, so the two checks
+    agree. A database without P6's tables (P3 deployed alone, unit tests) has none."""
+    if not sa.inspect(session.connection()).has_table("media_packages", schema="media"):
+        return ()
+    reports = session.execute(sa.text(
+        "select render_report_json from media.media_packages "
+        "where status in ('ready_for_publish', 'published') "
+        "and render_report_json like '%\"variation\"%' "
+        "order by created_at desc limit :limit"), {"limit": limit}).scalars().all()
+    worlds: list[str] = []
+    for report in reports:
+        variation = json.loads(report or "{}").get("variation")
+        world = variation.get("visual_world") if isinstance(variation, dict) else None
+        if isinstance(world, str) and world and world not in worlds:
+            worlds.append(world)
+    return tuple(worlds)
 
 
 def update_experiment_status(

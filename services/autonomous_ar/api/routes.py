@@ -84,6 +84,7 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
             unavailable_capabilities=tuple(payload.unavailable_capabilities),
             subgenre=payload.subgenre,
             avoid_subgenres=tuple(payload.avoid_subgenres),
+            duration_bucket=payload.duration_bucket,
         )
         snapshot = _resolve_snapshot(request, settings=settings, market_source=market_source)
         try:

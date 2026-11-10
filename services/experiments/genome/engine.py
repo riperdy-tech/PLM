@@ -183,6 +183,7 @@ class TemplateLibrary:
         self._inference = self._parse_inference(raw.get("brief_genre_inference"))
         self._buckets = self._parse_buckets(raw.get("playlist_duration_buckets", {}))
         self._policy = self._parse_policy(raw.get("playlist_duration_policy"))
+        self._allowed = self._parse_allowed(raw.get("playlist_duration_policy"))
         self._resolved: dict[str, GenreTemplate] = {}
         for name in sorted(self._templates):
             self._resolved[name] = self._build(name)
@@ -302,8 +303,8 @@ class TemplateLibrary:
             raise GenomeBuildError(
                 PLAYLIST_DURATION_OUTSIDE_POLICY,
                 f"duration_bucket {bucket!r} ({found.min_seconds}-{found.max_seconds} s) lies "
-                f"outside the playlist policy {self._policy.min_seconds}-"
-                f"{self._policy.max_seconds} s (ADR-0036)",
+                f"outside the playlist policy {self._allowed.min_seconds}-"
+                f"{self._allowed.max_seconds} s (ADR-0036)",
                 field_paths=["brief.duration_bucket"],
             )
         return found
@@ -321,8 +322,24 @@ class TemplateLibrary:
             return self._policy, f"duration_bucket_mapped:{bucket}->policy"
 
     def _inside_policy(self, declared: DurationRange) -> bool:
-        return (self._policy.min_seconds <= declared.min_seconds
-                and declared.max_seconds <= self._policy.max_seconds)
+        return (self._allowed.min_seconds <= declared.min_seconds
+                and declared.max_seconds <= self._allowed.max_seconds)
+
+    def _parse_allowed(self, raw: Any) -> DurationRange:
+        """The lengths a named bucket may have (``allowed_range``, owner 2026-11-10: the
+        owner picks the length at Start); without it, only the default bucket's range."""
+        allowed = raw.get("allowed_range") if isinstance(raw, Mapping) else None
+        if allowed is None:
+            return self._policy
+        try:
+            found = DurationRange.model_validate(allowed)
+        except ValueError as exc:
+            raise TemplateLibraryError(f"playlist_duration_policy.allowed_range: {exc}") from exc
+        if not (found.min_seconds <= self._policy.min_seconds
+                and self._policy.max_seconds <= found.max_seconds):
+            raise TemplateLibraryError(
+                "playlist_duration_policy.allowed_range must contain the default bucket")
+        return found
 
     def _parse_policy(self, raw: Any) -> DurationRange:
         if not isinstance(raw, Mapping) or not isinstance(raw.get("default_bucket"), str):

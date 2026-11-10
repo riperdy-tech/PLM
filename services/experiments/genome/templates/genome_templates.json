@@ -2,6 +2,8 @@
   "templates_version": "p3-genome-templates-v7",
   "playlist_duration_policy": {
     "default_bucket": "20_30m",
+    "allowed_range": {"min_seconds": 1200, "max_seconds": 7200, "target_seconds": 1500},
+    "allowed_basis": "Owner 2026-11-10 (Studio rebuild): the owner picks a video length at Start (20-30, 45-75 or 90-120 min); P2 puts only that choice in the brief, so a P1 arm's own bucket never sets the length. A brief without a choice gets the default bucket.",
     "basis": "Owner decision 2026-10-15 (ADR-0036), amended 2026-11-01 (ADR-0044 decision 3, revised 2026-11-01): a playlist video is 20-30 min, so a video needs about 6-9 tracks that the owner makes by hand on free Gemini credit. The default bucket's range is the policy range: a directive that names no duration_bucket gets it, and every template's and directive bucket's range must lie inside it (playlist_duration_outside_policy otherwise)."
   },
   "playlist_duration_buckets": {

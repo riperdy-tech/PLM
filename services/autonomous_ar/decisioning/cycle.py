@@ -68,6 +68,10 @@ class CycleRequest:
     avoid_subgenres: tuple[str, ...] = ()
     """Sub-styles the latest videos used per P3 (Studio Start, "let P2 pick"): avoided
     together with the sub-styles of P2's own latest picks."""
+    duration_bucket: str | None = None
+    """The owner's video length (Studio Start, 2026-11-10). It is the only length a brief
+    carries: an arm's own bucket (from P1 titles) never sets it, so a brief without the
+    owner's choice gets P3's default length."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +326,7 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         settings=settings,
         expires_at=request.as_of + timedelta(hours=policy.directive_ttl_hours),
         budget_share=share, cycle_budget=request.budget,
+        duration_bucket=request.duration_bucket,
     )
     # 13 — decision records: flagged ineligible arms, then every ranked arm
     for arm_id, reason in prepared.ineligible.items():
