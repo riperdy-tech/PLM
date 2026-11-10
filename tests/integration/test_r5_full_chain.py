@@ -572,8 +572,8 @@ def test_the_second_cycle_shifts_allocation_toward_the_rewarded_arm(chain: Chain
 
     Each run's learning step posts its own cycle at nearly the same instant, and P2 keeps
     an arm one of them selected out of the others for the policy's cooldown (1a5049d), so
-    the last learning cycle may not consider both arms. The cycle compared here is the
-    next one P2 would run once that cooldown has passed, from the same stored state."""
+    the last learning cycle may not consider both arms. The cycle compared here is a
+    SHADOW cycle once that cooldown has passed, from the same stored state."""
     api = Api(chain.token)
     last = max((r.outputs(Step.LEARN, PipelineState.LEARNING) for r in chain.runs),
                key=lambda o: o["as_of"])
@@ -581,12 +581,21 @@ def test_the_second_cycle_shifts_allocation_toward_the_rewarded_arm(chain: Chain
     learning = CONFIG.require_learning("r5-test")
     after_cooldown = datetime.fromisoformat(last["as_of"]) + timedelta(
         hours=DEFAULT_POLICY.fatigue.cooldown_hours + 1.0)
-    second_id = api.call("POST", Phase.AR, "/ar/cycles", json={
+    summary = api.call("POST", Phase.AR, "/ar/cycles", json={
         "brand_id": BRAND, "slot_count": learning.slot_count, "budget": learning.budget,
         "as_of": after_cooldown.isoformat(), "policy_version": learning.policy_version,
-        "activation_state": learning.activation_state,
-        "random_seed": int(uuid.uuid4().int % 2**31)})["cycle_id"]
+        # SHADOW: the same decisions with no production effect. An AUTONOMOUS cycle also
+        # sets aside arms whose sub-style a recent directive used (P2's sub-style memory),
+        # which would drop the future-garage arm for a reason unrelated to learning.
+        "activation_state": "SHADOW",
+        "random_seed": int(uuid.uuid4().int % 2**31)})
+    second_id = summary["cycle_id"]
     second = api.call("GET", Phase.AR, f"/ar/cycles/{second_id}/decisions")
+    strong_row = next((d for d in second if d["arm_id"] == chain.strong), None)
+    assert strong_row is not None, (summary, second)
+    assert strong_row["allocation_type"] == "exploit", strong_row  # measured now
+    assert strong_row["rank_after_constraints"] is not None, strong_row  # selected
+    assert any(d["arm_id"] == chain.weak for d in second), (summary, second)
     first_gap = _expected(chain.first_decisions, chain.strong) - _expected(
         chain.first_decisions, chain.weak)
     second_gap = _expected(second, chain.strong) - _expected(second, chain.weak)
@@ -594,9 +603,6 @@ def test_the_second_cycle_shifts_allocation_toward_the_rewarded_arm(chain: Chain
           f"{second_gap:.4f}; second-cycle ranks "
           f"{ {d['arm_id']: (d['allocation_type'], d['rank_before_constraints'], d['rank_after_constraints']) for d in second} }")
     assert second_gap > 0 and second_gap > first_gap, (first_gap, second_gap)
-    strong_row = next(d for d in second if d["arm_id"] == chain.strong)
-    assert strong_row["allocation_type"] == "exploit", strong_row  # measured now
-    assert strong_row["rank_after_constraints"] is not None, strong_row  # selected
     before = _draw_inputs(chain.engine, chain.first_cycle["cycle_id"])
     after = _draw_inputs(chain.engine, second_id)
     if {chain.strong, chain.weak} <= set(after):
