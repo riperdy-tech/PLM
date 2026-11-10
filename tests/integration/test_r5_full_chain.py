@@ -566,15 +566,27 @@ def _draw_inputs(engine: sa.Engine, cycle_id: str) -> dict[str, dict[str, Any]]:
 
 
 def test_the_second_cycle_shifts_allocation_toward_the_rewarded_arm(chain: Chain) -> None:
-    """The learning step's cycle (the last one, which consumed every reward) against the
-    first cycle: the posterior expected-reward gap moved toward the strong arm and the
-    probability that Thompson sampling ranks it first rose."""
+    """A cycle after every reward was consumed, against the first cycle: the posterior
+    expected-reward gap moved toward the strong arm and the probability that Thompson
+    sampling ranks it first rose.
+
+    Each run's learning step posts its own cycle at nearly the same instant, and P2 keeps
+    an arm one of them selected out of the others for the policy's cooldown (1a5049d), so
+    the last learning cycle may not consider both arms. The cycle compared here is the
+    next one P2 would run once that cooldown has passed, from the same stored state."""
     api = Api(chain.token)
     last = max((r.outputs(Step.LEARN, PipelineState.LEARNING) for r in chain.runs),
                key=lambda o: o["as_of"])
-    second_id = last["next_cycle"]["cycle_id"]
-    second = api.call("GET", Phase.AR, f"/ar/cycles/{second_id}/decisions")
     assert last["update"]["applied"] >= 0
+    learning = CONFIG.require_learning("r5-test")
+    after_cooldown = datetime.fromisoformat(last["as_of"]) + timedelta(
+        hours=DEFAULT_POLICY.cooldown_hours + 1.0)
+    second_id = api.call("POST", Phase.AR, "/ar/cycles", json={
+        "brand_id": BRAND, "slot_count": learning.slot_count, "budget": learning.budget,
+        "as_of": after_cooldown.isoformat(), "policy_version": learning.policy_version,
+        "activation_state": learning.activation_state,
+        "random_seed": int(uuid.uuid4().int % 2**31)})["cycle_id"]
+    second = api.call("GET", Phase.AR, f"/ar/cycles/{second_id}/decisions")
     first_gap = _expected(chain.first_decisions, chain.strong) - _expected(
         chain.first_decisions, chain.weak)
     second_gap = _expected(second, chain.strong) - _expected(second, chain.weak)
