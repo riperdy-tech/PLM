@@ -40,6 +40,7 @@ from typing import Any, Final
 from ..clock import Clock, SystemClock
 from ..dotenv import load_env_file
 from .actions import ActionRefused, ExceptionActions
+from .projects import FINISHED, explain_hold, number_runs, plain_log, state_label
 
 __all__ = ["APPROVAL_GRANT_HOURS", "OWNER", "Studio", "StudioPaths", "build_studio"]
 
@@ -120,6 +121,11 @@ class StudioPaths:
                    suno_inbox=None if suno is None else Path(suno))
 
 
+def _iso(value: Any) -> str:
+    return value.isoformat() if isinstance(value, datetime) else ("" if value is None
+                                                                  else str(value))
+
+
 def _refuse(status: int, code: str, message: str) -> ActionRefused:
     return ActionRefused(status, code, message)
 
@@ -138,6 +144,41 @@ def _image_suffix(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return ".webp"
     return None
+
+
+def wav_seconds(path: Path) -> float | None:
+    """The length of a PCM WAV from its header (``fmt`` byte rate, ``data`` size);
+    ``None`` when the file is not a readable WAV."""
+    import struct
+
+    try:
+        with path.open("rb") as f:
+            if f.read(12)[8:12] != b"WAVE":
+                return None
+            byte_rate = None
+            while True:
+                head = f.read(8)
+                if len(head) < 8:
+                    return None
+                chunk, size = head[:4], struct.unpack("<I", head[4:])[0]
+                if chunk == b"fmt ":
+                    fmt = f.read(size + (size & 1))
+                    byte_rate = struct.unpack("<I", fmt[8:12])[0]
+                    continue
+                if chunk == b"data":
+                    return None if not byte_rate else round(size / byte_rate, 1)
+                f.seek(size + (size & 1), 1)
+    except (OSError, struct.error):
+        return None
+
+
+_EXPECTED: Final = re.compile(r"^Length: about (\d+) seconds", re.MULTILINE)
+LENGTH_CHOICES: Final[dict[str, str]] = {
+    "20_30m": "20-30 minutes", "45_75m": "45-75 minutes", "90_120m": "90-120 minutes"}
+"""The video lengths the owner picks at Start (P3 buckets, owner 2026-11-10)."""
+RENDER_SECONDS_PER_VIDEO_SECOND: Final[float] = 0.25
+"""The still video's render time per second of video, measured 2026-11-09 at 1440p (a
+97-minute video took about 23 minutes on this host); the import's time estimate."""
 
 
 STYLE_LABELS: Final[dict[str, str]] = {
@@ -180,7 +221,7 @@ class Studio:
     """Stored bytes by ``(uri, checksum)``, verified."""
     import_art: Callable[[str, Path], dict[str, Any]]
     """P6's importer for one package's folder; raises on refusal."""
-    start: Callable[[str, str | None, tuple[str, ...]], Any] | None = None
+    start: Callable[[str, str | None, tuple[str, ...], str], Any] | None = None
     """Starts a new run (async) whose songs come from the named P4 provider
     (:data:`MUSIC_PROVIDERS`), of the owner's sub-style or P2's pick (``None``);
     ``None`` here: the Start button is refused."""
@@ -195,11 +236,18 @@ class Studio:
     """P6's reopen of one package for new art (``review_edits.reopen_art``)."""
     runs: Callable[[], list[dict[str, Any]]] | None = None
     """The pipeline's active runs (the production-queue view); ``None``: not shown."""
+    store: Any = None
+    """:class:`~.projects.ProjectStore`: every run and its record (``None``: no projects)."""
+    cancel: Callable[[str, str], Any] | None = None
+    """Sends a run the pipeline's cancel signal (async): ``(workflow_id, reason)``."""
     clock: Clock = field(default_factory=SystemClock)
     _video_cache: dict[str, bytes] = field(default_factory=dict)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
+    _imports: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Picture imports running or ended in this dashboard: package -> since, state,
+    expected seconds, error (the render takes minutes, so it runs on its own)."""
 
     # -- holds ------------------------------------------------------------------------------
 
@@ -249,6 +297,7 @@ class Studio:
             "notes": self.notes()[-20:],
             "start_available": self.start is not None,
             "styles": self.style_choices(),
+            "lengths": LENGTH_CHOICES,
         }
 
     def style_choices(self) -> dict[str, Any]:
@@ -310,9 +359,15 @@ class Studio:
                 "sheets": sheets}
 
     @staticmethod
-    def _sheets(source: str, inbox: Path) -> list[dict[str, Any]]:
+    def _sheets(source: str, inbox: Path, *, tracks: set[str] | None = None,
+                include_done: bool = False) -> list[dict[str, Any]]:
+        """The inbox's prompt sheets with a song still missing; ``include_done`` keeps the
+        finished ones too and ``tracks`` limits them to those tracks' sheets (a project
+        page shows its own songs, made or not)."""
         sheets = []
         for sheet in sorted(inbox.glob("*.prompts.txt")):
+            if tracks is not None and sheet.name.split(".")[0] not in tracks:
+                continue
             text = sheet.read_text(encoding="utf-8")
             blocks = text.split("--- Song ")
             header, songs = blocks[0].strip(), []
@@ -321,11 +376,15 @@ class Studio:
                 if match is None:
                     continue
                 stem = match.group(1)
+                wav = inbox / f"{stem}.wav"
+                expected = _EXPECTED.search(block)
                 songs.append({"stem": stem, "text": f"--- Song {block}".strip(),
-                              "saved": (inbox / f"{stem}.wav").is_file(),
+                              "saved": wav.is_file(),
+                              "seconds": wav_seconds(wav) if wav.is_file() else None,
+                              "expected_seconds": int(expected.group(1)) if expected else None,
                               "lyrics_needed": "Instrumental: no" in block,
                               "lyrics_saved": (inbox / f"{stem}.lyrics.txt").is_file()})
-            if songs and not all(s["saved"] for s in songs):
+            if songs and (include_done or not all(s["saved"] for s in songs)):
                 sheets.append({"sheet": sheet.name, "source": source, "inbox": str(inbox),
                                "header": header, "songs": songs})
         return sheets
@@ -338,8 +397,19 @@ class Studio:
             raise _refuse(404, "song_not_awaited", f"no waiting prompt sheet names {stem}.wav")
         if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
             raise _refuse(422, "not_a_wav", "the file is not a WAV (download it as WAV)")
-        _write_atomic(wanted[stem] / f"{stem}.wav", data)
-        return {"saved": f"{stem}.wav", "bytes": len(data)}
+        target = wanted[stem] / f"{stem}.wav"
+        _write_atomic(target, data)
+        return {"saved": f"{stem}.wav", "bytes": len(data), "seconds": wav_seconds(target)}
+
+    def song_file(self, stem: str) -> Path:
+        """A saved song, to play in the Studio."""
+        if _STEM.match(stem) is None:
+            raise _refuse(404, "song_unknown", f"{stem!r} is not a song name")
+        for _, inbox in self.paths.music_inboxes():
+            path = inbox / f"{stem}.wav"
+            if path.is_file():
+                return path
+        raise _refuse(404, "song_not_saved", f"{stem}.wav is not saved")
 
     async def songs_done(self) -> list[dict[str, Any]]:
         """Resume every run waiting for songs; P4 then checks every file again."""
@@ -531,34 +601,57 @@ class Studio:
     def remakes(self) -> dict[str, dict[str, Any]]:
         return {k: dict(v) for k, v in self._remakes.items() if v["state"] != "done"}
 
-    async def import_thumbnails(self, package_id: str) -> dict[str, Any]:
-        """P6's import (checks, still video, release), then resume the run waiting on it."""
+    async def import_thumbnails(self, package_id: str, *, wait: bool = False) -> dict[str, Any]:
+        """P6's import (checks, still video, release), then resume the run waiting on it.
+
+        The still video takes minutes (about a quarter of the video's length), so the
+        import runs on its own: closing or refreshing the page cannot lose it, and the
+        project page shows it with its time estimate until it is done or failed.
+        ``wait``: return when it is done (tests, scripts)."""
         folder = self._art_folder(package_id)
-        cases = [c for c in self._cases(ART_REASON)
-                 if package_id in self._package_ids(c)]
+        if (self._imports.get(package_id) or {}).get("state") == "running":
+            raise _refuse(409, "import_running", f"{package_id} is already being imported")
+        cases = [c for c in self._cases(ART_REASON) if package_id in self._package_ids(c)]
         in_review = [c for c in self._cases(APPROVAL_REASON)
                      if package_id in self._package_ids(c)]
-        if not cases and in_review:
-            # Reopened at the review (its remake was interrupted): import it again; the
-            # run is still held for approval, so nothing is resumed.
-            released = await asyncio.to_thread(self.import_art, package_id, folder)
-            return {"package": released, "resumed": [], "waiting_for": []}
-        if not cases:
+        if not cases and not in_review:
             raise _refuse(409, "thumbnail_hold_not_found",
                           f"no active thumbnail hold names {package_id}")
-        released = await asyncio.to_thread(self.import_art, package_id, folder)
-        resumed: list[dict[str, Any]] = []
-        waiting: set[str] = set()
-        for case in cases:
-            not_ready = [p for p in self._package_ids(case)
-                         if self.package(p).get("status") != "ready_for_publish"]
-            if not_ready:
-                waiting.update(not_ready)
-                continue
-            resumed.append(await self._resume(
-                case["case_id"], "production_owner",
-                {"thumbnail_art_inbox_ref": f"{folder} (imported in the Studio)"},
-                f"thumbnail art for {package_id} imported in the Studio"))
+        try:
+            seconds = float(self.package(package_id).get("video_duration_seconds") or 0)
+        except Exception:  # noqa: BLE001 - the estimate is only shown, never relied on
+            seconds = 0.0
+        self._imports[package_id] = {
+            "since": self.clock.now().isoformat(), "state": "running", "error": None,
+            "expected_seconds": round(seconds * RENDER_SECONDS_PER_VIDEO_SECOND) + 60}
+        if wait:
+            return await self._import_and_resume(package_id, folder, cases)
+        task = asyncio.create_task(self._import_and_resume(package_id, folder, cases))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return {"importing": package_id, **self._imports[package_id]}
+
+    async def _import_and_resume(self, package_id: str, folder: Path,
+                                 cases: list[dict[str, Any]]) -> dict[str, Any]:
+        try:
+            released = await asyncio.to_thread(self.import_art, package_id, folder)
+            resumed: list[dict[str, Any]] = []
+            waiting: set[str] = set()
+            for case in cases:  # none: reopened at the review, still held for approval
+                not_ready = [p for p in self._package_ids(case)
+                             if self.package(p).get("status") != "ready_for_publish"]
+                if not_ready:
+                    waiting.update(not_ready)
+                    continue
+                resumed.append(await self._resume(
+                    case["case_id"], "production_owner",
+                    {"thumbnail_art_inbox_ref": f"{folder} (imported in the Studio)"},
+                    f"thumbnail art for {package_id} imported in the Studio"))
+        except Exception as exc:
+            message = exc.error.message if isinstance(exc, ActionRefused) else str(exc)
+            self._imports[package_id].update(state="failed", error=message)
+            raise
+        self._imports[package_id].update(state="done")
         return {"package": released, "resumed": resumed, "waiting_for": sorted(waiting)}
 
     # -- review and approval ----------------------------------------------------------------
@@ -744,12 +837,205 @@ class Studio:
         return await self.actions.reject(case_id, actor=OWNER, role="production_owner",
                                          notes="rejected in the Studio")
 
-    async def start_run(self, music: str, subgenre: str | None = None) -> Any:
+    # -- projects: every run, numbered, with every step kept ----------------------------------
+
+    def _owner_roles(self) -> set[str]:
+        reviewers = getattr(self.actions, "reviewers", None)
+        return set(reviewers.roles_of(OWNER)) if reviewers is not None else set()
+
+    def _holds_by_run(self) -> dict[str, dict[str, Any]]:
+        return {str((c.get("pipeline") or {}).get("workflow_id")): c
+                for c in self._live_holds()}
+
+    def projects(self) -> list[dict[str, Any]]:
+        """Every project, newest first, with what its list row shows."""
+        if self.store is None:
+            return []
+        holds, roles = self._holds_by_run(), self._owner_roles()
+        listed = []
+        for run in number_runs(self.store.runs()):
+            hold = holds.get(run["workflow_id"]) if run["state"] == "HELD" else None
+            explained = None if hold is None else explain_hold(hold, owner_roles=roles)
+            yours = bool(explained and explained["your_turn"])
+            listed.append({
+                "number": run["number"], "workflow_id": run["workflow_id"],
+                "title": run.get("title"), "style": run.get("style"),
+                "style_label": STYLE_LABELS.get(str(run.get("style")), run.get("style")),
+                "length": run.get("length"), "duration_seconds": run.get("duration_seconds"),
+                "state": run["state"],
+                "label": state_label(run["state"], None if hold is None
+                                     else hold.get("reason_code")),
+                "your_turn": yours,
+                "problem": (run["state"] == "HELD" and not yours) or run["state"] == "FAILED",
+                "finished": run["state"] in FINISHED,
+                "started": _iso(run["created_at"]), "updated": _iso(run["updated_at"]),
+                "youtube": run.get("youtube"),
+                "working": self._busy(run.get("media_package_id")),
+            })
+        return listed[::-1]
+
+    def _busy(self, package: Any) -> dict[str, Any] | None:
+        """Work this dashboard runs for the package now (a picture import or remake)."""
+        if not package:
+            return None
+        for kind, table in (("import", self._imports), ("remake", self._remakes)):
+            job = table.get(str(package))
+            if job and job.get("state") in ("running", "failed"):
+                return {"kind": kind, "media_package_id": package, **job}
+        return None
+
+    def _run_of(self, number: int) -> dict[str, Any]:
+        if self.store is None:
+            raise _refuse(503, "projects_unavailable", "the project store is not configured")
+        for run in number_runs(self.store.runs()):
+            if run["number"] == number:
+                return run
+        raise _refuse(404, "project_unknown", f"there is no project #{number}")
+
+    def project(self, number: int) -> dict[str, Any]:
+        """One project's page: its status and stop, its log, and every step's content
+        (songs, pictures, video, upload), whether done or still to do."""
+        run = self._run_of(number)
+        hold = self._holds_by_run().get(run["workflow_id"]) if run["state"] == "HELD" else None
+        explained = None if hold is None else explain_hold(hold, owner_roles=self._owner_roles())
+        reason = None if hold is None else hold.get("reason_code")
+        experiment = run.get("experiment_id")
+        tracks = set(self.store.track_ids(experiment)) if experiment else set()
+        sheets: list[dict[str, Any]] = []
+        for source, inbox in self.paths.music_inboxes():
+            sheets += self._sheets(source, inbox, tracks=tracks, include_done=True)
+        packages = self.store.packages(experiment) if experiment else []
+        art = [self._project_art(str(p["media_package_id"]), str(p["status"]))
+               for p in packages]
+        latest = packages[0]["media_package_id"] if packages else None
+        video = self._project_video(str(latest)) if latest else None
+        return {
+            "number": number, "workflow_id": run["workflow_id"], "title": run.get("title"),
+            "style": run.get("style"),
+            "style_label": STYLE_LABELS.get(str(run.get("style")), run.get("style")),
+            "length": run.get("length"), "visual_world": run.get("visual_world"),
+            "state": run["state"], "label": state_label(run["state"], reason),
+            "started": _iso(run["created_at"]), "updated": _iso(run["updated_at"]),
+            "finished": run["state"] in FINISHED,
+            "hold": explained,
+            "log": plain_log(self.store.transitions(run["workflow_id"])),
+            "songs": {"sheets": sheets, "waiting": reason == SONGS_REASON},
+            "art": art, "art_waiting": reason == ART_REASON,
+            "video": video,
+            "review": self.review(hold) if reason == APPROVAL_REASON and hold else None,
+            "can_replace_songs": reason in (ART_REASON, APPROVAL_REASON) and bool(video),
+            "youtube": run.get("youtube"),
+            "working": self._busy(latest),
+            "notes": [n for n in self.notes() if n.get("workflow_id") == run["workflow_id"]],
+        }
+
+    def _project_art(self, package_id: str, status: str) -> dict[str, Any]:
+        inbox = self.paths.art_inbox
+        folder = None if inbox is None else inbox / package_id
+        variants: list[dict[str, Any]] = []
+        if folder is not None and (folder / "job.json").is_file():
+            job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+            for variant, letter in zip(job.get("variants") or [], _LETTERS, strict=False):
+                saved = sorted(p.name for p in folder.iterdir()
+                               if p.stem.upper() == letter and p.suffix.lower() in _ART_SUFFIXES)
+                variants.append({"letter": letter, "style_id": variant.get("style_id"),
+                                 "text": variant.get("text"), "prompt": variant.get("prompt"),
+                                 "saved": saved})
+        return {"media_package_id": package_id, "status": status, "variants": variants,
+                "import": self._imports.get(package_id), "remake": self._remakes.get(package_id),
+                "reuse_from": self._reuse_candidates(package_id) if variants else []}
+
+    def _project_video(self, package_id: str) -> dict[str, Any] | None:
+        try:
+            pkg = self.package(package_id)
+        except Exception as exc:  # noqa: BLE001 - shown, not hidden
+            return {"media_package_id": package_id, "error": str(exc)}
+        meta = (pkg.get("metadata_candidates") or [{}])[0]
+        return {"media_package_id": package_id, "status": pkg.get("status"),
+                "title": meta.get("title"), "description": meta.get("description"),
+                "duration_seconds": pkg.get("video_duration_seconds"),
+                "has_video": pkg.get("status") in ("ready_for_publish", "published"),
+                "thumbnails": [t.get("id") for t in pkg.get("thumbnails") or []],
+                "tracks": [{"song_id": c.get("song_id"), "title": c.get("title"),
+                            "start": c.get("timestamp_str")}
+                           for c in pkg.get("chapters") or []],
+                "sounds_like": _sounds_like(pkg)}
+
+    async def cancel_project(self, number: int, reason: str = "") -> dict[str, Any]:
+        """Stop a project for good (the run is cancelled; nothing more is made or sent)."""
+        run = self._run_of(number)
+        if run["state"] in FINISHED:
+            raise _refuse(409, "project_finished", f"project #{number} has already ended")
+        if self.cancel is None:
+            raise _refuse(503, "cancel_not_configured", "cancelling runs is not configured")
+        why = reason.strip() or "cancelled in the Studio"
+        await self.cancel(run["workflow_id"], why)
+        self._add_note("cancel", why, workflow_id=run["workflow_id"])
+        return {"cancelled": number, "workflow_id": run["workflow_id"]}
+
+    async def retry_hold(self, case_id: str) -> dict[str, Any]:
+        """Continue past a stop the owner has read (a refused step, short supply, the
+        spending guard): the evidence the hold names is the Studio's record that the owner
+        saw the reason and chose to try again. The exception queue still decides."""
+        case = next((c for c in self._live_holds() if c.get("case_id") == case_id), None)
+        if case is None:
+            raise _refuse(404, "hold_not_open", f"{case_id} is not an open stop")
+        explained = explain_hold(case, owner_roles=self._owner_roles())
+        if explained["action"] != "retry":
+            raise _refuse(409, "not_retryable", f"{case_id} is answered on its own step")
+        if not explained["owner_may_act"]:
+            raise _refuse(403, "owner_lacks_role", str(explained["blocked_because"]))
+        said = (f"Studio: the owner read the stop ({explained['detail'][:300]}) and chose to "
+                f"try again at {self.clock.now().isoformat()}")
+        evidence = {str(key): said for key in case.get("required_evidence") or []}
+        return await self._resume(case_id, str(case.get("reviewer_role")), evidence,
+                                  "try again from the Studio")
+
+    async def replace_project_songs(self, number: int, song_ids: list[str],
+                                    note: str) -> dict[str, Any]:
+        """Take songs out at the thumbnail step or the review: the run goes back to make as
+        many new ones (the songs step), then builds the video again."""
+        run = self._run_of(number)
+        hold = self._holds_by_run().get(run["workflow_id"])
+        reason = None if hold is None else hold.get("reason_code")
+        if hold is None or reason not in (ART_REASON, APPROVAL_REASON):
+            raise _refuse(409, "songs_not_replaceable",
+                          "songs can be replaced while the project waits for its pictures "
+                          "or for your approval")
+        if reason == APPROVAL_REASON:
+            return await self.replace_songs(str(hold["case_id"]), song_ids, note)
+        package_id = next(iter(self._package_ids(hold)), None)
+        members: set[str] = set()
+        if package_id:
+            members = {str(c.get("song_id")) for c in
+                       self.package(package_id).get("chapters") or []}
+        chosen = sorted({str(x) for x in song_ids})
+        unknown = [x for x in chosen if x not in members]
+        if not chosen or unknown:
+            raise _refuse(422, "song_not_in_package",
+                          f"choose songs of this video (unknown: {', '.join(unknown)})")
+        note = note.strip() or "replace these songs (no note)"
+        entry = self._add_note("replace_song", note, case_id=hold["case_id"],
+                               workflow_id=run["workflow_id"], song_ids=chosen,
+                               media_package_id=package_id)
+        answer = await self._resume(
+            str(hold["case_id"]), str(hold.get("reviewer_role") or "production_owner"),
+            {str(key): f"Studio: the owner replaced {', '.join(chosen)} at the thumbnail step"
+             for key in hold.get("required_evidence") or []},
+            f"replace song(s) {', '.join(chosen)}: {note}",
+            rewind_to="assemble", exclude_candidates=tuple(chosen))
+        return {**answer, "note": entry}
+
+    async def start_run(self, music: str, subgenre: str | None = None,
+                        length: str = "20_30m") -> Any:
         """Start a run whose song prompts are for ``music`` (``suno`` or ``flow_music``);
         its inbox must be configured, or nobody could hand the songs in. ``subgenre`` is
         the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick."""
         if self.start is None:
             raise _refuse(503, "start_not_configured", "starting runs is not configured")
+        if length not in LENGTH_CHOICES:
+            raise _refuse(422, "length_unknown",
+                          f"choose one of {', '.join(LENGTH_CHOICES)}, not {length!r}")
         if music not in MUSIC_PROVIDERS:
             raise _refuse(422, "music_tool_unknown",
                           f"choose one of {sorted(MUSIC_PROVIDERS)}, not {music!r}")
@@ -772,7 +1058,7 @@ class Studio:
                 if name and name not in seen:
                     seen.append(name)
             avoid = tuple(seen[:STYLE_MEMORY])
-        return await self.start(MUSIC_PROVIDERS[music], subgenre, avoid)
+        return await self.start(MUSIC_PROVIDERS[music], subgenre, avoid, length)
 
 
 def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
@@ -865,12 +1151,18 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
 
         return _p6(reopen_art, package_id)
 
-    start = None
+    start = cancel = None
+    store = None
+    if platform is not None:
+        from ..db import build_engine as _engine
+        from .projects import ProjectStore
+
+        store = ProjectStore(_engine(platform))
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
 
         async def start(music_provider: str, subgenre: str | None,
-                        avoid: tuple[str, ...]) -> dict[str, Any]:
+                        avoid: tuple[str, ...], length: str) -> dict[str, Any]:
             from dataclasses import asdict
 
             from ..pipeline.config import load_pipeline_config
@@ -888,11 +1180,20 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
                     await connect_client(platform), ar_url=urls[Phase.AR], token=token,
                     brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now(),
                     options=PipelineOptions(music_provider=music_provider),
-                    subgenre=subgenre, avoid_subgenres=avoid)
+                    subgenre=subgenre, avoid_subgenres=avoid, duration_bucket=length)
             except RunNotStarted as exc:
                 raise _refuse(409, exc.code, str(exc)) from exc
             return {**asdict(started), "music_provider": music_provider,
-                    "subgenre": subgenre, "avoided": list(avoid)}
+                    "subgenre": subgenre, "avoided": list(avoid), "length": length}
+
+        async def cancel(workflow_id: str, reason: str) -> None:
+            from ..pipeline.types import CancelSignal
+            from ..pipeline.workflow import PipelineWorkflow
+            from ..temporal import connect_client
+
+            client = await connect_client(platform)
+            await client.get_workflow_handle(workflow_id).signal(
+                PipelineWorkflow.cancel, CancelSignal(actor=OWNER, reason=reason))
 
     def styles() -> dict[str, Any]:
         if platform is None:
@@ -930,5 +1231,5 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media, runs=runs,
                   import_art=import_art, start=start, styles=styles, edit=edit,
-                  reopen=reopen,
+                  reopen=reopen, store=store, cancel=cancel,
                   clock=clock or SystemClock())

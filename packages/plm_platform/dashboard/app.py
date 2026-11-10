@@ -148,6 +148,8 @@ class StudioStartBody(BaseModel):
     subgenre: str | None = Field(
         default=None, description="the owner's sub-style; none: P2 picks (and avoids the "
                                   "sub-styles of the last picks)")
+    length: str = Field(default="20_30m",
+                        description="the video length: 20_30m, 45_75m or 90_120m")
 
 
 def _http(refused: ActionRefused) -> HTTPException:
@@ -291,6 +293,10 @@ class ReuseArtBody(BaseModel):
     from_package_id: str
 
 
+class CancelBody(BaseModel):
+    reason: str = ""
+
+
 def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     """The Studio (``dashboard.studio``): reads are open like the views, every write
     needs the service token."""
@@ -312,10 +318,45 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
         return {"data_source": LIVE_DATA_SOURCE,
                 **await asyncio.to_thread(guarded, studio.overview)}
 
+    @app.get("/api/studio/projects")
+    async def studio_projects() -> dict[str, Any]:
+        """Every project, newest first, and what the dashboard is working on."""
+        return {"data_source": LIVE_DATA_SOURCE,
+                "projects": await asyncio.to_thread(guarded, studio.projects)}
+
+    @app.get("/api/studio/projects/{number}")
+    async def studio_project(number: int) -> dict[str, Any]:
+        return {"data_source": LIVE_DATA_SOURCE,
+                **await asyncio.to_thread(guarded, lambda: studio.project(number))}
+
+    @app.post("/api/studio/projects/{number}/cancel", dependencies=[Depends(require_token)])
+    async def studio_cancel(number: int, body: CancelBody) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(
+            lambda: studio.cancel_project(number, body.reason))
+        return result
+
+    @app.post("/api/studio/projects/{number}/replace-songs",
+              dependencies=[Depends(require_token)])
+    async def studio_project_songs(number: int, body: ReplaceSongsBody) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(
+            lambda: studio.replace_project_songs(number, body.song_ids, body.note))
+        return result
+
+    @app.post("/api/studio/holds/{case_id}/retry", dependencies=[Depends(require_token)])
+    async def studio_retry(case_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = await guarded_async(lambda: studio.retry_hold(case_id))
+        return result
+
+    @app.get("/api/studio/songs/{stem}/audio")
+    async def studio_song_audio(stem: str, request: Request) -> Response:
+        path = guarded(lambda: studio.song_file(stem))
+        data = await asyncio.to_thread(path.read_bytes)
+        return _range(request, data, "audio/wav")
+
     @app.post("/api/studio/start", dependencies=[Depends(require_token)])
     async def studio_start(body: StudioStartBody) -> dict[str, Any]:
         return {"started": await guarded_async(
-            lambda: studio.start_run(body.music, body.subgenre))}
+            lambda: studio.start_run(body.music, body.subgenre, body.length))}
 
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:

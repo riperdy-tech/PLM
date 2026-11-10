@@ -142,7 +142,7 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
     assert [p.suffix for p in (folder / "replaced").iterdir()] == [".jpg"]  # kept, not deleted
     assert studio.art_file(PKG, "A") == (PNG, "image/png")
 
-    result = asyncio.run(studio.import_thumbnails(PKG))
+    result = asyncio.run(studio.import_thumbnails(PKG, wait=True))
     assert imported == [PKG] and result["package"]["status"] == "ready_for_publish"
     (call,) = actions.calls
     assert call[1] == "c2" and "thumbnail_art_inbox_ref" in call[2]
@@ -177,10 +177,10 @@ def test_thumbnail_import_waits_for_all_packages_in_the_same_hold(
     (other_folder / "job.json").write_text(
         (tmp_path / "art" / PKG / "job.json").read_text(encoding="utf-8"),
         encoding="utf-8")
-    first = asyncio.run(studio.import_thumbnails(PKG))
+    first = asyncio.run(studio.import_thumbnails(PKG, wait=True))
     assert first["resumed"] == [] and first["waiting_for"] == [other]
     assert actions.calls == []
-    second = asyncio.run(studio.import_thumbnails(other))
+    second = asyncio.run(studio.import_thumbnails(other, wait=True))
     assert second["waiting_for"] == []
     assert [call[1] for call in actions.calls] == ["joint"]
 
@@ -318,7 +318,7 @@ def test_start_asks_for_suno_or_flow_music_and_shows_both_inboxes(tmp_path: Path
     started: list[str] = []
 
     async def start(provider: str, subgenre: str | None,
-                    avoid: tuple[str, ...]) -> dict[str, Any]:
+                    avoid: tuple[str, ...], length: str = "20_30m") -> dict[str, Any]:
         started.append(provider)
         return {"workflow_id": "pipeline.d", "music_provider": provider}
 
@@ -471,7 +471,7 @@ def test_a_failed_remake_is_shown_and_can_be_imported_again_from_step_2(
     # Step 2's Import works for a package reopened at the review (no art hold).
     studio.import_art = lambda pid, art_folder: {"media_package_id": pid,
                                                  "status": "ready_for_publish"}
-    result = asyncio.run(studio.import_thumbnails(PKG))
+    result = asyncio.run(studio.import_thumbnails(PKG, wait=True))
     assert result["package"]["status"] == "ready_for_publish" and actions.calls == []
 
 
@@ -482,7 +482,7 @@ def test_start_offers_the_styles_p2_can_pick_and_passes_the_owner_choice(
     calls: list[tuple[str, str | None, tuple[str, ...]]] = []
 
     async def start(provider: str, subgenre: str | None,
-                    avoid: tuple[str, ...]) -> dict[str, Any]:
+                    avoid: tuple[str, ...], length: str = "20_30m") -> dict[str, Any]:
         calls.append((provider, subgenre, avoid))
         return {"workflow_id": "pipeline.d"}
 
