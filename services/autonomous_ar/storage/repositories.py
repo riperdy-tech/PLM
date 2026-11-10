@@ -949,7 +949,7 @@ def recent_directive_subgenres(session: Session, *, brand_id: str, limit: int,
     after ``now`` (a test run against a shared database with a fixed clock) is not a
     recent pick."""
     rows = session.execute(
-        sa.select(ar_production_directive.c.brief_json)
+        sa.select(ar_production_directive.c.id, ar_production_directive.c.brief_json)
         .join(ar_allocation_decision,
               ar_allocation_decision.c.id == ar_production_directive.c.decision_id)
         .join(ar_allocation_cycle, ar_allocation_cycle.c.id == ar_allocation_decision.c.cycle_id)
@@ -958,9 +958,27 @@ def recent_directive_subgenres(session: Session, *, brand_id: str, limit: int,
                ar_production_directive.c.created_at <= now)
         .order_by(ar_production_directive.c.created_at.desc())
         .limit(limit)
-    ).scalars().all()
+    ).all()
+    chosen = _p3_chosen_subgenres(session, [str(r[0]) for r in rows])
     found: list[str | None] = []
-    for brief in rows:
+    for directive_id, brief in rows:
         value = brief.get("subgenre") if isinstance(brief, dict) else None
+        value = value or chosen.get(str(directive_id))
         found.append(str(value) if value else None)
     return found
+
+
+def _p3_chosen_subgenres(session: Session, directive_ids: list[str]) -> dict[str, str]:
+    """The sub-style P3 designed each directive's video in (P3's experiment genome). An
+    arm that names no sub-style leaves the brief empty and P3 picks one; without this, P2's
+    memory of recent styles missed those videos (2026-11-09). A database without P3's
+    tables (P2 deployed alone, unit tests) has none."""
+    if not directive_ids or not sa.inspect(session.connection()).has_table(
+            "experiments", schema="experiments"):
+        return {}
+    rows = session.execute(sa.text(
+        "select e.production_directive_id, g.subgenre from experiments.experiments e "
+        "join experiments.content_genomes g on g.fingerprint = e.base_genome_fingerprint "
+        "where e.production_directive_id in :ids and g.subgenre is not null"
+    ).bindparams(sa.bindparam("ids", expanding=True)), {"ids": directive_ids}).all()
+    return {str(r[0]): str(r[1]) for r in rows}

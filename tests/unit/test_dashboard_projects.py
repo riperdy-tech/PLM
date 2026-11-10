@@ -233,3 +233,31 @@ def test_start_takes_a_length_choice(tmp_path: Path) -> None:
     assert seen == ["90_120m"]
     with pytest.raises(ActionRefused, match="length_unknown"):
         asyncio.run(studio.start_run("suno", None, "5_10m"))
+
+
+def test_start_previews_how_many_songs_each_length_asks_for() -> None:
+    """From P3's own plan: 3.5-minute songs, enough for the minimum, plus 25% spares
+    (20-30 min asked for 8 songs on 2026-11-09)."""
+    from plm_platform.dashboard.studio import song_counts
+
+    assert {b: c["songs"] for b, c in song_counts().items()} == {
+        "20_30m": 8, "45_75m": 17, "90_120m": 33}
+    assert {c["song_seconds"] for c in song_counts().values()} == {210}
+
+
+def test_youtube_counters_are_cached_and_a_failure_keeps_the_page(tmp_path: Path) -> None:
+    studio, _ = _project_studio(tmp_path, [])
+    calls: list[list[str]] = []
+
+    def stats(ids: list[str]) -> dict[str, dict[str, int]]:
+        calls.append(ids)
+        if len(calls) > 1:
+            raise RuntimeError("quota")
+        return {"yt1": {"views": 12, "likes": 1}}
+
+    studio.video_stats = stats
+    assert studio._stats(["yt1"]) == {"yt1": {"views": 12, "likes": 1}}
+    assert studio._stats(["yt1"]) == {"yt1": {"views": 12, "likes": 1}}  # cached
+    assert len(calls) == 1
+    studio._stats_cache = None
+    assert studio._stats(["yt1"]) == {}  # YouTube failed: no numbers, no error

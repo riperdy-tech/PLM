@@ -553,6 +553,13 @@ function lengthLabel(range) { return range ? `${Math.round(range[0] / 60)}-${Mat
 function when(iso) { return iso ? new Date(iso).toLocaleString() : 'unknown'; }
 function clock(iso) { return iso ? new Date(iso).toLocaleTimeString() : ''; }
 
+function statsText(y) {
+  const st = y && y.stats;
+  if (!st) return '';
+  return [`${(st.views ?? 0).toLocaleString()} views`, st.likes !== undefined ? `${st.likes} likes` : null,
+    st.comments !== undefined ? `${st.comments} comments` : null].filter(Boolean).join(' · ');
+}
+
 function statusBadge(p) {
   if (p.your_turn) return h('span', { class: 'badge badge-review' }, 'your turn');
   if (p.problem) return h('span', { class: 'badge badge-hard' }, 'stopped');
@@ -580,6 +587,16 @@ function startCard(s) {
     Object.entries(s.lengths || { '20_30m': '20-30 minutes' }).map(([id, label]) => h('option', { value: id }, label)));
   lengthSelect.value = keepLength in (s.lengths || {}) ? keepLength : '20_30m';
   const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
+  // What the length asks of the owner, from P3's own plan (/api/studio/start-options).
+  const preview = h('p', { class: 'muted' });
+  const showPreview = () => {
+    const plan = (s.song_counts || {})[lengthSelect.value];
+    preview.textContent = plan
+      ? `${plan.songs} song prompts of about ${minutes(plan.song_seconds)} each, for a ${lengthSelect.selectedOptions[0].textContent} video. If QA rejects some or they run short, the Studio asks for more.`
+      : '';
+  };
+  lengthSelect.addEventListener('change', showPreview);
+  showPreview();
   const start = (label, music) => actionButton(`Start with ${label} prompts`, 'btn-ok big',
     () => authedSend('/api/studio/start', 'POST', JSON.stringify({
       music, subgenre: styleSelect.value || null, length: lengthSelect.value }), 'application/json'),
@@ -588,6 +605,7 @@ function startCard(s) {
   return h('section', { class: 'step' },
     h('h2', {}, 'Start a new video'),
     h('div', { class: 'row-actions' }, h('strong', {}, 'Style'), styleSelect, h('strong', {}, 'Length'), lengthSelect),
+    preview,
     h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
     styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null,
     h('div', { class: 'row-actions' }, start('Suno', 'suno'), start('Flow Music', 'flow_music')));
@@ -608,7 +626,8 @@ function projectRow(p) {
       h('span', { class: 'muted' }, ` ${p.style_label || ''} · ${lengthLabel(p.length)} · started ${when(p.started)}`),
       h('span', { class: 'project-label' }, p.label),
       p.working ? h('span', { class: 'notice' }, p.working.state === 'failed' ? ` picture ${p.working.kind} failed` : ` building the video now`) : null),
-    h('span', {}, statusBadge(p), p.youtube ? h('span', { class: 'muted' }, ' YouTube ✓') : null));
+    h('span', {}, statusBadge(p), p.youtube ? h('a', { class: 'muted', href: p.youtube.url, target: '_blank', rel: 'noopener',
+      onclick: (e) => e.stopPropagation() }, ` YouTube ${statsText(p.youtube) || '✓'}`) : null));
 }
 
 function listPage(data) {
@@ -736,8 +755,10 @@ function songsSection(p) {
   const sheets = p.songs.sheets || [];
   const all = sheets.flatMap((s) => s.songs);
   const missing = all.filter((s) => !s.saved).length;
+  const madeSeconds = all.reduce((t, s) => t + (s.saved && s.seconds ? s.seconds : 0), 0);
+  const target = p.length ? ` of ${Math.round(p.length[0] / 60)}-${Math.round(p.length[1] / 60)} min needed` : '';
   const card = h('section', { class: `step ${p.songs.waiting ? 'waiting' : ''}` },
-    h('div', { class: 'step-head' }, h('h2', {}, `1. Songs (${all.length - missing} of ${all.length} saved)`),
+    h('div', { class: 'step-head' }, h('h2', {}, `1. Songs (${all.length - missing} of ${all.length} saved, ${Math.round(madeSeconds / 60)} min${target})`),
       p.songs.waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, missing ? 'not asked yet' : 'done')));
   if (!sheets.length) { card.append(h('p', { class: 'muted' }, 'No song prompts yet.')); return card; }
   if (p.songs.waiting && missing) card.append(batchUpload(all));
@@ -769,6 +790,7 @@ function picturesSection(p) {
       p.art_waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, (p.art || []).length ? 'done' : 'not asked yet')));
   if (!(p.art || []).length) { card.append(h('p', { class: 'muted' }, 'The pictures are asked for once the playlist is built.')); return card; }
   card.append(h('p', { class: 'muted' }, 'Make each picture in Nano Banana Pro (16:9, full size). Picture A is also the picture of the whole video.'));
+  if (p.review) card.append(h('p', { class: 'notice' }, 'To change the pictures now: step 3, Request changes, Pictures. The video is made again from the new picture A, before anything is uploaded.'));
   for (const [i, job] of p.art.entries()) {
     const current = i === 0;
     const box = h('details', { class: 'variant', open: current, 'data-key': `art:${job.media_package_id}` },
@@ -843,6 +865,7 @@ function youtubeSection(p) {
   return h('section', { class: 'step' }, h('div', { class: 'step-head' }, h('h2', {}, '4. On YouTube'),
     h('span', { class: 'badge' }, y ? (y.privacy || 'uploaded') : 'not uploaded')),
     y ? h('div', {}, h('p', {}, h('a', { href: y.url, target: '_blank', rel: 'noopener' }, y.url), h('span', { class: 'muted' }, ` ${y.privacy || ''}, ${when(y.published_at)}`)),
+      y.stats ? h('p', { class: 'kpi-line' }, statsText(y), h('span', { class: 'muted' }, ' (from YouTube, refreshed every 10 min)')) : h('p', { class: 'muted' }, 'Views: not available yet.'),
       y.unfinished ? h('p', { class: 'notice' }, `The video is on YouTube, but the upload step did not finish (P7: ${y.unfinished.replaceAll('_', ' ')}). See the stop above.`) : null)
       : h('p', { class: 'muted' }, 'Uploaded after you approve it.'));
 }

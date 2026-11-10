@@ -264,6 +264,26 @@ class RealYouTubeClient:
             seen.add(video_id)
         return uploads
 
+    def video_statistics(self, video_ids: list[str]) -> dict[str, dict[str, int]]:
+        """Read-only public counters per video (``videos.list part=statistics``, one quota
+        unit per call of up to 50 ids): views, likes, comments; a deleted video is absent."""
+        found: dict[str, dict[str, int]] = {}
+        for start in range(0, len(video_ids), 50):
+            params = {"id": ",".join(video_ids[start:start + 50]), "part": "statistics"}
+            with self._http() as client:
+                resp = client.get(f"{YOUTUBE_API_BASE}/videos", headers=self._auth_headers(),
+                                  params=params)
+                if resp.status_code != 200:
+                    self._handle_error_response(resp, "video_statistics")
+                data = resp.json()
+            for item in data.get("items", []) if isinstance(data, dict) else []:
+                stats = item.get("statistics") or {}
+                found[str(item.get("id"))] = {
+                    name: int(stats[key]) for name, key in (
+                        ("views", "viewCount"), ("likes", "likeCount"),
+                        ("comments", "commentCount")) if str(stats.get(key, "")).isdigit()}
+        return found
+
     def get_video(self, video_id: str) -> dict[str, Any] | None:
         """Retrieve video details for processing and read-only post-publish QA."""
         url = f"{YOUTUBE_API_BASE}/videos"

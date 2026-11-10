@@ -146,6 +146,24 @@ def _image_suffix(data: bytes) -> str | None:
     return None
 
 
+def song_counts(genre: str = "focus_electronic") -> dict[str, dict[str, int]]:
+    """What each Start length asks of the owner, from P3's own plan (its template's song
+    length, the bucket's range and the supply policy's spares): ``{bucket: {songs,
+    song_seconds}}``; empty when P3's code is not importable here."""
+    try:
+        from experiments.genome.engine import default_template_library
+        from experiments.materialization.builder import derived_duration_seconds
+        from experiments.materialization.supply import default_supply_policy, plan_supply
+    except ImportError:
+        return {}
+    library = default_template_library()
+    seconds = derived_duration_seconds(library.for_genre(genre).genome.track_duration)
+    return {bucket: {"songs": plan_supply(library.playlist_duration_for_bucket(bucket), seconds,
+                                          default_supply_policy()).track_count,
+                     "song_seconds": seconds}
+            for bucket in LENGTH_CHOICES}
+
+
 def wav_seconds(path: Path) -> float | None:
     """The length of a PCM WAV from its header (``fmt`` byte rate, ``data`` size);
     ``None`` when the file is not a readable WAV."""
@@ -240,11 +258,15 @@ class Studio:
     """:class:`~.projects.ProjectStore`: every run and its record (``None``: no projects)."""
     cancel: Callable[[str, str], Any] | None = None
     """Sends a run the pipeline's cancel signal (async): ``(workflow_id, reason)``."""
+    video_stats: Callable[[list[str]], dict[str, dict[str, int]]] | None = None
+    """YouTube's public counters per video id (read-only); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
     _video_cache: dict[str, bytes] = field(default_factory=dict)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
+    _stats_cache: tuple[float, dict[str, dict[str, int]]] | None = None
+    """The last YouTube counters and when (monotonic): refreshed every ten minutes."""
     _styles_cache: tuple[float, dict[str, Any]] | None = None
     """The last style lookup and when (monotonic): it changes only when a run starts."""
     _imports: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -305,7 +327,8 @@ class Studio:
     def start_options(self) -> dict[str, Any]:
         """What the Start card needs, without the inbox scans of :meth:`overview`."""
         return {"start_available": self.start is not None, "styles": self.style_choices(),
-                "lengths": LENGTH_CHOICES, "remakes": self.remakes()}
+                "lengths": LENGTH_CHOICES, "song_counts": song_counts(),
+                "remakes": self.remakes()}
 
     def style_choices(self) -> dict[str, Any]:
         """The Start button's sub-style picker: what can be chosen, and what the last
@@ -865,7 +888,12 @@ class Studio:
             return []
         holds, roles = self._holds_by_run(), self._owner_roles()
         listed = []
-        for run in number_runs(self.store.runs()):
+        runs = number_runs(self.store.runs())
+        stats = self._stats([r["youtube"]["video_id"] for r in runs if r.get("youtube")])
+        for run in runs:
+            if run.get("youtube"):
+                run["youtube"] = {**run["youtube"],
+                                  "stats": stats.get(run["youtube"]["video_id"])}
             hold = holds.get(run["workflow_id"]) if run["state"] == "HELD" else None
             explained = None if hold is None else explain_hold(hold, owner_roles=roles)
             yours = bool(explained and explained["your_turn"])
@@ -885,6 +913,23 @@ class Studio:
                 "working": self._busy(run.get("media_package_id")),
             })
         return listed[::-1]
+
+    def _stats(self, video_ids: list[str]) -> dict[str, dict[str, int]]:
+        """Views, likes and comments per published video, at most ten minutes old; empty
+        when YouTube cannot be read (the list still shows, without numbers)."""
+        import time
+
+        if self.video_stats is None or not video_ids:
+            return {}
+        cached = self._stats_cache
+        if cached and time.monotonic() - cached[0] < 600 and set(video_ids) <= set(cached[1]):
+            return cached[1]
+        try:
+            found = self.video_stats(sorted(set(video_ids)))
+        except Exception:  # noqa: BLE001 - counters are optional; the page must still load
+            return cached[1] if cached else {}
+        self._stats_cache = (time.monotonic(), found)
+        return found
 
     def _busy(self, package: Any) -> dict[str, Any] | None:
         """Work this dashboard runs for the package now (a picture import or remake)."""
@@ -908,6 +953,9 @@ class Studio:
         """One project's page: its status and stop, its log, and every step's content
         (songs, pictures, video, upload), whether done or still to do."""
         run = self._run_of(number)
+        if run.get("youtube"):
+            video_id = run["youtube"]["video_id"]
+            run["youtube"] = {**run["youtube"], "stats": self._stats([video_id]).get(video_id)}
         hold = self._holds_by_run().get(run["workflow_id"]) if run["state"] == "HELD" else None
         explained = None if hold is None else explain_hold(hold, owner_roles=self._owner_roles())
         reason = None if hold is None else hold.get("reason_code")
@@ -1169,6 +1217,15 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
 
     start = cancel = None
     store = None
+
+    def video_stats(video_ids: list[str]) -> dict[str, dict[str, int]]:
+        from youtube_publishing.client.real import RealYouTubeClient
+
+        client = RealYouTubeClient()
+        if not client.is_configured:
+            return {}
+        return client.video_statistics(video_ids)
+
     if platform is not None:
         from ..db import build_engine as _engine
         from .projects import ProjectStore
@@ -1247,5 +1304,5 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media, runs=runs,
                   import_art=import_art, start=start, styles=styles, edit=edit,
-                  reopen=reopen, store=store, cancel=cancel,
+                  reopen=reopen, store=store, cancel=cancel, video_stats=video_stats,
                   clock=clock or SystemClock())
