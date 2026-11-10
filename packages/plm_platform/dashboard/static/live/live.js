@@ -956,6 +956,9 @@ async function refreshStudio(force = false) {
     return;
   } finally { studioFetching = false; }
   studioUpdatedAt = Date.now();
+  const pill = document.getElementById('data-source-pill');
+  pill.textContent = 'DATA SOURCE: LIVE';  // reachable again, even when nothing changed
+  pill.className = 'pill pill-live';
   if (!force && JSON.stringify(data) === studioShown) return;
   if (force || (studioBusy === 0 && studioUntouched())) { drawStudio(data); return; }
   studioPending = data;

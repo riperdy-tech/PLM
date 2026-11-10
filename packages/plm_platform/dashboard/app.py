@@ -104,6 +104,11 @@ def _serve_static(app: FastAPI, directory: Path, *, token: str | None = None) ->
     @app.get("/", response_class=HTMLResponse)
     def get_root() -> HTMLResponse:
         page = index_file.read_text(encoding="utf-8")
+        # Each script and style link carries its file's version, so a dashboard update
+        # reaches every open browser on its next load, whatever it cached (2026-11-10).
+        for name in ("live.js", "live.css"):
+            stamp = int((directory / name).stat().st_mtime) if (directory / name).is_file() else 0
+            page = page.replace(f'"/static/{name}"', f'"/static/{name}?v={stamp}"')
         if token:
             page = page.replace(
                 "</head>",
