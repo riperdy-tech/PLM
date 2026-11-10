@@ -138,3 +138,31 @@ input, select, textarea {
   .header-side { align-items: flex-start; }
   .case dl, form.action .row, .review-media { grid-template-columns: 1fr; }
 }
+
+/* Studio projects (2026-11-10) */
+.alert-banner { border: 1px solid rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.12); border-radius: 14px; padding: 12px 16px; margin-bottom: 14px; }
+.alert-line { display: block; color: var(--text); text-decoration: none; padding: 4px 0; font-size: 15px; }
+.alert-line:hover { text-decoration: underline; }
+.project-row { display: grid; grid-template-columns: 60px 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin: 6px 0; color: var(--text); text-decoration: none; }
+.project-row:hover { border-color: var(--violet); }
+.project-row.yours { border-color: rgba(245, 158, 11, 0.7); }
+.project-row.stopped { border-color: rgba(239, 68, 68, 0.7); }
+.project-number { font-family: var(--mono); font-size: 18px; color: var(--cyan); }
+.project-main { display: flex; flex-direction: column; gap: 2px; }
+.project-label { color: var(--amber); }
+.hold-box { border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--border); }
+.hold-box.yours { border-color: rgba(245, 158, 11, 0.7); background: rgba(245, 158, 11, 0.10); }
+.hold-box.stopped { border-color: rgba(239, 68, 68, 0.8); background: rgba(239, 68, 68, 0.12); }
+.hold-box.working { border-color: rgba(6, 182, 212, 0.7); background: rgba(6, 182, 212, 0.10); }
+.progress { height: 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin: 8px 0; }
+.progress-bar { height: 100%; background: var(--cyan); transition: width 1s; }
+.log-list { list-style: none; padding: 0; margin: 8px 0 0; max-height: 360px; overflow-y: auto; }
+.log-list li { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.log-problem { color: #fca5a5; }
+.log-wait { color: var(--amber); }
+.log-you { color: var(--cyan); }
+.log-detail { color: var(--muted); margin: 2px 0 0 22px; white-space: pre-wrap; word-break: break-word; }
+.song audio { width: 100%; margin-top: 6px; }
+
+.view-root a { color: var(--cyan); }
+.view-root a.project-row, .view-root a.alert-line { color: var(--text); }

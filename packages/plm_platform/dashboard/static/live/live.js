@@ -368,7 +368,7 @@ function actionButton(label, cls, run, { confirm: question, busy } = {}) {
     if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
     result.className = 'result done';
     result.textContent = 'Done.';
-    setTimeout(() => loadView('studio'), 1200);
+    setTimeout(() => refreshStudio(true), 800);
   } }, label);
   return h('span', {}, button, ' ', result);
 }
@@ -385,85 +385,9 @@ function uploadInput(accept, url) {
     if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
     result.className = 'result done';
     result.textContent = `saved as ${out.body.saved}`;
-    setTimeout(() => loadView('studio'), 800);
+    setTimeout(() => refreshStudio(true), 500);
   } });
   return h('span', {}, input, ' ', result);
-}
-
-function stepCard(title, waitingCount) {
-  return h('section', { class: `step ${waitingCount ? 'waiting' : ''}` },
-    h('div', { class: 'step-head' }, h('h2', {}, title),
-      waitingCount ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, 'nothing waiting')));
-}
-
-function songsStep(songs, waiting, notes) {
-  const card = stepCard('1. Songs', (waiting.MANUAL_AUDIO_AWAITED || []).length);
-  const swaps = noteList((notes || []).filter((n) => n.kind === 'replace_song').slice(-3), 'Your notes for replaced songs');
-  if (swaps) card.append(swaps);
-  if (!songs.configured) {
-    card.append(h('p', { class: 'notice' }, 'The music inbox is not configured (PLM_FLOW_MUSIC_MANUAL_INBOX).'));
-    return card;
-  }
-  if (!songs.sheets.length) {
-    if ((waiting.MANUAL_AUDIO_AWAITED || []).length) {
-      // Every song is saved but the run has not been told yet: offer Continue.
-      card.append(h('p', { class: 'saved' }, 'All songs are saved. Press Continue to send them to the run.'),
-        h('div', { class: 'row-actions' },
-          actionButton('Continue', 'btn-ok big', () => authedSend('/api/studio/songs/done', 'POST'),
-            { busy: 'Sending the songs to the run... P4 checks every file.' })));
-    } else {
-      card.append(h('p', { class: 'muted' }, 'No song is waiting.'));
-    }
-    return card;
-  }
-  card.append(h('p', { class: 'muted' }, 'Make each song in the tool its sheet names (Suno or Flow Music) from its prompt, download it as WAV and upload it here. When every song is saved, press Continue.'));
-  let missing = 0;
-  for (const sheet of songs.sheets) {
-    card.append(h('h3', {}, `${sheet.source || ''} ${sheet.source ? '- ' : ''}${sheet.sheet}`));
-    for (const song of sheet.songs) {
-      if (!song.saved) missing += 1;
-      card.append(h('div', { class: 'song' },
-        h('div', { class: 'step-head' }, h('strong', { class: 'mono' }, `${song.stem}.wav`),
-          song.saved ? h('span', { class: 'saved' }, 'saved') : h('span', { class: 'missing' }, 'missing')),
-        h('div', { class: 'prompt' }, song.text),
-        h('div', { class: 'row-actions' }, copyButton(song.text), uploadInput('.wav,audio/wav', `/api/studio/songs/${encodeURIComponent(song.stem)}`)),
-        song.lyrics_needed && !song.lyrics_saved ? h('p', { class: 'notice' }, `This song has vocals: save its lyrics as ${song.stem}.lyrics.txt in ${songs.inbox}.`) : null));
-    }
-  }
-  card.append(h('div', { class: 'row-actions' },
-    actionButton(missing ? `Continue (${missing} still missing)` : 'Continue', 'btn-ok big',
-      () => authedSend('/api/studio/songs/done', 'POST'), { busy: 'Sending the songs to the run...' })));
-  return card;
-}
-
-function thumbnailsStep(jobs, waiting) {
-  const card = stepCard('2. Thumbnails', (waiting.THUMBNAIL_ART_AWAITED || []).length);
-  if (!jobs.length) { card.append(h('p', { class: 'muted' }, 'No thumbnail is waiting.')); return card; }
-  card.append(h('p', { class: 'muted' }, 'Make each image in Nano Banana Pro (16:9, full size) and upload it. Image A is also the picture of the whole video. Import checks all three and renders the video; it can take a few minutes.'));
-  for (const job of jobs) {
-    card.append(h('h3', {}, job.title || job.media_package_id));
-    const jobNotes = noteList(job.notes, 'Your note for the new art');
-    if (jobNotes) card.append(jobNotes);
-    for (const from of job.reuse_from || []) {
-      card.append(h('div', { class: 'row-actions' }, actionButton(`Reuse the images of the previous version`, 'btn',
-        () => postJson(`/api/studio/thumbnails/${job.media_package_id}/reuse`, { from_package_id: from }))));
-    }
-    for (const v of job.variants) {
-      const url = `/api/studio/thumbnails/${job.media_package_id}/${v.letter}`;
-      card.append(h('div', { class: 'variant' },
-        h('div', { class: 'step-head' }, h('strong', {}, `${v.letter}: ${v.style_id} ("${v.text}")`),
-          v.saved.length ? h('span', { class: 'saved' }, `saved: ${v.saved.join(', ')}`) : h('span', { class: 'missing' }, 'missing')),
-        h('div', { class: 'prompt' }, v.prompt || ''),
-        h('div', { class: 'row-actions' }, copyButton(v.prompt || ''), uploadInput('image/png,image/jpeg,image/webp', url)),
-        v.saved.length ? h('img', { class: 'preview', src: `${url}?t=${Date.now()}`, alt: `thumbnail ${v.letter}` }) : null));
-    }
-    const ready = job.variants.every((v) => v.saved.length);
-    card.append(h('div', { class: 'row-actions' }, ready
-      ? actionButton('Import and make the video', 'btn-ok big', () => authedSend(`/api/studio/thumbnails/${job.media_package_id}/import`, 'POST'),
-        { busy: 'Checking the images and rendering the still video... this can take several minutes.' })
-      : h('span', { class: 'muted' }, 'Upload A, B and C to import.')));
-  }
-  return card;
 }
 
 function postJson(url, payload) {
@@ -561,9 +485,9 @@ function changesPanel(r, p) {
       { confirm: 'Replace the ticked songs? The run goes back to make new ones, then the video is made again. Write in the note what the new song should be like.', busy: 'Sending the run back for new songs...' })));
 }
 
+// The approval of a project's video (inside its page's "3. Video and review").
 function reviewStep(reviews) {
-  const card = stepCard('3. Review and upload', reviews.length);
-  if (!reviews.length) { card.append(h('p', { class: 'muted' }, 'No video is waiting for approval.')); return card; }
+  const card = h('div', {});
   for (const r of reviews) {
     for (const p of r.packages) {
       if (p.error) { card.append(h('p', { class: 'notice' }, `${p.media_package_id}: ${p.error}`)); continue; }
@@ -596,32 +520,6 @@ function reviewStep(reviews) {
   return card;
 }
 
-let styleSelect = null;
-function styleName(styles, id) { return (styles.labels || {})[id] || id || 'no sub-style'; }
-
-function stylePicker(styles) {
-  const keep = styleSelect ? styleSelect.value : '';
-  styleSelect = h('select', {},
-    h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
-    (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
-  styleSelect.value = (styles.available || []).includes(keep) ? keep : '';
-  const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
-  return h('div', {},
-    h('div', { class: 'row-actions' }, h('strong', {}, 'Style:'), styleSelect),
-    h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
-    styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null);
-}
-
-function startButton(label, music) {
-  return actionButton(`Option: ${label}`, 'btn-ok big',
-    () => {
-      const subgenre = styleSelect && styleSelect.value ? styleSelect.value : null;
-      return authedSend('/api/studio/start', 'POST', JSON.stringify({ music, subgenre }), 'application/json');
-    },
-    { confirm: `Start a new video with ${label} song prompts? The run begins with the style shown.`,
-      busy: `Asking P2 for the next video and starting the run (${label} prompts)...` });
-}
-
 let remakesNow = {};
 function remakeLine(remake) {
   if (remake && remake.state === 'running') {
@@ -633,54 +531,434 @@ function remakeLine(remake) {
   return h('p', { class: 'notice' }, 'Waiting for new art in the thumbnail step before it can be approved.');
 }
 
-async function renderStudio() {
-  const s = await getJson('/api/studio');
-  remakesNow = s.remakes || {};
-  const waiting = s.waiting || {};
-  const count = Object.values(waiting).reduce((n, ids) => n + ids.length, 0);
-  document.getElementById('studio-count').textContent = count ? `(${count})` : '';
-  const head = h('section', { class: 'step' },
-    h('div', { class: 'step-head' },
-      h('div', {}, h('h2', {}, 'Studio'), h('p', { class: 'muted' }, 'Start a video, then answer each step when it waits for you. Nothing is uploaded until you approve it.')),
-      s.start_available
-        ? h('div', {}, stylePicker(s.styles || {}), h('strong', {}, 'Start a new video. Song prompts for:'),
-          h('div', { class: 'row-actions' },
-            startButton('Suno', 'suno'), startButton('Flow Music', 'flow_music')))
-        : h('span', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).')));
-  return h('div', {}, head, videosNow(s.videos || []), songsStep(s.songs, waiting, s.notes), thumbnailsStep(s.thumbnails, waiting), reviewStep(s.reviews || []));
+// ------------------------------------------------------------------------ studio: projects
+//
+// Owner 2026-11-09/10: every video is a numbered project with its own page (#studio/17);
+// every step stays visible after it is done; the page follows the run by itself (no F5)
+// and says loudly, with the reason and what to do, whenever a project stops.
+
+let studioRoute = null;          // null: the project list; a number: that project's page
+let studioShown = '';            // the JSON last drawn, to redraw only on a change
+let studioPending = null;        // data that arrived while the owner was busy on the page
+let studioUpdatedAt = 0;
+let alerted = new Set();         // projects already announced as needing the owner
+let studioBusy = 0;
+
+function minutes(seconds) {
+  if (seconds === null || seconds === undefined) return '?';
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function lengthLabel(range) { return range ? `${Math.round(range[0] / 60)}-${Math.round(range[1] / 60)} min` : 'length unknown'; }
+function when(iso) { return iso ? new Date(iso).toLocaleString() : 'unknown'; }
+function clock(iso) { return iso ? new Date(iso).toLocaleTimeString() : ''; }
+
+function statusBadge(p) {
+  if (p.your_turn) return h('span', { class: 'badge badge-review' }, 'your turn');
+  if (p.problem) return h('span', { class: 'badge badge-hard' }, 'stopped');
+  if (p.finished) return h('span', { class: 'badge' }, p.state.toLowerCase());
+  return h('span', { class: 'badge badge-state' }, 'working');
 }
 
-function videosNow(videos) {
-  const card = h('section', { class: 'step' }, h('div', { class: 'step-head' }, h('h2', {}, 'Your videos now'),
-    h('span', { class: 'muted' }, 'updates by itself every 20 seconds')));
-  if (!videos.length) { card.append(h('p', { class: 'muted' }, 'No video is being made. Press Start to begin one.')); return card; }
-  const when = (iso) => (iso ? new Date(iso).toLocaleString() : 'unknown');
-  for (const v of videos) {
-    card.append(h('div', { class: 'song' },
-      h('div', { class: 'step-head' }, h('strong', {}, v.label),
-        v.your_turn ? h('span', { class: 'badge badge-review' }, 'your turn') : h('span', { class: 'badge badge-state' }, 'working')),
-      h('p', { class: 'muted' }, `Since ${when(v.since)}. Started ${when(v.started)}. Run ${String(v.workflow_id || '').slice(9, 17)}`)));
+// -- the list ------------------------------------------------------------------------------
+
+let styleSelect = null;
+let lengthSelect = null;
+function styleName(styles, id) { return (styles.labels || {})[id] || id || 'no sub-style'; }
+
+function startCard(s) {
+  if (!s.start_available) return h('section', { class: 'step' }, h('h2', {}, 'Start a new video'),
+    h('p', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).'));
+  const styles = s.styles || {};
+  const keepStyle = styleSelect ? styleSelect.value : '';
+  const keepLength = lengthSelect ? lengthSelect.value : '20_30m';
+  styleSelect = h('select', { 'data-keep': '1' },
+    h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
+    (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
+  styleSelect.value = (styles.available || []).includes(keepStyle) ? keepStyle : '';
+  lengthSelect = h('select', { 'data-keep': '1' },
+    Object.entries(s.lengths || { '20_30m': '20-30 minutes' }).map(([id, label]) => h('option', { value: id }, label)));
+  lengthSelect.value = keepLength in (s.lengths || {}) ? keepLength : '20_30m';
+  const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
+  const start = (label, music) => actionButton(`Start with ${label} prompts`, 'btn-ok big',
+    () => authedSend('/api/studio/start', 'POST', JSON.stringify({
+      music, subgenre: styleSelect.value || null, length: lengthSelect.value }), 'application/json'),
+    { confirm: `Start a new ${lengthSelect.selectedOptions[0].textContent} video, style: ${styleSelect.selectedOptions[0].textContent}, song prompts for ${label}?`,
+      busy: 'Asking P2 for the next video and starting it...' });
+  return h('section', { class: 'step' },
+    h('h2', {}, 'Start a new video'),
+    h('div', { class: 'row-actions' }, h('strong', {}, 'Style'), styleSelect, h('strong', {}, 'Length'), lengthSelect),
+    h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
+    styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null,
+    h('div', { class: 'row-actions' }, start('Suno', 'suno'), start('Flow Music', 'flow_music')));
+}
+
+function alertBanner(projects) {
+  const needing = projects.filter((p) => p.your_turn || p.problem);
+  if (!needing.length) return null;
+  return h('section', { class: 'alert-banner' }, needing.map((p) => h('a', { href: `#studio/${p.number}`, class: 'alert-line' },
+    h('strong', {}, `#${p.number} `), p.problem ? '⚠ ' : '● ', p.label, p.title ? ` — ${p.title}` : '')));
+}
+
+function projectRow(p) {
+  return h('a', { class: `project-row ${p.your_turn ? 'yours' : ''} ${p.problem ? 'stopped' : ''}`, href: `#studio/${p.number}` },
+    h('span', { class: 'project-number' }, `#${p.number}`),
+    h('span', { class: 'project-main' },
+      h('strong', {}, p.title || '(no title yet)'),
+      h('span', { class: 'muted' }, ` ${p.style_label || ''} · ${lengthLabel(p.length)} · started ${when(p.started)}`),
+      h('span', { class: 'project-label' }, p.label),
+      p.working ? h('span', { class: 'notice' }, p.working.state === 'failed' ? ` picture ${p.working.kind} failed` : ` building the video now`) : null),
+    h('span', {}, statusBadge(p), p.youtube ? h('span', { class: 'muted' }, ' YouTube ✓') : null));
+}
+
+function listPage(data) {
+  const projects = data.projects || [];
+  const active = projects.filter((p) => !p.finished);
+  const done = projects.filter((p) => p.finished);
+  return h('div', {},
+    alertBanner(projects),
+    startCard(data.overview || {}),
+    h('section', { class: 'step' }, h('h2', {}, `Projects in progress (${active.length})`),
+      active.length ? active.map(projectRow) : h('p', { class: 'muted' }, 'Nothing in progress. Start a video above.')),
+    h('section', { class: 'step' }, h('h2', {}, `Finished projects (${done.length})`),
+      done.length ? done.map(projectRow) : h('p', { class: 'muted' }, 'None yet.')));
+}
+
+// -- one project ---------------------------------------------------------------------------
+
+function holdBox(p) {
+  const hold = p.hold;
+  if (!hold) return null;
+  const cls = hold.your_turn ? 'hold-box yours' : 'hold-box stopped';
+  return h('section', { class: cls },
+    h('h2', {}, hold.title),
+    h('p', {}, hold.what),
+    hold.detail ? h('pre', { class: 'prompt' }, hold.detail) : null,
+    h('p', { class: 'muted' }, `Since ${when(hold.since)}. Case ${hold.case_id}.`),
+    hold.action === 'retry' && hold.owner_may_act ? h('div', { class: 'row-actions' },
+      actionButton('Try again', 'btn-ok big', () => authedSend(`/api/studio/holds/${hold.case_id}/retry`, 'POST'),
+        { confirm: 'Try this step again? If the cause is not fixed it will stop here again.', busy: 'Continuing the run...' })) : null,
+    hold.action === 'retry' && !hold.owner_may_act ? h('p', { class: 'result refused' }, hold.blocked_because) : null,
+    hold.your_turn ? h('p', { class: 'muted' }, 'Your step is below.') : null);
+}
+
+function progressText(since, expected) {
+  const elapsed = (Date.now() - new Date(since).getTime()) / 1000;
+  const left = Math.max(0, Math.round((expected - elapsed) / 60));
+  return `Started ${clock(since)}. ` + (expected ? (elapsed < expected ? `About ${left} min left (estimate).`
+    : 'Taking longer than estimated; still working.') : 'Working...');
+}
+
+// The 1-second ticker moves a running render's bar and estimate between data updates.
+function tickProgress() {
+  for (const box of document.querySelectorAll('.hold-box.working[data-since]')) {
+    const expected = Number(box.dataset.expected) || 0;
+    const elapsed = (Date.now() - new Date(box.dataset.since).getTime()) / 1000;
+    const bar = box.querySelector('.progress-bar');
+    if (bar && expected) bar.style.width = `${Math.min(99, Math.round((elapsed / expected) * 100))}%`;
+    const eta = box.querySelector('.eta');
+    if (eta) eta.textContent = progressText(box.dataset.since, expected);
+  }
+}
+
+function workingBox(p) {
+  const w = p.working;
+  if (!w) return null;
+  if (w.state === 'failed') {
+    return h('section', { class: 'hold-box stopped' }, h('h2', {}, `Making the video failed`),
+      h('pre', { class: 'prompt' }, w.error || 'no reason given'),
+      h('p', {}, 'Fix the pictures in step 2 and press Import again.'));
+  }
+  const elapsed = (Date.now() - new Date(w.since).getTime()) / 1000;
+  const expected = w.expected_seconds || 0;
+  const pct = expected ? Math.min(99, Math.round((elapsed / expected) * 100)) : null;
+  return h('section', { class: 'hold-box working', 'data-since': w.since, 'data-expected': expected },
+    h('h2', {}, w.kind === 'remake' ? 'Making the video again with your new pictures' : 'Making the video from picture A'),
+    h('p', { class: 'eta' }, progressText(w.since, expected)),
+    pct !== null ? h('div', { class: 'progress' }, h('div', { class: 'progress-bar', style: `width:${pct}%` })) : null,
+    h('p', { class: 'muted' }, 'It keeps going if you close or refresh this page.'));
+}
+
+const LOG_ICON = { step: '›', done: '✓', wait: '●', problem: '⚠', you: '★' };
+function logBox(p) {
+  const lines = (p.log || []).slice().reverse();
+  return h('details', { class: 'step log', open: true, 'data-key': `log:${p.number}` },
+    h('summary', {}, h('strong', {}, 'Status log'), h('span', { class: 'muted' }, ` (${lines.length} entries, newest first)`)),
+    h('ol', { class: 'log-list' }, lines.map((l) => h('li', { class: `log-${l.kind}` },
+      h('span', { class: 'mono muted' }, `${new Date(l.at).toLocaleString()} `),
+      h('span', { class: 'log-icon' }, LOG_ICON[l.kind] || '·'), ' ', l.text,
+      l.detail ? h('div', { class: 'log-detail mono' }, l.detail) : null))));
+}
+
+function songLength(song) {
+  if (!song.saved) return h('span', { class: 'missing' }, 'missing');
+  if (song.seconds === null || song.seconds === undefined) return h('span', { class: 'saved' }, 'saved');
+  const off = song.expected_seconds && (song.seconds < song.expected_seconds * 0.5 || song.seconds > song.expected_seconds * 1.6);
+  return h('span', { class: off ? 'notice' : 'saved' },
+    `saved, ${minutes(song.seconds)}` + (song.expected_seconds ? ` (asked about ${minutes(song.expected_seconds)})` : ''));
+}
+
+function batchUpload(songs) {
+  const result = h('div', { class: 'result' });
+  const input = h('input', { type: 'file', multiple: true, accept: '.wav,audio/wav', onchange: async () => {
+    const files = [...(input.files || [])];
+    if (!files.length) return;
+    const missing = songs.filter((s) => !s.saved).map((s) => s.stem);
+    const byName = new Map(files.map((f) => [f.name.replace(/\.wav$/i, ''), f]));
+    const plan = [];
+    const left = files.filter((f) => !missing.includes(f.name.replace(/\.wav$/i, '')));
+    for (const stem of missing) {
+      const f = byName.get(stem) || left.shift();
+      if (f) plan.push([stem, f]);
+    }
+    if (!plan.length) { result.textContent = 'Every song is already saved.'; return; }
+    const text = plan.map(([stem, f]) => `${f.name} -> ${stem}.wav`).join('\n');
+    if (!window.confirm(`Save these files, in this order?\n\n${text}`)) { input.value = ''; return; }
+    studioBusy += 1;
+    try {
+      const done = [];
+      for (const [stem, f] of plan) {
+        result.className = 'result';
+        result.textContent = `uploading ${f.name} (${done.length + 1} of ${plan.length})...`;
+        const out = await authedSend(`/api/studio/songs/${encodeURIComponent(stem)}`, 'PUT', f, 'application/octet-stream');
+        if (!out.ok) { result.className = 'result refused'; result.textContent = `${f.name}: ${refusal(out)}`; return; }
+        done.push(`${f.name}: ${minutes(out.body.seconds)}`);
+      }
+      result.className = 'result done';
+      result.textContent = `Saved ${done.length}: ${done.join(', ')}`;
+    } finally { studioBusy -= 1; input.value = ''; }
+    refreshStudio(true);
+  } });
+  return h('div', { class: 'row-actions' }, h('strong', {}, 'Upload several at once:'), input, result);
+}
+
+function songsSection(p) {
+  const sheets = p.songs.sheets || [];
+  const all = sheets.flatMap((s) => s.songs);
+  const missing = all.filter((s) => !s.saved).length;
+  const card = h('section', { class: `step ${p.songs.waiting ? 'waiting' : ''}` },
+    h('div', { class: 'step-head' }, h('h2', {}, `1. Songs (${all.length - missing} of ${all.length} saved)`),
+      p.songs.waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, missing ? 'not asked yet' : 'done')));
+  if (!sheets.length) { card.append(h('p', { class: 'muted' }, 'No song prompts yet.')); return card; }
+  if (p.songs.waiting && missing) card.append(batchUpload(all));
+  let n = 0;
+  for (const sheet of sheets) {
+    for (const song of sheet.songs) {
+      n += 1;
+      const url = `/api/studio/songs/${encodeURIComponent(song.stem)}`;
+      card.append(h('details', { class: 'song', open: !song.saved, 'data-key': `song:${song.stem}` },
+        h('summary', {}, h('strong', {}, `Song ${n} `), h('span', { class: 'mono muted' }, `${song.stem}.wav (${sheet.source}) `), songLength(song)),
+        h('div', { class: 'prompt' }, song.text),
+        h('div', { class: 'row-actions' }, copyButton(song.text),
+          p.songs.waiting ? h('span', {}, h('span', { class: 'muted' }, song.saved ? 'Replace file:' : 'Upload:'), uploadInput('.wav,audio/wav', url)) : null),
+        song.saved ? h('audio', { controls: true, preload: 'none', src: `${url}/audio` }) : null,
+        song.lyrics_needed && !song.lyrics_saved ? h('p', { class: 'notice' }, `This song has vocals: save its lyrics as ${song.stem}.lyrics.txt.`) : null));
+    }
+  }
+  if (p.songs.waiting) {
+    card.append(h('div', { class: 'row-actions' },
+      actionButton(missing ? `Continue (${missing} still missing)` : 'Continue: send the songs', 'btn-ok big',
+        () => authedSend('/api/studio/songs/done', 'POST'), { busy: 'Sending the songs to the run... P4 checks every file.' })));
   }
   return card;
 }
 
-// The Studio refreshes itself while nothing is being typed, picked or sent.
-// It never refreshes while a panel is open (Request changes), a field holds unsent text
-// or a chosen file, or anything is being sent; a reload keeps open panels open.
-let studioBusy = 0;
+function picturesSection(p) {
+  const card = h('section', { class: `step ${p.art_waiting ? 'waiting' : ''}` },
+    h('div', { class: 'step-head' }, h('h2', {}, '2. Pictures (thumbnail and video picture)'),
+      p.art_waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, (p.art || []).length ? 'done' : 'not asked yet')));
+  if (!(p.art || []).length) { card.append(h('p', { class: 'muted' }, 'The pictures are asked for once the playlist is built.')); return card; }
+  card.append(h('p', { class: 'muted' }, 'Make each picture in Nano Banana Pro (16:9, full size). Picture A is also the picture of the whole video.'));
+  for (const [i, job] of p.art.entries()) {
+    const current = i === 0;
+    const box = h('details', { class: 'variant', open: current, 'data-key': `art:${job.media_package_id}` },
+      h('summary', {}, h('strong', {}, current ? 'Current pictures' : 'Earlier version'), h('span', { class: 'muted mono' }, ` ${job.media_package_id} (${job.status})`)));
+    for (const from of current && p.art_waiting ? job.reuse_from || [] : []) {
+      box.append(h('div', { class: 'row-actions' }, actionButton('Reuse the pictures of the previous version', 'btn',
+        () => postJson(`/api/studio/thumbnails/${job.media_package_id}/reuse`, { from_package_id: from }))));
+    }
+    for (const v of job.variants) {
+      const url = `/api/studio/thumbnails/${job.media_package_id}/${v.letter}`;
+      box.append(h('div', { class: 'variant' },
+        h('div', { class: 'step-head' }, h('strong', {}, `${v.letter}: ${v.style_id} ("${v.text}")`),
+          v.saved.length ? h('span', { class: 'saved' }, `saved: ${v.saved.join(', ')}`) : h('span', { class: 'missing' }, 'missing')),
+        h('details', { 'data-key': `prompt:${job.media_package_id}:${v.letter}`, open: !v.saved.length }, h('summary', {}, 'Prompt'), h('div', { class: 'prompt' }, v.prompt || '')),
+        h('div', { class: 'row-actions' }, copyButton(v.prompt || ''),
+          current && p.art_waiting ? uploadInput('image/png,image/jpeg,image/webp', url) : null),
+        v.saved.length ? h('img', { class: 'preview', src: `${url}?v=${encodeURIComponent(v.saved.join(','))}`, alt: `picture ${v.letter}` }) : null));
+    }
+    if (current && p.art_waiting) {
+      const ready = job.variants.every((v) => v.saved.length);
+      const running = job.import && job.import.state === 'running';
+      box.append(h('div', { class: 'row-actions' }, running ? h('span', { class: 'notice' }, 'Making the video now (see the top of the page).')
+        : ready ? actionButton('Import and make the video', 'btn-ok big', () => authedSend(`/api/studio/thumbnails/${job.media_package_id}/import`, 'POST'),
+          { busy: 'Starting the import...' })
+          : h('span', { class: 'muted' }, 'Upload A, B and C to import.')));
+    }
+    card.append(box);
+  }
+  return card;
+}
+
+function replaceSongsBox(p) {
+  const tracks = (p.video && p.video.tracks) || [];
+  const note = h('textarea', { rows: 2, placeholder: 'What should the new song be like? (shown at the songs step)' });
+  const list = h('div', { class: 'songs-pick' }, tracks.map((t) => h('label', { class: 'pick' },
+    h('input', { type: 'checkbox', value: t.song_id }), ` ${t.start} ${t.title}`)));
+  return h('details', { class: 'changes', 'data-key': `replace:${p.number}` },
+    h('summary', {}, 'Replace songs'),
+    h('p', { class: 'muted' }, 'Tick the songs to take out. The project goes back to the songs step for as many new ones, then builds the video again.'),
+    list, h('label', {}, 'Note'), note,
+    h('div', { class: 'row-actions' }, actionButton('Replace the ticked songs', 'btn', () => postJson(`/api/studio/projects/${p.number}/replace-songs`, {
+      song_ids: [...list.querySelectorAll('input:checked')].map((i) => i.value), note: note.value }),
+      { confirm: 'Replace the ticked songs? The project goes back to make new ones, then the video is built again.', busy: 'Sending the project back for new songs...' })));
+}
+
+function videoSection(p) {
+  const v = p.video;
+  const card = h('section', { class: `step ${p.review ? 'waiting' : ''}` },
+    h('div', { class: 'step-head' }, h('h2', {}, '3. Video and review'),
+      p.review ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, v && v.has_video ? 'built' : 'not built yet')));
+  if (!v) { card.append(h('p', { class: 'muted' }, 'The video is built after the pictures are imported.')); return card; }
+  if (v.error) { card.append(h('p', { class: 'notice' }, `${v.media_package_id}: ${v.error}`)); return card; }
+  if (p.review) {
+    card.append(reviewStep([p.review]));
+  } else {
+    const base = `/api/studio/packages/${v.media_package_id}`;
+    card.append(h('h3', {}, v.title || v.media_package_id),
+      v.has_video ? h('div', { class: 'review-media' },
+        h('video', { controls: true, preload: 'none', src: `${base}/video` }),
+        h('div', {}, v.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${v.thumbnails[0]}`, alt: 'thumbnail' }) : null,
+          h('p', { class: 'muted' }, `${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs`)))
+        : h('p', { class: 'muted' }, `Playlist built (${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs); the video is made from picture A.`),
+      h('details', { 'data-key': `tracks:${p.number}` }, h('summary', {}, `Tracklist (${v.tracks.length})`),
+        h('ol', {}, v.tracks.map((t) => h('li', {}, `${t.start} ${t.title}`)))));
+  }
+  if (p.can_replace_songs && !p.review) card.append(replaceSongsBox(p));
+  return card;
+}
+
+function youtubeSection(p) {
+  const y = p.youtube;
+  return h('section', { class: 'step' }, h('div', { class: 'step-head' }, h('h2', {}, '4. On YouTube'),
+    h('span', { class: 'badge' }, y ? (y.privacy || 'uploaded') : 'not uploaded')),
+    y ? h('div', {}, h('p', {}, h('a', { href: y.url, target: '_blank', rel: 'noopener' }, y.url), h('span', { class: 'muted' }, ` ${y.privacy || ''}, ${when(y.published_at)}`)),
+      y.unfinished ? h('p', { class: 'notice' }, `The video is on YouTube, but the upload step did not finish (P7: ${y.unfinished.replaceAll('_', ' ')}). See the stop above.`) : null)
+      : h('p', { class: 'muted' }, 'Uploaded after you approve it.'));
+}
+
+function projectPage(p) {
+  const head = h('section', { class: 'step project-head' },
+    h('p', {}, h('a', { href: '#studio' }, '← All projects')),
+    h('div', { class: 'step-head' },
+      h('h2', {}, `#${p.number} ${p.title || '(no title yet)'}`), statusBadge(p)),
+    h('p', { class: 'muted' }, `${p.style_label || 'style unknown'} · ${lengthLabel(p.length)}${p.visual_world ? ` · ${p.visual_world.replaceAll('_', ' ')}` : ''} · started ${when(p.started)}`),
+    h('p', { class: 'project-label' }, p.label),
+    p.finished ? null : h('div', { class: 'row-actions' }, actionButton('Cancel this project', 'btn-danger', () => postJson(`/api/studio/projects/${p.number}/cancel`, { reason: '' }),
+      { confirm: `Cancel project #${p.number}? It stops for good: nothing more is made or uploaded.`, busy: 'Cancelling...' })));
+  return h('div', {}, head, holdBox(p), workingBox(p), logBox(p),
+    songsSection(p), picturesSection(p), videoSection(p), youtubeSection(p),
+    noteList(p.notes, 'Your notes on this project'));
+}
+
+// -- live updates, alerts and routing --------------------------------------------------------
+
 function studioUntouched() {
   const root = document.getElementById('view-root');
-  if (root.querySelector('details[open]')) return false;
-  for (const el of root.querySelectorAll('textarea, input[type="text"], input[type="file"], select')) {
-    if (el.type === 'file' ? el.files && el.files.length : el.value !== el.defaultValue) return false;
+  if (root.querySelector('details.changes[open]')) return false;
+  for (const el of root.querySelectorAll('textarea, input[type="text"], input[type="file"], input[type="checkbox"], select')) {
+    if (el.dataset.keep) continue;  // kept across redraws (Start's style and length)
+    if (el.type === 'file') { if (el.files && el.files.length) return false; continue; }
+    if (el.type === 'checkbox') { if (el.checked) return false; continue; }
+    if (el.tagName === 'SELECT') {
+      const first = [...el.options].find((o) => o.defaultSelected) || el.options[0];
+      if (first && el.value !== first.value) return false;
+      continue;
+    }
+    if (el.value !== el.defaultValue) return false;
   }
   const active = document.activeElement;
-  return !(active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName));
+  return !(active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) && !active.dataset.keep);
 }
-setInterval(() => {
-  if (currentView !== 'studio' || studioBusy > 0 || document.hidden || !studioUntouched()) return;
+
+function announce(projects) {
+  const needing = projects.filter((p) => p.your_turn || p.problem);
+  document.title = needing.length ? `(${needing.length}) PLM Studio: ${needing[0].problem ? 'stopped' : 'your turn'}` : 'PLM Control Deck';
+  document.getElementById('studio-count').textContent = needing.length ? `(${needing.length})` : '';
+  const fresh = needing.filter((p) => !alerted.has(`${p.number}:${p.label}`));
+  for (const p of needing) alerted.add(`${p.number}:${p.label}`);
+  if (fresh.length && 'Notification' in window && Notification.permission === 'granted') {
+    for (const p of fresh) new Notification(`PLM #${p.number}: ${p.label}`, { body: p.title || '' });
+  }
+}
+
+async function fetchStudio() {
+  const list = await getJson('/api/studio/projects');
+  announce(list.projects || []);
+  const options = await getJson('/api/studio/start-options');
+  remakesNow = options.remakes || {};
+  if (studioRoute === null) return { kind: 'list', projects: list.projects, overview: options };
+  const page = await getJson(`/api/studio/projects/${studioRoute}`);
+  return { kind: 'page', page };
+}
+
+function drawStudio(data) {
+  const root = document.getElementById('view-root');
+  const wasOpen = new Map([...root.querySelectorAll('details[data-key]')].map((d) => [d.dataset.key, d.open]));
+  const y = studioShown ? window.scrollY : 0;  // a new page opens at its top
+  root.replaceChildren(data.kind === 'list' ? listPage(data) : projectPage(data.page));
+  for (const d of root.querySelectorAll('details[data-key]')) if (wasOpen.has(d.dataset.key)) d.open = wasOpen.get(d.dataset.key);
+  window.scrollTo(0, y);
+  studioShown = JSON.stringify(data);
+  studioPending = null;
+  studioUpdatedAt = Date.now();
+  const pill = document.getElementById('data-source-pill');
+  pill.textContent = 'DATA SOURCE: LIVE';
+  pill.className = 'pill pill-live';
+}
+
+// Redraw when something changed; while the owner is typing, picking or uploading, keep the
+// page and offer the update instead (never lose what they are doing).
+let studioFetching = false;
+async function refreshStudio(force = false) {
+  if (currentView !== 'studio' || (studioFetching && !force)) return;
+  let data;
+  studioFetching = true;
+  try { data = await fetchStudio(); }
+  catch (e) {
+    const pill = document.getElementById('data-source-pill');
+    pill.textContent = 'DATA SOURCE: UNREACHABLE';
+    pill.className = 'pill pill-bad';
+    if (force || !studioShown) document.getElementById('view-root').replaceChildren(h('div', { class: 'card unavailable' }, h('h2', {}, 'Studio unavailable'), h('p', { class: 'reason' }, String(e))));
+    return;
+  } finally { studioFetching = false; }
+  studioUpdatedAt = Date.now();
+  if (!force && JSON.stringify(data) === studioShown) return;
+  if (force || (studioBusy === 0 && studioUntouched())) { drawStudio(data); return; }
+  studioPending = data;
+}
+
+function updatedLine() {
+  const el = document.getElementById('generated-at');
+  if (currentView !== 'studio') return;
+  const ago = studioUpdatedAt ? Math.round((Date.now() - studioUpdatedAt) / 1000) : null;
+  el.replaceChildren(ago === null ? 'updating...' : `updated ${ago}s ago (live)`,
+    studioPending ? h('button', { class: 'btn btn-ok', type: 'button', onclick: () => drawStudio(studioPending) }, ' New update: show it') : '');
+}
+
+function routeFromHash() {
+  const m = (location.hash || '').match(/^#studio\/(\d+)$/);
+  return m ? Number(m[1]) : null;
+}
+
+setInterval(() => { refreshStudio(false); }, 5000);
+setInterval(() => { updatedLine(); tickProgress(); }, 1000);
+window.addEventListener('hashchange', () => {
+  if (!(location.hash || '').startsWith('#studio')) return;
+  studioRoute = routeFromHash();
+  studioShown = '';
   loadView('studio');
-}, 20000);
+});
 
 // ------------------------------------------------------------------------ shell
 
@@ -690,13 +968,9 @@ async function loadView(name) {
   const root = document.getElementById('view-root');
   try {
     if (name === 'studio') {
-      const wasOpen = new Set([...root.querySelectorAll('details[open][data-key]')].map((d) => d.dataset.key));
-      const studioPill = document.getElementById('data-source-pill');
-      studioPill.textContent = 'DATA SOURCE: LIVE';
-      studioPill.className = 'pill pill-live';
-      document.getElementById('generated-at').textContent = `updated ${new Date().toLocaleTimeString()}`;
-      root.replaceChildren(await renderStudio());
-      for (const d of root.querySelectorAll('details[data-key]')) if (wasOpen.has(d.dataset.key)) d.open = true;
+      studioRoute = routeFromHash();
+      if (!studioShown) root.replaceChildren(h('p', { class: 'muted' }, 'Loading...'));
+      await refreshStudio(true);
       return;
     }
     if (name === 'exceptions' || name === 'production-queue') reviewers = await getJson('/api/reviewers');
@@ -712,8 +986,23 @@ async function loadView(name) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => loadView(tab.dataset.view));
-  document.getElementById('refresh-btn').addEventListener('click', () => loadView(currentView));
-  const initial = (location.hash || '').slice(1);
+  for (const tab of document.querySelectorAll('.tab')) tab.addEventListener('click', () => {
+    if (tab.dataset.view === 'studio' && location.hash.startsWith('#studio/')) location.hash = '#studio';
+    loadView(tab.dataset.view);
+  });
+  const refresh = document.getElementById('refresh-btn');
+  refresh.addEventListener('click', async () => {
+    refresh.disabled = true;
+    refresh.textContent = 'Updating...';
+    await loadView(currentView);
+    refresh.textContent = 'Updated ✓';
+    setTimeout(() => { refresh.textContent = 'Refresh'; refresh.disabled = false; }, 1200);
+  });
+  const alerts = document.getElementById('alerts-btn');
+  if (alerts && 'Notification' in window && Notification.permission === 'default') {
+    alerts.hidden = false;
+    alerts.addEventListener('click', async () => { await Notification.requestPermission(); alerts.hidden = true; });
+  }
+  const initial = (location.hash || '').slice(1).split('/')[0];
   loadView(VIEWS.includes(initial) ? initial : 'studio');
 });

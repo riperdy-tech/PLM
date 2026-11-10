@@ -288,6 +288,17 @@ class ProjectStore:
         videos = {r["media_package_id"]: r for r in self._rows(
             "select media_package_id, youtube_video_id, video_url, privacy_status, "
             "published_at from youtube.publication_records")}
+        # P7 writes the publication record only when the whole publish is verified; an
+        # upload that went up but stopped before (thumbnail, processing) is still on
+        # YouTube, and the Studio says so (2026-11-10: jCn1eokpryw).
+        for r in self._rows(
+                "select m.media_package_id, a.youtube_video_id, a.state, m.privacy_status, "
+                "a.updated_at as published_at from youtube.publish_attempts a "
+                "join youtube.publish_manifests m on m.manifest_id = a.manifest_id "
+                "where a.youtube_video_id is not null order by a.updated_at"):
+            if r["media_package_id"] not in videos or videos[r["media_package_id"]].get(
+                    "unfinished"):
+                videos[r["media_package_id"]] = {**r, "video_url": None, "unfinished": r["state"]}
         for run in runs:
             exp = experiments.get(run["workflow_id"]) or {}
             run["experiment_id"] = exp.get("experiment_id")
@@ -307,7 +318,8 @@ class ProjectStore:
                                "url": video.get("video_url")
                                or f"https://youtu.be/{video['youtube_video_id']}",
                                "privacy": video.get("privacy_status"),
-                               "published_at": _iso(video.get("published_at"))}
+                               "published_at": _iso(video.get("published_at")),
+                               "unfinished": video.get("unfinished")}
                               if video.get("youtube_video_id") else None)
         return runs
 

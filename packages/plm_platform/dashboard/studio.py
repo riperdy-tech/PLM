@@ -245,6 +245,8 @@ class Studio:
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
+    _styles_cache: tuple[float, dict[str, Any]] | None = None
+    """The last style lookup and when (monotonic): it changes only when a run starts."""
     _imports: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Picture imports running or ended in this dashboard: package -> since, state,
     expected seconds, error (the render takes minutes, so it runs on its own)."""
@@ -300,17 +302,27 @@ class Studio:
             "lengths": LENGTH_CHOICES,
         }
 
+    def start_options(self) -> dict[str, Any]:
+        """What the Start card needs, without the inbox scans of :meth:`overview`."""
+        return {"start_available": self.start is not None, "styles": self.style_choices(),
+                "lengths": LENGTH_CHOICES, "remakes": self.remakes()}
+
     def style_choices(self) -> dict[str, Any]:
         """The Start button's sub-style picker: what can be chosen, and what the last
         videos used (owner 2026-11-09: videos must not sound alike one to the next)."""
         if self.styles is None:
             return {"available": [], "recent": [], "labels": STYLE_LABELS}
+        import time
+
+        if self._styles_cache and time.monotonic() - self._styles_cache[0] < 120:
+            return self._styles_cache[1]
         try:
             found = self.styles()
         except Exception as exc:  # noqa: BLE001 - the picker degrades to "P2 picks"
             return {"available": [], "recent": [], "labels": STYLE_LABELS,
                     "error": str(exc)}
-        return {**found, "labels": STYLE_LABELS}
+        self._styles_cache = (time.monotonic(), {**found, "labels": STYLE_LABELS})
+        return self._styles_cache[1]
 
     async def _resume(self, case_id: str, role: str, evidence: dict[str, str],
                       notes: str, **signal: Any) -> dict[str, Any]:
@@ -866,7 +878,7 @@ class Studio:
                 "label": state_label(run["state"], None if hold is None
                                      else hold.get("reason_code")),
                 "your_turn": yours,
-                "problem": (run["state"] == "HELD" and not yours) or run["state"] == "FAILED",
+                "problem": run["state"] == "HELD" and not yours,
                 "finished": run["state"] in FINISHED,
                 "started": _iso(run["created_at"]), "updated": _iso(run["updated_at"]),
                 "youtube": run.get("youtube"),
@@ -917,6 +929,8 @@ class Studio:
             "state": run["state"], "label": state_label(run["state"], reason),
             "started": _iso(run["created_at"]), "updated": _iso(run["updated_at"]),
             "finished": run["state"] in FINISHED,
+            "your_turn": bool(explained and explained["your_turn"]),
+            "problem": run["state"] == "HELD" and not (explained and explained["your_turn"]),
             "hold": explained,
             "log": plain_log(self.store.transitions(run["workflow_id"])),
             "songs": {"sheets": sheets, "waiting": reason == SONGS_REASON},
@@ -1058,7 +1072,9 @@ class Studio:
                 if name and name not in seen:
                     seen.append(name)
             avoid = tuple(seen[:STYLE_MEMORY])
-        return await self.start(MUSIC_PROVIDERS[music], subgenre, avoid, length)
+        started = await self.start(MUSIC_PROVIDERS[music], subgenre, avoid, length)
+        self._styles_cache = None  # the new run is now one of the last videos
+        return started
 
 
 def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,

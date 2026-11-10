@@ -318,6 +318,11 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
         return {"data_source": LIVE_DATA_SOURCE,
                 **await asyncio.to_thread(guarded, studio.overview)}
 
+    @app.get("/api/studio/start-options")
+    async def studio_start_options() -> dict[str, Any]:
+        return {"data_source": LIVE_DATA_SOURCE,
+                **await asyncio.to_thread(guarded, studio.start_options)}
+
     @app.get("/api/studio/projects")
     async def studio_projects() -> dict[str, Any]:
         """Every project, newest first, and what the dashboard is working on."""

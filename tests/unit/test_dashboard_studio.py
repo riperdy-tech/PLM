@@ -515,6 +515,7 @@ def test_start_offers_the_styles_p2_can_pick_and_passes_the_owner_choice(
         raise RuntimeError("database down")
 
     studio.styles = broken
+    studio._styles_cache = None  # the lookup is cached for two minutes
     assert studio.overview()["styles"]["error"] == "database down"
     with pytest.raises(ActionRefused, match="style_unavailable"):
         asyncio.run(studio.start_run("flow_music", "minimal_pulse"))
