@@ -85,6 +85,10 @@ def _base_app(title: str, description: str, data_source: str) -> FastAPI:
     ) -> Response:
         response = await call_next(request)
         response.headers[DATA_SOURCE_HEADER] = data_source
+        if request.url.path.startswith("/static/"):
+            # The page's code changes with every dashboard update; a browser that kept an
+            # old live.js showed an old Studio (2026-11-10). It revalidates instead.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     return app
