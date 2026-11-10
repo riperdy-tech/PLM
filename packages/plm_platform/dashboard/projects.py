@@ -298,7 +298,9 @@ class ProjectStore:
                 "where a.youtube_video_id is not null order by a.updated_at"):
             if r["media_package_id"] not in videos or videos[r["media_package_id"]].get(
                     "unfinished"):
-                videos[r["media_package_id"]] = {**r, "video_url": None, "unfinished": r["state"]}
+                done = r["state"] in ("verified", "published", "scheduled")
+                videos[r["media_package_id"]] = {**r, "video_url": None,
+                                                 "unfinished": None if done else r["state"]}
         for run in runs:
             exp = experiments.get(run["workflow_id"]) or {}
             run["experiment_id"] = exp.get("experiment_id")
