@@ -9,6 +9,7 @@ normalised form; nothing here overwrites evidence.
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 import unicodedata
 from typing import Final
@@ -35,9 +36,11 @@ def normalize_text(raw: str) -> str:
 
     Emoji and other symbol characters are dropped (they carry no musical term);
     `&` and `-` survive because `r&b` and `late-night` are terms. Apostrophes are
-    removed, never spaced, so `R’n’B` folds onto `rnb` — not `r n b`.
+    removed, never spaced, so `R’n’B` folds onto `rnb` — not `r n b`. HTML entities are
+    decoded first: YouTube's search returns titles escaped (`Piano &amp; Synth`,
+    `&#39;Infinite&#39;`), and undecoded they never matched `&` terms (2026-11-10).
     """
-    folded = unicodedata.normalize("NFKC", raw).casefold()
+    folded = unicodedata.normalize("NFKC", html.unescape(raw)).casefold()
     unspaced = _APOSTROPHES.sub("", folded)
     spaceless = _PUNCT_RUN.sub(" ", unspaced)
     return _WHITESPACE_RUN.sub(" ", spaceless).strip()

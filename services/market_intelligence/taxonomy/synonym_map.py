@@ -48,6 +48,7 @@ SYNONYMS: Final[dict[str, tuple[D, str]]] = {
     "organic electronica": (D.SUBGENRE, "organic_electronic"),
     "piano synth": (D.SUBGENRE, "piano_synth_concentration"),
     "piano and synth": (D.SUBGENRE, "piano_synth_concentration"),
+    "piano & synth": (D.SUBGENRE, "piano_synth_concentration"),
     "melancholic": (D.MOOD, "melancholic"),
     "sad": (D.MOOD, "melancholic"),
     "dreamy": (D.MOOD, "dreamy"),

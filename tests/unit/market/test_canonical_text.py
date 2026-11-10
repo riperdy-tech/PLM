@@ -33,3 +33,11 @@ def test_provider_ids_are_validated_with_the_documented_shapes() -> None:
 def test_canonical_urls_are_built_for_youtube_entities() -> None:
     assert video_canonical_url("vid00000001") == "https://www.youtube.com/watch?v=vid00000001"
     assert channel_canonical_url("UC" + "a" * 22).endswith("/channel/UC" + "a" * 22)
+
+
+def test_html_escaped_titles_are_decoded_before_matching() -> None:
+    """YouTube search returns escaped titles; undecoded, `&` terms never matched."""
+    assert normalize_text("Chloé - Bouquet (Piano &amp; Synth Performance)") == (
+        "chloé - bouquet piano & synth performance")
+    assert normalize_text("&#39;Infinite&#39; Ambient Mix") == "infinite ambient mix"
+    assert normalize_text("R&amp;B") == normalize_text("R&B")
