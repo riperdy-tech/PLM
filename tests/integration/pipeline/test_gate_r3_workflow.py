@@ -626,6 +626,64 @@ async def test_a_song_taken_out_at_approval_is_replaced_before_the_new_package(
     assert steps.calls_for(Step.UPLOAD) == []
 
 
+async def test_a_song_taken_out_while_assembly_is_held_is_replaced(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """Proves (owner 2026-11-10: go back to the songs from the thumbnail step): a resume
+    of a hold of the assembly step with ``rewind_to="assemble"`` and
+    ``exclude_candidates`` asks P3 for a new song (its own keys) and assembles again
+    without the removed one, under the next rewind's assembly key."""
+    import dataclasses
+
+    from plm_platform.pipeline.client import start_pipeline
+    from plm_platform.pipeline.types import StepRequest, StepResult
+
+    from tests.integration.pipeline.support import QUEUE
+
+    class HeldSteps(MockPhaseSteps):
+        def __init__(self, scripts: dict[Step, ScriptedStep]) -> None:
+            super().__init__(scripts)
+            self.assemble_inputs: list[list[str]] = []
+
+        async def generate(self, request: StepRequest) -> StepResult:
+            if "rrr1s" in request.idempotency_key:
+                self.calls.append((Step.GENERATE.value, request.idempotency_key))
+                return StepResult(outputs={"candidate_ids": ["cand-new"]})
+            return await super().generate(request)
+
+        async def assemble(self, request: StepRequest) -> StepResult:
+            self.assemble_inputs.append(list(request.inputs["generate"]["candidate_ids"]))
+            return await super().assemble(request)
+
+    steps = HeldSteps(_scripts(
+        generate=ScriptedStep(outputs={"candidate_ids": ["cand-a", "cand-b"]}),
+        assemble=ScriptedStep(outputs={
+            "media_package_ids": ["media-mock"],
+            "packages": [{"media_package_id": "media-mock", "p3_package_id": "pkg-mock",
+                          "candidate_ids": ["cand-a", "cand-new"]}]},
+            raises_first=ValidationFailure("held at assembly"), raises_for_first_keys=1)))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(
+            client, directive_id=directive_id, brand_id="gate_brand", task_queue=QUEUE,
+            options=dataclasses.replace(OPTIONS, require_publish_approval=True))
+        held = await wait_until(handle, lambda s: s.state == "HELD", "the assembly hold")
+        assert held.held_from == "ASSEMBLING"
+        await handle.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="otto", role="platform_owner", evidence={"platform_fix_ref": "studio"},
+            rewind_to="assemble", exclude_candidates=("cand-b",)))
+        approval = await wait_until(
+            handle, lambda s: s.state == "HELD" and s.held_from == "PACKAGED",
+            "the approval hold after the swap")
+        assert approval.held_from == "PACKAGED"
+        await handle.terminate(reason="R6 test: swap at assembly proven")
+
+    assert steps.assemble_inputs[-1] == ["cand-a", "cand-new"]
+    assert steps.calls_for(Step.EXTEND) == [idempotency_key(workflow_id, "extend.rrr1s.0")]
+    assert steps.calls_for(Step.ASSEMBLE)[-1] == idempotency_key(workflow_id, "assemble.rr1")
+    assert steps.calls_for(Step.UPLOAD) == []
+
+
 async def test_a_rewind_that_runs_short_tops_up_under_its_own_keys(
     client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
 ) -> None:

@@ -219,6 +219,8 @@ class PipelineWorkflow:
         """The packages the approval hold showed the owner (P3 package -> candidates)."""
         self._swap: dict[str, list[str]] = {}
         """P3 package -> songs the owner took out at the approval hold, to replace."""
+        self._p3_packages: list[str] = []
+        """The run's P3 packages (policy check), for a swap at an assembly hold."""
         self._receipts: list[dict[str, Any]] = []
         """Every external write the phases reported, for the cost read at the outcome."""
 
@@ -293,7 +295,13 @@ class PipelineWorkflow:
 
         rerenders = 0
         while True:
-            assembled = await self._assemble(policy, generated, rerenders)
+            try:
+                assembled = await self._assemble(policy, generated, rerenders)
+            except _RewindToAssemble:
+                # The owner replaced songs while assembly was held (the thumbnail step):
+                # assemble again under the next rewind's keys.
+                rerenders += 1
+                continue
             if assembled is None:
                 return self._outcome()
             await self._move(PipelineState.PACKAGED, step=Step.ASSEMBLE, done=assembled)
@@ -419,6 +427,7 @@ class PipelineWorkflow:
         rounds = 0
         allowance = options.max_topup_rounds
         base = Step.ASSEMBLE.value if rerender == 0 else f"{Step.ASSEMBLE.value}.rr{rerender}"
+        self._p3_packages = [str(p) for p in policy.result.outputs.get("package_ids") or []]
         await self._move(PipelineState.ASSEMBLING)
         if self._swap:
             # The owner took songs out at the approval hold: drop them for good and ask
@@ -795,19 +804,29 @@ class PipelineWorkflow:
                 return False
             if all(case in cleared for case in self._open_cases):
                 rewind = getattr(signal, "rewind_to", None)
+                excluded = set(getattr(signal, "exclude_candidates", ()) or ())
+                # Owner 2026-11-10: songs may be replaced while assembly is held (the
+                # thumbnail step), not only at the approval hold. A run with one P3
+                # package gives every excluded song to it.
+                at_assembly = (step is Step.ASSEMBLE and rewind == Step.ASSEMBLE.value
+                               and bool(excluded) and len(self._p3_packages) == 1
+                               and workflow.patched("swap-at-assembly-hold"))
                 if rewind is not None:
-                    self._rewind = step is Step.UPLOAD and rewind == Step.ASSEMBLE.value
+                    self._rewind = at_assembly or (
+                        step is Step.UPLOAD and rewind == Step.ASSEMBLE.value)
                     summary["rewind_to"] = rewind if self._rewind else None
                     if not self._rewind:
                         workflow.logger.warning("rewind to %r ignored on a %s hold",
                                                 rewind, step.value)
-                    excluded = set(getattr(signal, "exclude_candidates", ()) or ())
-                    if self._rewind and excluded:
+                    if self._rewind and excluded and at_assembly:
+                        self._swap = {self._p3_packages[0]: sorted(excluded)}
+                    elif self._rewind and excluded:
                         self._swap = {
                             str(p.get("p3_package_id")): songs
                             for p in self._last_packages
                             if (songs := sorted(excluded & {str(c) for c in
                                                             p.get("candidate_ids") or []}))}
+                    if self._swap:
                         summary["exclude_candidates"] = sorted(
                             c for songs in self._swap.values() for c in songs)
                 await self._move(held_from, outputs=summary, hold_case_ids=self._open_cases)
