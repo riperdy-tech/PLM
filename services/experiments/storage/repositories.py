@@ -313,6 +313,20 @@ def recent_subgenres(session: Session, *, genre: str, limit: int = 20) -> tuple[
     return tuple(str(row) for row in rows)
 
 
+_DESIGN_LOCK_KEY = 0x50335F44  # "P3_D": one advisory lock for experiment designs
+
+
+def lock_experiment_design(session: Session) -> None:
+    """Serialize designs until this transaction ends (PostgreSQL; a no-op elsewhere).
+
+    A design reads the latest experiments' visual worlds and sub-styles to avoid them;
+    two designs at once (the runs of one P2 cycle start together) would each miss the
+    other's and take the same world, which P6's variation check then refuses."""
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(sa.text("SELECT pg_advisory_xact_lock(:key)"),
+                        {"key": _DESIGN_LOCK_KEY})
+
+
 def recent_visual_worlds(session: Session, *, genre: str, limit: int = 3) -> tuple[str, ...]:
     """The visual worlds of the genre's latest ``limit`` experiments, newest first.
 
@@ -331,6 +345,21 @@ def recent_visual_worlds(session: Session, *, genre: str, limit: int = 3) -> tup
         .limit(limit)
     ).scalars().all()
     worlds = [str(row) for row in rows]
+    # The visual spec is stored at materialize, the world chosen at design: runs started
+    # together (one P2 cycle) design before either materializes, so a designed
+    # experiment's world counts from its genome (Gate R5, 2026-11-10).
+    designed = session.execute(
+        sa.select(content_genomes_table.c.dimensions_json)
+        .join(experiments_table,
+              experiments_table.c.base_genome_fingerprint == content_genomes_table.c.fingerprint)
+        .where(content_genomes_table.c.genre == genre)
+        .order_by(experiments_table.c.created_at.desc(), experiments_table.c.experiment_id)
+        .limit(limit)
+    ).scalars().all()
+    for dimensions in designed:
+        world = json.loads(dimensions or "{}").get("visual_world")
+        if isinstance(world, str) and world and world not in worlds:
+            worlds.append(world)
     for world in recent_packaged_visual_worlds(session, limit=limit):
         if world not in worlds:
             worlds.append(world)

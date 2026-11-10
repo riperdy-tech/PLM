@@ -114,6 +114,7 @@ def build_router(
                     ).model_dump(),
                 ) from err
 
+            repositories.lock_experiment_design(session)
             try:
                 genre = brief_genre(adapted)[0]
                 base_genome = build_genome_from_directive(

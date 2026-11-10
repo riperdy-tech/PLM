@@ -295,3 +295,33 @@ def test_legacy_row_without_a_measurement_plan_is_refused_on_load() -> None:
         with pytest.raises(LegacyExperimentError) as exc:
             repositories.get_experiment(session, "exp_legacy")
     assert exc.value.code == "legacy_experiment_without_measurement_plan"
+
+
+def test_a_designed_experiment_counts_toward_recent_visual_worlds() -> None:
+    """P3 stores the visual spec only at materialize, but the world is chosen at design.
+
+    Two pipeline runs from one P2 cycle start together: the second designs before the
+    first materializes. Its world must already count, or both keep the template's world
+    and P6's variation check refuses the second package after its songs are made
+    (Gate R5, 2026-11-10)."""
+    engine = create_experiments_engine()
+    with experiments_session(engine) as session:
+        genome = _sample_genome()
+        repositories.insert_genome(session, genome, genome_id="gen_designed", created_at=NOW)
+        repositories.insert_experiment(session, Experiment(
+            experiment_id="exp_designed", content_arm_id="arm_01",
+            production_directive_id="dir_01", experiment_type=ExperimentType.SINGLE_FACTOR,
+            status=ExperimentStatus.DRAFT,
+            hypothesis=Hypothesis(statement="s", target_metric="retention_rate",
+                                  expected_direction="increase"),
+            variables=(ExperimentVariable(name="bpm", variable_class=VariableClass.EXPERIMENTAL,
+                                          baseline_value=80, treatment_values=(70,)),),
+            treatments=(Treatment(treatment_id="trt", treatment_index=0, name="t",
+                                  variable_assignments={"bpm": 70}),),
+            base_genome_fingerprint=compute_genome_fingerprint(genome), created_at=NOW,
+            **design_facts("exp_designed"),
+        ))
+        session.commit()
+
+        assert repositories.recent_visual_worlds(session, genre=genome.genre) == (
+            "rainy_asian_city",)
