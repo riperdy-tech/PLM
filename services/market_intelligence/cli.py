@@ -367,7 +367,7 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     arm and an ``ENV=ci`` run scored nothing (R5: P2 then had no opportunity to
     allocate). Both profiles lie inside the brand's focus identity (ADR-0044: P2 blocks
     any arm outside it, so the older lofi/R&B corpus left R5 nothing to allocate) and
-    differ enough that P2 does not cluster them into one slot.
+    differ enough that P2's cluster and use-case caps do not hold them to one slot.
     """
     from plm_platform.config import Env, Secret
 

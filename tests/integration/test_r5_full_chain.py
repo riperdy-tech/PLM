@@ -19,8 +19,8 @@ containers.
   records it in P9 before it measures (nothing extra here).
 * Mock outcomes: the containers' declared model (``config/dev/mock_outcomes.json``) pins
   the true effect of the two arms P1's CI corpus forms (both inside P2's brand identity,
-  ADR-0044, and in separate P2 clusters: the dreamy study-focus arm 1.4, the melancholic
-  future-garage arm 0.25). The test reads the same file and calls the arm with the larger
+  ADR-0044, in separate P2 clusters and use-case caps: the dreamy study-focus arm 1.4,
+  the melancholic future-garage arm with no named use case 0.25). The test reads the same file and calls the arm with the larger
   effect "strong", asserting the gap is clear (ratio >= ``MIN_EFFECT_RATIO``). The strong arm is
   the one P1 scores lower, so its posterior has to overturn a lower prior.
 * Namespacing: P2 keys learning state (arm state, posterior, update log, results) by the

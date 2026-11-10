@@ -84,9 +84,11 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
     by_profile = {(arm.profile.subgenre, arm.profile.mood): arm.arm_id for arm in arms}
     strong = by_profile[(None, ("dreamy",))]
     weak = by_profile[("future_garage_focus", ("melancholic",))]
-    # P2 caps a cluster of similar arms at one of R5's three slots: the first cycle can
-    # allocate both arms only when they are not one cluster.
+    # P2 caps a cluster of similar arms, and arms of one use case, at one of R5's three
+    # slots (0.6 shares): the first cycle allocates both arms only when they are neither
+    # one cluster nor one use case (an unset use case is its own "unknown" bucket).
     assert arm_similarity(dims[strong], dims[weak]) < ARSettings().similarity_threshold
+    assert dims[strong].use_cases != dims[weak].use_cases
     model = load_mock_outcome_model(
         Path(__file__).resolve().parents[3] / "config/dev/mock_outcomes.json",
     )
