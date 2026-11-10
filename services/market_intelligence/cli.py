@@ -293,15 +293,23 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
     except QuotaExceededError:
         # The connector refused an attempt that would have crossed the run's budget
         # (per-run or the day's remainder): stop low-priority work, reschedule (§27).
+        # The queries collected before the refusal ran: they take their normal cadence.
+        # Rescheduling them too (as before 2026-11-10) put the same first queries at
+        # the head of every run, so a pool larger than one run's budget never reached
+        # its tail (the focus sub-style seeds had never run).
         repositories.add_run_cost(session, run_id, api_calls=active.request_count,
                                   api_quota_units=active.quota_units_used)
-        for state in due:
+        done, left = due[:len(summaries)], due[len(summaries):]
+        mark_scheduled(session, done, now=now, settings=settings)
+        for state in done:
+            mark_run(session, state.query_id, at=now)
+        for state in left:
             reset_schedule(session, state.query_id, now=now, settings=settings,
                            reason="QUOTA_EXCEEDED")
         repositories.finish_collection_run(
             session, run_id, status=CollectionRunStatus.PARTIAL,
             counters=_counters_from_db(session, run_id, requests=active.request_count),
-            error_summary={"QUOTA_EXCEEDED": len(due)}, finished_at=datetime.now(UTC),
+            error_summary={"QUOTA_EXCEEDED": len(left)}, finished_at=datetime.now(UTC),
         )
         return {"job": trigger, "queries": len(due), "run_id": run_id, "quota_exhausted": True,
                 "status": CollectionRunStatus.PARTIAL.value}

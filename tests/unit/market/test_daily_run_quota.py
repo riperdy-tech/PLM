@@ -193,3 +193,32 @@ def test_the_ledger_ignores_previous_days(market_session) -> None:
     repositories.add_run_cost(market_session, run_id, api_quota_units=SETTINGS.quota_units_per_day)
     assert daily_quota_state(market_session, now=NOW, settings=SETTINGS).remaining_units == \
         SETTINGS.quota_units_per_day
+
+
+def test_a_run_cut_short_keeps_the_queries_it_finished_and_moves_on_next_time(
+    market_session, memory_objects
+) -> None:
+    """2026-11-10: every daily run hit the per-run budget and rescheduled every query,
+    finished ones included, so the next run began at the same head again and the pool's
+    tail (the focus sub-style seeds) never ran. The finished queries now count as run."""
+    source_id = _install(market_session)
+    repositories.upsert_query(
+        market_session, source_id=source_id, query_text="piano and synth focus",
+        query_type=QueryType.MUSIC_GENRE, locale="en", country_code="US", language="english",
+        seed_group="bootstrap", priority=40, query_version="p1-queries-v1",
+    )
+    mock = MockHTTP(repeat_last=True)
+    mock.enqueue_json(_fixture("search_lofi_p1.json"))
+    mock.enqueue_json(_fixture("videos_lofi_batch.json"))
+    mock.enqueue_json(_fixture("channels_lofi_batch.json"))
+
+    # 150 units: the first query (100 + 1 + 1) fits, the second search (100) does not.
+    result = _run_due_collection(market_session, now=NOW, settings=SETTINGS,
+                                 connector=_connector(mock, units=150))
+
+    assert result["quota_exhausted"] is True
+    rows = {r["query_text"]: r for r in repositories.load_queries(market_session)}
+    assert rows["lofi"]["last_run_at"] is not None  # it ran
+    assert rows["piano and synth focus"]["last_run_at"] is None  # it waits for the next run
+    run = repositories.load_run(market_session, result["run_id"])
+    assert run is not None and run["error_summary"] == {"QUOTA_EXCEEDED": 1}
