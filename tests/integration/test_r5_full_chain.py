@@ -580,7 +580,7 @@ def test_the_second_cycle_shifts_allocation_toward_the_rewarded_arm(chain: Chain
     assert last["update"]["applied"] >= 0
     learning = CONFIG.require_learning("r5-test")
     after_cooldown = datetime.fromisoformat(last["as_of"]) + timedelta(
-        hours=DEFAULT_POLICY.cooldown_hours + 1.0)
+        hours=DEFAULT_POLICY.fatigue.cooldown_hours + 1.0)
     second_id = api.call("POST", Phase.AR, "/ar/cycles", json={
         "brand_id": BRAND, "slot_count": learning.slot_count, "budget": learning.budget,
         "as_of": after_cooldown.isoformat(), "policy_version": learning.policy_version,
