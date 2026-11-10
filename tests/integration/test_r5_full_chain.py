@@ -18,8 +18,9 @@ containers.
 * FX: the development pipeline configuration declares the USD->KRW rate; the outcome step
   records it in P9 before it measures (nothing extra here).
 * Mock outcomes: the containers' declared model (``config/dev/mock_outcomes.json``) pins
-  the true effect of the two arms P1's CI corpus forms (``lofi_study_focus`` 1.4,
-  ``rnb`` 0.25). The test reads the same file and calls the arm with the larger effect
+  the true effect of the two arms P1's CI corpus forms (both focus electronic, as P2's
+  brand identity requires since ADR-0044: the plain arm 1.4, the future-garage arm
+  0.25). The test reads the same file and calls the arm with the larger effect
   "strong", asserting the gap is clear (ratio >= ``MIN_EFFECT_RATIO``). The strong arm is
   the one P1 scores lower, so its posterior has to overturn a lower prior.
 * Namespacing: P2 keys learning state (arm state, posterior, update log, results) by the
@@ -363,6 +364,9 @@ async def _drive(settings: Settings, factory: sessionmaker[Session], token: str,
             "brand_id": BRAND, "slot_count": learning.slot_count, "budget": learning.budget,
             "as_of": t0.isoformat(), "policy_version": learning.policy_version,
             "activation_state": learning.activation_state,
+            # The owner's length choice (Studio Start): without one P3 makes its 20-30
+            # min default, and this gate runs at production scale (45-75 min).
+            "duration_bucket": "45_75m",
             "random_seed": int(uuid.uuid4().int % 2**31)})
         decisions = api.call("GET", Phase.AR, f"/ar/cycles/{first['cycle_id']}/decisions")
         decision_ids = {d["decision_id"] for d in decisions}

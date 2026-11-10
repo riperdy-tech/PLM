@@ -122,11 +122,17 @@ def _stage(settings: Settings, p5: Session, run: str, *,
 
 
 def _request(staged: list[dict[str, Any]]) -> dict[str, Any]:
+    # P6 refuses a package whose visual world one of the brand's last 3 packages used, or
+    # whose concept or titles repeat a recent one (upload-variation-v1, ADR-0045), and the
+    # brand's packages accumulate in one database; so each request gets its own world and
+    # a concept differing by more than one swapped word.
+    fresh = uuid.uuid4().hex
     return {"candidate_ids": [s["candidate_id"] for s in staged], "brand_id": "longform_signal",
             # Only all tracks together land in this declared range.
             "duration_range_seconds": {"min_seconds": int(sum(t[0] for t in TRACKS) - 4.0),
                                        "max_seconds": int(sum(t[0] for t in TRACKS) - 4.0) + 1},
-            "visual_profile": "it_waveform", "playlist_concept": "Integration Focus",
+            "visual_profile": f"it_waveform_{fresh[:8]}",
+            "playlist_concept": f"Integration Focus {fresh[8:14]} {fresh[14:20]}",
             "render_profile": "preview_360p_v1"}
 
 

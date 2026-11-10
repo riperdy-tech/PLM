@@ -1,0 +1,133 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "etag-videos-focus-ci-1",
+  "pageInfo": {
+    "totalResults": 6,
+    "resultsPerPage": 6
+  },
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-1",
+      "id": "vid00000001",
+      "snippet": {
+        "publishedAt": "2026-08-01T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "Future Garage for Coding — Deep Work Mix",
+        "description": "instrumental future garage",
+        "channelTitle": "NightLoop",
+        "defaultLanguage": "en"
+      },
+      "statistics": {
+        "viewCount": "120000",
+        "likeCount": "8400",
+        "commentCount": "312"
+      },
+      "contentDetails": {
+        "duration": "PT1H2M"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-2",
+      "id": "vid00000002",
+      "snippet": {
+        "publishedAt": "2026-08-15T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "Focus Electronic for Deep Work",
+        "description": "instrumental electronic focus music",
+        "channelTitle": "StudyLoops"
+      },
+      "statistics": {
+        "viewCount": "54000",
+        "likeCount": "3900",
+        "commentCount": "330"
+      },
+      "contentDetails": {
+        "duration": "PT58M"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-3",
+      "id": "vid00000004",
+      "snippet": {
+        "publishedAt": "2026-08-18T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "Electronic Focus Music for Coding",
+        "description": "instrumental, no vocals",
+        "channelTitle": "StudyLoops"
+      },
+      "statistics": {
+        "viewCount": "61000",
+        "likeCount": "4200",
+        "commentCount": "305"
+      },
+      "contentDetails": {
+        "duration": "PT1H4M"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-4",
+      "id": "vid00000005",
+      "snippet": {
+        "publishedAt": "2026-08-20T10:00:00Z",
+        "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+        "title": "Deep Focus Electronic Session",
+        "description": "instrumental focus music",
+        "channelTitle": "StudyLoops"
+      },
+      "statistics": {
+        "viewCount": "47000",
+        "likeCount": "3100",
+        "commentCount": "268"
+      },
+      "contentDetails": {
+        "duration": "PT45M"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-5",
+      "id": "vid00000006",
+      "snippet": {
+        "publishedAt": "2026-08-05T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "Future Garage Focus Mix",
+        "description": "instrumental, no vocals",
+        "channelTitle": "NightLoop",
+        "defaultLanguage": "en"
+      },
+      "statistics": {
+        "viewCount": "98000",
+        "likeCount": "7100",
+        "commentCount": "287"
+      },
+      "contentDetails": {
+        "duration": "PT55M"
+      }
+    },
+    {
+      "kind": "youtube#video",
+      "etag": "etag-multi-video-6",
+      "id": "vid00000007",
+      "snippet": {
+        "publishedAt": "2026-08-08T10:00:00Z",
+        "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+        "title": "Future Garage for Programming",
+        "description": "instrumental future garage",
+        "channelTitle": "NightLoop",
+        "defaultLanguage": "en"
+      },
+      "statistics": {
+        "viewCount": "131000",
+        "likeCount": "9050",
+        "commentCount": "340"
+      },
+      "contentDetails": {
+        "duration": "PT1H8M"
+      }
+    }
+  ]
+}

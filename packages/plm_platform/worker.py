@@ -39,6 +39,7 @@ import argparse
 import asyncio
 import importlib
 import logging
+import os
 import signal
 import sys
 from collections.abc import Callable, Coroutine, Sequence
@@ -351,4 +352,14 @@ def _run(coro: Coroutine[Any, Any, int]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    if "--healthcheck" in sys.argv[1:]:
+        # The check's answer is already decided and logged. Interpreter teardown with the
+        # Temporal client's native runtime still alive has crashed the process (SIGSEGV,
+        # exit -11; CI 2026-11-09), which turns a decided 0 or 1 into an unhealthy
+        # container either way, so this short-lived process skips the teardown.
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(status)
+    sys.exit(status)

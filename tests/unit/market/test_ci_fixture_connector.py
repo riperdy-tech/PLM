@@ -22,6 +22,8 @@ import pytest
 from plm_platform.config import load_settings
 from plm_platform.testing.mock_outcomes import load_mock_outcome_model
 
+from services.autonomous_ar.domain.arm import ArmDimensions
+from services.autonomous_ar.policy.identity import load_brand_identities
 from services.market_intelligence.cli import _production_connector
 from services.market_intelligence.config import load_market_settings
 from services.market_intelligence.normalization.youtube import _seconds
@@ -41,7 +43,7 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
     settings = load_market_settings(platform=load_settings())
     connector = _production_connector(settings, 10_000)
 
-    found = connector.search_videos("lofi study")
+    found = connector.search_videos("focus electronic")
     ids = [obj.provider_object_id for obj in found.objects]
     videos = connector.fetch_videos(ids)
     assert len(videos.objects) == len(ids) >= 2 * settings.min_arm_support
@@ -64,12 +66,21 @@ def test_the_ci_corpus_forms_at_least_two_supported_arms(
         taxonomy_version=settings.taxonomy_version,
     )
     assert len(arms) >= 2, [d.dimensions for d in drafts]
+    # P2 blocks an arm outside the brand's identity (ADR-0044) before it allocates, so
+    # every arm the CI corpus forms must be one the brand may produce.
+    identity = load_brand_identities()["longform_signal"]
+    for arm in arms:
+        dims = ArmDimensions(
+            genre=arm.profile.genre, subgenre=arm.profile.subgenre,
+            use_cases=(arm.profile.use_case,) if arm.profile.use_case else (),
+            vocal_mode=arm.profile.vocal_mode, duration_bucket=arm.profile.duration_bucket)
+        assert identity.admits(dims), arm.profile
     # R5's synthetic outcomes must name the IDs P1 now actually creates. Taxonomy v3
     # IDs are digests of the profile, so the two fixture profiles are found by profile.
-    by_profile = {(arm.profile.genre, arm.profile.use_case, arm.profile.duration_bucket):
+    by_profile = {(arm.profile.subgenre, arm.profile.use_case, arm.profile.duration_bucket):
                   arm.arm_id for arm in arms}
-    strong = by_profile[("lofi", "study_focus", "45_75m")]
-    weak = by_profile[("rnb", None, "45_75m")]
+    strong = by_profile[(None, "study_focus", "45_75m")]
+    weak = by_profile[("future_garage_focus", "study_focus", "45_75m")]
     model = load_mock_outcome_model(
         Path(__file__).resolve().parents[3] / "config/dev/mock_outcomes.json",
     )

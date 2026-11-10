@@ -176,8 +176,11 @@ def _stage_and_assemble(settings: Settings, factory: sessionmaker[Session], toke
                             "candidate_ids": candidates, "brand_id": BRAND,
                             "duration_range_seconds": {"min_seconds": total,
                                                        "max_seconds": total + 1},
-                            "visual_profile": "it_waveform",
-                            "playlist_concept": "R5 Integration Focus",
+                            # P6's variation check (ADR-0045) refuses a world one of
+                            # the brand's last 3 packages used and a concept differing
+                            # by one word: both are fresh per run.
+                            "visual_profile": f"it_waveform_{run}",
+                            "playlist_concept": f"R5 Integration Focus {run[:5]} {run[5:]}",
                             "render_profile": "preview_360p_v1"})
     assert answer.status_code == 200, answer.text
     assert answer.json()["status"] == "ready_for_publish", answer.json()

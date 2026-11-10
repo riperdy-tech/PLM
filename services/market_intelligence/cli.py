@@ -365,7 +365,8 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     The corpus is the multi-profile one (six videos over two taxonomy profiles): §16's
     arm support floor is two videos per profile, so the two-video corpus could form no
     arm and an ``ENV=ci`` run scored nothing (R5: P2 then had no opportunity to
-    allocate).
+    allocate). Both profiles are focus electronic (ADR-0044): P2 blocks any arm outside
+    the brand's identity, so the older lofi/R&B corpus left R5 nothing to allocate.
     """
     from plm_platform.config import Env, Secret
 
@@ -379,8 +380,8 @@ def _mock_connector(settings: MarketSettings, quota_units: int, *,
     from .collection.seeds import load_bootstrap_seeds
 
     fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "market" / "youtube"
-    search = json.loads((fixtures / "search_multi_p1.json").read_text(encoding="utf-8"))
-    videos = json.loads((fixtures / "videos_multi_batch.json").read_text(encoding="utf-8"))
+    search = json.loads((fixtures / "search_focus_ci.json").read_text(encoding="utf-8"))
+    videos = json.loads((fixtures / "videos_focus_ci.json").read_text(encoding="utf-8"))
     channels = json.loads((fixtures / "channels_lofi_batch.json").read_text(encoding="utf-8"))
     mock = MockHTTP(repeat_last=True)
     for _ in load_bootstrap_seeds():  # search + videos.list + channels.list per query
