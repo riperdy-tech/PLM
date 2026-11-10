@@ -220,7 +220,8 @@ def plain_log(transitions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             elif step == "qa":
                 passed = sum(1 for e in out.get("evaluations") or []
                              if isinstance(e, Mapping)
-                             and str(e.get("disposition", "")).startswith("PASSED"))
+                             and isinstance(e.get("disposition"), str)
+                             and e["disposition"].startswith("PASSED"))
                 total = _count(out, "evaluations")
                 if total:
                     text = f"Songs checked: {passed} of {total} passed"
