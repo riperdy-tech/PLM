@@ -142,6 +142,10 @@ def test_upload_publishes_the_c6_package_on_the_configured_channel() -> None:
     assert result.outputs["external_writes"] == [{**r, "media_package_id": "m1"}
                                                  for r in RECEIPTS]
     assert result.cost is None  # P7 reports no money; the spend is in the ledger
+    # P7 uploads inside this call (821 MB took six minutes, 2026-11-09): the read
+    # timeout is the long bounded one, not the client's default seconds.
+    assert publish.extensions["timeout"]["read"] == HttpPhaseSteps.PUBLISH_TIMEOUT_SECONDS
+    assert 600 < HttpPhaseSteps.PUBLISH_TIMEOUT_SECONDS
 
 
 def test_upload_turns_a_guard_refusal_into_its_hold() -> None:

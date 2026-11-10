@@ -73,6 +73,10 @@ def _refuse_simulated(writes: list[dict[str, Any]], phase: Phase, path: str,
 class ReleaseSteps(HttpStepsBase):
     # -- upload: P6's C6 package to P7 on the configured channel ---------------------------
 
+    PUBLISH_TIMEOUT_SECONDS: Final[float] = 3300.0
+    """P7's publish call carries the upload itself; like P6's render it is bounded under
+    the 3600 s default activity limit (``HttpSteps.ASSEMBLE_TIMEOUT_SECONDS``)."""
+
     async def upload(self, request: StepRequest) -> StepResult:
         return await asyncio.to_thread(self._upload, request)
 
@@ -86,9 +90,14 @@ class ReleaseSteps(HttpStepsBase):
             media_package_id = str(require(package, "media_package_id", "assemble package"))
             c6 = p6.get(f"/media/packages/{media_package_id}/c6", idempotency_key=key)
             path = "/youtube/publish"
+            # P7 uploads the whole video inside this call: an 821 MB, 97-minute master
+            # took six minutes (2026-11-09). The client's default timeout gave up after
+            # seconds while P7 kept uploading; the retry then met the upload's own budget
+            # reservation and held the run, though the video went up.
             answer = p7.post(path, idempotency_key=request_key(key, "publish", media_package_id),
                              body={"media_package": c6, "channel_id": publish.channel_id,
-                                   "operating_mode": publish.operating_mode})
+                                   "operating_mode": publish.operating_mode},
+                             timeout_seconds=self.PUBLISH_TIMEOUT_SECONDS)
             writes = _tag(answer.get("external_writes"), media_package_id=media_package_id)
             _refuse_simulated(writes, Phase.YOUTUBE, path, publish.allow_simulated)
             event = answer.get("publication_event")
