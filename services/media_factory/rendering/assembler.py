@@ -250,6 +250,7 @@ def assemble_media_package(
         recent_hooks=recent_hooks)
     variation = variation_fingerprint(
         concept=meta_res.hooks[0], visual_world=visual_profile,
+        experiment_id=lineage.experiment_id,
         titles=[str(c["title"]) for c in meta_res.metadata_candidates])
     variation["hooks"] = list(meta_res.hooks)
     variation_report = {

@@ -10,7 +10,8 @@ render, the package's concept, visual world and titles are compared with the bra
 * the same concept (case, spacing and punctuation ignored) is refused;
 * the visual world of any of the last :attr:`VariationPolicy.visual_world_gap` packages is
   refused (P3 rotates the world over the same window, so this only fires when a brief
-  names a recently used world);
+  names a recently used world), except a package of the same experiment: its treatments
+  differ only in the experiment's factor, so they share the base genome's world;
 * a title that differs from an earlier one by at most one swapped word (a template fill)
   is refused.
 
@@ -54,10 +55,14 @@ def _words(text: str) -> list[str]:
 
 
 def variation_fingerprint(*, concept: str, visual_world: str, titles: Sequence[str],
+                          experiment_id: str | None = None,
                           policy: VariationPolicy = DEFAULT_VARIATION_POLICY) -> dict[str, Any]:
     """What this check compares, stored in the package's render report."""
-    return {"policy_version": policy.version, "concept": concept,
-            "visual_world": visual_world, "titles": list(titles)}
+    fingerprint: dict[str, Any] = {"policy_version": policy.version, "concept": concept,
+                                   "visual_world": visual_world, "titles": list(titles)}
+    if experiment_id is not None:
+        fingerprint["experiment_id"] = experiment_id
+    return fingerprint
 
 
 def check_upload_variation(
@@ -77,8 +82,10 @@ def check_upload_variation(
         where = f"earlier package {album.media_package_id}"
         if concept and _words(str(prior.get("concept", ""))) == concept:
             _refuse(f"the concept {current['concept']!r} repeats {where}")
-        if index < policy.visual_world_gap and prior.get("visual_world") == current[
-                "visual_world"]:
+        sibling = current.get("experiment_id") is not None and prior.get(
+            "experiment_id") == current["experiment_id"]
+        if index < policy.visual_world_gap and not sibling and prior.get(
+                "visual_world") == current["visual_world"]:
             _refuse(f"the visual world {current['visual_world']!r} was used by {where}, "
                     f"one of the last {policy.visual_world_gap}")
         for title, words in zip(current["titles"], titles, strict=True):

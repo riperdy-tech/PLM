@@ -66,6 +66,29 @@ def test_windows_bound_what_is_compared() -> None:
     check_upload_variation(_current(), current_release_manifest_id="rel_new", history=same)
 
 
+def test_treatments_of_one_experiment_may_share_their_world() -> None:
+    """An experiment's treatments differ only in its factor (P3 gives every treatment the
+    base genome's world), so a sibling package's world is not a repeat; another
+    experiment's still is, and a sibling's concept still is."""
+    sibling = CatalogAlbum("pkg_t0", "rel_t0", None, variation=variation_fingerprint(
+        concept="Night Desk Session", visual_world="observatory_workspace",
+        titles=["Night Desk Session" + SUFFIX], experiment_id="exp_1"))
+
+    def treatment(concept: str, experiment_id: str) -> dict[str, Any]:
+        return variation_fingerprint(concept=concept, visual_world="observatory_workspace",
+                                     titles=[concept + " for Late Deep Work Sessions"],
+                                     experiment_id=experiment_id)
+
+    check_upload_variation(treatment("Working Late at the Observatory", "exp_1"),
+                           current_release_manifest_id="rel_t1", history=[sibling])
+    with pytest.raises(MediaAssemblyError, match="visual world"):
+        check_upload_variation(treatment("Working Late at the Observatory", "exp_2"),
+                               current_release_manifest_id="rel_t1", history=[sibling])
+    with pytest.raises(MediaAssemblyError, match="concept"):
+        check_upload_variation(treatment("Night Desk Session", "exp_1"),
+                               current_release_manifest_id="rel_t1", history=[sibling])
+
+
 def test_p6_stores_the_fingerprint_and_refuses_a_repeated_concept_over_http() -> None:
     from fastapi.testclient import TestClient
     from media_factory.api.app import create_app

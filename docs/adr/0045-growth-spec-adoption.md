@@ -33,6 +33,12 @@ principles apply and its examples do not.
    recordings were already refused outright (stricter than the spec's 20% overlap). P3
    moves a brief off its template's visual world when one of the genre's last 3 videos used
    it, so the check only fires on a brief that names a recent world.
+   *Amended 2026-11-10 (Gate R5):* the world rule skips a package of the same experiment
+   (the fingerprint records `experiment_id`): an experiment's treatments differ only in
+   its factor and share the base genome's world, so a second treatment was refused after
+   its songs were made. Concept and title rules still apply to siblings. P3 also counts
+   the worlds of experiments designed but not yet materialized, and designs one at a
+   time, so runs started together by one P2 cycle take different worlds.
 5. **Titles and description (ranks 3 and 5.1, built 2026-11-03):** P3's title pattern
    (`{mood} {genre} for {use_case}`) gave focus videos raw codes as their concept
    ("focused focus_electronic for study_focus") and the same concept every time, which the
