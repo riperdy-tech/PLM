@@ -191,6 +191,31 @@ def wav_seconds(path: Path) -> float | None:
 
 
 _EXPECTED: Final = re.compile(r"^Length: about (\d+) seconds", re.MULTILINE)
+# A sheet's paste-in texts: "Styles (665 characters; ...):" or "Prompt (...):" with the
+# text on the next line, and "Exclude styles: ..." on one line.
+_FIELD_HEAD: Final = re.compile(r"^(Styles|Prompt) \(\d+ characters;[^)]*\):$")
+_EXCLUDE: Final = re.compile(r"^Exclude styles: (.+)$")
+
+
+def song_fields(block: str) -> tuple[list[str], list[dict[str, str]]]:
+    """A song block split into its information lines and the texts the owner pastes into
+    the tool's separate boxes (Suno's Styles and Exclude styles, Flow Music's Prompt)."""
+    info: list[str] = []
+    fields: list[dict[str, str]] = []
+    lines = block.splitlines()
+    i = 0
+    while i < len(lines):
+        head, exclude = _FIELD_HEAD.match(lines[i]), _EXCLUDE.match(lines[i])
+        if head and i + 1 < len(lines):
+            fields.append({"label": head.group(1), "text": lines[i + 1]})
+            i += 2
+            continue
+        if exclude:
+            fields.append({"label": "Exclude styles", "text": exclude.group(1)})
+        elif lines[i].strip():
+            info.append(lines[i])
+        i += 1
+    return info, fields
 LENGTH_CHOICES: Final[dict[str, str]] = {
     "20_30m": "20-30 minutes", "45_75m": "45-75 minutes", "90_120m": "90-120 minutes"}
 """The video lengths the owner picks at Start (P3 buckets, owner 2026-11-10)."""
@@ -413,7 +438,9 @@ class Studio:
                 stem = match.group(1)
                 wav = inbox / f"{stem}.wav"
                 expected = _EXPECTED.search(block)
+                info, fields = song_fields(block.split("\n", 1)[1] if "\n" in block else "")
                 songs.append({"stem": stem, "text": f"--- Song {block}".strip(),
+                              "info": info, "fields": fields,
                               "saved": wav.is_file(),
                               "seconds": wav_seconds(wav) if wav.is_file() else None,
                               "expected_seconds": int(expected.group(1)) if expected else None,

@@ -17,7 +17,7 @@ import pytest
 from plm_platform.clock import FixedClock
 from plm_platform.dashboard.actions import ActionRefused
 from plm_platform.dashboard.app import _range
-from plm_platform.dashboard.studio import Studio, StudioPaths
+from plm_platform.dashboard.studio import Studio, StudioPaths, song_fields
 from starlette.requests import Request
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
@@ -533,3 +533,23 @@ def test_the_review_shows_which_recent_videos_this_one_sounds_like(tmp_path: Pat
     studio.package = base
     (review,) = studio.overview()["reviews"]
     assert review["packages"][0]["sounds_like"] == []
+
+
+def test_a_suno_song_splits_into_its_styles_and_exclude_boxes() -> None:
+    """Suno's page has separate Styles and Exclude styles boxes; each gets its own text."""
+    block = ("1 ---\nSave as: trk_a-b.wav\nInstrumental: yes\n"
+             "Length: about 210 seconds (any length the track accepts is fine)\n"
+             "Styles (24 characters; paste all of it into Styles):\n"
+             "focus_electronic, 94 BPM\n"
+             "Exclude styles: low quality, noise\n")
+    info, fields = song_fields(block)
+    assert fields == [{"label": "Styles", "text": "focus_electronic, 94 BPM"},
+                      {"label": "Exclude styles", "text": "low quality, noise"}]
+    assert info == ["1 ---", "Save as: trk_a-b.wav", "Instrumental: yes",
+                    "Length: about 210 seconds (any length the track accepts is fine)"]
+
+
+def test_a_flow_music_song_has_one_prompt_box() -> None:
+    info, fields = song_fields("Save as: trk_a-b.wav\nPrompt (5 characters; paste all of it):\ncalm.\n")
+    assert fields == [{"label": "Prompt", "text": "calm."}]
+    assert info == ["Save as: trk_a-b.wav"]

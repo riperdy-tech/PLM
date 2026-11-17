@@ -166,3 +166,5 @@ input, select, textarea {
 
 .view-root a { color: var(--cyan); }
 .view-root a.project-row, .view-root a.alert-line { color: var(--text); }
+.field { margin: 6px 0; }
+.field-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }

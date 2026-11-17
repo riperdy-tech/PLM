@@ -346,13 +346,25 @@ function refusal(out) {
   return `REFUSED (${out.status}) ${d.code || ''}: ${d.message || ''}`;
 }
 
-function copyButton(text) {
+function copyButton(text, label = 'Copy prompt') {
   const button = h('button', { class: 'btn', type: 'button', onclick: async () => {
     try { await navigator.clipboard.writeText(text); button.textContent = 'Copied'; }
     catch { button.textContent = 'Copy failed: select the text'; }
-    setTimeout(() => { button.textContent = 'Copy prompt'; }, 1500);
-  } }, 'Copy prompt');
+    setTimeout(() => { button.textContent = label; }, 1500);
+  } }, label);
   return button;
+}
+
+// A song's prompt: its paste-in texts each in their own box with their own copy button
+// (Suno keeps Styles and Exclude styles apart); the whole text when the sheet has none.
+function songPrompt(song) {
+  if (!(song.fields || []).length) return [h('div', { class: 'prompt' }, song.text), copyButton(song.text)];
+  return [
+    h('div', { class: 'prompt' }, (song.info || []).join('\n')),
+    ...song.fields.map((f) => h('div', { class: 'field' },
+      h('div', { class: 'field-head' }, h('strong', {}, f.label), ` (${f.text.length} characters) `, copyButton(f.text, `Copy ${f.label}`)),
+      h('div', { class: 'prompt' }, f.text))),
+  ];
 }
 
 function actionButton(label, cls, run, { confirm: question, busy } = {}) {
@@ -769,8 +781,8 @@ function songsSection(p) {
       const url = `/api/studio/songs/${encodeURIComponent(song.stem)}`;
       card.append(h('details', { class: 'song', open: !song.saved, 'data-key': `song:${song.stem}` },
         h('summary', {}, h('strong', {}, `Song ${n} `), h('span', { class: 'mono muted' }, `${song.stem}.wav (${sheet.source}) `), songLength(song)),
-        h('div', { class: 'prompt' }, song.text),
-        h('div', { class: 'row-actions' }, copyButton(song.text),
+        songPrompt(song),
+        h('div', { class: 'row-actions' },
           p.songs.waiting ? h('span', {}, h('span', { class: 'muted' }, song.saved ? 'Replace file:' : 'Upload:'), uploadInput('.wav,audio/wav', url)) : null),
         song.saved ? h('audio', { controls: true, preload: 'none', src: `${url}/audio` }) : null,
         song.lyrics_needed && !song.lyrics_saved ? h('p', { class: 'notice' }, `This song has vocals: save its lyrics as ${song.stem}.lyrics.txt.`) : null));
