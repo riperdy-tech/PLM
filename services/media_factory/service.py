@@ -176,6 +176,7 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             before_render=_before_render if render_session_factory is not None else None,
             render_attempt=recovery_attempt,
             session_compilation=request.session_compilation,
+            subgenre=request.subgenre,
             # With the art inbox the owner's art replaces the video at import: render a
             # still placeholder (minutes), not the waveform (longer than the program).
             still_placeholder=thumbnail_art_inbox is not None,

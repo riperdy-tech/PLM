@@ -377,5 +377,5 @@ def test_consecutive_videos_of_a_genre_never_share_a_visual_world() -> None:
             f"/experiments/v1/experiments/{exp_id}/materialize", headers=HEADERS,
             json={"treatment_id": experiment["treatments"][0]["treatment_id"]}).json()["package"]
         worlds.append(package["visual_spec"]["visual_world"])
-    assert worlds[0] == "observatory_workspace"
+    assert worlds[0] == "rainy_night_desk"
     assert len(set(worlds)) == 3, worlds

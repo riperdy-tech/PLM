@@ -80,3 +80,30 @@ principles apply and its examples do not.
   a production owner, because P6 answers with a generic 422.
 - Packages rendered before `upload-variation-v1` carry no fingerprint and are counted,
   not compared.
+
+## Amendment 2026-11-17: titles lead with function, genre and length
+
+The owner rejected the scenario-hook titles ("Night Shift at the Observatory — ...",
+repeated every few videos) and asked what caused them. The cause was this ADR's title
+rule, `[scenario/feeling hook] + [functional keyword]`, filled from three fixed phrases
+per visual world. Our own market data does not support it: of the 15 recent long focus
+videos with the most views per subscriber (P1, 2026-11-17), about 2 open with a phrase;
+the rest lead with the function, the genre and the length or a feature ("Deep Work
+Music | Ambient Focus Beats for ...", "3 Hours of Generative Ambient for Deep Focus ·
+...", "Hyperfocus Techno | 3 Hour Deep Work Pomodoro ...").
+
+Decision (`media_factory.metadata.packaging`, `PACKAGING_VERSION` pack-v7):
+
+- A title is built from the function ("Deep Work Music", "Focus Music",
+  "Concentration Music"), the sub-style's genre as people search for it ("Retro Synth",
+  "Chillstep", "Future Garage"...), the length, activities and a feature ("No Vocals").
+  Six formats; the three candidates for Test & Compare use different formats.
+- No title opens with or contains the scene. The scene is one plain line per world
+  ("Desk by a Rainy Window at Night") used in the description and P6's own thumbnails.
+- P3's sub-style reaches P6 as the assemble request's `subgenre` (from the track specs'
+  arrangement); without one the genre is "Ambient Electronic".
+- Titles are chosen so none is within two words of a title of the last 10 packages (the
+  variation check's template-fill rule), so the check cannot stop a run on them; the
+  variation fingerprint's concept is the first title.
+- Localized titles lead with the language's search phrase, then the genre (in English,
+  as it is searched) and the length.

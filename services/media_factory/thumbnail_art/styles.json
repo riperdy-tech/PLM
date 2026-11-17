@@ -1,6 +1,6 @@
 {
   "schema_version": "thumbnail-styles-v1",
-  "guide_version": "2026-11-06",
+  "guide_version": "2026-11-17",
   "evidence": {
     "scan": "data/thumbnail_trends/2026-11-04 (scripts/thumbnail_trend_scan.py)",
     "method": "147 long-form (>= 20 min) videos from 8 focus-music searches published in the last 90 days, ranked by views per channel subscriber (floored at 1,000); top 30 reviewed, at most 2 per channel.",
@@ -73,7 +73,13 @@
     "observatory_workspace": {"accent": "with a slim telescope by the window", "vista": "a star-filled night sky above snowy peaks"},
     "server_hall_glow": {"accent": "with one small glowing server light in the corner", "vista": "a coastline at blue hour with city lights along the shore"},
     "circuit_grid_abstract": {"accent": "with thin glowing light lines on the floor", "vista": "an abstract landscape of light grids at dusk"},
-    "blueprint_hall": {"accent": "with one rolled blueprint beside the laptop", "vista": "a fjord under a soft golden evening sky"}
+    "blueprint_hall": {"accent": "with one rolled blueprint beside the laptop", "vista": "a fjord under a soft golden evening sky"},
+    "rainy_night_desk": {"accent": "with a mug of tea and raindrops running down the glass", "vista": "a rain-streaked city at night with soft blurred lights"},
+    "sunrise_home_office": {"accent": "with a coffee cup and a small green plant", "vista": "quiet rooftops and trees in warm sunrise light"},
+    "late_night_library": {"accent": "with a stack of books and a green banker's lamp", "vista": "a moonlit stone courtyard seen past tall wooden bookshelves"},
+    "city_apartment_night": {"accent": "with a pair of headphones beside the laptop", "vista": "a city skyline at night with thousands of warm lit windows"},
+    "snowy_cabin_desk": {"accent": "with a steaming mug and a wool blanket over the chair", "vista": "a snowy forest valley at dusk with softly falling snow"},
+    "train_window_journey": {"accent": "and a paper coffee cup on the small table", "vista": "green hills and a river passing by in soft morning light"}
   },
   "default_world": {"accent": "and nothing else on the desk", "vista": "a calm ocean cliff at sunset"},
   "meme_backgrounds": ["white", "light warm grey", "soft beige"]

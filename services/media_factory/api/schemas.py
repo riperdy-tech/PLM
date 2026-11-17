@@ -47,6 +47,9 @@ class AssemblePackageRequest(BaseModel):
     thumbnail_family: str | None = Field(default=None, min_length=1)
     """P3's ``thumbnail_spec.thumbnail_family``: the style of thumbnail art variant A
     (:mod:`..thumbnail_art.guide`). ``None`` or a style the guide lacks uses its default."""
+    subgenre: str | None = Field(default=None, min_length=1)
+    """P3's sub-style (the track specs' arrangement ``subgenre``): the genre the titles
+    name (:data:`..metadata.packaging.GENRES`). ``None``: the brand's genre."""
     session_compilation: bool = False
     """A long session video re-assembled from tracks this brand already released, across
     experiments, under its own lineage that credits no P2 arm (ADR-0044 revision)."""

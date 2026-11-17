@@ -38,10 +38,11 @@ SUB_STYLES = (
     "piano_synth_concentration",
 )
 FOCUS_WORLDS = {
-    "architect_studio_night", "drafting_table_dawn", "minimal_desk_monolith",
-    "observatory_workspace", "server_hall_glow", "circuit_grid_abstract", "blueprint_hall",
+    "minimal_desk_monolith", "rainy_night_desk", "sunrise_home_office", "late_night_library",
+    "city_apartment_night", "snowy_cabin_desk", "train_window_journey",
 }
-"""P6's focus-identity workspace worlds (ADR-0044, commit 8c76c6c)."""
+"""P6's focus-identity worlds: everyday places people work in (ADR-0044 amendment
+2026-11-17)."""
 OUT_OF_IDENTITY = ("vinyl", "crackle", "trap", "808", "neon", "vocal", "choir", "drop")
 
 
@@ -278,19 +279,19 @@ def test_a_recently_used_visual_world_is_rotated_to_a_fresh_one() -> None:
     A world the brief names is kept as named."""
     directive = _focus({"subgenre": "future_garage_focus"})
     default = build_genome_from_directive(directive).visual_world
-    assert default == "observatory_workspace"
+    assert default == "rainy_night_desk"
     assert build_genome_from_directive(
-        directive, recent_visual_worlds=("blueprint_hall",)).visual_world == default
+        directive, recent_visual_worlds=("late_night_library",)).visual_world == default
 
     fresh = build_genome_from_directive(directive, recent_visual_worlds=(default,))
     assert fresh.visual_world in FOCUS_WORLDS - {default}
 
-    newest_first = ("observatory_workspace", "architect_studio_night", "drafting_table_dawn",
-                    "minimal_desk_monolith", "server_hall_glow", "circuit_grid_abstract",
-                    "blueprint_hall")
+    newest_first = ("rainy_night_desk", "sunrise_home_office", "late_night_library",
+                    "minimal_desk_monolith", "city_apartment_night", "snowy_cabin_desk",
+                    "train_window_journey")
     assert build_genome_from_directive(
-        directive, recent_visual_worlds=newest_first).visual_world == "blueprint_hall"
+        directive, recent_visual_worlds=newest_first).visual_world == "train_window_journey"
 
-    named = _focus({"subgenre": "future_garage_focus", "visual_world": "server_hall_glow"})
+    named = _focus({"subgenre": "future_garage_focus", "visual_world": "snowy_cabin_desk"})
     assert build_genome_from_directive(
-        named, recent_visual_worlds=("server_hall_glow",)).visual_world == "server_hall_glow"
+        named, recent_visual_worlds=("snowy_cabin_desk",)).visual_world == "snowy_cabin_desk"

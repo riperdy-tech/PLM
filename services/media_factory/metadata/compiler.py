@@ -3,27 +3,28 @@
 Assembles YouTube-compliant chapter markers, tracklist arrays, and metadata
 candidates with synthetic media disclosure.
 
-Titles follow the growth spec (2026-11-03, ADR-0045): a scenario or feeling hook from
-:mod:`.packaging` plus the words people search for, in three candidates that differ on
-one axis (scenario first, keyword first, feeling first) for YouTube's Test & Compare,
-e.g. ``Night Shift in the Server Hall — Focus Music for Studying & Coding``. They never
-use a numbered-volume, "Official Mix", "Full Album" or lo-fi formula, and never exceed
-YouTube's 100 characters. The description follows the spec's layout: a hook line with the
-primary search words, a second line of secondary ones, the tracklist (chapters), where
-the music and the visuals come from, the AI notice, and at most three hashtags.
+Titles lead with what the video is for and what it sounds like (owner 2026-11-17, on
+P1's market data; see :mod:`.packaging`): the function, the sub-style's genre, the length
+or a feature, e.g. ``Deep Work Music | Retro Synth for Coding & Writing``, in three
+candidates of different formats for YouTube's Test & Compare. No poetic scene line opens
+a title. They never use a numbered-volume, "Official Mix", "Full Album" or lo-fi formula,
+and never exceed YouTube's 100 characters. The description follows the growth spec's
+layout: a line with the scene, the length and the primary search words, a second line of
+secondary ones, the tracklist (chapters), the AI notice, and at most three hashtags.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Collection
 from typing import Any
 
 from ..domain.models import Chapter, PlaylistTrack
 from .localization import localize
-from .packaging import choose_activities, choose_hooks, series_for
+from .packaging import ACTIVITIES, choose_titles, genre_for, scene_for, series_for
 
 __all__ = ["HASHTAGS", "TITLE_MAX_CHARS", "MetadataCompilationResult",
-           "compile_metadata_and_chapters", "duration_phrase", "functional_title"]
+           "compile_metadata_and_chapters", "duration_phrase"]
 
 TITLE_MAX_CHARS = 100
 """YouTube's title limit."""
@@ -47,24 +48,6 @@ def duration_phrase(seconds: float) -> str:
     return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minutes"
 
 
-def functional_title(concept: str, suffix: str) -> str:
-    """``concept`` + ``suffix``, the concept shortened (never the suffix) to fit 100."""
-    room = TITLE_MAX_CHARS - len(suffix)
-    concept = concept.strip()
-    if len(concept) > room:
-        concept = concept[:room - 1].rstrip() + "…"
-    return f"{concept}{suffix}"
-
-
-def _fit(prefix: str, hook: str) -> str:
-    """``prefix`` + ``hook``, the hook shortened (never the prefix) to fit 100."""
-    room = TITLE_MAX_CHARS - len(prefix)
-    hook = hook.strip()
-    if len(hook) > room:
-        hook = hook[:room - 1].rstrip() + "…"
-    return f"{prefix}{hook}"
-
-
 class MetadataCompilationResult:
     """Outcome of metadata compilation."""
 
@@ -81,7 +64,8 @@ class MetadataCompilationResult:
         self.metadata_candidates = metadata_candidates
         self.chapter_objects = chapter_objects
         self.hooks = hooks
-        """(scene, feeling) the titles use; the upload variation check records them."""
+        """(scene, genre): the scene the picture and description show, and the genre the
+        titles name; the upload variation check records them."""
 
 
 def compile_metadata_and_chapters(
@@ -91,14 +75,15 @@ def compile_metadata_and_chapters(
     playlist_concept: str,
     ai_disclosure_required: bool = True,
     visual_world: str | None = None,
+    subgenre: str | None = None,
     seed: str = "",
-    recent_hooks: Collection[str] = (),
+    recent_titles: Collection[str] = (),
 ) -> MetadataCompilationResult:
     """Compile timestamped chapter markers, tracklist, and publishable metadata options.
 
-    ``seed`` (the package id) varies the hooks and search words between videos;
-    ``recent_hooks`` are the brand's recent ones, which are not taken again while others
-    are left."""
+    ``subgenre`` names the genre the titles carry; ``seed`` (the package id) varies the
+    formats and activities between videos; ``recent_titles`` are the brand's recent
+    titles, which no new title may be a template fill of."""
     # 1. Compile chapters from the final timeline
     chapter_objects: list[Chapter] = []
     chapters_json: list[dict[str, Any]] = []
@@ -145,21 +130,21 @@ def compile_metadata_and_chapters(
     chapter_lines = [f"{c['timestamp_str']} - {c['title']}" for c in chapters_json]
     chapter_block = "\n".join(chapter_lines)
 
-    # 4. Metadata candidates (growth spec, ADR-0045): three titles, one description.
+    # 4. Metadata candidates: three titles, one description.
     length = duration_phrase(tracks[-1].end_offset_seconds if tracks else 0.0)
-    scene, feeling = choose_hooks(visual_world, playlist_concept, seed=seed,
-                                  recent=recent_hooks)
-    first, second, third = choose_activities(seed)
+    scene = scene_for(visual_world, playlist_concept)
+    genre = genre_for(subgenre)
+    first, second, third = sorted(ACTIVITIES, key=lambda a: hashlib.sha256(
+        f"{seed}:{a}".encode()).digest())[:3]
     brand_slug = brand_name.lower().replace(" ", "")
     series = series_for(visual_world)
-    titles = {
-        "meta_a_scenario": functional_title(scene, f" — Focus Music for {first} & {second}"),
-        "meta_b_keyword": _fit(f"{length} of Focus Music for {first} & {second} · ", scene),
-        "meta_c_feeling": functional_title(
-            feeling, f" · Instrumental Focus Music for {first}"),
-    }
+    chosen = choose_titles(genre=genre, length=length, seed=seed, recent_titles=recent_titles)
+    if not chosen:  # every format is a template fill: the variation check refuses it
+        chosen = [f"Deep Work Music | {genre} for {first} & {second}"]
+    titles = {f"meta_{letter}": title[:TITLE_MAX_CHARS]
+              for letter, title in zip("abc", chosen, strict=False)}
     description = "\n".join((
-        (f"{scene}: {length.lower()} of calm instrumental electronic music for "
+        (f"{scene}: {length.lower()} of calm instrumental {genre.lower()} for "
          f"{first.lower()}, {second.lower()} and {third.lower()}."),
         ("No lyrics and no vocals, a soft steady pulse in the background: focus music for "
          "work, studying and late-night concentration."),
@@ -170,7 +155,8 @@ def compile_metadata_and_chapters(
     ))
     # The same translations ride on every candidate: YouTube shows them only to viewers
     # of that language, and Test & Compare tests the English title (ADR-0045).
-    localizations = localize(scene, seconds=tracks[-1].end_offset_seconds if tracks else 0.0,
+    localizations = localize(visual_world, genre=genre,
+                             seconds=tracks[-1].end_offset_seconds if tracks else 0.0,
                              chapter_block=chapter_block)
     metadata_candidates = [
         {
@@ -191,5 +177,5 @@ def compile_metadata_and_chapters(
         tracklist=tracklist_json,
         metadata_candidates=metadata_candidates,
         chapter_objects=chapter_objects,
-        hooks=(scene, feeling),
+        hooks=(scene, genre),
     )

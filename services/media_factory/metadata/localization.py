@@ -2,10 +2,11 @@
 
 English stays the default language; YouTube shows a localization only to viewers whose
 language it is. The owner chose German, Dutch, Swedish, Korean, Traditional Chinese and
-Japanese. Each language says what the scenario title says, in that language's own way
-of searching for focus music (작업용 BGM, 作業用BGM, 讀書音樂, Musik zum Konzentrieren), not
-word for word. The scene of every focus world is written per language; a scene without a
-translation leaves that language out rather than mixing English into it.
+Japanese. Each title leads with that language's own way of searching for focus music (작업용 BGM,
+作業用BGM, 讀書音樂, Musik zum Konzentrieren), then the genre and the length, as the
+English title does (owner 2026-11-17: no scene line in titles). The scene of every focus
+world is written per language for the description; a world without a translation leaves
+the languages out rather than mixing English into them.
 
 Written by the pipeline's author, not by native speakers: each language's text should be
 read once by a native speaker (ADR-0045).
@@ -15,8 +16,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final
-
-from .packaging import SCENES
 
 __all__ = ["LANGUAGES", "localize"]
 
@@ -73,90 +72,57 @@ LANGUAGES: Final[dict[str, _Language]] = {
 }
 """YouTube language codes (``zh-Hant``: Traditional Chinese, for Taiwan and Hong Kong)."""
 
-_SCENES: Final[dict[str, tuple[str, ...]]] = {
-    # in the order of packaging.SCENES, world by world
-    "de": ("Spätabends im Architekturbüro", "Bernsteinlicht im stillen Atelier",
-           "Nach Feierabend im Atelier",
-           "Morgengrauen am Zeichentisch", "Erstes Licht, erster Entwurf",
-           "Frühe Stunden am Zeichentisch",
-           "Ein Tisch, eine Aufgabe, kein Lärm", "Aufgeräumter Tisch vor tiefer Arbeit",
-           "Leerer Tisch, klarer Kopf",
-           "Spät arbeiten in der Sternwarte", "Nachtschicht in der Sternwarte",
-           "Sterne oben, Arbeit am Bildschirm",
-           "Nachtschicht im Serverraum", "Serverlichter und stiller Fokus",
-           "Summende Racks, tiefe Konzentration",
-           "Im Inneren des Schaltkreises", "Signalwege und ruhiger Fokus",
-           "Im Raster versunken, im Flow",
-           "Baupläne in der ganzen Halle", "Planungsstunden in der Planhalle",
-           "Große Pläne, stille Halle"),
-    "nl": ("Laat in het architectenatelier", "Amberlicht in een stil atelier",
-           "Na sluitingstijd in het atelier",
-           "Ochtendgloren aan de tekentafel", "Eerste licht, eerste schets",
-           "Vroege uren aan de tekentafel",
-           "Eén bureau, één taak, geen lawaai", "Opgeruimd bureau voor diep werk",
-           "Minimaal bureau, helder hoofd",
-           "Laat doorwerken in de sterrenwacht", "Nachtdienst in de sterrenwacht",
-           "Sterren boven, werk op het scherm",
-           "Nachtdienst in de serverhal", "Serverlichtjes en stille focus",
-           "Zoemende racks, diep werk",
-           "Binnen in het circuitraster", "Signaalpaden en rustige focus",
-           "Verdwaald in het raster, in de flow",
-           "Bouwtekeningen door de hele hal", "Planuren in de blauwdrukhal",
-           "Grote plannen, stille hal"),
-    "sv": ("Sent på kvällen i arkitektstudion", "Bärnstensljus i en tyst studio",
-           "Efter arbetstid i studion",
-           "Gryning vid ritbordet", "Första ljuset, första utkastet",
-           "Tidiga timmar vid ritbordet",
-           "Ett skrivbord, en uppgift, inget brus", "Rent skrivbord inför djupt arbete",
-           "Minimalt skrivbord, klart huvud",
-           "Sena arbetstimmar i observatoriet", "Nattskift i observatoriet",
-           "Stjärnor ovanför, arbete på skärmen",
-           "Nattskift i serverhallen", "Serverljus och stilla fokus",
-           "Surrande rack, djupt arbete",
-           "Inuti kretsnätet", "Signalvägar och stadigt fokus", "Försjunken i nätet, i flow",
-           "Ritningar över hela hallen", "Planeringstimmar i ritningshallen",
-           "Stora planer, tyst hall"),
-    "ko": ("늦은 밤, 건축가의 작업실에서", "조용한 작업실의 호박빛 조명", "모두 퇴근한 뒤의 작업실",
-           "새벽, 제도판 앞에서", "첫 햇살, 첫 스케치", "이른 아침의 제도판",
-           "책상 하나, 할 일 하나, 소음 없이", "깊은 집중 전, 깨끗한 책상", "미니멀한 책상, 맑은 머리",
-           "천문대에서 늦게까지 일하는 밤", "천문대의 야간 근무", "머리 위엔 별, 화면 위엔 일",
-           "서버실의 야간 근무", "서버 불빛과 고요한 집중", "웅웅대는 서버랙, 깊은 몰입",
-           "회로 격자 속으로", "신호의 길, 흔들림 없는 집중", "격자 속에 빠져, 몰입의 흐름",
-           "홀 가득 펼쳐진 설계도", "설계도 홀에서 보내는 계획의 시간", "큰 계획, 고요한 홀"),
-    "zh-Hant": ("深夜的建築師工作室", "安靜工作室裡的琥珀色燈光", "下班後的工作室",
-                "黎明時分的製圖桌", "第一道光，第一份草稿", "清晨的製圖桌前",
-                "一張桌子、一件事、沒有雜音", "深度工作前的整潔桌面", "極簡桌面，清晰思緒",
-                "在天文台工作到深夜", "天文台的夜班", "頭頂星空，螢幕上的工作",
-                "伺服器機房的夜班", "伺服器燈光與安靜的專注", "低鳴的機櫃，深度專注",
-                "走進電路網格", "訊號路徑與穩定的專注", "沉浸網格之中，進入心流",
-                "鋪滿大廳的藍圖", "在藍圖大廳規劃的時光", "遠大計畫，安靜大廳"),
-    "ja": ("深夜の建築家のアトリエで", "静かなアトリエの琥珀色の灯り", "誰もいない夜のアトリエ",
-           "夜明けの製図台", "最初の光、最初の下書き", "製図台に向かう早朝",
-           "机ひとつ、タスクひとつ、雑音なし", "深い集中の前の、片づいた机", "ミニマルな机、クリアな頭",
-           "天文台で過ごす遅い作業時間", "天文台の夜勤", "頭上に星、画面に仕事",
-           "サーバールームの夜勤", "サーバーの灯りと静かな集中", "低く唸るラック、深い集中",
-           "回路グリッドの内側へ", "信号の道と、揺るがない集中", "グリッドに没頭、フロー状態",
-           "ホールに広がる設計図", "設計図ホールで過ごす計画の時間", "大きな計画、静かなホール"),
+_SCENES: Final[dict[str, dict[str, str]]] = {
+    "rainy_night_desk": {
+        "de": "Schreibtisch am verregneten Fenster bei Nacht",
+        "nl": "Bureau bij een regenachtig raam 's nachts",
+        "sv": "Skrivbord vid ett regnigt fönster en natt",
+        "ko": "비 오는 밤, 창가의 책상", "zh-Hant": "雨夜窗邊的書桌", "ja": "雨の夜、窓辺の机"},
+    "sunrise_home_office": {
+        "de": "Homeoffice bei Sonnenaufgang", "nl": "Thuiskantoor bij zonsopgang",
+        "sv": "Hemmakontor i soluppgången",
+        "ko": "해 뜰 무렵의 홈오피스", "zh-Hant": "日出時的居家辦公室", "ja": "日の出のホームオフィス"},
+    "late_night_library": {
+        "de": "Stille Bibliothek bei Nacht", "nl": "Stille bibliotheek 's nachts",
+        "sv": "Tyst bibliotek en natt",
+        "ko": "밤의 조용한 도서관", "zh-Hant": "夜晚安靜的圖書館", "ja": "夜の静かな図書館"},
+    "city_apartment_night": {
+        "de": "Stadtwohnung über den Lichtern", "nl": "Stadsappartement boven de lichtjes",
+        "sv": "Stadslägenhet ovanför ljusen",
+        "ko": "도시의 불빛 위, 아파트 책상", "zh-Hant": "城市燈火之上的公寓", "ja": "街の灯りを見下ろす部屋"},
+    "snowy_cabin_desk": {
+        "de": "Hüttenschreibtisch an einem verschneiten Abend",
+        "nl": "Bureau in een hut op een besneeuwde avond",
+        "sv": "Skrivbord i en stuga en snöig kväll",
+        "ko": "눈 내리는 저녁, 오두막의 책상", "zh-Hant": "雪夜小木屋裡的書桌", "ja": "雪の夜、山小屋の机"},
+    "train_window_journey": {
+        "de": "Arbeiten am Zugfenster", "nl": "Werken bij een treinraam",
+        "sv": "Arbete vid ett tågfönster",
+        "ko": "기차 창가에서 일하기", "zh-Hant": "在火車窗邊工作", "ja": "列車の窓辺で作業"},
+    "minimal_desk_monolith": {
+        "de": "Aufgeräumter, minimalistischer Schreibtisch", "nl": "Strak, minimalistisch bureau",
+        "sv": "Rent, minimalistiskt skrivbord",
+        "ko": "깔끔한 미니멀 책상", "zh-Hant": "整潔的極簡書桌", "ja": "すっきりしたミニマルな机"},
 }
+"""Each focus world's scene (:data:`.packaging.SCENES`) per language."""
 
-_ENGLISH: Final[tuple[str, ...]] = tuple(s for scenes in SCENES.values() for s in scenes)
 
-
-def localize(scene: str, *, seconds: float, chapter_block: str,
+def localize(visual_world: str | None, *, genre: str, seconds: float, chapter_block: str,
              ) -> dict[str, dict[str, str]]:
-    """``{language: {title, description}}`` for an English ``scene`` of
-    :data:`.packaging.SCENES`; empty for any other scene (nothing is half translated)."""
-    if scene not in _ENGLISH:
+    """``{language: {title, description}}`` for a focus world of
+    :data:`.packaging.SCENES`; empty for any other world (nothing is half translated).
+    The title leads with the language's own search phrase, then the genre (kept in
+    English, as listeners search it) and the length."""
+    scenes = _SCENES.get(visual_world or "")
+    if scenes is None:
         return {}
-    index = _ENGLISH.index(scene)
     minutes = max(1, round(seconds / 60))
     out: dict[str, dict[str, str]] = {}
     for code, lang in LANGUAGES.items():
-        local = _SCENES[code][index]
         length = lang.minutes.format(minutes)
         description = "\n".join((
-            lang.hook.format(scene=local, length=length), lang.calm, "",
+            lang.hook.format(scene=scenes[code], length=length), lang.calm, "",
             f"{lang.tracklist}:\n{chapter_block}", "", lang.hashtags))
-        out[code] = {"title": f"{local}{lang.separator}{lang.head}"[:100],
+        out[code] = {"title": f"{lang.head}{lang.separator}{genre} · {length}"[:100],
                      "description": description}
     return out

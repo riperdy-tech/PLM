@@ -159,3 +159,14 @@ hours and a shortest of 60 minutes. The run of 2026-11-09 was already made at 90
 minutes. The Studio's Start therefore defaults to `90_120m`; 20–30 and 45–75 minutes stay
 selectable. P3's `default_bucket` (`20_30m`) applies only to briefs that name no length;
 every Studio start names one.
+
+## Amendment 2026-11-17: everyday places, not architectural rooms
+
+The owner found the visual worlds niche ("how many people can relate to an
+observatory?"): an architect's studio, a drafting table, an observatory, a server hall,
+a circuit grid and a blueprint hall, plus the minimal desk. P3 now chooses among
+everyday places people work in (`p3-genome-templates-v8`, P6 `p6-worlds-v3`, art guide
+2026-11-17): a desk by a rainy window at night, a home office at sunrise, a quiet
+library at night, a city apartment above the lights, a cabin desk on a snowy evening,
+working by a train window, and the clean minimal desk. The older worlds stay in P6's
+tables because recorded packages name them.

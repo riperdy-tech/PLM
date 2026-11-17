@@ -7,10 +7,11 @@ colour, and thumbnail A's scene: sky, light, weather and skyline. The brand stil
 the text, the accent and variants B and C. A world without an entry keeps the brand
 look, and the visual plan records ``visual_world_known: false`` instead of guessing.
 
-The worlds from ``architect_studio_night`` on are the focus-music identity's
-(ADR-0044): stylized architectural workspaces and abstract technical environments in
-charcoal and graphite, warm amber, cool white and muted electric accents. The older
-worlds stay because recorded packages name them.
+The worlds from ``rainy_night_desk`` on are the focus-music identity's (ADR-0044
+amendment 2026-11-17): everyday places people work in, which the owner found more
+relatable than the architectural and technical rooms before them
+(``architect_studio_night`` to ``blueprint_hall``). The older worlds stay because
+recorded packages name them.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from typing import Final, Literal
 
 __all__ = ["WORLDS", "WORLDS_VERSION", "VisualWorld", "visual_world"]
 
-WORLDS_VERSION: Final[str] = "p6-worlds-v2"
+WORLDS_VERSION: Final[str] = "p6-worlds-v3"
 
 Weather = Literal["rain", "snow", "stars", "mist", "none"]
 Skyline = Literal["city", "hills", "waves", "trees", "room", "road",
@@ -74,6 +75,20 @@ WORLDS: Final[dict[str, VisualWorld]] = {
     "circuit_grid_abstract": VisualWorld("#0F1115", "#23262D", "#8FB8C9", "#F2A23C", "none",
                                          "grid"),
     "blueprint_hall": VisualWorld("#121821", "#26303C", "#E9EEF2", "#F2A23C", "none", "grid"),
+    # Everyday places people work in (ADR-0044 amendment 2026-11-17), replacing the
+    # architectural and technical rooms above in P3's choices.
+    "rainy_night_desk": VisualWorld("#10151F", "#232C3B", "#9DB7D5", "#F2B866", "rain",
+                                    "workspace"),
+    "sunrise_home_office": VisualWorld("#3B3A48", "#8A5A3C", "#FFF4E2", "#FFC27A", "none",
+                                       "workspace"),
+    "late_night_library": VisualWorld("#15120F", "#2E2620", "#E7C99A", "#FFD58A", "none",
+                                      "room"),
+    "city_apartment_night": VisualWorld("#0C1222", "#243250", "#A9C4F0", "#F2B866", "none",
+                                        "city"),
+    "snowy_cabin_desk": VisualWorld("#1B2433", "#4B5A70", "#F1F5FA", "#FFB45E", "snow",
+                                    "hills"),
+    "train_window_journey": VisualWorld("#283447", "#61758C", "#F5F7FA", "#FFD08A", "none",
+                                        "hills"),
 }
 """Every visual world the P3 templates name (default and alternatives)."""
 

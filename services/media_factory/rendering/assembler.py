@@ -58,7 +58,11 @@ from ..playlist.catalog import (
 from ..playlist.diversity import check_album_texture
 from ..playlist.sequencer import DEFAULT_SEQUENCING_POLICY, SequencingPolicy
 from ..playlist.sound_variance import check_sound_variance
-from ..playlist.variation import check_upload_variation, variation_fingerprint
+from ..playlist.variation import (
+    DEFAULT_VARIATION_POLICY,
+    check_upload_variation,
+    variation_fingerprint,
+)
 from ..visuals.planner import BrandProfile, plan_visual_session
 from .profiles import RenderProfile, render_profile
 from .renderer import MediaRenderer, RenderExecutionResult
@@ -67,14 +71,15 @@ from .toolchain import MediaToolchain
 __all__ = ["PACKAGING_VERSION", "AssemblyPipelineResult", "PackageAlreadyAssembled",
            "assemble_media_package"]
 
-PACKAGING_VERSION = "pack-v6"
+PACKAGING_VERSION = "pack-v7"
 """How a package is presented: thumbnails, video background and mastering. Part of the
 package version (with the sequencing version), so a presentation change gives the same
 release a new package id and re-renders it instead of replaying the stored one.
 v2 (2026-11-04): thumbnails show the scene line, the scene fills the video, -2 dBTP.
 v3 (2026-11-04): the AAC encode drops ``+bitexact`` (2 dB true-peak overshoot), -2.5 dBTP.
 v5 (2026-11-04): QA true-peak ceiling back to 0 dBTP (v4's re-encode trim reverted).
-v6 (2026-11-17): AAC at 384k, not 192k (a 1 ms drum hit encoded to +1.3 dBTP at 192k)."""
+v6 (2026-11-17): AAC at 384k, not 192k (a 1 ms drum hit encoded to +1.3 dBTP at 192k).
+v7 (2026-11-17): titles lead with function, genre and length; no scene line (owner)."""
 
 
 class PackageAlreadyAssembled(Exception):
@@ -139,6 +144,7 @@ def assemble_media_package(
     render_attempt: int = 1,
     session_compilation: bool = False,
     still_placeholder: bool = False,
+    subgenre: str | None = None,
     clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
@@ -149,7 +155,8 @@ def assemble_media_package(
     a package id up: when the request resolves to a package already assembled,
     :class:`PackageAlreadyAssembled` is raised before anything is rendered.
     ``session_compilation`` re-assembles released tracks of several experiments into one
-    long session video under its own lineage (ADR-0044 revision).
+    long session video under its own lineage (ADR-0044 revision). ``subgenre`` (P3's
+    sub-style) names the genre the titles carry.
     """
     profile = (render_profile_name if isinstance(render_profile_name, RenderProfile)
                else render_profile(render_profile_name))
@@ -237,20 +244,24 @@ def assemble_media_package(
                                history=recorded if recorded is not None else ()),
         "coverage": "complete" if recorded is not None else "not_configured",
     }
-    # Packaging must not feel like the brand's last uploads (growth spec, rank 1): the
-    # titles take hooks the recent packages did not use (the chapters above are the same).
-    # A re-render of this release keeps its own scene line.
-    recent_hooks = {hook for album in (recorded or ())
-                    if album.variation and album.release_manifest_id != rel_id
-                    for hook in (album.variation.get("concept"),
-                                 *(album.variation.get("hooks") or ()))
-                    if isinstance(hook, str)}
+    # Packaging must not feel like the brand's last uploads (growth spec, rank 1): no
+    # title may be a template fill of a recent one (the chapters above are the same).
+    # A re-render of this release keeps its own titles.
+    # The same packages the check compares: the last ``window`` that recorded titles.
+    compared = [album for album in (recorded or ())
+                if isinstance(album.variation, dict)
+                and album.release_manifest_id != rel_id][:DEFAULT_VARIATION_POLICY.window]
+    recent_titles = [title for album in compared
+                     for title in (album.variation or {}).get("titles") or ()
+                     if isinstance(title, str)]
     meta_res = compile_metadata_and_chapters(
         tracks=tracks, brand_name=brand_profile.brand_name, playlist_concept=playlist_concept,
-        ai_disclosure_required=True, visual_world=visual_profile, seed=package_id,
-        recent_hooks=recent_hooks)
+        ai_disclosure_required=True, visual_world=visual_profile, subgenre=subgenre,
+        seed=package_id, recent_titles=recent_titles)
+    # The concept compared with recent packages is the first title (the scene alone
+    # repeats whenever a world comes back).
     variation = variation_fingerprint(
-        concept=meta_res.hooks[0], visual_world=visual_profile,
+        concept=str(meta_res.metadata_candidates[0]["title"]), visual_world=visual_profile,
         experiment_id=lineage.experiment_id,
         titles=[str(c["title"]) for c in meta_res.metadata_candidates])
     variation["hooks"] = list(meta_res.hooks)
@@ -271,7 +282,7 @@ def assemble_media_package(
         now=planned_at,
     )
     visual_session = visual_res.visual_session
-    # The thumbnails show the scene line, so it is part of the render's input identity.
+    # P6's own thumbnails show the scene, so it is part of the render's input identity.
     headline = meta_res.hooks[0]
     presentation = f"{playlist_concept}|{headline}"
     by_candidate = {m.candidate_id: m for m in track_manifests}

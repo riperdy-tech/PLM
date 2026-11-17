@@ -492,6 +492,9 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         return {
             "brand_id": str(require(package, "brand_id", where)),
             "thumbnail_family": thumbnail.get("thumbnail_family") or None,
+            # The sub-style P3 arranged the songs in: the genre P6's titles name.
+            "subgenre": ((first.get("creative_latitude") or {}).get("track_arrangement")
+                         or {}).get("subgenre") or None,
             "duration_range_seconds": {"min_seconds": int(minimum),
                                        "max_seconds": int(maximum)},
             "visual_profile": str(require(visual, "visual_world", f"{where} visual spec")),
@@ -573,6 +576,8 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     "playlist_concept": facts["playlist_concept"]}
             if facts["thumbnail_family"]:
                 body["thumbnail_family"] = facts["thumbnail_family"]
+            if facts["subgenre"]:
+                body["subgenre"] = facts["subgenre"]
             try:
                 assembled = p6.post(
                     "/media/packages/assemble",

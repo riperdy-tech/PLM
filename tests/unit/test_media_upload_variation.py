@@ -125,10 +125,11 @@ def test_p6_stores_the_fingerprint_and_refuses_a_repeated_concept_over_http() ->
     assert made.status_code == 200, made.text
     stored = made.json()["render_report"]["variation"]
     assert stored["visual_world"] == "architect_studio_night"
-    assert stored["concept"] == stored["hooks"][0]  # the scene hook, not P3's raw pattern
+    # The concept is the first title (function and genre first), not P3's raw pattern.
+    assert stored["concept"] == stored["titles"][0] != "Night Desk"
     assert stored["compared_packages"] == 0 and stored["coverage"] == "complete"
 
-    # The same P3 concept again: P6 still gives the next upload hooks of its own, so
+    # The same P3 concept again: P6 still gives the next upload titles of its own, so
     # nothing repeats; a world one of the last three used is refused.
     reused = client.post("/media/packages/assemble", headers=HEADERS, json=_request(
         *(m.candidate_id for m in second), playlist_concept="Night Desk"))
@@ -140,7 +141,7 @@ def test_p6_stores_the_fingerprint_and_refuses_a_repeated_concept_over_http() ->
     assert again.status_code == 200, again.text
     later = again.json()["render_report"]["variation"]
     assert later["compared_packages"] == 1
-    assert not set(later["hooks"]) & set(stored["hooks"])
+    assert not set(later["titles"]) & set(stored["titles"])
 
 
 def test_the_test_and_compare_kit_lists_three_titles_and_thumbnails() -> None:

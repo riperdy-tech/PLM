@@ -1,64 +1,106 @@
-"""Scenario hooks and search words for focus-video titles (growth spec 2026-11-03).
+"""What a focus video's title says, and the scene its picture shows (owner 2026-11-17).
 
-The spec's title rule is ``[scenario/feeling hook] + [functional keyword]``, the hook in
-the first ~40 characters (mobile and TV cut titles there), three candidates per video that
-differ on one axis (scenario first, keyword first, feeling first) for YouTube's Test &
-Compare. Generic head terms alone ("study music") lose to the giants; a scenario on top
-of them is what a viewer recognizes.
+The title opens with what the video is for and what it sounds like, never a poetic scene
+line. The 2026-11-03 growth spec's ``[scenario hook] + [keyword]`` rule was dropped on our
+own market data: of the 15 recent long focus videos with the most views per subscriber
+(P1, 2026-11-17), about 2 open with a phrase; the rest lead with the function, the genre
+and the length or a feature ("Deep Work Music | Ambient Focus Beats for Extreme
+Concentration...", "3 Hours of Generative Ambient for Deep Focus · ...", "Hyperfocus
+Techno | 3 Hour Deep Work Pomodoro..."). So a title here is built from:
 
-* **Scenes** describe what the video shows: each focus visual world (ADR-0044) has its
-  own, so a title never promises a picture the video does not have.
-* **Feelings** describe the use, not the sound, and claim nothing about the listener.
-* **Activities** are the words people type into YouTube search, checked against
-  YouTube's autocomplete on 2026-11-03 ("music for studying", "music for coding",
-  "deep work music", "concentration music", "music to focus on reading", "music to focus
-  on writing").
+* **the genre** of the video's sub-style, as people search for it (:data:`GENRES`);
+* **the length** (``2 Hours``, ``104 Minutes``);
+* **activities**, the words people type into YouTube search (autocomplete, 2026-11-03);
+* **a feature** listeners filter on (no vocals, no lyrics).
 
-:func:`choose_hooks` takes a scene and a feeling the brand's recent packages did not use,
-so the upload variation check (:mod:`..playlist.variation`) never meets a repeated hook.
+:func:`choose_titles` fills the :data:`FORMATS` so that no title is a template fill of a
+recent one (the upload variation check, :mod:`..playlist.variation`, refuses those).
+
+* **Scenes** name what the picture shows, plainly, one per focus world (ADR-0044
+  amendment 2026-11-17: everyday places people work in). The description and P6's own
+  drawn thumbnails use it; the title does not.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection
+import itertools
+import re
+from collections.abc import Collection, Sequence
 from typing import Final
 
-__all__ = ["ACTIVITIES", "FEELINGS", "HOOK_MAX_CHARS", "SCENES", "SERIES", "choose_activities",
-           "choose_hooks", "series_for"]
+__all__ = ["ACTIVITIES", "DEFAULT_GENRE", "FEATURES", "FORMATS", "GENRES", "PURPOSES",
+           "SCENES", "SERIES",
+           "choose_titles", "genre_for", "scene_for", "series_for"]
 
-HOOK_MAX_CHARS: Final[int] = 40
-
-SCENES: Final[dict[str, tuple[str, ...]]] = {
-    "architect_studio_night": ("Late Night in the Architect's Studio",
-                               "Amber Lamps in a Quiet Studio", "After Hours at the Studio"),
-    "drafting_table_dawn": ("Dawn at the Drafting Table", "First Light, First Draft",
-                            "Early Hours at the Drafting Table"),
-    "minimal_desk_monolith": ("One Desk, One Task, No Noise", "A Clean Desk Before Deep Work",
-                              "Minimal Desk, Clear Head"),
-    "observatory_workspace": ("Working Late at the Observatory", "Night Shift at the Observatory",
-                              "Stars Overhead, Work on Screen"),
-    "server_hall_glow": ("Night Shift in the Server Hall", "Server Lights and Quiet Focus",
-                         "Humming Racks, Deep Work"),
-    "circuit_grid_abstract": ("Inside the Circuit Grid", "Signal Paths and Steady Focus",
-                              "Lost in the Grid, in the Flow"),
-    "blueprint_hall": ("Blueprints Across the Hall", "Planning Hours in the Blueprint Hall",
-                       "Big Plans, Quiet Hall"),
+SCENES: Final[dict[str, str]] = {
+    "rainy_night_desk": "Desk by a Rainy Window at Night",
+    "sunrise_home_office": "Home Office at Sunrise",
+    "late_night_library": "Quiet Library at Night",
+    "city_apartment_night": "City Apartment Above the Lights",
+    "snowy_cabin_desk": "Cabin Desk on a Snowy Evening",
+    "train_window_journey": "Working by a Train Window",
+    "minimal_desk_monolith": "Clean Minimal Desk",
 }
-"""Scenario hooks per focus visual world (P6's :data:`..visuals.worlds.WORLDS`)."""
+"""The plain scene of each focus visual world (P6's :data:`..visuals.worlds.WORLDS`)."""
 
 SERIES: Final[dict[str, tuple[str, str]]] = {
-    "architect_studio_night": ("night_desk", "Night Desk Sessions"),
-    "observatory_workspace": ("night_desk", "Night Desk Sessions"),
-    "drafting_table_dawn": ("first_light", "First Light Focus"),
+    "rainy_night_desk": ("night_desk", "Night Desk Sessions"),
+    "late_night_library": ("night_desk", "Night Desk Sessions"),
+    "city_apartment_night": ("night_desk", "Night Desk Sessions"),
+    "sunrise_home_office": ("first_light", "First Light Focus"),
     "minimal_desk_monolith": ("first_light", "First Light Focus"),
-    "server_hall_glow": ("signal_room", "Signal Room"),
-    "circuit_grid_abstract": ("signal_room", "Signal Room"),
-    "blueprint_hall": ("blueprint_hours", "Blueprint Hours"),
+    "snowy_cabin_desk": ("quiet_places", "Quiet Places"),
+    "train_window_journey": ("quiet_places", "Quiet Places"),
 }
-"""The channel's recurring series (growth spec rank 4: 3–5 named series, each with a fixed
-visual motif and its own playlist): (series id, name) by visual world. Late-night
-workspaces, morning desks, technical rooms, planning halls."""
+"""The channel's recurring series (growth spec rank 4): (series id, name) by visual world."""
+
+GENRES: Final[dict[str, str]] = {
+    "future_garage_focus": "Future Garage",
+    "soft_cyber_electronica": "Soft Electronica",
+    "minimal_pulse": "Minimal Electronic",
+    "ambient_breakbeat": "Ambient Breakbeat",
+    "downtempo_synth": "Downtempo Synth",
+    "deep_work_chillstep": "Chillstep",
+    "restrained_retro_future": "Retro Synth",
+    "organic_electronic": "Organic Electronic",
+    "piano_synth_concentration": "Piano & Synth",
+}
+"""The genre a sub-style's video is titled with: the name people search for."""
+
+DEFAULT_GENRE: Final[str] = "Ambient Electronic"
+"""A video without a known sub-style (the brand's genre: calm instrumental electronic)."""
+
+ACTIVITIES: Final[tuple[str, ...]] = (
+    "Studying", "Coding", "Reading", "Writing", "Working", "Programming")
+
+PURPOSES: Final[tuple[str, ...]] = ("Deep Focus", "Flow State", "Productivity",
+                                    "Concentration")
+FEATURES: Final[tuple[str, ...]] = ("No Vocals", "No Lyrics", "Instrumental Only")
+
+FORMATS: Final[tuple[str, ...]] = (
+    "Deep Work Music | {genre} for {a} & {b}",
+    "{length} of {genre} for {p} · {f}",
+    "Focus Music for {a} & {b} — {genre}, {f}",
+    "{genre} Focus Music | {length} for {a} & {b}",
+    "Concentration Music: {genre} for {a} | {length}, {f}",
+    "{genre} for {p} | {length} of Music for {a}",
+)
+"""Title formats, each led by the function, the genre or the length (see the module
+docstring); ``{a}``/``{b}`` are :data:`ACTIVITIES`, ``{p}`` :data:`PURPOSES`, ``{f}``
+:data:`FEATURES`."""
+
+_WORD = re.compile(r"[^\W_]+")
+
+
+def scene_for(visual_world: str | None, fallback: str) -> str:
+    """The world's plain scene, or ``fallback`` (the playlist concept) for a world
+    outside the focus identity."""
+    return SCENES.get(visual_world or "") or fallback.strip()
+
+
+def genre_for(subgenre: str | None) -> str:
+    return GENRES.get(subgenre or "", DEFAULT_GENRE)
 
 
 def series_for(visual_world: str | None) -> tuple[str, str] | None:
@@ -66,40 +108,34 @@ def series_for(visual_world: str | None) -> tuple[str, str] | None:
     return SERIES.get(visual_world or "")
 
 
-FEELINGS: Final[tuple[str, ...]] = (
-    "Headphones On, World Off", "When the Noise Fades and Work Begins",
-    "For the Hour It Finally Clicks", "Settle In and Get It Done",
-    "Stay in the Flow a Little Longer", "The Quiet Before the Breakthrough",
-    "One More Hour of Focus", "Clear Head, Steady Hands",
-)
-
-ACTIVITIES: Final[tuple[str, ...]] = (
-    "Studying", "Coding", "Deep Work", "Concentration", "Reading", "Writing")
+def _seeded(options: Sequence[str], seed: str) -> list[str]:
+    return sorted(options, key=lambda o: hashlib.sha256(f"{seed}:{o}".encode()).digest())
 
 
-def _fresh(options: Collection[str], seed: str, recent: Collection[str]) -> str:
-    ordered = sorted(options)
-    unused = [o for o in ordered if o not in recent] or ordered
-    digest = hashlib.sha256(seed.encode("utf-8")).digest()
-    return unused[int.from_bytes(digest[:4], "big") % len(unused)]
+def _too_close(title: str, others: Collection[set[str]], max_difference: int) -> bool:
+    words = set(_WORD.findall(title.lower()))
+    return any(len(words ^ other) <= max_difference for other in others)
 
 
-def choose_hooks(visual_world: str | None, fallback_scene: str, *, seed: str,
-                 recent: Collection[str] = ()) -> tuple[str, str]:
-    """(scene, feeling) for a package: hooks absent from ``recent`` where any are left.
-
-    A world without scenes (one outside the focus identity) uses ``fallback_scene`` (the
-    playlist concept)."""
-    scenes = SCENES.get(visual_world or "")
-    scene = _fresh(scenes, f"{seed}:scene", recent) if scenes else fallback_scene.strip()
-    return scene, _fresh(FEELINGS, f"{seed}:feeling", recent)
-
-
-def choose_activities(seed: str) -> tuple[str, str, str]:
-    """Three different search activities, varied per package."""
-    digest = hashlib.sha256(f"{seed}:activities".encode()).digest()
-    pool = list(ACTIVITIES)
-    picked = []
-    for byte in digest[:3]:
-        picked.append(pool.pop(byte % len(pool)))
-    return picked[0], picked[1], picked[2]
+def choose_titles(*, genre: str, length: str, seed: str, recent_titles: Collection[str] = (),
+                  count: int = 3, max_difference: int = 2) -> list[str]:
+    """``count`` titles in different formats, none within ``max_difference`` words of a
+    recent title or of each other (the variation check's template-fill rule); the formats
+    and activities are tried in an order varied by ``seed``. Fewer when nothing else fits
+    (the variation check then refuses the package, loudly)."""
+    taken = [set(_WORD.findall(t.lower())) for t in recent_titles]
+    fills = [{"a": a, "b": b, "p": p, "f": f}
+             for a, b in itertools.permutations(ACTIVITIES, 2)
+             for p in PURPOSES for f in FEATURES]
+    chosen: list[str] = []
+    for fmt in _seeded(FORMATS, f"{seed}:format"):
+        for fill in sorted(fills, key=lambda x: hashlib.sha256(
+                f"{seed}:{fmt}:{sorted(x.items())}".encode()).digest()):
+            title = fmt.format(genre=genre, length=length, **fill)
+            if not _too_close(title, taken, max_difference):
+                chosen.append(title)
+                taken.append(set(_WORD.findall(title.lower())))
+                break
+        if len(chosen) == count:
+            break
+    return chosen
