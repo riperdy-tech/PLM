@@ -281,3 +281,47 @@ def test_the_longform_still_video_renders_at_1440p() -> None:
     still = render_profile(STILL_VIDEO_PROFILES["yt_longform_1080p_v1"])
     assert (still.width, still.height) == (2560, 1440)
     assert still.x264_crf <= 20 and still.audio_bitrate == "384k"
+
+
+def test_the_owners_pick_is_the_video_picture_and_first_thumbnail(tmp_path: Path) -> None:
+    """Owner 2026-11-17: after uploading the three images, the owner picks which one the
+    video shows; it is also the first (default) thumbnail."""
+    engine = create_media_engine(static_pool=True)
+    store = InMemoryArtifactStore()
+    manifests = [stored_manifest(store, f"pick_track_{n}", measured_duration_seconds=60,
+                                 synth=spec) for n, spec in enumerate(synth_specs())]
+    toolchain = StandInToolchain()
+    backend = backend_for(store, manifests, toolchain=toolchain)
+    request = AssemblePackageRequest.model_validate({
+        "candidate_ids": [m.candidate_id for m in manifests], "brand_id": "brand_neon",
+        "duration_range_seconds": {"min_seconds": 170, "max_seconds": 180},
+        "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
+        "render_profile": "preview_360p_v1",
+    })
+    factory = lambda: media_session(engine)
+    try:
+        with factory() as session:
+            pkg = assemble_and_persist(
+                session, backend, request, clock=FixedClock(NOW),
+                default_render_profile="preview_360p_v1", render_session_factory=factory,
+                worker_id_factory=lambda: "w1", thumbnail_art_inbox=tmp_path)
+            session.commit()
+        folder = tmp_path / pkg.media_package_id
+        for name in ("A.png", "B.png", "C.png"):
+            (folder / name).write_bytes(_png((1920, 1080)))
+        (folder / "pick.txt").write_text("D", encoding="utf-8")
+        with factory() as session:
+            with pytest.raises(MediaAssemblyError, match="thumbnail_art_pick_unknown"):
+                import_owner_art(session, store, toolchain, pkg.media_package_id, folder,
+                                 now=NOW)
+            session.rollback()
+        (folder / "pick.txt").write_text("b\n", encoding="utf-8")
+        with factory() as session:
+            released = import_owner_art(session, store, toolchain, pkg.media_package_id,
+                                        folder, now=NOW)
+            session.commit()
+        assert [t["id"] for t in released.thumbnails] == ["art_b", "art_a", "art_c"]
+        still = released.render_report["video_pipeline"]["still_image"]
+        assert still["variant_key"] == "art_b" and still["source"] == "B.png"
+    finally:
+        engine.dispose()

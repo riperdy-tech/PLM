@@ -144,7 +144,11 @@ def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(
     assert [p.suffix for p in (folder / "replaced").iterdir()] == [".jpg"]  # kept, not deleted
     assert studio.art_file(PKG, "A") == (PNG, "image/png")
 
-    result = asyncio.run(studio.import_thumbnails(PKG, wait=True))
+    with pytest.raises(ActionRefused, match="pick_unknown"):
+        asyncio.run(studio.import_thumbnails(PKG, pick="D", wait=True))
+    assert not (folder / "pick.txt").exists()
+    result = asyncio.run(studio.import_thumbnails(PKG, pick="b", wait=True))
+    assert (folder / "pick.txt").read_text(encoding="utf-8") == "B"  # P6's import reads it
     assert imported == [PKG] and result["package"]["status"] == "ready_for_publish"
     (call,) = actions.calls
     assert call[1] == "c2" and "thumbnail_art_inbox_ref" in call[2]

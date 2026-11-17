@@ -695,8 +695,11 @@ class Studio:
     def remakes(self) -> dict[str, dict[str, Any]]:
         return {k: dict(v) for k, v in self._remakes.items() if v["state"] != "done"}
 
-    async def import_thumbnails(self, package_id: str, *, wait: bool = False) -> dict[str, Any]:
+    async def import_thumbnails(self, package_id: str, *, pick: str | None = None,
+                                wait: bool = False) -> dict[str, Any]:
         """P6's import (checks, still video, release), then resume the run waiting on it.
+        ``pick`` is the letter the owner chose as the video's picture and first thumbnail;
+        it is written to the art folder's ``pick.txt``, which P6's import reads.
 
         The still video takes minutes (about a quarter of the video's length), so the
         import runs on its own: closing or refreshing the page cannot lose it, and the
@@ -705,6 +708,11 @@ class Studio:
         folder = self._art_folder(package_id)
         if (self._imports.get(package_id) or {}).get("state") == "running":
             raise _refuse(409, "import_running", f"{package_id} is already being imported")
+        if pick is not None:
+            job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+            letters = _LETTERS[:len(job.get("variants") or [])]
+            if pick.upper() not in letters:
+                raise _refuse(422, "pick_unknown", f"pick one of {', '.join(letters)}")
         cases = [c for c in self._cases(ART_REASON) if package_id in self._package_ids(c)]
         in_review = [c for c in self._cases(APPROVAL_REASON)
                      if package_id in self._package_ids(c)]
@@ -715,6 +723,8 @@ class Studio:
             seconds = float(self.package(package_id).get("video_duration_seconds") or 0)
         except Exception:  # noqa: BLE001 - the estimate is only shown, never relied on
             seconds = 0.0
+        if pick is not None:
+            _write_atomic(folder / "pick.txt", pick.upper().encode())
         self._imports[package_id] = {
             "since": self.clock.now().isoformat(), "state": "running", "error": None,
             "expected_seconds": round(seconds * RENDER_SECONDS_PER_VIDEO_SECOND) + 60}

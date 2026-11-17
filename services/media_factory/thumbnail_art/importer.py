@@ -2,10 +2,10 @@
 
 All three images are checked before anything is stored: one missing or refused image
 leaves the package waiting, with every problem named. The video is then re-rendered as
-art A held still over the package's audio master (the owner's rule, 2026-11-04: the
+the owner's picked art (``pick.txt``, else A) held still over the package's audio master (the owner's rule, 2026-11-04: the
 picture is the thumbnail, with no waveform or motion) and passes the same post-render QA
 as the first render, or the package keeps waiting. On success the package offers only
-the owner's art (A first, the style P2 chose), carries the still video, and goes
+the owner's art (the picked one first, else A, the style P2 chose), carries the still video, and goes
 ``ready_for_publish``.
 """
 
@@ -31,7 +31,7 @@ from ..storage.repositories import (
     list_thumbnail_variants,
     replace_media_package_art,
 )
-from .inbox import SIZE, check_image, find_art, read_job
+from .inbox import SIZE, check_image, find_art, read_job, read_pick
 
 __all__ = ["import_owner_art"]
 
@@ -66,6 +66,14 @@ def import_owner_art(session: Session, store: ArtifactStore, toolchain: MediaToo
             checked.append((variant, result, path))
     if problems:
         raise MediaAssemblyError("thumbnail_art_invalid", "; ".join(problems))
+    pick = read_pick(folder)
+    if pick is not None:
+        letters = [v["variant_key"].removeprefix("art_").upper() for v, _, _ in checked]
+        if pick not in letters:
+            raise MediaAssemblyError("thumbnail_art_pick_unknown",
+                                     f"picked {pick!r}, the images are {', '.join(letters)}")
+        # The pick is the video's picture and the first (default) thumbnail.
+        checked.sort(key=lambda c: c[0]["variant_key"].removeprefix("art_").upper() != pick)
     video = _render_still_video(store, toolchain, pkg, checked[0][0]["variant_key"],
                                 checked[0][2])
 

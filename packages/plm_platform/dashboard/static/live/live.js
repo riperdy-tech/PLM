@@ -801,7 +801,7 @@ function picturesSection(p) {
     h('div', { class: 'step-head' }, h('h2', {}, '2. Pictures (thumbnail and video picture)'),
       p.art_waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, (p.art || []).length ? 'done' : 'not asked yet')));
   if (!(p.art || []).length) { card.append(h('p', { class: 'muted' }, 'The pictures are asked for once the playlist is built.')); return card; }
-  card.append(h('p', { class: 'muted' }, 'Make each picture in Nano Banana Pro (16:9, full size). Picture A is also the picture of the whole video.'));
+  card.append(h('p', { class: 'muted' }, 'Make each picture in Nano Banana Pro (16:9, full size). When all three are uploaded, pick the one the whole video shows; it is also the first thumbnail.'));
   if (p.review) card.append(h('p', { class: 'notice' }, 'To change the pictures now: step 3, Request changes, Pictures. The video is made again from the new picture A, before anything is uploaded.'));
   for (const [i, job] of p.art.entries()) {
     const current = i === 0;
@@ -825,9 +825,11 @@ function picturesSection(p) {
       const ready = job.variants.every((v) => v.saved.length);
       const running = job.import && job.import.state === 'running';
       box.append(h('div', { class: 'row-actions' }, running ? h('span', { class: 'notice' }, 'Making the video now (see the top of the page).')
-        : ready ? actionButton('Import and make the video', 'btn-ok big', () => authedSend(`/api/studio/thumbnails/${job.media_package_id}/import`, 'POST'),
-          { busy: 'Starting the import...' })
-          : h('span', { class: 'muted' }, 'Upload A, B and C to import.')));
+        : ready ? h('span', {}, h('strong', {}, 'Which picture does the video show? '),
+          job.variants.map((v) => actionButton(`Make the video with ${v.letter}`, 'btn-ok big',
+            () => postJson(`/api/studio/thumbnails/${job.media_package_id}/import`, { pick: v.letter }),
+            { busy: `Making the video with ${v.letter}...` })))
+          : h('span', { class: 'muted' }, 'Upload A, B and C, then pick the one the video shows.')));
     }
     card.append(box);
   }

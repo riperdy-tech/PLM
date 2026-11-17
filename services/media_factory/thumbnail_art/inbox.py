@@ -6,10 +6,12 @@ is not offered for publishing with P6's own drawn thumbnails: it waits at
 
 * ``PROMPTS.md``: three Nano Banana Pro prompts for the owner to paste, and where to
   save each image (``A.png``, ``B.png``, ``C.png``; JPEG or WebP also accepted);
-* ``job.json``: the same prompts and their styles, as the import reads them.
+* ``job.json``: the same prompts and their styles, as the import reads them;
+* ``pick.txt`` (written by the Studio when the owner chooses): the letter of the image
+  that is the video's picture and the first thumbnail; absent, it is A.
 
 ``plm media thumbnail-import`` then checks every image (:func:`check_image`) and,
-only when all three pass, renders the video as image A held still and releases the
+only when all three pass, renders the video as the picked image held still and releases the
 package with them. Unset, P6
 publishes its own drawn thumbnails as before (development and tests).
 """
@@ -95,6 +97,18 @@ def write_job(inbox: Path, *, package_id: str, title: str, guide_version: str,
 def read_job(folder: Path) -> dict[str, Any]:
     job: dict[str, Any] = json.loads((folder / JOB_FILE).read_text(encoding="utf-8"))
     return job
+
+
+PICK_FILE = "pick.txt"
+
+
+def read_pick(folder: Path) -> str | None:
+    """The letter the owner picked for the video and first thumbnail (``"B"``), or
+    ``None`` when the owner has not chosen (the import then uses A)."""
+    path = folder / PICK_FILE
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8").strip().upper() or None
 
 
 def find_art(folder: Path, variant_key: str) -> Path | None:

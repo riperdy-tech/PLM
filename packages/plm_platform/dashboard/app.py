@@ -152,6 +152,11 @@ class SwapArtBody(BaseModel):
     note: str = ""
 
 
+class StudioArtImportBody(BaseModel):
+    pick: str | None = Field(default=None, description="the letter (A, B or C) of the "
+                             "video's picture and first thumbnail; none: A")
+
+
 class StudioStartBody(BaseModel):
     music: str = Field(description="suno or flow_music: which tool the song prompts are for")
     subgenre: str | None = Field(
@@ -399,9 +404,10 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.post("/api/studio/thumbnails/{package_id}/import",
               dependencies=[Depends(require_token)])
-    async def studio_art_import(package_id: str) -> dict[str, Any]:
+    async def studio_art_import(package_id: str,
+                                body: StudioArtImportBody | None = None) -> dict[str, Any]:
         result: dict[str, Any] = await guarded_async(
-            lambda: studio.import_thumbnails(package_id))
+            lambda: studio.import_thumbnails(package_id, pick=body.pick if body else None))
         return result
 
     @app.get("/api/studio/packages/{package_id}/video")
