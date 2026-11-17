@@ -261,3 +261,15 @@ def test_youtube_counters_are_cached_and_a_failure_keeps_the_page(tmp_path: Path
     assert len(calls) == 1
     studio._stats_cache = None
     assert studio._stats(["yt1"]) == {}  # YouTube failed: no numbers, no error
+
+
+def test_a_failed_render_is_not_shown_as_done_pictures(tmp_path: Path) -> None:
+    """Owner 2026-11-17: a render that failed QA never asked for pictures, yet the
+    Pictures step said done. Only versions with an art job are pictures."""
+    studio, _ = _project_studio(tmp_path, [])
+    studio.store.packages = lambda experiment_id: [
+        {"media_package_id": "mpkg_0000000000000bad", "status": "failed"}]
+    studio.package = lambda package_id: {"status": "failed", "chapters": []}
+    page = studio.project(2)
+    assert page["art"] == []
+    assert page["video"]["status"] == "failed" and page["video"]["has_video"] is False

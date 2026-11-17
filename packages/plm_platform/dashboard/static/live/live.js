@@ -864,6 +864,7 @@ function videoSection(p) {
         h('video', { controls: true, preload: 'none', src: `${base}/video` }),
         h('div', {}, v.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${v.thumbnails[0]}`, alt: 'thumbnail' }) : null,
           h('p', { class: 'muted' }, `${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs`)))
+        : v.status === 'failed' ? h('p', { class: 'notice' }, `This version (${v.media_package_id}) failed its final check; the status log says why.`)
         : h('p', { class: 'muted' }, `Playlist built (${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs); the video is made from picture A.`),
       h('details', { 'data-key': `tracks:${p.number}` }, h('summary', {}, `Tracklist (${v.tracks.length})`),
         h('ol', {}, v.tracks.map((t) => h('li', {}, `${t.start} ${t.title}`)))));

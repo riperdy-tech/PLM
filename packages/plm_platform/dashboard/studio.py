@@ -1024,8 +1024,9 @@ class Studio:
         for source, inbox in self.paths.music_inboxes():
             sheets += self._sheets(source, inbox, tracks=tracks, include_done=True)
         packages = self.store.packages(experiment) if experiment else []
-        art = [self._project_art(str(p["media_package_id"]), str(p["status"]))
-               for p in packages]
+        # Only versions that asked for pictures (an art job): a failed render never did.
+        art = [job for job in (self._project_art(str(p["media_package_id"]), str(p["status"]))
+                               for p in packages) if job["variants"]]
         latest = packages[0]["media_package_id"] if packages else None
         video = self._project_video(str(latest)) if latest else None
         return {
