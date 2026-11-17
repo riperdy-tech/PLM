@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -554,3 +556,23 @@ def test_a_flow_music_song_has_one_prompt_box() -> None:
     info, fields = song_fields("Save as: trk_a-b.wav\nPrompt (5 characters; paste all of it):\ncalm.\n")
     assert fields == [{"label": "Title", "text": "trk_a-b"}, {"label": "Prompt", "text": "calm."}]
     assert info == ["Save as: trk_a-b.wav"]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
+def test_an_m4a_song_is_kept_and_saved_as_its_decoded_wav(tmp_path: Path) -> None:
+    """Suno's high-quality download is M4A: the Studio keeps it and saves its WAV."""
+    import wave
+
+    studio, _ = _studio(tmp_path, [{"case_id": "c1", "reason_code": "MANUAL_AUDIO_AWAITED"}])
+    m4a = tmp_path / "tone.m4a"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=3:sample_rate=48000", "-ac", "2", "-c:a", "aac",
+                    str(m4a)], check=True)
+    saved = studio.save_song("trk_1-aaaa1111", m4a.read_bytes())
+    assert saved["saved"] == "trk_1-aaaa1111.wav"
+    assert saved["seconds"] is not None and 2.9 < saved["seconds"] < 3.2
+    assert (tmp_path / "music" / "trk_1-aaaa1111.m4a").read_bytes() == m4a.read_bytes()
+    with wave.open(str(tmp_path / "music" / "trk_1-aaaa1111.wav"), "rb") as wf:
+        assert (wf.getframerate(), wf.getnchannels(), wf.getsampwidth()) == (48000, 2, 2)
+    with pytest.raises(ActionRefused, match="m4a_unreadable"):
+        studio.save_song("trk_1-bbbb2222", b"\0\0\0\x20ftypM4A broken")

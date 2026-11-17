@@ -130,6 +130,30 @@ def _refuse(status: int, code: str, message: str) -> ActionRefused:
     return ActionRefused(status, code, message)
 
 
+def m4a_to_wav(data: bytes) -> bytes:
+    """An M4A song decoded to a 16-bit PCM WAV at its own sample rate and channels, with
+    nothing trimmed or changed; refused when ffmpeg is missing or cannot read it."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise _refuse(503, "ffmpeg_missing", "ffmpeg is not installed, so M4A cannot be read")
+    with tempfile.TemporaryDirectory() as tmp:
+        # A file, not a pipe: ffmpeg fills in the WAV header's sizes only on a seekable output.
+        source, target = Path(tmp) / "song.m4a", Path(tmp) / "song.wav"
+        source.write_bytes(data)
+        done = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source), "-vn",
+             "-map_metadata", "-1", "-c:a", "pcm_s16le", str(target)],
+            capture_output=True, check=False, timeout=300)
+        if done.returncode != 0 or not target.is_file():
+            raise _refuse(422, "m4a_unreadable", "ffmpeg could not read the M4A: "
+                          + done.stderr.decode(errors="replace")[:200])
+        return target.read_bytes()
+
+
 def _write_atomic(path: Path, data: bytes) -> None:
     tmp = path.with_name(f".{path.name}.part")
     tmp.write_bytes(data)
@@ -462,9 +486,12 @@ class Studio:
                   for s in sheet["songs"]}
         if _STEM.match(stem) is None or stem not in wanted:
             raise _refuse(404, "song_not_awaited", f"no waiting prompt sheet names {stem}.wav")
-        if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
-            raise _refuse(422, "not_a_wav", "the file is not a WAV (download it as WAV)")
         target = wanted[stem] / f"{stem}.wav"
+        if data[4:8] == b"ftyp":  # an M4A: kept as downloaded, imported as its decoded WAV
+            _write_atomic(target.with_suffix(".m4a"), data)
+            data = m4a_to_wav(data)
+        if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
+            raise _refuse(422, "not_a_wav", "the file is not a WAV or M4A (download it as one)")
         _write_atomic(target, data)
         return {"saved": f"{stem}.wav", "bytes": len(data), "seconds": wav_seconds(target)}
 

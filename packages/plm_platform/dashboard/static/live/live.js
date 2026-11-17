@@ -731,13 +731,13 @@ function songLength(song) {
 
 function batchUpload(songs) {
   const result = h('div', { class: 'result' });
-  const input = h('input', { type: 'file', multiple: true, accept: '.wav,audio/wav', onchange: async () => {
+  const input = h('input', { type: 'file', multiple: true, accept: '.wav,.m4a,audio/wav,audio/mp4', onchange: async () => {
     const files = [...(input.files || [])];
     if (!files.length) return;
     const missing = songs.filter((s) => !s.saved).map((s) => s.stem);
-    const byName = new Map(files.map((f) => [f.name.replace(/\.wav$/i, ''), f]));
+    const byName = new Map(files.map((f) => [f.name.replace(/\.(wav|m4a)$/i, ''), f]));
     const plan = [];
-    const left = files.filter((f) => !missing.includes(f.name.replace(/\.wav$/i, '')));
+    const left = files.filter((f) => !missing.includes(f.name.replace(/\.(wav|m4a)$/i, '')));
     for (const stem of missing) {
       const f = byName.get(stem) || left.shift();
       if (f) plan.push([stem, f]);
@@ -783,7 +783,7 @@ function songsSection(p) {
         h('summary', {}, h('strong', {}, `Song ${n} `), h('span', { class: 'mono muted' }, `${song.stem}.wav (${sheet.source}) `), songLength(song)),
         songPrompt(song),
         h('div', { class: 'row-actions' },
-          p.songs.waiting ? h('span', {}, h('span', { class: 'muted' }, song.saved ? 'Replace file:' : 'Upload:'), uploadInput('.wav,audio/wav', url)) : null),
+          p.songs.waiting ? h('span', {}, h('span', { class: 'muted' }, song.saved ? 'Replace file:' : 'Upload:'), uploadInput('.wav,.m4a,audio/wav,audio/mp4', url)) : null),
         song.saved ? h('audio', { controls: true, preload: 'none', src: `${url}/audio` }) : null,
         song.lyrics_needed && !song.lyrics_saved ? h('p', { class: 'notice' }, `This song has vocals: save its lyrics as ${song.stem}.lyrics.txt.`) : null));
     }

@@ -375,7 +375,9 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:
         data = await request.body()
-        saved: dict[str, Any] = guarded(lambda: studio.save_song(stem, data))
+        # In a thread: an M4A is decoded by ffmpeg, which takes seconds.
+        saved: dict[str, Any] = await asyncio.to_thread(
+            guarded, lambda: studio.save_song(stem, data))
         return saved
 
     @app.post("/api/studio/songs/done", dependencies=[Depends(require_token)])
