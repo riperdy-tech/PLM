@@ -150,3 +150,12 @@ plus an `opening` term that favours the track nearest that median as the first o
 Background focus music keeps a level energy and starts on its most typical track, as
 the growth spec (ADR-0045) asks for. The package version follows the sequencing version,
 so packages assembled from now on get new ids; stored packages are unchanged.
+
+## Amendment 2026-11-17: Studio starts at 90–120 minutes
+
+The owner expects videos of at least an hour. The 2026-11-04 trend scan of the 30
+best-performing recent focus videos found none under 45 minutes, a median of about two
+hours and a shortest of 60 minutes. The run of 2026-11-09 was already made at 90–120
+minutes. The Studio's Start therefore defaults to `90_120m`; 20–30 and 45–75 minutes stay
+selectable. P3's `default_bucket` (`20_30m`) applies only to briefs that name no length;
+every Studio start names one.

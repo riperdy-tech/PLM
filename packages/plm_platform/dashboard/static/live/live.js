@@ -578,14 +578,14 @@ function startCard(s) {
     h('p', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).'));
   const styles = s.styles || {};
   const keepStyle = styleSelect ? styleSelect.value : '';
-  const keepLength = lengthSelect ? lengthSelect.value : '20_30m';
+  const keepLength = lengthSelect ? lengthSelect.value : '90_120m';
   styleSelect = h('select', { 'data-keep': '1' },
     h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
     (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
   styleSelect.value = (styles.available || []).includes(keepStyle) ? keepStyle : '';
   lengthSelect = h('select', { 'data-keep': '1' },
     Object.entries(s.lengths || { '20_30m': '20-30 minutes' }).map(([id, label]) => h('option', { value: id }, label)));
-  lengthSelect.value = keepLength in (s.lengths || {}) ? keepLength : '20_30m';
+  lengthSelect.value = keepLength in (s.lengths || {}) ? keepLength : '90_120m';
   const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
   // What the length asks of the owner, from P3's own plan (/api/studio/start-options).
   const preview = h('p', { class: 'muted' });

@@ -1089,7 +1089,7 @@ class Studio:
         return {**answer, "note": entry}
 
     async def start_run(self, music: str, subgenre: str | None = None,
-                        length: str = "20_30m") -> Any:
+                        length: str = "90_120m") -> Any:
         """Start a run whose song prompts are for ``music`` (``suno`` or ``flow_music``);
         its inbox must be configured, or nobody could hand the songs in. ``subgenre`` is
         the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick."""
