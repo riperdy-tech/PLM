@@ -543,7 +543,8 @@ def test_a_suno_song_splits_into_its_styles_and_exclude_boxes() -> None:
              "focus_electronic, 94 BPM\n"
              "Exclude styles: low quality, noise\n")
     info, fields = song_fields(block)
-    assert fields == [{"label": "Styles", "text": "focus_electronic, 94 BPM"},
+    assert fields == [{"label": "Title", "text": "trk_a-b"},
+                      {"label": "Styles", "text": "focus_electronic, 94 BPM"},
                       {"label": "Exclude styles", "text": "low quality, noise"}]
     assert info == ["1 ---", "Save as: trk_a-b.wav", "Instrumental: yes",
                     "Length: about 210 seconds (any length the track accepts is fine)"]
@@ -551,5 +552,5 @@ def test_a_suno_song_splits_into_its_styles_and_exclude_boxes() -> None:
 
 def test_a_flow_music_song_has_one_prompt_box() -> None:
     info, fields = song_fields("Save as: trk_a-b.wav\nPrompt (5 characters; paste all of it):\ncalm.\n")
-    assert fields == [{"label": "Prompt", "text": "calm."}]
+    assert fields == [{"label": "Title", "text": "trk_a-b"}, {"label": "Prompt", "text": "calm."}]
     assert info == ["Save as: trk_a-b.wav"]

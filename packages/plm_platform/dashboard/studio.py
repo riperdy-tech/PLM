@@ -206,6 +206,9 @@ def song_fields(block: str) -> tuple[list[str], list[dict[str, str]]]:
     i = 0
     while i < len(lines):
         head, exclude = _FIELD_HEAD.match(lines[i]), _EXCLUDE.match(lines[i])
+        save_as = _SAVE_AS.match(lines[i])
+        if save_as:  # the title is the file name without .wav; the line stays for saving
+            fields.insert(0, {"label": "Title", "text": save_as.group(1)})
         if head and i + 1 < len(lines):
             fields.append({"label": head.group(1), "text": lines[i + 1]})
             i += 2
@@ -216,6 +219,8 @@ def song_fields(block: str) -> tuple[list[str], list[dict[str, str]]]:
             info.append(lines[i])
         i += 1
     return info, fields
+
+
 LENGTH_CHOICES: Final[dict[str, str]] = {
     "20_30m": "20-30 minutes", "45_75m": "45-75 minutes", "90_120m": "90-120 minutes"}
 """The video lengths the owner picks at Start (P3 buckets, owner 2026-11-10)."""
