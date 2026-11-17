@@ -67,13 +67,14 @@ from .toolchain import MediaToolchain
 __all__ = ["PACKAGING_VERSION", "AssemblyPipelineResult", "PackageAlreadyAssembled",
            "assemble_media_package"]
 
-PACKAGING_VERSION = "pack-v5"
+PACKAGING_VERSION = "pack-v6"
 """How a package is presented: thumbnails, video background and mastering. Part of the
 package version (with the sequencing version), so a presentation change gives the same
 release a new package id and re-renders it instead of replaying the stored one.
 v2 (2026-11-04): thumbnails show the scene line, the scene fills the video, -2 dBTP.
 v3 (2026-11-04): the AAC encode drops ``+bitexact`` (2 dB true-peak overshoot), -2.5 dBTP.
-v5 (2026-11-04): QA true-peak ceiling back to 0 dBTP (v4's re-encode trim reverted)."""
+v5 (2026-11-04): QA true-peak ceiling back to 0 dBTP (v4's re-encode trim reverted).
+v6 (2026-11-17): AAC at 384k, not 192k (a 1 ms drum hit encoded to +1.3 dBTP at 192k)."""
 
 
 class PackageAlreadyAssembled(Exception):

@@ -30,7 +30,10 @@ class RenderProfile:
     x264_preset: str = "veryfast"
     x264_crf: int = 20
     audio_codec: str = "aac"
-    audio_bitrate: str = "192k"
+    audio_bitrate: str = "384k"
+    """YouTube's recommended stereo AAC bitrate. At 192k FFmpeg's native AAC encoder
+    turned one 1 ms drum hit of a -2.4 dBTP master into +1.3 dBTP (run 18, package
+    mpkg_b9c71a8b4a2b55cd, 2026-11-17); the same master encoded at 384k peaks at -1.6."""
     sample_rate: int = 48000
     channels: int = 2
     container: str = "mp4"

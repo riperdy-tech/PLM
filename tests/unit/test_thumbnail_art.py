@@ -280,4 +280,4 @@ def test_the_longform_still_video_renders_at_1440p() -> None:
 
     still = render_profile(STILL_VIDEO_PROFILES["yt_longform_1080p_v1"])
     assert (still.width, still.height) == (2560, 1440)
-    assert still.x264_crf <= 20 and still.audio_bitrate == "192k"
+    assert still.x264_crf <= 20 and still.audio_bitrate == "384k"
