@@ -27,6 +27,8 @@ outcome step can attribute each write's cost to its video without an allocation 
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, Final
 
@@ -77,10 +79,21 @@ class ReleaseSteps(HttpStepsBase):
     """P7's publish call carries the upload itself; like P6's render it is bounded under
     the 3600 s default activity limit (``HttpSteps.ASSEMBLE_TIMEOUT_SECONDS``)."""
 
+    PROCESSING_POLL_SECONDS: Final[float] = 120.0
+    PROCESSING_DEADLINE_SECONDS: Final[float] = 3300.0
+    """An uploaded video YouTube has not finished processing is asked about again every
+    ``PROCESSING_POLL_SECONDS`` until this long after the step began (the step's limit is
+    3600 s), then the run holds as before. P7 resumes its stored attempt on each ask: it
+    re-checks YouTube and never uploads again. A 104-minute 1440p video was still
+    processing when its upload returned (2026-11-17) and held the run."""
+    _sleep: Callable[[float], None] = staticmethod(time.sleep)
+    _monotonic: Callable[[], float] = staticmethod(time.monotonic)
+
     async def upload(self, request: StepRequest) -> StepResult:
         return await asyncio.to_thread(self._upload, request)
 
     def _upload(self, request: StepRequest) -> StepResult:
+        began = self._monotonic()
         publish = self._config.require_publish(request.step)
         key = request.idempotency_key
         p6, p7 = self._client(Phase.MEDIA), self._client(Phase.YOUTUBE)
@@ -94,10 +107,19 @@ class ReleaseSteps(HttpStepsBase):
             # took six minutes (2026-11-09). The client's default timeout gave up after
             # seconds while P7 kept uploading; the retry then met the upload's own budget
             # reservation and held the run, though the video went up.
-            answer = p7.post(path, idempotency_key=request_key(key, "publish", media_package_id),
-                             body={"media_package": c6, "channel_id": publish.channel_id,
-                                   "operating_mode": publish.operating_mode},
-                             timeout_seconds=self.PUBLISH_TIMEOUT_SECONDS)
+            call: dict[str, Any] = {
+                "idempotency_key": request_key(key, "publish", media_package_id),
+                "body": {"media_package": c6, "channel_id": publish.channel_id,
+                         "operating_mode": publish.operating_mode},
+                "timeout_seconds": self.PUBLISH_TIMEOUT_SECONDS}
+            answer = p7.post(path, **call)
+            # Uploaded, but YouTube is still processing it: wait and ask again.
+            while (answer.get("state") == "failed_retryable" and answer.get("youtube_video_id")
+                   and not isinstance(answer.get("publication_event"), dict)
+                   and self._monotonic() - began + self.PROCESSING_POLL_SECONDS
+                   < self.PROCESSING_DEADLINE_SECONDS):
+                self._sleep(self.PROCESSING_POLL_SECONDS)
+                answer = p7.post(path, **call)
             writes = _tag(answer.get("external_writes"), media_package_id=media_package_id)
             _refuse_simulated(writes, Phase.YOUTUBE, path, publish.allow_simulated)
             event = answer.get("publication_event")

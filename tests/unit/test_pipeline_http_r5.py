@@ -171,6 +171,36 @@ def test_upload_turns_a_guard_refusal_into_its_hold() -> None:
         asyncio.run(failed.steps().upload(_request(Step.UPLOAD, {"assemble": ASSEMBLED})))
 
 
+def test_upload_waits_for_youtube_processing_without_uploading_again(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-17: a 104-minute video was still processing when its upload returned, and
+    the run held. The step now asks P7 again (P7 resumes the attempt, no re-upload)."""
+    clock = [0.0]
+    monkeypatch.setattr(HttpPhaseSteps, "_monotonic", staticmethod(lambda: clock[0]))
+    monkeypatch.setattr(HttpPhaseSteps, "_sleep",
+                        staticmethod(lambda s: clock.__setitem__(0, clock[0] + s)))
+    processing = {"attempt_id": "att-1", "manifest_id": "man-1", "state": "failed_retryable",
+                  "youtube_video_id": "yt1",
+                  "error": "YouTube processing is not yet confirmed succeeded"}
+    answers = [processing, processing, {"attempt_id": "att-1", "manifest_id": "man-1",
+                                        "state": "verified", "youtube_video_id": "yt1",
+                                        "publication_event": EVENT, "external_writes": []}]
+    world = _upload_world(lambda r: answers.pop(0))
+    result = asyncio.run(world.steps().upload(_request(Step.UPLOAD, {"assemble": ASSEMBLED})))
+    assert result.outputs["publications"][0]["youtube_video_id"] == "yt1"
+    sent = world.sent("POST", "/youtube/publish")
+    assert len(sent) == 3 and len({r.headers["Idempotency-Key"] for r in sent}) == 1
+    assert clock[0] == 2 * HttpPhaseSteps.PROCESSING_POLL_SECONDS
+
+    # Still processing at the step's deadline: the run holds as before (Try again).
+    clock[0] = 0.0
+    stuck = _upload_world(processing)
+    with pytest.raises(ValidationFailure, match="not yet confirmed"):
+        asyncio.run(stuck.steps().upload(_request(Step.UPLOAD, {"assemble": ASSEMBLED})))
+    assert clock[0] < HttpPhaseSteps.PROCESSING_DEADLINE_SECONDS
+    assert len(stuck.sent("POST", "/youtube/publish")) > 3
+
+
 STRICT = dataclasses.replace(CONFIG, publish=dataclasses.replace(
     CONFIG.publish, allow_simulated=False))
 
