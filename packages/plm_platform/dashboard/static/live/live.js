@@ -698,13 +698,13 @@ function workingBox(p) {
   if (w.state === 'failed') {
     return h('section', { class: 'hold-box stopped' }, h('h2', {}, `Making the video failed`),
       h('pre', { class: 'prompt' }, w.error || 'no reason given'),
-      h('p', {}, 'Fix the pictures in step 2 and press Import again.'));
+      h('p', {}, 'Fix the pictures in step 2 and pick the video picture again.'));
   }
   const elapsed = (Date.now() - new Date(w.since).getTime()) / 1000;
   const expected = w.expected_seconds || 0;
   const pct = expected ? Math.min(99, Math.round((elapsed / expected) * 100)) : null;
   return h('section', { class: 'hold-box working', 'data-since': w.since, 'data-expected': expected },
-    h('h2', {}, w.kind === 'remake' ? 'Making the video again with your new pictures' : 'Making the video from picture A'),
+    h('h2', {}, w.kind === 'remake' ? 'Making the video again with your new pictures' : `Making the video from picture ${w.pick || 'A'}`),
     h('p', { class: 'eta' }, progressText(w.since, expected)),
     pct !== null ? h('div', { class: 'progress' }, h('div', { class: 'progress-bar', style: `width:${pct}%` })) : null,
     h('p', { class: 'muted' }, 'It keeps going if you close or refresh this page.'));

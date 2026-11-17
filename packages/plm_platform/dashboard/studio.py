@@ -727,6 +727,7 @@ class Studio:
             _write_atomic(folder / "pick.txt", pick.upper().encode())
         self._imports[package_id] = {
             "since": self.clock.now().isoformat(), "state": "running", "error": None,
+            "pick": pick.upper() if pick else "A",
             "expected_seconds": round(seconds * RENDER_SECONDS_PER_VIDEO_SECOND) + 60}
         if wait:
             return await self._import_and_resume(package_id, folder, cases)
