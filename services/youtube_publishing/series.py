@@ -20,9 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-__all__ = ["SERIES_PLAYLISTS_VAR", "SeriesPlaylist", "load_series_playlists"]
+__all__ = ["DEFAULT_PLAYLIST_KEY", "SERIES_PLAYLISTS_VAR", "SeriesPlaylist", "load_series_playlists"]
 
 SERIES_PLAYLISTS_VAR: Final[str] = "PLM_YOUTUBE_SERIES_PLAYLISTS_FILE"
+DEFAULT_PLAYLIST_KEY: Final[str] = "default"
+"""The entry for every video whose series has no playlist of its own (owner 2026-11-23:
+most visual worlds belong to no series, and a new channel needs one playlist with all
+its videos more than several near-empty ones)."""
 
 
 @dataclass(frozen=True, slots=True)

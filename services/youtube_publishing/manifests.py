@@ -9,8 +9,8 @@ comes from the parsed package or from the operator-configured channel profile:
   is AI-generated (ADR-0044), whatever a package declares (ARCH-P18);
 * privacy and made-for-kids are the channel's configured defaults;
 * the video goes to its series' playlist when ``series_playlists`` (:mod:`.series`)
-  lists the package's series, and the description links that playlist; otherwise no
-  playlist is attached.
+  lists the package's series (or else under ``"default"``), and the description links
+  that playlist; otherwise no playlist is attached.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from plm_platform.media_timing import classify_saved_media_timing
 
 from .domain.ids import build_idempotency_key, build_manifest_id
 from .domain.models import CandidateSelection, ChannelProfile, ManifestTrack, PublishManifest
-from .series import SeriesPlaylist
+from .series import DEFAULT_PLAYLIST_KEY, SeriesPlaylist
 
 __all__ = ["CandidateSelectionError", "PackageNotReadyError", "build_publish_manifest",
            "preflight_metadata", "same_publish_choice"]
@@ -122,7 +122,8 @@ def build_publish_manifest(
     )
     lineage = pkg.lineage
     channel_id = profile.channel_id
-    playlist = (series_playlists or {}).get(meta.series or "")
+    playlists = series_playlists or {}
+    playlist = playlists.get(meta.series or "") or playlists.get(DEFAULT_PLAYLIST_KEY)
     description = meta.description if playlist is None else (
         f"{meta.description}\n\nMore in {playlist.title}: {playlist.url}")
     return PublishManifest(

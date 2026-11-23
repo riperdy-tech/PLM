@@ -259,6 +259,21 @@ def test_p7_puts_a_series_video_in_its_playlist_and_links_it(
     assert manifest.description.endswith(
         "More in Night Desk Sessions: https://www.youtube.com/playlist?list=PLnight")
     assert load_series_playlists({}) == {}
+    # Owner 2026-11-23: a "default" entry takes every video whose series has no
+    # playlist of its own (most pictures belong to no series), so all of them land in
+    # one channel playlist; a series' own playlist still wins.
+    config.write_text(json.dumps({"default": {"playlist_id": "PLall", "title": "All Mixes"}}))
+    fallback = build_publish_manifest(
+        pkg, CHANNEL, publish_at=None, now=NOW,
+        series_playlists=load_series_playlists({SERIES_PLAYLISTS_VAR: str(config)}))
+    assert (fallback.playlist_id, fallback.playlist_title) == ("PLall", "All Mixes")
+    config.write_text(json.dumps({"default": {"playlist_id": "PLall", "title": "All Mixes"},
+                                  "night_desk": {"playlist_id": "PLnight",
+                                                 "title": "Night Desk Sessions"}}))
+    own = build_publish_manifest(
+        pkg, CHANNEL, publish_at=None, now=NOW,
+        series_playlists=load_series_playlists({SERIES_PLAYLISTS_VAR: str(config)}))
+    assert own.playlist_id == "PLnight"
     config.write_text(json.dumps({"night_desk": {"title": "no id"}}))
     with pytest.raises(ValueError, match="playlist_id"):
         load_series_playlists({SERIES_PLAYLISTS_VAR: str(config)})
