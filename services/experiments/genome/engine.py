@@ -106,6 +106,13 @@ _TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset(
 PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
 PLAYLIST_DURATION_OUTSIDE_POLICY: Final[str] = "playlist_duration_outside_policy"
 
+OWNER_MINUTES_BUCKET: Final[re.Pattern[str]] = re.compile(r"(\d{1,3})m")
+"""The owner's typed length (owner 2026-11-23: "95m" is 95 minutes), besides the table's
+named buckets."""
+OWNER_MINUTES_SLACK_SECONDS: Final[int] = 300
+"""How far either side of the owner's minutes a video may land: songs run about 3.5
+minutes, so P6 needs a window wider than one song to fit whole songs."""
+
 
 def normalize_dimension_value(dimension: str, value: str) -> str:
     """Normalize dimension string values to canonical lowercase snake_case tokens."""
@@ -290,7 +297,11 @@ class TemplateLibrary:
 
     def playlist_duration_for_bucket(self, bucket: str) -> DurationRange:
         """The declared playlist range of a P2 ``duration_bucket``; an unknown bucket or
-        one outside the policy range is refused, never mapped or clamped."""
+        one outside the policy range is refused, never mapped or clamped. ``"95m"`` is the
+        owner's typed minutes: 95 min, 5 min either side, kept inside the policy."""
+        minutes = OWNER_MINUTES_BUCKET.fullmatch(bucket)
+        if minutes is not None:
+            return self._owner_minutes(bucket, int(minutes.group(1)) * 60)
         found = self._buckets.get(bucket)
         if found is None:
             raise GenomeBuildError(
@@ -320,6 +331,20 @@ class TemplateLibrary:
                                 PLAYLIST_DURATION_OUTSIDE_POLICY):
                 raise
             return self._policy, f"duration_bucket_mapped:{bucket}->policy"
+
+    def _owner_minutes(self, bucket: str, target: int) -> DurationRange:
+        allowed = self._allowed
+        if not allowed.min_seconds <= target <= allowed.max_seconds:
+            raise GenomeBuildError(
+                PLAYLIST_DURATION_OUTSIDE_POLICY,
+                f"duration_bucket {bucket!r} ({target} s) lies outside the playlist policy "
+                f"{allowed.min_seconds}-{allowed.max_seconds} s",
+                field_paths=["brief.duration_bucket"],
+            )
+        return DurationRange(
+            min_seconds=max(allowed.min_seconds, target - OWNER_MINUTES_SLACK_SECONDS),
+            max_seconds=min(allowed.max_seconds, target + OWNER_MINUTES_SLACK_SECONDS),
+            target_seconds=target)
 
     def _inside_policy(self, declared: DurationRange) -> bool:
         return (self._allowed.min_seconds <= declared.min_seconds

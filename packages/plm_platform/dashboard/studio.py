@@ -182,10 +182,11 @@ def song_counts(genre: str = "focus_electronic") -> dict[str, dict[str, int]]:
         return {}
     library = default_template_library()
     seconds = derived_duration_seconds(library.for_genre(genre).genome.track_duration)
+    buckets = [*LENGTH_CHOICES, *(f"{m}m" for m in range(MINUTES_RANGE[0], MINUTES_RANGE[1] + 1))]
     return {bucket: {"songs": plan_supply(library.playlist_duration_for_bucket(bucket), seconds,
                                           default_supply_policy()).track_count,
                      "song_seconds": seconds}
-            for bucket in LENGTH_CHOICES}
+            for bucket in buckets}
 
 
 def wav_seconds(path: Path) -> float | None:
@@ -248,6 +249,18 @@ def song_fields(block: str) -> tuple[list[str], list[dict[str, str]]]:
 LENGTH_CHOICES: Final[dict[str, str]] = {
     "20_30m": "20-30 minutes", "45_75m": "45-75 minutes", "90_120m": "90-120 minutes"}
 """The video lengths the owner picks at Start (P3 buckets, owner 2026-11-10)."""
+MINUTES_RANGE: Final[tuple[int, int]] = (20, 120)
+"""Owner 2026-11-23: the length is typed in whole minutes (sent as ``"95m"``); P3 plans 5
+minutes either side. The limits are P3's allowed playlist range."""
+
+
+def minutes_length(length: str) -> int | None:
+    """The minutes of a typed length (``"95m"`` -> 95) inside :data:`MINUTES_RANGE`."""
+    found = re.fullmatch(r"(\d{1,3})m", length)
+    if found is None:
+        return None
+    value = int(found.group(1))
+    return value if MINUTES_RANGE[0] <= value <= MINUTES_RANGE[1] else None
 RENDER_SECONDS_PER_VIDEO_SECOND: Final[float] = 0.25
 """The still video's render time per second of video, measured 2026-11-09 at 1440p (a
 97-minute video took about 23 minutes on this host); the import's time estimate."""
@@ -381,7 +394,8 @@ class Studio:
     def start_options(self) -> dict[str, Any]:
         """What the Start card needs, without the inbox scans of :meth:`overview`."""
         return {"start_available": self.start is not None, "styles": self.style_choices(),
-                "lengths": LENGTH_CHOICES, "song_counts": song_counts(),
+                "lengths": LENGTH_CHOICES, "minutes_range": list(MINUTES_RANGE),
+                "song_counts": song_counts(),
                 "remakes": self.remakes()}
 
     def style_choices(self) -> dict[str, Any]:
@@ -1166,9 +1180,10 @@ class Studio:
         the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick."""
         if self.start is None:
             raise _refuse(503, "start_not_configured", "starting runs is not configured")
-        if length not in LENGTH_CHOICES:
+        if length not in LENGTH_CHOICES and minutes_length(length) is None:
             raise _refuse(422, "length_unknown",
-                          f"choose one of {', '.join(LENGTH_CHOICES)}, not {length!r}")
+                          f"type whole minutes from {MINUTES_RANGE[0]} to {MINUTES_RANGE[1]} "
+                          f"(e.g. 95m) or one of {', '.join(LENGTH_CHOICES)}, not {length!r}")
         if music not in MUSIC_PROVIDERS:
             raise _refuse(422, "music_tool_unknown",
                           f"choose one of {sorted(MUSIC_PROVIDERS)}, not {music!r}")

@@ -26,10 +26,12 @@ from services.experiments.config import load_experiments_settings
 from services.experiments.domain.genome import DurationRange
 from services.experiments.genome.engine import (
     TEMPLATES_PATH,
+    GenomeBuildError,
     TemplateLibrary,
     TemplateLibraryError,
     brief_playlist_duration,
     build_genome_from_directive,
+    default_template_library,
 )
 from services.experiments.ingestion.p2_adapter import adapt_directive
 from services.experiments.materialization.supply import (
@@ -168,6 +170,26 @@ def test_the_owners_length_choice_sets_the_playlist_range(
     open_brief = build_genome_from_directive(adapt_directive(_directive(duration_bucket=None)))
     assert (open_brief.playlist_duration.min_seconds,
             open_brief.playlist_duration.max_seconds) == (1200, 1800)
+
+
+@pytest.mark.parametrize(("bucket", "expected"), [
+    ("95m", (5400, 6000, 5700)), ("20m", (1200, 1500, 1200)), ("120m", (6900, 7200, 7200)),
+    ("60m", (3300, 3900, 3600))])
+def test_the_owners_minutes_set_a_range_five_minutes_either_side(
+        bucket: str, expected: tuple[int, int, int]) -> None:
+    """Owner 2026-11-23: the length is typed in minutes at Start ("95m"). Songs run
+    about 3.5 minutes, so P3 plans 5 minutes either side of it, inside the policy."""
+    directive = adapt_directive(_directive(duration_bucket=bucket))
+    duration = build_genome_from_directive(directive).playlist_duration
+    assert (duration.min_seconds, duration.max_seconds, duration.target_seconds) == expected
+    assert brief_playlist_duration(directive)[1] is None
+
+
+@pytest.mark.parametrize("bucket", ["19m", "121m", "0m"])
+def test_minutes_outside_the_policy_are_refused_not_clamped(bucket: str) -> None:
+    with pytest.raises(GenomeBuildError) as caught:
+        default_template_library().playlist_duration_for_bucket(bucket)
+    assert caught.value.code == "playlist_duration_outside_policy"
 
 
 def test_a_template_range_outside_the_policy_is_refused_at_load() -> None:

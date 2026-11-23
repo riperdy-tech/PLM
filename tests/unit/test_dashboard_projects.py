@@ -233,6 +233,12 @@ def test_start_takes_a_length_choice(tmp_path: Path) -> None:
     assert seen == ["90_120m"]
     with pytest.raises(ActionRefused, match="length_unknown"):
         asyncio.run(studio.start_run("suno", None, "5_10m"))
+    # Owner 2026-11-23: any whole number of minutes from 20 to 120.
+    asyncio.run(studio.start_run("suno", None, "95m"))
+    assert seen[-1] == "95m"
+    for bad in ("19m", "121m", "95", "95.5m"):
+        with pytest.raises(ActionRefused, match="length_unknown"):
+            asyncio.run(studio.start_run("suno", None, bad))
 
 
 def test_start_previews_how_many_songs_each_length_asks_for() -> None:
@@ -240,9 +246,22 @@ def test_start_previews_how_many_songs_each_length_asks_for() -> None:
     (20-30 min asked for 8 songs on 2026-11-09)."""
     from plm_platform.dashboard.studio import song_counts
 
-    assert {b: c["songs"] for b, c in song_counts().items()} == {
+    counts = song_counts()
+    assert {b: counts[b]["songs"] for b in ("20_30m", "45_75m", "90_120m")} == {
         "20_30m": 8, "45_75m": 17, "90_120m": 33}
-    assert {c["song_seconds"] for c in song_counts().values()} == {210}
+    assert {c["song_seconds"] for c in counts.values()} == {210}
+    # Typed minutes: every whole minute from 20 to 120 (95 min plans from 90 min up).
+    assert counts["95m"]["songs"] == 33 and counts["20m"]["songs"] == 8
+    assert "19m" not in counts and "121m" not in counts
+
+
+def test_studio_minutes_match_p3s_policy() -> None:
+    """The Start box's limits are P3's allowed range, so P3 never refuses a typed length."""
+    from experiments.genome.engine import default_template_library
+    from plm_platform.dashboard.studio import MINUTES_RANGE
+
+    allowed = default_template_library()._allowed
+    assert MINUTES_RANGE == (allowed.min_seconds // 60, allowed.max_seconds // 60)
 
 
 def test_youtube_counters_are_cached_and_a_failure_keeps_the_page(tmp_path: Path) -> None:

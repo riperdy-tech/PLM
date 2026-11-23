@@ -370,7 +370,7 @@ function songPrompt(song) {
 function actionButton(label, cls, run, { confirm: question, busy } = {}) {
   const result = h('div', { class: 'result' });
   const button = h('button', { class: `btn ${cls || ''}`, type: 'button', onclick: async () => {
-    if (question && !window.confirm(question)) return;
+    if (question && !window.confirm(typeof question === 'function' ? question() : question)) return;
     button.disabled = true;
     result.className = 'result';
     result.textContent = busy || 'Working...';
@@ -590,33 +590,43 @@ function startCard(s) {
     h('p', { class: 'notice' }, 'Starting runs is not configured (platform settings or service token missing).'));
   const styles = s.styles || {};
   const keepStyle = styleSelect ? styleSelect.value : '';
-  const keepLength = lengthSelect ? lengthSelect.value : '90_120m';
+  // Owner 2026-11-23: the length is typed in whole minutes; P3 plans 5 minutes either side.
+  const [minMinutes, maxMinutes] = s.minutes_range || [20, 120];
+  const keepLength = lengthSelect ? lengthSelect.value : '90';
   styleSelect = h('select', { 'data-keep': '1' },
     h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
     (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
   styleSelect.value = (styles.available || []).includes(keepStyle) ? keepStyle : '';
-  lengthSelect = h('select', { 'data-keep': '1' },
-    Object.entries(s.lengths || { '20_30m': '20-30 minutes' }).map(([id, label]) => h('option', { value: id }, label)));
-  lengthSelect.value = keepLength in (s.lengths || {}) ? keepLength : '90_120m';
+  lengthSelect = h('input', { type: 'number', min: minMinutes, max: maxMinutes, step: 1,
+    value: keepLength, 'data-keep': '1', style: 'width: 5em' });
+  const typedMinutes = () => {
+    const value = Number(lengthSelect.value);
+    return Number.isInteger(value) && value >= minMinutes && value <= maxMinutes ? value : null;
+  };
   const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
   // What the length asks of the owner, from P3's own plan (/api/studio/start-options).
   const preview = h('p', { class: 'muted' });
   const showPreview = () => {
-    const plan = (s.song_counts || {})[lengthSelect.value];
+    const value = typedMinutes();
+    if (value === null) {
+      preview.textContent = `Type whole minutes from ${minMinutes} to ${maxMinutes}.`;
+      return;
+    }
+    const plan = (s.song_counts || {})[`${value}m`];
     preview.textContent = plan
-      ? `${plan.songs} song prompts of about ${minutes(plan.song_seconds)} each, for a ${lengthSelect.selectedOptions[0].textContent} video. If QA rejects some or they run short, the Studio asks for more.`
+      ? `${plan.songs} song prompts of about ${minutes(plan.song_seconds)} each, for a video of about ${value} minutes (${Math.max(minMinutes, value - 5)}-${Math.min(maxMinutes, value + 5)}). If QA rejects some or they run short, the Studio asks for more.`
       : '';
   };
-  lengthSelect.addEventListener('change', showPreview);
+  lengthSelect.addEventListener('input', showPreview);
   showPreview();
   const start = (label, music) => actionButton(`Start with ${label} prompts`, 'btn-ok big',
     () => authedSend('/api/studio/start', 'POST', JSON.stringify({
-      music, subgenre: styleSelect.value || null, length: lengthSelect.value }), 'application/json'),
-    { confirm: `Start a new ${lengthSelect.selectedOptions[0].textContent} video, style: ${styleSelect.selectedOptions[0].textContent}, song prompts for ${label}?`,
+      music, subgenre: styleSelect.value || null, length: `${lengthSelect.value.trim()}m` }), 'application/json'),
+    { confirm: () => `Start a new ${lengthSelect.value}-minute video, style: ${styleSelect.selectedOptions[0].textContent}, song prompts for ${label}?`,
       busy: 'Asking P2 for the next video and starting it...' });
   return h('section', { class: 'step' },
     h('h2', {}, 'Start a new video'),
-    h('div', { class: 'row-actions' }, h('strong', {}, 'Style'), styleSelect, h('strong', {}, 'Length'), lengthSelect),
+    h('div', { class: 'row-actions' }, h('strong', {}, 'Style'), styleSelect, h('strong', {}, 'Length'), lengthSelect, ' minutes'),
     preview,
     h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
     styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null,

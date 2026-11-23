@@ -163,7 +163,8 @@ class StudioStartBody(BaseModel):
         default=None, description="the owner's sub-style; none: P2 picks (and avoids the "
                                   "sub-styles of the last picks)")
     length: str = Field(default="90_120m",
-                        description="the video length: 20_30m, 45_75m or 90_120m")
+                        description="the video length: whole minutes from 20 to 120 "
+                                    "(e.g. 95m), or 20_30m, 45_75m or 90_120m")
 
 
 def _http(refused: ActionRefused) -> HTTPException:
