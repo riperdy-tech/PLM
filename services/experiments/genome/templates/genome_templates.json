@@ -306,7 +306,7 @@
       "alternatives": {
         "visual_world": ["minimal_desk_monolith", "rainy_night_desk", "sunrise_home_office", "late_night_library", "city_apartment_night", "snowy_cabin_desk", "train_window_journey"],
         "visual_motion_profile": ["slow_parallax", "static_ambient", "subtle_loop"],
-        "thumbnail_family": ["cinematic_workspace_vista", "electric_city_night", "over_shoulder_worker", "monumental_minimal", "meme_object_lowercase", "cozy_retreat_desk"],
+        "thumbnail_family": ["cinematic_workspace_vista", "electric_city_night", "desk_instrument_still_life", "monumental_minimal", "meme_object_lowercase", "cozy_retreat_desk"],
         "title_archetype": ["activity_genre", "mood_context", "scene_duration"],
         "hook_profile": ["atmospheric", "instrumental_riff", "slow_burn"],
         "song_structure": ["loop_progression", "ambient_evolving"],

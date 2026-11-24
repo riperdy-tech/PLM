@@ -1,18 +1,19 @@
 {
   "schema_version": "thumbnail-styles-v1",
-  "guide_version": "2026-11-17",
+  "guide_version": "2026-11-24",
   "evidence": {
     "scan": "data/thumbnail_trends/2026-11-04 (scripts/thumbnail_trend_scan.py)",
     "method": "147 long-form (>= 20 min) videos from 8 focus-music searches published in the last 90 days, ranked by views per channel subscriber (floored at 1,000); top 30 reviewed, at most 2 per channel.",
     "not_used": "Bright clickbait text over brains or faces (#3 MEMORIZE FASTER, #26 ADHD FOCUS) ranked, but they sell brainwave or medical claims this channel does not make.",
-    "v2_review": "2026-11-05: the owner's first art from guide 2026-11-04 compared with the top 30. The winners are nearly empty rooms where the window view fills most of the frame, bright golden-hour or clear blue-hour light, no person or one tiny distant figure, and text on open sky; and they spread over clearly different looks (open-view room, neon city, monumental scale, one-object meme, cozy cabin, hands from above). Our art was cluttered (drawings pinned on every wall), dark, showed a man up close with text across him, and A, B and C were three versions of one dark room with the same lettering. v2 makes every scene minimal and bright, keeps people out of the foreground, puts the text on open sky, gives each look its own lettering, and picks A, B and C from three different looks with three different phrases."
+    "v2_review": "2026-11-05: the owner's first art from guide 2026-11-04 compared with the top 30. The winners are nearly empty rooms where the window view fills most of the frame, bright golden-hour or clear blue-hour light, no person or one tiny distant figure, and text on open sky; and they spread over clearly different looks (open-view room, neon city, monumental scale, one-object meme, cozy cabin, hands from above). Our art was cluttered (drawings pinned on every wall), dark, showed a man up close with text across him, and A, B and C were three versions of one dark room with the same lettering. v2 makes every scene minimal and bright, keeps people out of the foreground, puts the text on open sky, gives each look its own lettering, and picks A, B and C from three different looks with three different phrases.",
+    "v3_review": "2026-11-24: the owner rejected B's hands-from-above prompt (a near-black top-down keyboard flat-lay with typing hands): it vanishes at phone size and in dark mode, puts a person in the foreground and says nothing about the music. B is now an instrument still life (a glowing synth, drum machine or tape deck behind a notebook) on a bright dusty-teal wall, and no style shows hands."
   },
   "rules": [
     "16:9 landscape YouTube thumbnail that still reads clearly at phone size: one clear subject, strong light-dark contrast, bright enough to read when small.",
     "Minimal and uncluttered: no papers, posters, sketches or clutter on the walls or the desk; large calm empty areas.",
     "No other text, letters, numbers, logos or watermarks besides the phrase given.",
     "Every object is plain and unbranded: no brand names, logos or trademarks anywhere.",
-    "No real or famous person and no recognisable face; at most hands, or one tiny distant figure; never a person in the foreground."
+    "No real or famous person, no face and no hands; at most one tiny distant figure, never a person in the foreground."
   ],
   "text_policy": "Every phrase in texts is short, names focus or work (the channel is focus music for work, ADR-0044; mood words such as stillness or slow read as sleep or meditation), and makes no claim about brainwaves, Hz, ADHD, memory or health. The styles keep the brand's charcoal, graphite, warm amber and cool white (ADR-0044), except the neon city (saturated cyan and red neon, as the scan's cyberpunk winners #11, #12, #16) and the bright meme style.",
   "styles": {
@@ -32,13 +33,14 @@
       "typography": "Render the words \"{text}\" huge and bold in a heavy condensed sans-serif, stacked across the left half, bright white with a red-magenta neon glow, filling about half the frame width.",
       "texts": ["NIGHT FOCUS", "DEEP WORK", "LATE SHIFT WORK", "SYSTEM FOCUS", "DARK FOCUS"]
     },
-    "over_shoulder_worker": {
-      "label": "Hands at work, seen from above",
-      "look": "hands_top_down",
+    "desk_instrument_still_life": {
+      "label": "Instrument still life on a writing desk",
+      "look": "instrument_still_life",
       "evidence_ranks": [6, 4, 9],
-      "prompt": "Top-down photograph of a dark matte desk: two hands typing on a plain black keyboard, with only a closed notebook, a pen, wired earbuds and a cup of black coffee around them, neatly spaced. One soft light from above, rich deep blacks, minimal and orderly, no face.",
-      "typography": "Across the upper middle, render the words \"{text}\" in bold, very widely letter-spaced capital letters in white.",
-      "texts": ["ENTER DEEP FOCUS", "LOCK IN", "HYPERFOCUS", "FLOW STATE"]
+      "prompt": "Photorealistic still life seen from the side at eye level: a clean light-oak writing desk with an open notebook and a fountain pen resting across the page, and just behind it {object} glow a soft warm amber. A warm desk lamp lights the scene from the left. Behind the desk, a smooth, softly lit dusty-teal wall with plenty of calm empty space. Warm amber against cool teal, gentle shallow depth of field, quiet late-evening mood, bright and clean overall, no people and no hands.",
+      "typography": "In the empty upper half, render the words \"{text}\" in large, clean, widely letter-spaced white capital letters with a faint soft shadow, centred.",
+      "texts": ["ENTER DEEP FOCUS", "LOCK IN", "HYPERFOCUS", "FLOW STATE"],
+      "objects": ["a small plain unbranded vintage analog synthesizer whose keys and knobs", "a compact plain unbranded drum machine whose square pads", "a small plain unbranded cassette tape deck whose level meters"]
     },
     "monumental_minimal": {
       "label": "Monumental scale, one tiny figure",
