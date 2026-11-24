@@ -209,3 +209,74 @@ def test_google_oauth_refresh_rejected_as_upstream_failure() -> None:
     result = _preview(_api(reporting_downloader=source))
     assert result.status_code == 502
     assert result.json()["detail"]["code"] == "authenticated_reporting_source_failed"
+
+
+@pytest.mark.parametrize("url", [
+    # The shape Google actually returned on 2026-11-24 (ids replaced).
+    "https://youtubereporting.googleapis.com/v1/media/CHANNEL/UCabc/jobs/job-1/reports/42?alt=media",
+    "https://youtubereporting.googleapis.com/v1/media/9180799901?alt=media",
+])
+def test_google_download_paths_on_the_reporting_host_are_accepted(url: str) -> None:
+    from analytics.ingestion.youtube_reporting import _download_url
+
+    assert _download_url(url) == url
+
+
+@pytest.mark.parametrize("url", [
+    "https://evil.example/v1/media/a/b?alt=media",
+    "https://youtubereporting.googleapis.com/v1/media/a/../b?alt=media",
+    "https://youtubereporting.googleapis.com/v1/media/a//b?alt=media",
+    "https://youtubereporting.googleapis.com/v1/other/a?alt=media",
+    "http://youtubereporting.googleapis.com/v1/media/a?alt=media",
+])
+def test_download_urls_off_the_reporting_media_path_are_refused(url: str) -> None:
+    from analytics.ingestion.youtube_reporting import (
+        ReportingDownloadError,
+        _download_url,
+    )
+
+    with pytest.raises(ReportingDownloadError):
+        _download_url(url)
+
+
+def test_rate_limit_is_waited_out_then_given_up() -> None:
+    """Google answered 429 when a month of reports was read at once (2026-11-24)."""
+    from analytics.ingestion.youtube_reporting import ReportingDownloadError
+
+    answers = iter([429, 429, 200])
+    waits: list[float] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(next(answers), json={"jobs": []})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        downloader = AuthenticatedReachDownloader(
+            client=client, access_token=lambda: "t", sleep=waits.append)
+        assert downloader.list_reach_jobs() == ()
+    assert waits == [2.0, 4.0]
+
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda req: httpx.Response(429, json={}))) as client:
+        downloader = AuthenticatedReachDownloader(
+            client=client, access_token=lambda: "t", sleep=waits.append)
+        with pytest.raises(ReportingDownloadError, match="HTTP 429"):
+            downloader.list_reach_jobs()
+
+
+def test_csv_download_also_waits_out_a_rate_limit() -> None:
+    """The month's 22nd CSV download got 429 on 2026-11-24 after the metadata calls."""
+    from analytics.ingestion.youtube_reporting import AuthenticatedReachDownloader as D
+
+    answers = iter([429, 200])
+    waits: list[float] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(next(answers), content=b"a,b\n")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        downloader = D(client=client, access_token=lambda: "t", sleep=waits.append)
+        with client.stream("GET", "https://x.test/") as first:
+            assert downloader._rate_limited(first, 0)
+        with client.stream("GET", "https://x.test/") as second:
+            assert bytes(downloader._read_csv(second)) == b"a,b\n"
+    assert waits == [2.0]

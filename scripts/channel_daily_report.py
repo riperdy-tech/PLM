@@ -11,9 +11,11 @@ growth spec's decision rules (``analytics.evaluation.channel_rules``) and writes
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -40,16 +42,40 @@ from youtube_publishing.client.real import RealYouTubeClient
 logger = logging.getLogger("channel_daily_report")
 
 
+def _cached_rows(cache: Path | None, report_id: str) -> tuple[ReachRow, ...] | None:
+    path = None if cache is None else cache / f"{report_id}.json"
+    if path is None or not path.exists():
+        return None
+    return tuple(ReachRow(date.fromisoformat(d), c, v, int(i), Decimal(r))
+                 for d, c, v, i, r in json.loads(path.read_text(encoding="utf-8")))
+
+
+def _store_rows(cache: Path | None, report_id: str, rows: tuple[ReachRow, ...]) -> None:
+    if cache is None:
+        return
+    cache.mkdir(parents=True, exist_ok=True)
+    data = [[r.date.isoformat(), r.channel_id, r.video_id, r.impressions, str(r.ctr_ratio)]
+            for r in rows]
+    (cache / f"{report_id}.json").write_text(json.dumps(data), encoding="utf-8")
+
+
 def download_reach_rows(downloader: AuthenticatedReachDownloader, *, job_id: str,
-                        ctr_unit: str, channel_id: str) -> tuple[ReachRow, ...]:
-    """Every current (not superseded) daily report of the job, one row per day and video."""
+                        ctr_unit: str, channel_id: str,
+                        cache: Path | None = None) -> tuple[ReachRow, ...]:
+    """Every current (not superseded) daily report of the job, one row per day and video.
+
+    A report id names one fixed revision, so its rows are kept in ``cache`` and later
+    runs download only new reports (Google rate-limits a month read at once)."""
     rows: dict[tuple[date, str], ReachRow] = {}
     for version in downloader.list_reach_reports(job_id=job_id):
         if version.revision_status != "current":
             continue
-        report = downloader.fetch(job_id=job_id, report_id=version.report_id,
-                                  ctr_unit=ctr_unit)  # type: ignore[arg-type]
-        for row in report.rows:
+        report_rows = _cached_rows(cache, version.report_id)
+        if report_rows is None:
+            report_rows = downloader.fetch(job_id=job_id, report_id=version.report_id,
+                                           ctr_unit=ctr_unit).rows  # type: ignore[arg-type]
+            _store_rows(cache, version.report_id, report_rows)
+        for row in report_rows:
             if row.channel_id != channel_id:
                 raise ReportingDownloadError("reach rows belong to another channel")
             key = (row.date, row.video_id)
@@ -142,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
                 client=http_client, access_token=analytics._get_access_token)
             rows = download_reach_rows(downloader, job_id=options.reach_job_id,
                                        ctr_unit=options.reach_ctr_unit,
-                                       channel_id=options.channel_id)
+                                       channel_id=options.channel_id,
+                                       cache=options.out / "reach-cache")
     except (ReportingDownloadError, ReachReportError, YouTubeAnalyticsError) as exc:
         logger.error("Reach reports unavailable: %s", exc)
         return 2

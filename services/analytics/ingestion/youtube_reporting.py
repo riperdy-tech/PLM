@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -91,7 +92,9 @@ def _download_url(url: object) -> str:
             and parts.hostname == "youtubereporting.googleapis.com"
             and parts.port is None
             and parts.username is None and parts.password is None
-            and bool(re.fullmatch(r"/v1/media/[A-Za-z0-9_-]+", parts.path))
+            # Google's real links have several segments, e.g.
+            # /v1/media/<a>/<b>/jobs/<job>/<c>/<report> (observed 2026-11-24).
+            and bool(re.fullmatch(r"/v1/media(?:/[A-Za-z0-9_-]+)+", parts.path))
             and parts.query in ("", "alt=media")
             and not parts.fragment
         )
@@ -105,21 +108,38 @@ def _download_url(url: object) -> str:
 class AuthenticatedReachDownloader:
     """Google API metadata checks + bounded, authenticated GET of one report."""
 
+    RATE_LIMIT_RETRIES = 4
+    """Google answers HTTP 429 when a month of daily reports is read in one go
+    (2026-11-24); waits of 2, 4, 8 and 16 s (or its Retry-After) get through."""
+
     def __init__(
         self, *, client: httpx.Client, access_token: Callable[[], str],
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.client = client
         self.access_token = access_token
+        self.sleep = sleep
+
+    def _rate_limited(self, response: httpx.Response, attempt: int) -> bool:
+        """Wait and say so when Google answered 429 and a retry is left."""
+        if response.status_code != 429 or attempt == self.RATE_LIMIT_RETRIES:
+            return False
+        after = response.headers.get("Retry-After", "")
+        self.sleep(min(float(after), 60.0) if after.isdigit() else 2.0 ** (attempt + 1))
+        return True
 
     def _get(
         self, url: str, headers: dict[str, str], params: dict[str, str | int] | None = None,
     ) -> httpx.Response:
-        try:
-            response = self.client.get(
-                url, headers=headers, params=params, follow_redirects=False,
-            )
-        except httpx.HTTPError as exc:
-            raise ReportingDownloadError("Google Reporting API request failed") from exc
+        for attempt in range(self.RATE_LIMIT_RETRIES + 1):
+            try:
+                response = self.client.get(
+                    url, headers=headers, params=params, follow_redirects=False,
+                )
+            except httpx.HTTPError as exc:
+                raise ReportingDownloadError("Google Reporting API request failed") from exc
+            if not self._rate_limited(response, attempt):
+                break
         if response.status_code in (401, 403):
             raise ReportingAccessDenied(
                 f"Google Reporting API access denied (HTTP {response.status_code}); "
@@ -130,6 +150,24 @@ class AuthenticatedReachDownloader:
                 f"Google Reporting API returned HTTP {response.status_code}"
             )
         return response
+
+    def _read_csv(self, response: httpx.Response) -> bytearray:
+        """The CSV bytes of a download answer, bounded to MAX_CSV_BYTES."""
+        if response.status_code in (401, 403):
+            raise ReportingAccessDenied(
+                f"Google Reporting download denied (HTTP {response.status_code}); "
+                "check OAuth scope and report access"
+            )
+        if response.status_code != 200:
+            raise ReportingDownloadError(
+                f"Google report download returned HTTP {response.status_code}"
+            )
+        contents = bytearray()
+        for chunk in response.iter_bytes():
+            contents.extend(chunk)
+            if len(contents) > MAX_CSV_BYTES:
+                raise ReportingDownloadError("reach CSV exceeds 4 MiB limit")
+        return contents
 
     def _metadata(
         self, url: str, headers: dict[str, str], params: dict[str, str | int] | None = None,
@@ -270,23 +308,14 @@ class AuthenticatedReachDownloader:
 
         # Explicit stream bounds decompressed payloads, including gzip responses.
         try:
-            with self.client.stream(
-                "GET", url, headers=headers, follow_redirects=False,
-            ) as response:
-                if response.status_code in (401, 403):
-                    raise ReportingAccessDenied(
-                        f"Google Reporting download denied (HTTP {response.status_code}); "
-                        "check OAuth scope and report access"
-                    )
-                if response.status_code != 200:
-                    raise ReportingDownloadError(
-                        f"Google report download returned HTTP {response.status_code}"
-                    )
-                contents = bytearray()
-                for chunk in response.iter_bytes():
-                    contents.extend(chunk)
-                    if len(contents) > MAX_CSV_BYTES:
-                        raise ReportingDownloadError("reach CSV exceeds 4 MiB limit")
+            for attempt in range(self.RATE_LIMIT_RETRIES + 1):
+                with self.client.stream(
+                    "GET", url, headers=headers, follow_redirects=False,
+                ) as response:
+                    if self._rate_limited(response, attempt):
+                        continue
+                    contents = self._read_csv(response)
+                    break
         except httpx.HTTPError as exc:
             raise ReportingDownloadError("Google report download failed") from exc
         try:

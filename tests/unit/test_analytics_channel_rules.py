@@ -5,13 +5,12 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-
-from services.analytics.evaluation.channel_rules import (
+from analytics.evaluation.channel_rules import (
     VideoFacts,
     evaluate_channel,
     first_week_impressions,
 )
-from services.analytics.ingestion.youtube_reach import ReachRow
+from analytics.ingestion.youtube_reach import ReachRow
 
 
 def _video(video_id: str, *, age: int = 20, impressions: int | None = 5000,
@@ -126,3 +125,14 @@ def test_report_escapes_pipes_in_titles() -> None:
     facts = [VideoFacts("v", "Retro Synth | 104 Minutes", 6, None, None, None, None)]
     text = render(facts, evaluate_channel(facts), today=date(2026, 11, 23), reach_days=0)
     assert r"Retro Synth \| 104 Minutes (v)" in text
+
+
+def test_downloaded_reports_are_cached_by_report_id(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from scripts.channel_daily_report import download_reach_rows
+
+    downloader = _Downloader({"r1": (_row(20),)}, {"r1": "current"})
+    first = download_reach_rows(downloader, job_id="j", ctr_unit="ratio", channel_id="UC",  # type: ignore[arg-type]
+                                cache=tmp_path)
+    again = download_reach_rows(downloader, job_id="j", ctr_unit="ratio", channel_id="UC",  # type: ignore[arg-type]
+                                cache=tmp_path)
+    assert first == again and downloader.fetched == ["r1"]
