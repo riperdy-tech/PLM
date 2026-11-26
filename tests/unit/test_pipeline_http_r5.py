@@ -332,6 +332,22 @@ def test_processing_reports_the_latest_publication_instant() -> None:
     assert [u["youtube_video_id"] for u in result.outputs["units"]] == ["yt1", "yt2"]
 
 
+@pytest.mark.parametrize("p6_answer", [{"state": "started"}, httpx.Response(503)])
+def test_live_videos_are_sent_to_the_archive_and_a_failure_never_fails_the_step(
+        p6_answer: Any) -> None:
+    """Owner 2026-11-27: once live, P6 archives the renders to the backup drive."""
+    world = World()
+    world.on("GET", "/youtube/attempts/att-1", {"state": "verified", "youtube_video_id": "yt1",
+                                                "published_at": PUBLISHED})
+    world.on("POST", "/media/archive", p6_answer)
+    result = asyncio.run(world.steps().await_processing(
+        _request(Step.AWAIT_PROCESSING, {"upload": PUBLICATIONS})))
+    assert result.outputs["units"][0]["youtube_video_id"] == "yt1"
+    (sent,) = world.sent("POST", "/media/archive")
+    assert _body(sent) == {"media_package_ids": [
+        PUBLICATIONS["publications"][0]["media_package_id"]]}
+
+
 # -- evaluate_outcome ---------------------------------------------------------------------------
 
 

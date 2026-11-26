@@ -1239,7 +1239,7 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     """The Studio over the deployment: P6 through the phase API, media from the object
     store, P6's importer in process (FFmpeg on this host) and runs started through P2
     and Temporal. ``platform=None``: every action is refused by its collaborator."""
-    from ..storage import digest_from_key, from_uri, get_verified
+    from ..storage import ObjectNotFoundError, digest_from_key, from_uri, get_verified
     from ..temporal import Phase
 
     def runs() -> list[dict[str, Any]]:
@@ -1264,7 +1264,12 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
         key = from_uri(uri)
         if digest_from_key(key) != checksum:
             raise _refuse(409, "checksum_mismatch", f"{uri} does not pin {checksum}")
-        return get_verified(key)
+        try:
+            return get_verified(key)
+        except ObjectNotFoundError as exc:
+            raise _refuse(410, "media_archived",
+                          "this file was moved to the backup drive after the upload "
+                          "(E:\\PLM-backups\\videos)") from exc
 
     def import_art(package_id: str, folder: Path) -> dict[str, Any]:
         if platform is None:

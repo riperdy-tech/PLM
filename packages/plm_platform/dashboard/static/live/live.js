@@ -29,6 +29,14 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+// A published video's file is moved to the backup drive after the upload (P6 archive,
+// 2026-11-27): when it no longer loads, say where it went instead of a broken player.
+function videoPlayer(attrs) {
+  const el = h('video', { ...attrs, onerror: () => el.replaceWith(h('p', { class: 'muted' },
+    'Video file archived to the backup drive (E:\\PLM-backups\\videos). It is live on YouTube.')) });
+  return el;
+}
+
 function unknown(label = 'unknown') { return h('span', { class: 'unknown' }, label); }
 
 function val(value, format = (v) => String(v)) {
@@ -507,7 +515,7 @@ function reviewStep(reviews) {
       card.append(h('div', { class: 'variant' },
         h('h3', {}, p.title || p.media_package_id),
         h('div', { class: 'review-media' },
-          h('video', { controls: true, preload: 'metadata', src: `${base}/video?v=${encodeURIComponent(p.video_checksum || '')}` }),
+          videoPlayer({ controls: true, preload: 'metadata', src: `${base}/video?v=${encodeURIComponent(p.video_checksum || '')}` }),
           h('div', {}, h('strong', {}, 'Thumbnail'),
             p.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${p.thumbnails[0]}`, alt: 'thumbnail' }) : h('p', { class: 'unknown' }, 'none'),
             h('p', { class: 'muted' }, `${Math.round((p.duration_seconds || 0) / 60)} min, ${p.chapters} chapters`))),
@@ -874,7 +882,7 @@ function videoSection(p) {
     const base = `/api/studio/packages/${v.media_package_id}`;
     card.append(h('h3', {}, v.title || v.media_package_id),
       v.has_video ? h('div', { class: 'review-media' },
-        h('video', { controls: true, preload: 'none', src: `${base}/video?v=${encodeURIComponent(v.video_checksum || '')}` }),
+        videoPlayer({ controls: true, preload: 'none', src: `${base}/video?v=${encodeURIComponent(v.video_checksum || '')}` }),
         h('div', {}, v.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${v.thumbnails[0]}`, alt: 'thumbnail' }) : null,
           h('p', { class: 'muted' }, `${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs`)))
         : v.status === 'failed' ? h('p', { class: 'notice' }, `This version (${v.media_package_id}) failed its final check; the status log says why.`)

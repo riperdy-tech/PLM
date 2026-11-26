@@ -190,3 +190,22 @@ def _window(value: str) -> Any:
     from plm_contracts import ObservationWindow
 
     return ObservationWindow(value)
+
+
+def test_a_repeated_publish_of_a_published_package_needs_no_media_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the upload P6 moves the renders to the backup drive (2026-11-27): a caller's
+    retry of the same publish answers from the publication record without its bytes."""
+    def gone(uri: str, checksum: str) -> bytes:
+        raise AssertionError(f"fetched {uri} for an already-published package")
+
+    monkeypatch.setattr("youtube_publishing.api.app.artifact_bytes", gone)
+    switching = MockYouTubeClient()
+    client = _app(client=switching)
+    first = _publish(client)
+    assert first.status_code == 200, first.text
+    switching.provider_mode = ProviderMode.REAL  # type: ignore[misc]  # the real client now
+    replay = _publish(client)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["youtube_video_id"] == first.json()["youtube_video_id"]

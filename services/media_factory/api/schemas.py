@@ -126,3 +126,9 @@ class HealthResponse(BaseModel):
 
     status: str
     service: str
+
+
+class ArchiveRequest(BaseModel):
+    """Published packages whose renders go to the archive drive."""
+
+    media_package_ids: list[str] = Field(default_factory=list, max_length=200)

@@ -15,6 +15,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libsndfile1 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# pg_dump 16 (the server's major) from the PostgreSQL apt repository: P6 writes a
+# database dump with every archive run (services/media_factory/archive.py).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && pg_dump --version | grep -Eq " 16\." \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Editable install; the compose worker bind-mounts the repo over /app at runtime.

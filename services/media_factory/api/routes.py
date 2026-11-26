@@ -14,6 +14,7 @@ from plm_contracts import ErrorShape
 from plm_platform.clock import Clock
 from sqlalchemy.orm import Session
 
+from ..archive import RenderArchiver, pg_dump_to
 from ..backend import MediaBackend
 from ..config import MediaFactorySettings
 from ..domain.enums import PackageStatus
@@ -26,6 +27,7 @@ from ..storage.repositories import (
     get_render_job,
 )
 from .schemas import (
+    ArchiveRequest,
     AssemblePackageRequest,
     HealthResponse,
     MediaPackageResponse,
@@ -81,6 +83,7 @@ def build_router(
     router = APIRouter(prefix="/media", tags=["media_factory"])
     auth_dep = require_service_token(settings.platform)
     render_lock = threading.Lock()
+    archiver = _archiver(settings, clock)
 
     def _require_session() -> Iterator[Session]:
         if session_factory is None:
@@ -101,6 +104,21 @@ def build_router(
             raise
         finally:
             session.close()
+
+    @router.post("/archive", status_code=status.HTTP_202_ACCEPTED,
+                 dependencies=[Depends(auth_dep)])
+    def archive_endpoint(payload: ArchiveRequest) -> dict[str, Any]:
+        """Archive published packages' renders (copy to the archive drive, then free them
+        here) in the background. Every package still pending from an earlier request (the
+        drive was unplugged) goes too. ``state``: ``started``, ``queued`` or
+        ``not_configured``."""
+        state = archiver.request(payload.media_package_ids)
+        return {"state": state, **archiver.status()}
+
+    @router.get("/archive", dependencies=[Depends(auth_dep)])
+    def archive_status_endpoint() -> dict[str, Any]:
+        """The archive drive's state, the pending packages and the last run."""
+        return archiver.status()
 
     @router.get("/health", response_model=HealthResponse)
     def health_check() -> HealthResponse:
@@ -298,3 +316,24 @@ def build_router(
         )
 
     return router
+
+
+def _archiver(settings: MediaFactorySettings, clock: Clock) -> RenderArchiver:
+    platform = settings.platform
+
+    def store() -> Any:
+        from plm_platform.storage import build_client
+
+        return build_client(platform)
+
+    from plm_platform.storage import bucket_name
+
+    return RenderArchiver(
+        archive_dir=settings.archive_dir if platform is not None else None,
+        store=store,
+        bucket=bucket_name(platform) if platform is not None else "",
+        pending_file=settings.archive_pending_file,
+        clock=clock.now,
+        dump_database=(None if platform is None
+                       else pg_dump_to(platform.database_url.get_secret_value())),
+    )

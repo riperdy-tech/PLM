@@ -31,6 +31,11 @@ class MediaFactorySettings:
     thumbnail_art_inbox: Path | None = None
     """``PLM_THUMBNAIL_ART_INBOX``: set, a rendered package waits for the owner's thumbnail
     art there (:mod:`.thumbnail_art.inbox`); unset, P6's drawn thumbnails are offered."""
+    archive_dir: Path | None = None
+    """``PLM_ARCHIVE_DIR``: set, a published package's renders are copied there and freed
+    locally (:mod:`.archive`); unset, nothing is archived."""
+    archive_pending_file: Path = Path("data/archive-pending.json")
+    """Packages waiting for the archive drive (relative to the working directory)."""
 
 
 def load_media_factory_settings(
@@ -52,6 +57,9 @@ def load_media_factory_settings(
         overrides["default_render_profile"] = configured
     if "thumbnail_art_inbox" not in overrides:
         overrides["thumbnail_art_inbox"] = art_inbox(source)
+    if "archive_dir" not in overrides:
+        raw = source.get("PLM_ARCHIVE_DIR", "").strip()
+        overrides["archive_dir"] = Path(raw) if raw else None
     settings = MediaFactorySettings(platform=platform, **overrides)  # type: ignore[arg-type]
     if settings.default_render_profile not in RENDER_PROFILES:
         raise SettingsError(

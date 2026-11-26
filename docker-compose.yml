@@ -42,6 +42,9 @@ x-plm-app: &plm-app
     # P6 waits for the owner's thumbnail art in this folder (relative to /app, the repo);
     # unset, P6 offers its own drawn thumbnails (services/media_factory/thumbnail_art).
     - PLM_THUMBNAIL_ART_INBOX=${PLM_THUMBNAIL_ART_INBOX:-}
+    # P6 copies a published video's renders here and frees them locally (the api-media
+    # /archive mount below); unset, nothing is archived.
+    - PLM_ARCHIVE_DIR=${PLM_ARCHIVE_DIR:-}
   volumes:
     - .:/app
   depends_on:
@@ -276,6 +279,11 @@ services:
   api-media:
     <<: *plm-app
     command: ["plm", "media", "serve", "--host", "0.0.0.0", "--port", "8006"]
+    volumes:
+      - .:/app
+      # The backup drive (PLM_ARCHIVE_HOST_DIR, e.g. E:/PLM-backups); P6 archives only when
+      # it holds the .plm-archive marker, so an unplugged drive archives nothing.
+      - ${PLM_ARCHIVE_HOST_DIR:-./data/archive-unset}:/archive
     ports:
       - "127.0.0.1:8006:8006"
     healthcheck:

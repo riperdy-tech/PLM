@@ -27,6 +27,7 @@ outcome step can attribute each write's cost to its video without an allocation 
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 from datetime import timedelta
@@ -36,6 +37,8 @@ from ..temporal import Phase, ValidationFailure
 from .http_base import HttpStepsBase, instant
 from .phase_client import ExternalWriteRefused, StepNotReady, request_key, require
 from .types import StepRequest, StepResult
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["ReleaseSteps"]
 
@@ -215,6 +218,18 @@ class ReleaseSteps(HttpStepsBase):
     async def await_processing(self, request: StepRequest) -> StepResult:
         return await asyncio.to_thread(self._await_processing, request)
 
+    def _archive_renders(self, key: str, package_ids: list[str]) -> None:
+        """Owner decision 2026-11-27: once the videos are live, P6 copies their renders to
+        the archive drive and frees them locally (in the background). Best effort: the
+        publication is done whatever happens here, so a failure is logged, never raised;
+        P6 keeps what it could not archive pending for the next video."""
+        try:
+            self._client(Phase.MEDIA).post(
+                "/media/archive", idempotency_key=request_key(key, "archive"),
+                body={"media_package_ids": package_ids})
+        except Exception:  # deliberate: see docstring
+            logger.warning("asking P6 to archive %s failed", package_ids, exc_info=True)
+
     def _await_processing(self, request: StepRequest) -> StepResult:
         key = request.idempotency_key
         uploaded = require(request.inputs, "upload", "await_processing inputs")
@@ -242,6 +257,8 @@ class ReleaseSteps(HttpStepsBase):
                           "attempt_id": attempt_id, "state": state,
                           "published_at": published_at.isoformat()})
         latest = max(instant(u["published_at"], "unit published_at") for u in units)
+        self._archive_renders(key, [str(u["media_package_id"]) for u in units
+                                    if u.get("media_package_id")])
         return StepResult(
             outputs={"published_at": latest.isoformat(), "units": units},
             provider_ids={f"youtube_video.{n}": u["youtube_video_id"]

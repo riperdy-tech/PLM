@@ -12,6 +12,32 @@ Before 2026-11-26 there were only one-off dumps made before a migration, all ins
 `data\` on the same disk as the data they protect. `scripts\backup_plm.ps1` makes a full,
 repeatable backup.
 
+## After every upload (automatic)
+
+Owner decision 2026-11-27: no schedule. Each time a video is confirmed live on YouTube
+(the pipeline's `await_processing` step), P6 archives it in the background:
+
+1. Copies the video master and audio master to `E:\PLM-backups\videos\<package>\` and
+   checks each copy against the SHA-256 its storage key pins.
+2. Writes `manifest.json` there (original storage keys, hashes, sizes).
+3. Only then deletes those renders from local MinIO (1.7-2.6 GB per video). Songs and
+   thumbnails stay local: later playlists may reuse them.
+4. Writes a database dump to `E:\PLM-backups\db\plm-<stamp>.dump` (the newest 10 are kept).
+
+The publication never waits for or fails because of this. If the drive is unplugged
+(no `E:\PLM-backups\.plm-archive` marker visible), nothing is copied or deleted; the
+package is listed in `data\archive-pending.json` and goes with the next video's run. If a
+package stays pending after the drive is back, restart Docker Desktop (it may still show
+the container an empty folder) and it goes with the next upload. State:
+`GET /media/archive` on api-media (127.0.0.1:8006, service token).
+
+Configuration (main checkout `.env`): `PLM_ARCHIVE_HOST_DIR=E:/PLM-backups` (mounted into
+api-media at `/archive`) and `PLM_ARCHIVE_DIR=/archive`. Unset, nothing is archived.
+
+The Studio shows "Video file archived to the backup drive" for an archived video. To get
+one back into MinIO, put the file back under its original key from `manifest.json`
+(e.g. `mc cp` into `plm-media/<key>`).
+
 ## Make a backup
 
 The stack must be running (Studio launcher or `docker compose up -d`). Nothing is

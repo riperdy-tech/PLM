@@ -262,7 +262,11 @@ def create_youtube_router(
             # 4. Execute Publishing Engine. A real upload sends the package's own bytes,
             # fetched by their pinned digests; a mock client uses its placeholders.
             video_data = thumbnail_data = None
-            if provider_mode_of(yt_client) is ProviderMode.REAL:
+            # An already-published package answers from its record without its bytes,
+            # which may be archived off this machine by now (P6, 2026-11-27).
+            published = get_publication_record_by_package_id(
+                session, manifest.media_package_id) is not None
+            if provider_mode_of(yt_client) is ProviderMode.REAL and not published:
                 if media_bytes is None:
                     raise _refused(503, "media_store_not_configured",
                                    "a real upload needs the package's stored bytes", [])
