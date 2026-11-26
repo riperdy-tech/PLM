@@ -69,7 +69,7 @@ async def dashboard(settings: Settings, tmp_path: Path) -> AsyncIterator[httpx.A
     app: FastAPI = create_live_app(live, actions, platform=settings)
     headers = {SERVICE_TOKEN_HEADER: settings.service_token.get_secret_value()}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                 base_url="http://dashboard", headers=headers,
+                                 base_url="http://127.0.0.1", headers=headers,
                                  timeout=30.0) as client:
         yield client
 
