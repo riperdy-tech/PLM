@@ -811,9 +811,14 @@ class PipelineWorkflow:
                 at_assembly = (step is Step.ASSEMBLE and rewind == Step.ASSEMBLE.value
                                and bool(excluded) and len(self._p3_packages) == 1
                                and workflow.patched("swap-at-assembly-hold"))
+                # Review 2026-11-26: on the upload step only the approval hold may rewind.
+                # A fault hold after the upload call may already have a public video;
+                # assembling again there would upload a second one.
+                at_approval = (step is Step.UPLOAD and rewind == Step.ASSEMBLE.value and (
+                    not workflow.patched("rewind-only-at-approval")
+                    or all(code == PUBLISH_APPROVAL_HOLD_REASON for _, code, _ in specs)))
                 if rewind is not None:
-                    self._rewind = at_assembly or (
-                        step is Step.UPLOAD and rewind == Step.ASSEMBLE.value)
+                    self._rewind = at_assembly or at_approval
                     summary["rewind_to"] = rewind if self._rewind else None
                     if not self._rewind:
                         workflow.logger.warning("rewind to %r ignored on a %s hold",
