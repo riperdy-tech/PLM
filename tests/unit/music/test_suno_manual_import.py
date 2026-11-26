@@ -312,7 +312,8 @@ def test_the_settings_come_from_env_and_the_inbox_selects_manual_suno(tmp_path: 
         SunoManualSettings()
     real = ExecutionSettings(provider_modes={"music": ProviderMode.REAL})
     assert default_provider_for(real, manual_inbox=True) == "suno_manual"
-    assert default_provider_for(real) == "suno"
+    with pytest.raises(ValueError, match="needs an owner inbox"):
+        default_provider_for(real)  # never the removed automated Suno client
     assert default_provider_for(ExecutionSettings(), manual_inbox=True) == "mock"
 
 

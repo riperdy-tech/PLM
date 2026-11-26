@@ -48,7 +48,7 @@ from services.music_factory.generation.engine import (
 )
 from services.music_factory.generation.planner import plan_generation
 from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.adapters import SunoAdapter
+from services.music_factory.providers.adapters import ElevenLabsAdapter
 from services.music_factory.providers.mock_provider import MockMusicProvider
 from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 from services.music_factory.storage.repositories import (
@@ -85,10 +85,10 @@ def _spec(track_spec_id: str = "trk_guard_01", **overrides: Any) -> dict[str, An
         lineage=lineage_fields(experiment_id="exp_guard_01"), **overrides,
     )
     if "provider_policy" not in overrides:
-        # CountingRealProvider and SunoAdapter are explicitly authorized
+        # CountingRealProvider and the paid ElevenLabs stub are explicitly authorized
         # by this fixture so the tests can isolate budget/guard refusals.
         fields["provider_policy"] = {
-            "allowed_providers": ["mock", "real_fake", "suno"],
+            "allowed_providers": ["mock", "real_fake", "elevenlabs"],
         }
     return TrackSpecPayload.build(**fields).to_wire()
 
@@ -483,60 +483,6 @@ def test_ambiguous_no_job_response_keeps_persisted_ops_reservation() -> None:
     finally:
         music_engine.dispose()
         ops_engine.dispose()
-
-
-def test_suno_submit_error_keeps_real_guard_budget_and_blocks_replay(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The actual REAL adapter must not invent a job or enable a paid retry."""
-    from services.music_factory.providers.suno_client import SunoClientError
-
-    provider = SunoAdapter(api_key="dummy-test-key")
-    calls = 0
-
-    def submit_failure(**kwargs: object) -> None:
-        nonlocal calls
-        calls += 1
-        raise SunoClientError("submission timeout after request was sent")
-
-    monkeypatch.setattr(provider._client, "submit_generation", submit_failure)
-    budget = RecordingBudget()
-    spec = adapt_track_spec(_spec())
-    plan, variants = plan_generation(spec, created_at=NOW)
-    engine = create_music_engine(static_pool=True)
-    try:
-        with music_session(engine) as session:
-            first = GenerationEngine(
-                clock=FixedClock(NOW), storage=InMemoryArtifactStorage(),
-                write_guard=_live_guard(budget),
-            ).execute_plan(
-                session, plan=plan, variants=variants, spec=spec,
-                provider_adapter=provider,
-            )
-            attempts = list_generation_attempts(session, plan.plan_id)
-            assert len(attempts) == 1
-            assert attempts[0].provider_job_id == ""
-            assert attempts[0].failure_code == "PROVIDER_OUTCOME_UNKNOWN"
-            session.commit()
-        assert first.status is PlanStatus.FAILED
-        assert "provider_job_reconciliation_required" in first.errors
-        assert calls == 1 and len(budget.reserved) == 1
-        assert budget.committed == [] and budget.released == []
-
-        new_budget = RecordingBudget()
-        with music_session(engine) as session:
-            replay = GenerationEngine(
-                clock=FixedClock(NOW), storage=InMemoryArtifactStorage(),
-                write_guard=_live_guard(new_budget),
-            ).execute_plan(
-                session, plan=plan, variants=variants, spec=spec,
-                provider_adapter=provider,
-            )
-            session.rollback()
-        assert "provider_job_reconciliation_required" in replay.errors
-        assert calls == 1 and new_budget.reserved == []
-    finally:
-        engine.dispose()
 
 
 def test_failed_live_job_refuses_automatic_retry() -> None:
@@ -1082,11 +1028,11 @@ def test_api_rejects_disallowed_real_provider_with_guard_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """P4 cannot spend under a real provider excluded by P3's C3 brief."""
-    def unreachable(self: SunoAdapter, request: GenerationRequest) -> GenerationResponse:
+    def unreachable(self: ElevenLabsAdapter, request: GenerationRequest) -> GenerationResponse:
         raise AssertionError("disallowed real provider must never be called")
 
-    monkeypatch.setattr(SunoAdapter, "generate", unreachable)
-    client = _client(default_provider="suno", guard=_live_guard(RecordingBudget()))
+    monkeypatch.setattr(ElevenLabsAdapter, "generate", unreachable)
+    client = _client(default_provider="elevenlabs", guard=_live_guard(RecordingBudget()))
     spec = _spec(provider_policy={"allowed_providers": ["mock"]})
     plan = client.post("/music/plans", json=spec, headers=HEADERS)
     assert plan.status_code == 200
@@ -1107,11 +1053,11 @@ def test_api_refuses_an_unfunded_real_call_with_409_and_never_calls(
     """Proves the API maps a guard refusal to 409 in the platform convention shared with
     P7/P8 (``external_write_<decision>``, "music.generate not performed: <reason>"), and
     that the real adapter's ``generate`` is never reached."""
-    def unreachable(self: SunoAdapter, request: GenerationRequest) -> GenerationResponse:
+    def unreachable(self: ElevenLabsAdapter, request: GenerationRequest) -> GenerationResponse:
         raise AssertionError("the real provider must not be called")
 
-    monkeypatch.setattr(SunoAdapter, "generate", unreachable)
-    client = _client(default_provider="suno", guard=_live_guard())
+    monkeypatch.setattr(ElevenLabsAdapter, "generate", unreachable)
+    client = _client(default_provider="elevenlabs", guard=_live_guard())
     plan = client.post("/music/plans", json=_spec(), headers=HEADERS).json()
     resp = client.post(f"/music/plans/{plan['plan_id']}/execute", json=_spec(), headers=HEADERS)
     assert resp.status_code == 409
@@ -1124,7 +1070,7 @@ def test_api_refuses_an_unfunded_real_call_with_409_and_never_calls(
     stored =client.get(f"/music/plans/{plan['plan_id']}", headers=HEADERS).json()
     assert stored["plan"]["status"] == "failed"
 
-    dry = _client(default_provider="suno")  # no configured policy: dry-run
+    dry = _client(default_provider="elevenlabs")  # no configured policy: dry-run
     plan = dry.post("/music/plans", json=_spec(), headers=HEADERS).json()
     resp = dry.post(f"/music/plans/{plan['plan_id']}/execute", json=_spec(), headers=HEADERS)
     assert resp.status_code == 409
@@ -1132,10 +1078,10 @@ def test_api_refuses_an_unfunded_real_call_with_409_and_never_calls(
 
 
 
-def test_provider_mode_music_real_selects_suno_and_nothing_else_does() -> None:
+def test_real_music_mode_needs_an_owner_inbox_and_never_automated_suno() -> None:
     assert default_provider_for(ExecutionSettings()) == "mock"
-    assert default_provider_for(
-        ExecutionSettings(provider_modes={"music": ProviderMode.REAL})) == "suno"
+    with pytest.raises(ValueError, match="needs an owner inbox"):
+        default_provider_for(ExecutionSettings(provider_modes={"music": ProviderMode.REAL}))
     assert default_provider_for(
         ExecutionSettings(provider_modes={"youtube": ProviderMode.REAL})) == "mock"
 
@@ -1149,10 +1095,10 @@ def test_service_guard_reads_the_owner_grants_file(
 ) -> None:
     """Without an injected guard the service loads ``PLM_WRITE_AUTHORIZATIONS_FILE``: a grant
     moves the refusal from the missing authorization on to the (absent) budget ledger."""
-    def unreachable(self: SunoAdapter, request: GenerationRequest) -> GenerationResponse:
+    def unreachable(self: ElevenLabsAdapter, request: GenerationRequest) -> GenerationResponse:
         raise AssertionError("the real provider must not be called")
 
-    monkeypatch.setattr(SunoAdapter, "generate", unreachable)
+    monkeypatch.setattr(ElevenLabsAdapter, "generate", unreachable)
     grants = tmp_path / "grants.json"
     grants.write_text(json.dumps([{
         "capability": "music.generate", "granted_by": "owner",
@@ -1167,7 +1113,7 @@ def test_service_guard_reads_the_owner_grants_file(
     engine = create_music_engine(static_pool=True)
     app = create_app(
         session_factory=lambda: music_session(engine),
-        settings=load_music_factory_settings(platform=platform, default_provider="suno"),
+        settings=load_music_factory_settings(platform=platform, default_provider="elevenlabs"),
         storage=MinioArtifactStorage(platform, client=FakeMinio()),  # type: ignore[arg-type]
         execution=ExecutionSettings(provider_modes={"music": ProviderMode.REAL},
                                     policies={"music.generate": ExecutionPolicy.LIVE}),

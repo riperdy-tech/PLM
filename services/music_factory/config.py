@@ -50,4 +50,10 @@ def default_provider_for(
         return "mock"
     if flow_music_inbox:
         return "flow_music_manual"
-    return "suno_manual" if manual_inbox else "suno"
+    if manual_inbox:
+        return "suno_manual"
+    # Never fall back to an automated provider: a missing or mistyped inbox setting
+    # must stop the service, not send live generation elsewhere (review 2026-11-26).
+    raise ValueError(
+        "PLM_PROVIDER_MODE__MUSIC=real needs an owner inbox: set "
+        "PLM_FLOW_MUSIC_MANUAL_INBOX or PLM_SUNO_MANUAL_INBOX")

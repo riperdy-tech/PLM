@@ -144,13 +144,13 @@ def test_api_execute_keeps_paid_attempts_when_the_request_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real route wires the checkpoint: a 500 cannot erase a paid job."""
-    from services.music_factory.providers.adapters import SunoAdapter
+    from services.music_factory.providers.adapters import ElevenLabsAdapter
     from services.music_factory.storage.artifacts import MinioArtifactStorage
     from tests.support.fake_minio import FakeMinio
 
     calls: list[str] = []
 
-    def generate(self: SunoAdapter, request: GenerationRequest) -> GenerationResponse:
+    def generate(self: ElevenLabsAdapter, request: GenerationRequest) -> GenerationResponse:
         calls.append(request.track_spec_id)
         if len(calls) > 1:
             raise ConnectionError("provider transport lost")
@@ -161,9 +161,9 @@ def test_api_execute_keeps_paid_attempts_when_the_request_fails(
             cost_credits=1, credit_receipt_ref="suno-receipt-1",
         )
 
-    monkeypatch.setattr(SunoAdapter, "generate", generate)
+    monkeypatch.setattr(ElevenLabsAdapter, "generate", generate)
     platform = load_settings(env=dict(ENV))
-    settings = load_music_factory_settings(platform=platform, default_provider="suno")
+    settings = load_music_factory_settings(platform=platform, default_provider="elevenlabs")
     db = create_music_engine(static_pool=True)
     app = create_app(
         session_factory=lambda: music_session(db), settings=settings,

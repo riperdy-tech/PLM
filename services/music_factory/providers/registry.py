@@ -24,16 +24,6 @@ DEFAULT_PROVIDER_CAPABILITIES: dict[str, ProviderCapabilities] = {
         supported_genres=("rnb", "pop", "hiphop", "electronic", "lofi", "ambient", "jazz", "rock"),
         supported_vocal_modes=("vocal", "instrumental", "mixed"),
     ),
-    "suno:chirp-v3-5": ProviderCapabilities(
-        provider_id="suno",
-        model_id="chirp-v3-5",
-        max_duration_seconds=240,
-        supports_stems=True,
-        supports_lyrics=True,
-        supports_instrumental=True,
-        supported_genres=("rnb", "pop", "hiphop", "electronic", "rock", "country"),
-        supported_vocal_modes=("vocal", "instrumental", "mixed"),
-    ),
     "elevenlabs:music-v1": ProviderCapabilities(
         provider_id="elevenlabs",
         model_id="music-v1",

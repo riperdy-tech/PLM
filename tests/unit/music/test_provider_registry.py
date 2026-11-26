@@ -15,10 +15,10 @@ from services.music_factory.providers.registry import (
 
 def test_default_registry_contents() -> None:
     providers = list_registered_providers()
-    assert len(providers) >= 4
+    assert len(providers) >= 3
     provider_ids = {p.provider_id for p in providers}
     assert "mock" in provider_ids
-    assert "suno" in provider_ids
+    assert "suno" not in provider_ids  # the automated Suno client was removed
     assert "elevenlabs" in provider_ids
     assert "stable_audio" in provider_ids
 
