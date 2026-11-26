@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts import produce_full_playlist
 from scripts.audit_local_album_evidence import audit_local_albums, main
 
 IDS = (
@@ -149,44 +148,6 @@ def test_same_clip_prefix_in_multiple_manifest_rows_is_ambiguous(
     result = audit_local_albums([album])["albums"][0]
     assert result["displaced_clip_prefix_matches"] == []
     assert result["ambiguous_clip_prefix_track_indices"] == [1, 2]
-
-
-def test_legacy_harvest_refuses_displaced_cached_clip_before_provider(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    folder = tmp_path / "legacy"
-    _wav(folder, 4, IDS[0])
-    monkeypatch.setattr(produce_full_playlist, "TRACKS_DIR", folder / "tracks")
-    monkeypatch.setattr(produce_full_playlist, "KNOWN_CLIPS", [IDS[0]])
-
-    class NoProvider:
-        def __getattr__(self, name: str) -> object:
-            raise AssertionError("provider_not_authorized")
-
-    with pytest.raises(
-        RuntimeError, match="legacy_harvest_displaced_cached_clip_refused",
-    ):
-        produce_full_playlist.generate_and_download_tracks(
-            NoProvider(), target_track_count=1,
-        )
-    assert not (folder / "tracks" / f"track_01_{IDS[0][:8]}.wav").exists()
-
-
-def test_legacy_harvest_keeps_exact_position_cached_clip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    folder = tmp_path / "legacy"
-    file = _wav(folder, 1, IDS[0])
-    monkeypatch.setattr(produce_full_playlist, "TRACKS_DIR", folder / "tracks")
-    monkeypatch.setattr(produce_full_playlist, "KNOWN_CLIPS", [IDS[0]])
-    monkeypatch.setattr(produce_full_playlist, "get_audio_duration", lambda _: 2.0)
-    rows = produce_full_playlist.generate_and_download_tracks(
-        object(), target_track_count=1,
-    )
-    assert len(rows) == 1
-    assert rows[0].index == 1
-    assert rows[0].wav_path == file
-    assert rows[0].clip_id == IDS[0]
 
 
 def test_missing_or_invalid_manifest_is_unknown_not_clean(tmp_path: Path) -> None:

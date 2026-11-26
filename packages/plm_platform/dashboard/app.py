@@ -20,16 +20,17 @@ limited to loopback origins without credentials.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import html
 import json
+import secrets
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, Final
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from plm_contracts import ErrorShape
 from pydantic import BaseModel, Field
@@ -65,19 +66,53 @@ DEMO_STATIC_DIR = STATIC_DIR / "demo"
 
 DATA_SOURCE_HEADER: Final[str] = "X-PLM-Data-Source"
 
-LOOPBACK_ORIGIN_REGEX: Final[str] = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
-"""Only browsers on this machine may call the API cross-origin."""
+ALLOWED_HOSTS: Final[frozenset[str]] = frozenset(
+    {"127.0.0.1", "localhost", "[::1]", "testserver"})
+"""Host names the dashboard answers to: loopback only (``testserver`` is Starlette's
+TestClient). Any other Host header is a DNS-rebinding attempt and is refused, so a web
+page whose name was re-pointed at 127.0.0.1 can never read the page or its secret."""
+
+MUTATING_METHODS: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _host_name(host_header: str) -> str:
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[: host.index("]") + 1] if "]" in host else host
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+def _refusal(status: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"detail": ErrorShape(
+        code=code, field_paths=[], message=message).model_dump()})
 
 
 def _base_app(title: str, description: str, data_source: str) -> FastAPI:
     app = FastAPI(title=title, version="2.0.0", description=description)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origin_regex=LOOPBACK_ORIGIN_REGEX,
-        allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", SERVICE_TOKEN_HEADER],
-    )
+    # No CORS: the page and its API share one origin, and no other origin (another
+    # local port included) may read or drive it (review 2026-11-26).
+
+    @app.middleware("http")
+    async def same_machine_same_page(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        host = request.headers.get("host", "")
+        if _host_name(host) not in ALLOWED_HOSTS:
+            return _refusal(400, "host_not_allowed",
+                            "the dashboard answers only to 127.0.0.1 or localhost")
+        if request.method in MUTATING_METHODS:
+            # A browser names where a request comes from; only the dashboard's own page
+            # may change anything (a request without these headers is not a browser's).
+            site = request.headers.get("sec-fetch-site")
+            origin = request.headers.get("origin")
+            if site is not None and site not in ("same-origin", "none"):
+                return _refusal(403, "cross_site_request",
+                                "only the dashboard's own page can do this")
+            if origin is not None and origin.lower() not in (
+                    f"http://{host.lower()}", f"https://{host.lower()}"):
+                return _refusal(403, "cross_site_request",
+                                "only the dashboard's own page can do this")
+        return await call_next(request)
 
     @app.middleware("http")
     async def stamp_data_source(
@@ -95,9 +130,10 @@ def _base_app(title: str, description: str, data_source: str) -> FastAPI:
 
 
 def _serve_static(app: FastAPI, directory: Path, *, token: str | None = None) -> None:
-    """``token``: the service token, written into the page so its buttons work without
-    asking the owner for it. The dashboard listens on loopback only and allows loopback
-    origins only, so no website can read the page; the token never leaves this machine."""
+    """``token``: the dashboard's per-launch page secret, written into the page so its
+    buttons work without asking the owner. It is not the platform service token (which
+    also opens every phase API): it only drives this dashboard, it changes with every
+    launch, and only loopback hosts and the page's own origin are served."""
     app.mount("/static", StaticFiles(directory=str(directory)), name="static")
     index_file = directory / "index.html"
 
@@ -185,7 +221,8 @@ def create_live_app(
         "Exceptions actions over the R3 exception queue.",
         LIVE_DATA_SOURCE,
     )
-    require_token = require_service_token(platform, surface="dashboard")
+    page_secret = secrets.token_urlsafe(32)
+    require_token = require_dashboard_token(platform, page_secret)
 
     @app.get("/api/views/{name}")
     def get_view(name: str) -> dict[str, Any]:
@@ -255,9 +292,25 @@ def create_live_app(
     if studio is not None:
         _studio_routes(app, studio, require_token)
     _serve_static(app, LIVE_STATIC_DIR, token=(
-        None if platform is None or platform.service_token is None
-        else platform.service_token.get_secret_value()))
+        None if platform is None or platform.service_token is None else page_secret))
     return app
+
+
+def require_dashboard_token(platform: Settings | None,
+                            page_secret: str) -> Callable[..., None]:
+    """The dashboard's write gate: the page's per-launch secret or the platform service
+    token (scripts, tests). Without a configured service token everything stays closed
+    (503), as in R15."""
+    platform_gate = require_service_token(platform, surface="dashboard")
+
+    def dependency(request: Request) -> None:
+        token = request.headers.get(SERVICE_TOKEN_HEADER)
+        if (token is not None and platform is not None and platform.service_token is not None
+                and hmac.compare_digest(token.encode(), page_secret.encode())):
+            return
+        platform_gate(token)
+
+    return dependency
 
 
 def _range(request: Request, data: bytes, media_type: str) -> Response:

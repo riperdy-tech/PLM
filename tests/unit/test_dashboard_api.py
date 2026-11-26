@@ -120,15 +120,31 @@ def test_qa_resolve_unknown_case_is_404_not_resolved() -> None:
     assert r.json()["detail"]["code"] == "unknown_case"
 
 
-def test_cors_allows_loopback_without_credentials() -> None:
-    r = _client().get("/api/stats", headers={"Origin": "http://127.0.0.1:8050"})
-    assert r.headers["access-control-allow-origin"] == "http://127.0.0.1:8050"
-    assert "access-control-allow-credentials" not in r.headers
+def test_no_other_origin_may_read_the_dashboard() -> None:
+    """No CORS at all: another local port is as foreign as a website (review 2026-11-26)."""
+    for origin in ("http://127.0.0.1:8050", "https://evil.example"):
+        r = _client().get("/api/stats", headers={"Origin": origin})
+        assert "access-control-allow-origin" not in r.headers
 
 
-def test_cors_rejects_foreign_origin() -> None:
-    r = _client().get("/api/stats", headers={"Origin": "https://evil.example"})
-    assert "access-control-allow-origin" not in r.headers
+def test_a_rebound_host_name_is_refused() -> None:
+    """DNS rebinding: a website's name re-pointed at 127.0.0.1 reaches nothing."""
+    r = _client().get("/", headers={"Host": "attacker.example:8000"})
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "host_not_allowed"
+    assert _client().get("/", headers={"Host": "127.0.0.1:8000"}).status_code == 200
+
+
+def test_only_the_dashboards_own_page_may_change_anything() -> None:
+    client = _client()
+    body = {"case_id": "case_does_not_exist", "resolution": "CLEARED_BY_OVERRIDE"}
+    for headers in ({"Origin": "http://127.0.0.1:5173"}, {"Origin": "https://evil.example"},
+                    {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}):
+        r = client.post("/api/qa/resolve", json=body, headers={**AUTH, **headers})
+        assert r.status_code == 403, headers
+        assert r.json()["detail"]["code"] == "cross_site_request"
+    same = client.post("/api/qa/resolve", json=body, headers={
+        **AUTH, "Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"})
+    assert same.status_code == 404  # reached the route
 
 
 def test_root_html_shows_demo_banner() -> None:

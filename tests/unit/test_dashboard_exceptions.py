@@ -410,9 +410,23 @@ def test_the_page_carries_the_token_so_its_buttons_never_ask_for_it() -> None:
                          reviewers=REVIEWERS)
     settings = load_settings(env=PLATFORM_ENV)
     assert settings.service_token is not None
-    page = TestClient(create_live_app(live, actions, platform=settings)).get("/")
+    client = TestClient(create_live_app(live, actions, platform=settings))
+    page = client.get("/")
     token = settings.service_token.get_secret_value()
-    assert f'<meta name="plm-service-token" content="{token}">' in page.text
+    # The page carries its own per-launch secret, never the platform service token
+    # (which also opens every phase API).
+    assert token not in page.text
+    import re
+    secret = re.search(r'<meta name="plm-service-token" content="([^"]+)">', page.text)
+    assert secret is not None and len(secret.group(1)) >= 32
     assert page.headers["cache-control"] == "no-store"
+    case = raise_hold(factory, "UNKNOWN_COMMERCIAL_LICENSE", NOW)
+    with_secret = client.post(f"/api/exceptions/{case.id}/reject",
+                              json={"actor": "nobody"},
+                              headers={SERVICE_TOKEN_HEADER: secret.group(1)})
+    assert with_secret.status_code != 401  # the page secret opens the dashboard
+    wrong = client.post(f"/api/exceptions/{case.id}/reject", json={"actor": "nobody"},
+                        headers={SERVICE_TOKEN_HEADER: "not-the-secret"})
+    assert wrong.status_code == 401
     bare = TestClient(create_live_app(live, actions, platform=None)).get("/")
     assert "plm-service-token" not in bare.text
