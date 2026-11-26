@@ -10,6 +10,7 @@ from plm_contracts.seams import ExperimentLineage
 from plm_platform.clearance import ClearanceVerifier, TrackRef
 from plm_platform.clock import Clock
 from plm_platform.execution import (
+    RESUMED_RESERVATION_REASON,
     ExternalWriteGuard,
     GuardDecision,
     WriteDecision,
@@ -155,7 +156,8 @@ class YouTubePublishingEngine:
         return receipts
 
     def _authorize(
-        self, capability: str, manifest: PublishManifest, operating_mode: OperatingMode
+        self, capability: str, manifest: PublishManifest, operating_mode: OperatingMode,
+        *, resuming: bool = False,
     ) -> GuardDecision:
         ceiling = ExecutionPolicy.DRY_RUN if operating_mode is OperatingMode.DRY_RUN else None
         decision = self.write_guard.authorize_external_write(
@@ -164,6 +166,7 @@ class YouTubePublishingEngine:
             idempotency_key=self.write_key(manifest, capability),
             policy_ceiling=ceiling,
             now=self._clock.now(),
+            resuming=resuming,
         )
         self.decisions.append(decision)
         return decision
@@ -325,7 +328,11 @@ class YouTubePublishingEngine:
             # 3. Resumable Upload (if not already uploaded)
             youtube_video_id = attempt.youtube_video_id
             if not youtube_video_id:
-                upload_decision = self._authorize(CAPABILITY_UPLOAD, manifest, operating_mode)
+                # With a stored session the earlier upload's outcome is asked of YouTube
+                # below, so its still-held reservation may be continued.
+                upload_decision = self._authorize(
+                    CAPABILITY_UPLOAD, manifest, operating_mode,
+                    resuming=bool(attempt.upload_session_uri))
                 if not upload_decision.decision.may_call_provider:
                     return self._halt_for(session, attempt, upload_decision)
                 # Step 3a: Create Upload Session
@@ -376,14 +383,17 @@ class YouTubePublishingEngine:
                         updated_at=self._clock.now(),
                     )
                     session.commit()
+                    video_resource: dict[str, Any] | None = None
+                    bytes_sent = 0
                 else:
                     session_uri = attempt.upload_session_uri
+                    # A lost response may hide a finished upload or a partial chunk: go
+                    # by what YouTube holds, never by the last offset P7 saved.
+                    bytes_sent, video_resource = self.client.query_upload_status(
+                        session_uri=session_uri, total_bytes=total_bytes)
 
                 # Step 3b: Chunked upload
-                video_resource: dict[str, Any] | None = None
-                bytes_sent = attempt.bytes_uploaded
-
-                while bytes_sent < total_bytes:
+                while video_resource is None and bytes_sent < total_bytes:
                     chunk = video_bytes[bytes_sent : bytes_sent + self.chunk_size]
                     video_resource = self.client.upload_video_chunk(
                         session_uri=session_uri,
@@ -404,15 +414,18 @@ class YouTubePublishingEngine:
                     raise YouTubeClientError("Upload completed but no video resource returned")
 
                 youtube_video_id = str(video_resource["id"])
-                self.write_guard.settle_external_write(upload_decision, performed=True)
+                # The video id is saved before the ledger is settled: a stop between the
+                # two leaves a held reservation, never a committed one P7 cannot resume.
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,
                     state=PublishState.UPLOADED,
                     youtube_video_id=youtube_video_id,
+                    bytes_uploaded=total_bytes,
                     updated_at=self._clock.now(),
                 )
                 session.commit()
+                self.write_guard.settle_external_write(upload_decision, performed=True)
 
             # 4. Processing & Verification
             update_publish_attempt(
@@ -435,8 +448,10 @@ class YouTubePublishingEngine:
                     updated_at=self._clock.now(),
                 )
                 session.commit()
+                updated = get_publish_attempt_by_id(session, attempt.attempt_id)
                 return PublishingEngineResult(
-                    attempt=attempt, error=f"Remote video {youtube_video_id} not found"
+                    attempt=updated or attempt,
+                    error=f"Remote video {youtube_video_id} not found",
                 )
 
             # A successful GET is not processing or chapter-metadata verification.
@@ -468,40 +483,45 @@ class YouTubePublishingEngine:
                         attempt=updated or attempt, error=remote_check.reason
                     )
 
-            # 5. Thumbnail upload
-            decision = self._authorize(CAPABILITY_THUMBNAIL, manifest, operating_mode)
-            if not decision.decision.may_call_provider:
-                return self._halt_for(session, attempt, decision)
-            thumb_bytes = self._media_bytes(thumbnail_data, "placeholder_thumbnail_bytes")
-            if thumb_bytes is None:
-                self.write_guard.settle_external_write(
-                    decision, performed=False, reason="thumbnail_bytes_missing"
+            # 5. Thumbnail upload (skipped when an earlier call set it; a write_receipts
+            # entry reports it as performed_earlier). Setting the same image again is a
+            # harmless overwrite, so a held reservation of an unsettled call is resumed.
+            if not attempt.thumbnail_uploaded:
+                decision = self._authorize(CAPABILITY_THUMBNAIL, manifest, operating_mode,
+                                           resuming=True)
+                if not decision.decision.may_call_provider:
+                    return self._halt_for(session, attempt, decision)
+                thumb_bytes = self._media_bytes(thumbnail_data, "placeholder_thumbnail_bytes")
+                if thumb_bytes is None:
+                    if decision.reason != RESUMED_RESERVATION_REASON:
+                        self.write_guard.settle_external_write(
+                            decision, performed=False, reason="thumbnail_bytes_missing"
+                        )
+                    return self._missing_media(session, attempt, "thumbnail")
+                update_publish_attempt(
+                    session,
+                    attempt.attempt_id,
+                    state=PublishState.THUMBNAIL_PENDING,
+                    updated_at=self._clock.now(),
                 )
-                return self._missing_media(session, attempt, "thumbnail")
-            update_publish_attempt(
-                session,
-                attempt.attempt_id,
-                state=PublishState.THUMBNAIL_PENDING,
-                updated_at=self._clock.now(),
-            )
-            session.commit()
+                session.commit()
 
-            self.client.set_thumbnail(youtube_video_id, thumb_bytes)
-            self.write_guard.settle_external_write(decision, performed=True)
-            update_publish_attempt(
-                session,
-                attempt.attempt_id,
-                state=PublishState.THUMBNAIL_SET,
-                thumbnail_uploaded=True,
-                updated_at=self._clock.now(),
-            )
-            session.commit()
+                self.client.set_thumbnail(youtube_video_id, thumb_bytes)
+                update_publish_attempt(
+                    session,
+                    attempt.attempt_id,
+                    state=PublishState.THUMBNAIL_SET,
+                    thumbnail_uploaded=True,
+                    updated_at=self._clock.now(),
+                )
+                session.commit()
+                self.write_guard.settle_external_write(decision, performed=True)
 
-            # 6. Playlist placement (if configured)
+            # 6. Playlist placement (if configured; skipped when an earlier call placed it)
             playlist_id = manifest.playlist_id
-            playlist_item_id = None
-            if playlist_id:
-                decision = self._authorize(CAPABILITY_PLAYLIST, manifest, operating_mode)
+            if playlist_id and not attempt.youtube_playlist_item_id:
+                decision = self._authorize(CAPABILITY_PLAYLIST, manifest, operating_mode,
+                                           resuming=True)
                 if not decision.decision.may_call_provider:
                     return self._halt_for(session, attempt, decision)
                 update_publish_attempt(
@@ -512,18 +532,22 @@ class YouTubePublishingEngine:
                 )
                 session.commit()
 
-                item = self.client.insert_playlist_item(playlist_id, youtube_video_id)
-                self.write_guard.settle_external_write(decision, performed=True)
-                playlist_item_id = item.get("id")
+                item = None
+                if decision.reason == RESUMED_RESERVATION_REASON:
+                    # The earlier insert's response was lost: it may have been added.
+                    item = self.client.find_playlist_item(playlist_id, youtube_video_id)
+                if item is None:
+                    item = self.client.insert_playlist_item(playlist_id, youtube_video_id)
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,
                     state=PublishState.PLAYLIST_ATTACHED,
                     youtube_playlist_id=playlist_id,
-                    youtube_playlist_item_id=playlist_item_id,
+                    youtube_playlist_item_id=item.get("id"),
                     updated_at=self._clock.now(),
                 )
                 session.commit()
+                self.write_guard.settle_external_write(decision, performed=True)
 
             # 7. Final State: Scheduled or Published
             final_state = PublishState.SCHEDULED if manifest.publish_at else PublishState.VERIFIED

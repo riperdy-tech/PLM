@@ -55,6 +55,14 @@ class YouTubeClientProtocol(Protocol):
         """Upload chunk. Returns video resource dict when complete, or None if more chunks needed."""
         ...
 
+    def query_upload_status(
+        self, *, session_uri: str, total_bytes: int
+    ) -> tuple[int, dict[str, Any] | None]:
+        """Ask YouTube what an upload session holds: ``(bytes received, None)`` while it
+        is incomplete, ``(total_bytes, video resource)`` once the upload finished (its
+        last response may have been lost). Read-only; never sends media."""
+        ...
+
     def get_video(self, video_id: str) -> dict[str, Any] | None:
         """Retrieve video details (processingDetails, status)."""
         ...
@@ -69,4 +77,8 @@ class YouTubeClientProtocol(Protocol):
 
     def insert_playlist_item(self, playlist_id: str, video_id: str, position: int = 0) -> dict[str, Any]:
         """Add a video to a playlist."""
+        ...
+
+    def find_playlist_item(self, playlist_id: str, video_id: str) -> dict[str, Any] | None:
+        """The playlist item holding ``video_id`` in ``playlist_id``, or ``None``. Read-only."""
         ...

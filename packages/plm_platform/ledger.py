@@ -313,7 +313,9 @@ class ReservationResult:
 
     def verdict(self) -> BudgetVerdict:
         return BudgetVerdict(allowed=self.allowed, reason=self.reason.value,
-                             replayed=self.replayed)
+                             replayed=self.replayed,
+                             held=(self.replayed and self.entry is not None
+                                   and self.entry.status is EntryStatus.RESERVED))
 
 
 @dataclass(frozen=True, slots=True)

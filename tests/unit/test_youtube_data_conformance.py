@@ -76,8 +76,25 @@ def test_resumable_upload_follows_the_documented_protocol(mock_http: MockHTTP) -
 def test_a_short_receipt_stops_the_upload(mock_http: MockHTTP, reply: str) -> None:
     """The engine advances by the whole chunk, so skipping unreceived bytes would corrupt it."""
     enqueue(mock_http, P, reply)
-    with pytest.raises(YouTubeTransientError, match="resume from the server's offset"):
+    with pytest.raises(YouTubeTransientError, match="resumes from the server's offset"):
         _chunk(_client(mock_http), 0)
+
+
+def test_a_timeout_is_transient_not_permanent(mock_http: MockHTTP) -> None:
+    """A lost response may still have reached YouTube: retry and ask, never give up."""
+    mock_http.enqueue_timeout()
+    with pytest.raises(YouTubeTransientError, match="did not complete"):
+        _chunk(_client(mock_http), 0)
+
+
+def test_the_upload_status_query_reads_what_youtube_holds(mock_http: MockHTTP) -> None:
+    enqueue(mock_http, P, "chunk_308_partial", "chunk_308_none_received", "upload_complete")
+    client = _client(mock_http)
+    assert client.query_upload_status(session_uri=SESSION, total_bytes=1000) == (300, None)
+    assert client.query_upload_status(session_uri=SESSION, total_bytes=1000) == (0, None)
+    total, video = client.query_upload_status(session_uri=SESSION, total_bytes=1000)
+    assert total == 1000 and video is not None and video.get("id")
+    assert mock_http.requests[0].headers["Content-Range"] == "bytes */1000"
 
 
 def test_session_without_location_is_refused(mock_http: MockHTTP) -> None:

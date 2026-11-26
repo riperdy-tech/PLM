@@ -100,7 +100,7 @@ class MockYouTubeClient:
         session["uploaded_bytes"] = start_byte + len(chunk)
 
         if session["uploaded_bytes"] >= total_bytes:
-            video_id = self.simulated_video_id or f"yt_vid_{hashlib.sha256(session_uri.encode()).hexdigest()[:11]}"
+            video_id = self._video_id(session_uri)
             resource: dict[str, Any] = {
                 "id": video_id,
                 "snippet": session["snippet"],
@@ -121,6 +121,19 @@ class MockYouTubeClient:
             return resource
 
         return None
+
+    def _video_id(self, session_uri: str) -> str:
+        return self.simulated_video_id or f"yt_vid_{hashlib.sha256(session_uri.encode()).hexdigest()[:11]}"
+
+    def query_upload_status(
+        self, *, session_uri: str, total_bytes: int
+    ) -> tuple[int, dict[str, Any] | None]:
+        session = self.sessions.get(session_uri)
+        if session is None:  # a restarted mock lost its sessions: start over
+            return 0, None
+        if session["uploaded_bytes"] >= total_bytes:
+            return total_bytes, self.videos.get(self._video_id(session_uri))
+        return int(session["uploaded_bytes"]), None
 
     def get_video(self, video_id: str) -> dict[str, Any] | None:
         self._check_fault_injection("get_video")
@@ -160,3 +173,11 @@ class MockYouTubeClient:
         }
         self.playlist_items.append(item)
         return item
+
+    def find_playlist_item(self, playlist_id: str, video_id: str) -> dict[str, Any] | None:
+        for item in self.playlist_items:
+            snippet = item["snippet"]
+            if (snippet["playlistId"] == playlist_id
+                    and snippet["resourceId"]["videoId"] == video_id):
+                return item
+        return None

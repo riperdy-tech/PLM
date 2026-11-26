@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -60,10 +62,18 @@ class RealYouTubeClient:
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
 
-    def _http(self) -> AbstractContextManager[httpx.Client]:
-        if self._http_client is not None:
-            return nullcontext(self._http_client)
-        return httpx.Client(timeout=self.timeout)
+    @contextmanager
+    def _http(self) -> Iterator[httpx.Client]:
+        """An HTTP client; a timeout or a dropped connection is transient (retryable),
+        never a permanent failure: the request may still have reached YouTube."""
+        try:
+            if self._http_client is not None:
+                yield self._http_client
+            else:
+                with httpx.Client(timeout=self.timeout) as client:
+                    yield client
+        except httpx.TransportError as exc:
+            raise YouTubeTransientError(f"YouTube request did not complete: {exc!r}") from exc
 
     @property
     def is_configured(self) -> bool:
@@ -175,7 +185,7 @@ class RealYouTubeClient:
                 if received != f"bytes=0-{end_byte}":
                     raise YouTubeTransientError(
                         f"YouTube holds {received or 'no bytes'} after sending up to byte "
-                        f"{end_byte}; resume from the server's offset is not implemented"
+                        f"{end_byte}; the retry resumes from the server's offset"
                     )
                 return None
             if resp.status_code in (200, 201):
@@ -185,6 +195,31 @@ class RealYouTubeClient:
                 return {}
             self._handle_error_response(resp, "upload_video_chunk")
             return None
+
+    def query_upload_status(
+        self, *, session_uri: str, total_bytes: int
+    ) -> tuple[int, dict[str, Any] | None]:
+        """Ask the resumable session what it holds (``PUT`` with ``bytes */total``)."""
+        headers = {"Content-Range": f"bytes */{total_bytes}", "Content-Length": "0"}
+        with self._http() as client:
+            resp = client.put(session_uri, headers=headers)
+            if resp.status_code == 308:
+                received = resp.headers.get("Range")
+                if not received:
+                    return 0, None
+                match = re.fullmatch(r"bytes=0-(\d+)", received.strip())
+                if match is None:
+                    raise YouTubeClientError(f"unexpected upload Range header {received!r}")
+                return int(match.group(1)) + 1, None
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                return total_bytes, data if isinstance(data, dict) else {}
+            if resp.status_code in (404, 410):
+                raise YouTubeClientError(
+                    f"upload session expired (HTTP {resp.status_code}); check the channel "
+                    "for a partial video before uploading again")
+            self._handle_error_response(resp, "query_upload_status")
+            return 0, None
 
     def list_recent_uploads(
         self, *, max_results: int = 20, channel_id: str | None = None
@@ -355,3 +390,15 @@ class RealYouTubeClient:
                 self._handle_error_response(resp, "insert_playlist_item")
             data = resp.json()
             return data if isinstance(data, dict) else {}
+
+    def find_playlist_item(self, playlist_id: str, video_id: str) -> dict[str, Any] | None:
+        """The playlist item holding ``video_id``, or ``None`` (``playlistItems.list``)."""
+        with self._http() as client:
+            resp = client.get(
+                f"{YOUTUBE_API_BASE}/playlistItems", headers=self._auth_headers(),
+                params={"part": "id", "playlistId": playlist_id, "videoId": video_id})
+            if resp.status_code != 200:
+                self._handle_error_response(resp, "find_playlist_item")
+            data = resp.json()
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return items[0] if items and isinstance(items[0], dict) else None

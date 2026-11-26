@@ -131,6 +131,13 @@ class BudgetVerdict:
     reason: str
     replayed: bool = False
     """True when this key already holds/held budget; not permission for a new write."""
+    held: bool = False
+    """True when the replayed entry is still only reserved: the earlier write's outcome
+    was never settled (the provider call raised or the process stopped)."""
+
+
+RESUMED_RESERVATION_REASON: Final[str] = "resuming_held_reservation"
+"""Reason of an ``EXECUTE`` that continues a write whose reservation is still held."""
 
 
 type CostEstimate = Money | Decimal | None
@@ -337,12 +344,19 @@ class ExternalWriteGuard:
         policy_ceiling: ExecutionPolicy | None = None,
         preflight_refusal: str | None = None,
         now: datetime,
+        resuming: bool = False,
     ) -> GuardDecision:
         """Decide one write at ``now``.
 
         ``policy_ceiling`` and ``preflight_refusal`` can only tighten policy.
         A caller with a known-zero plan budget may refuse before any ledger
         reservation or provider write. ``None`` cost is unknown, not zero.
+
+        ``resuming``: the caller continues its own earlier write of this key and can tell
+        on its own whether that write already happened (a resumable upload session, a
+        playlist lookup, an idempotent overwrite). A replayed reservation that is still
+        only held is then ``EXECUTE`` (``resuming_held_reservation``); a committed or
+        unknown one stays denied.
         """
         now = require_aware(now)
         policy = self._settings.policy(capability)
@@ -350,7 +364,7 @@ class ExternalWriteGuard:
             policy = policy_ceiling
         decision, reason = self._decide(
             capability, provider_mode, policy, idempotency_key, cost_estimate, now,
-            preflight_refusal=preflight_refusal,
+            preflight_refusal=preflight_refusal, resuming=resuming,
         )
         result = GuardDecision(
             capability=capability,
@@ -386,6 +400,7 @@ class ExternalWriteGuard:
         now: datetime,
         *,
         preflight_refusal: str | None = None,
+        resuming: bool = False,
     ) -> tuple[WriteDecision, str]:
         if not idempotency_key.strip():
             return WriteDecision.DENY, "missing_idempotency_key"
@@ -407,6 +422,8 @@ class ExternalWriteGuard:
         verdict = self._budget.reserve(capability, idempotency_key, cost_estimate)
         if not verdict.allowed:
             return WriteDecision.DENY, verdict.reason
+        if verdict.replayed and resuming and verdict.held:
+            return WriteDecision.EXECUTE, RESUMED_RESERVATION_REASON
         if verdict.replayed:
             # The ledger returns an allowed reservation replay to prove
             # idempotent *funding*, not to authorize a second provider call.
