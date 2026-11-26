@@ -31,6 +31,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -328,7 +329,10 @@ class Studio:
     video_stats: Callable[[list[str]], dict[str, dict[str, int]]] | None = None
     """YouTube's public counters per video id (read-only); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
-    _video_cache: dict[str, bytes] = field(default_factory=dict)
+    _video_cache: dict[tuple[str, str], bytes] = field(default_factory=dict)
+    """One video in memory, keyed by its own (uri, checksum): a remake re-renders the
+    same package with a new video, which must never be served from the old entry."""
+    _video_lock: Any = field(default_factory=threading.Lock)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
@@ -794,6 +798,7 @@ class Studio:
                 "title": meta.get("title"), "description": meta.get("description"),
                 "tags": meta.get("tags"),
                 "duration_seconds": pkg.get("video_duration_seconds"),
+                "video_checksum": pkg.get("video_checksum"),
                 "thumbnails": [t.get("id") for t in pkg.get("thumbnails") or []],
                 "art_library": self._safe_library(package_id),
                 "art_prompts": self._job_prompts(package_id),
@@ -809,12 +814,16 @@ class Studio:
                           or (workflow_id and n.get("workflow_id") == workflow_id)]}
 
     def video(self, package_id: str) -> bytes:
-        if package_id not in self._video_cache:
-            pkg = self.package(package_id)
-            self._video_cache.clear()  # one video in memory at a time
-            self._video_cache[package_id] = self.media(str(pkg["video_master_uri"]),
-                                                       str(pkg["video_checksum"]))
-        return self._video_cache[package_id]
+        """The package's current video (after a remake, the new one, never the old)."""
+        pkg = self.package(package_id)
+        key = (str(pkg["video_master_uri"]), str(pkg["video_checksum"]))
+        with self._video_lock:
+            data = self._video_cache.get(key)
+            if data is None:
+                data = self.media(*key)
+                self._video_cache.clear()  # one video in memory at a time
+                self._video_cache[key] = data
+            return data
 
     def thumbnail(self, package_id: str, variant: str) -> bytes:
         pkg = self.package(package_id)
@@ -863,15 +872,27 @@ class Studio:
         _write_atomic(path, (json.dumps(kept, indent=2) + "\n").encode("utf-8"))
         return expires
 
-    async def approve(self, case_id: str) -> dict[str, Any]:
-        """The owner's approval: grant this upload, then resume the run."""
+    async def approve(self, case_id: str,
+                      shown: Mapping[str, str] | None = None) -> dict[str, Any]:
+        """The owner's approval: grant this upload, then resume the run.
+
+        ``shown`` is ``{package_id: video_checksum}`` of the videos the page played. If a
+        package's video changed since (a remake finished), the approval is refused: the
+        owner approves only what they watched."""
         case = self._approval_case(case_id)
         package_ids = self._package_ids(case)
-        waiting = [p for p in package_ids
-                   if self.package(p).get("status") != "ready_for_publish"]
+        current = {p: self.package(p) for p in package_ids}
+        waiting = [p for p, pkg in current.items() if pkg.get("status") != "ready_for_publish"]
         if waiting:
             raise _refuse(409, "package_not_ready",
                           f"{', '.join(waiting)} is not ready (new art still to import)")
+        if shown is not None:
+            changed = [p for p, pkg in current.items()
+                       if shown.get(p) != pkg.get("video_checksum")]
+            if changed:
+                raise _refuse(409, "video_changed",
+                              "the video changed since this page showed it (a remake "
+                              "finished): reload, watch the new video, then approve")
         expires = self._write_grants(case_id, package_ids)
         answer = await self._resume(
             case_id, "production_owner",
@@ -1102,6 +1123,7 @@ class Studio:
                 "title": meta.get("title"), "description": meta.get("description"),
                 "duration_seconds": pkg.get("video_duration_seconds"),
                 "has_video": pkg.get("status") in ("ready_for_publish", "published"),
+                "video_checksum": pkg.get("video_checksum"),
                 "thumbnails": [t.get("id") for t in pkg.get("thumbnails") or []],
                 "tracks": [{"song_id": c.get("song_id"), "title": c.get("title"),
                             "start": c.get("timestamp_str")}

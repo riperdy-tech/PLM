@@ -193,6 +193,11 @@ class StudioArtImportBody(BaseModel):
                              "video's picture and first thumbnail; none: A")
 
 
+class ApproveBody(BaseModel):
+    video_checksums: dict[str, str] | None = Field(
+        default=None, description="package id -> checksum of the video the page showed")
+
+
 class StudioStartBody(BaseModel):
     music: str = Field(description="suno or flow_music: which tool the song prompts are for")
     subgenre: str | None = Field(
@@ -476,8 +481,10 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
                         else "image/jpeg")
 
     @app.post("/api/studio/approvals/{case_id}/approve", dependencies=[Depends(require_token)])
-    async def studio_approve(case_id: str) -> dict[str, Any]:
-        result: dict[str, Any] = await guarded_async(lambda: studio.approve(case_id))
+    async def studio_approve(case_id: str,
+                             body: ApproveBody | None = None) -> dict[str, Any]:
+        shown = None if body is None else body.video_checksums
+        result: dict[str, Any] = await guarded_async(lambda: studio.approve(case_id, shown))
         return result
 
     @app.post("/api/studio/approvals/{case_id}/changes/text",

@@ -507,7 +507,7 @@ function reviewStep(reviews) {
       card.append(h('div', { class: 'variant' },
         h('h3', {}, p.title || p.media_package_id),
         h('div', { class: 'review-media' },
-          h('video', { controls: true, preload: 'metadata', src: `${base}/video` }),
+          h('video', { controls: true, preload: 'metadata', src: `${base}/video?v=${encodeURIComponent(p.video_checksum || '')}` }),
           h('div', {}, h('strong', {}, 'Thumbnail'),
             p.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${p.thumbnails[0]}`, alt: 'thumbnail' }) : h('p', { class: 'unknown' }, 'none'),
             h('p', { class: 'muted' }, `${Math.round((p.duration_seconds || 0) / 60)} min, ${p.chapters} chapters`))),
@@ -524,7 +524,8 @@ function reviewStep(reviews) {
     const history = noteList(r.notes, 'Your notes on this video');
     if (history) card.append(history);
     card.append(h('div', { class: 'row-actions' },
-      actionButton('Approve and upload to YouTube', 'btn-ok big', () => authedSend(`/api/studio/approvals/${r.case_id}/approve`, 'POST'),
+      actionButton('Approve and upload to YouTube', 'btn-ok big', () => authedSend(`/api/studio/approvals/${r.case_id}/approve`, 'POST',
+        JSON.stringify({ video_checksums: Object.fromEntries(r.packages.filter((p) => !p.error).map((p) => [p.media_package_id, p.video_checksum])) }), 'application/json'),
         { confirm: 'Upload this video to YouTube now? This publishes it on your channel.', busy: 'Granting the upload and resuming the run...' }),
       actionButton('Reject', 'btn-danger', () => authedSend(`/api/studio/approvals/${r.case_id}/reject`, 'POST'),
         { confirm: 'Reject this video? The run ends and nothing is uploaded.' })));
@@ -873,7 +874,7 @@ function videoSection(p) {
     const base = `/api/studio/packages/${v.media_package_id}`;
     card.append(h('h3', {}, v.title || v.media_package_id),
       v.has_video ? h('div', { class: 'review-media' },
-        h('video', { controls: true, preload: 'none', src: `${base}/video` }),
+        h('video', { controls: true, preload: 'none', src: `${base}/video?v=${encodeURIComponent(v.video_checksum || '')}` }),
         h('div', {}, v.thumbnails.length ? h('img', { class: 'preview', src: `${base}/thumbnails/${v.thumbnails[0]}`, alt: 'thumbnail' }) : null,
           h('p', { class: 'muted' }, `${Math.round((v.duration_seconds || 0) / 60)} min, ${v.tracks.length} songs`)))
         : v.status === 'failed' ? h('p', { class: 'notice' }, `This version (${v.media_package_id}) failed its final check; the status log says why.`)

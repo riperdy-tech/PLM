@@ -580,3 +580,30 @@ def test_an_m4a_song_is_kept_and_saved_as_its_decoded_wav(tmp_path: Path) -> Non
         assert (wf.getframerate(), wf.getnchannels(), wf.getsampwidth()) == (48000, 2, 2)
     with pytest.raises(ActionRefused, match="m4a_unreadable"):
         studio.save_song("trk_1-bbbb2222", b"\0\0\0\x20ftypM4A broken")
+
+
+def test_the_review_serves_the_new_video_after_a_remake_and_refuses_a_stale_approval(
+        tmp_path: Path) -> None:
+    """A remake re-renders the same package with a new video: the review must play the
+    new one (the cache is keyed by the video, not the package), and an approval of the
+    video the page showed before the remake is refused (review 2026-11-26)."""
+    hold = {"case_id": "c3", "reason_code": "PUBLISH_APPROVAL_AWAITED",
+            "details": {"media_package_ids": [PKG]},
+            "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
+    studio, actions = _studio(tmp_path, [hold], status="ready_for_publish")
+    current = {"uri": "plm://v/old", "checksum": "a" * 64}
+    fetched: list[str] = []
+    studio.package = lambda pid: {"status": "ready_for_publish",
+                                  "video_master_uri": current["uri"],
+                                  "video_checksum": current["checksum"]}
+    studio.media = lambda uri, checksum: fetched.append(uri) or uri.encode()
+    assert studio.video(PKG) == b"plm://v/old"
+    assert studio.video(PKG) == b"plm://v/old" and fetched == ["plm://v/old"]  # cached
+    current.update(uri="plm://v/new", checksum="b" * 64)  # the remake finished
+    assert studio.video(PKG) == b"plm://v/new"
+
+    with pytest.raises(ActionRefused, match="video_changed"):
+        asyncio.run(studio.approve("c3", {PKG: "a" * 64}))
+    assert actions.calls == []
+    asyncio.run(studio.approve("c3", {PKG: "b" * 64}))
+    assert actions.calls[-1][:2] == ("resume", "c3")
