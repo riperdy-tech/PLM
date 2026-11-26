@@ -83,6 +83,8 @@ jobs:
         run: plm migrate
 
       - name: Integration tests
+        env:
+          PLM_INTEGRATION_ISOLATED_STACK: "1"
         run: pytest -q -m integration
 
       # Media tests need the pinned FFmpeg 7 in the dev image, so they run inside it; a
@@ -144,6 +146,7 @@ jobs:
       - name: Full chain (Gate R5)
         env:
           PLM_R5_ISOLATED_STACK: "1"
+          PLM_INTEGRATION_ISOLATED_STACK: "1"
         run: pytest -q -m full_chain
 
       - name: Tear down the compose stack

@@ -17,7 +17,7 @@ logs:  ## follow stack logs
 	docker compose logs -f
 
 test:  ## run the test suite
-	$(PY) -m pytest -q
+	$(PY) -m pytest -q -m "not integration"
 
 lint:  ## lint
 	$(PY) -m ruff check .

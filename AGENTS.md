@@ -63,7 +63,9 @@ stage, record it in `docs/STATUS.md` with the stage that owns it.
 ## 5. Working conventions
 
 - Gates for every change are `ruff check .`, `mypy packages services`, and
-  `pytest -m "not integration"`. Integration tests need `docker compose up -d --wait`.
+  `pytest -m "not integration"`. Integration tests run only on a disposable stack
+  (`PLM_INTEGRATION_ISOLATED_STACK=1` and a `plm_migration_disposable_*` database on a
+  non-5432 port, as CI sets up); never against the owner's real database.
 - Phases talk over HTTP contracts only. Shared vocabulary lives in `plm_contracts`, and
   shared runtime in `plm_platform`. A service never imports another service, except in
   `tests/contract`.

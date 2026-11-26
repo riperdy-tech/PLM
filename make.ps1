@@ -31,7 +31,7 @@ switch ($Target) {
     'up'        { & docker compose up -d; Stop-IfFailed $LASTEXITCODE }
     'down'      { & docker compose down; Stop-IfFailed $LASTEXITCODE }
     'logs'      { & docker compose logs -f; Stop-IfFailed $LASTEXITCODE }
-    'test'      { & $Python -m pytest -q; Stop-IfFailed $LASTEXITCODE }
+    'test'      { & $Python -m pytest -q -m 'not integration'; Stop-IfFailed $LASTEXITCODE }
     'lint'      { & $Python -m ruff check .; Stop-IfFailed $LASTEXITCODE }
     'fmt'       { & $Python -m ruff format .; Stop-IfFailed $LASTEXITCODE }
     'typecheck' { & $Python -m mypy; Stop-IfFailed $LASTEXITCODE }
