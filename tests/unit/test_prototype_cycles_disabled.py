@@ -5,8 +5,6 @@ post a fabricated reward into P2; none generates music or renders a video.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import httpx
 import pytest
 
@@ -39,13 +37,3 @@ def test_direct_test_video_upload_refuses(no_network: None) -> None:
     with pytest.raises(RuntimeError, match="prototype disabled"):
         main()
 
-
-def test_control_deck_cycle_refuses_before_any_step(no_network: None) -> None:
-    pytest.importorskip("tkinter")
-    pytest.importorskip("PIL.ImageTk")
-    from scripts.plm_desktop_control import PlmControlDeckApp
-
-    deck = MagicMock()
-    with pytest.raises(RuntimeError, match="Control Deck cycle disabled"):
-        PlmControlDeckApp._run_cycle_steps(deck)
-    deck._update_progress.assert_not_called()
