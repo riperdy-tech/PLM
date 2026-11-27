@@ -185,9 +185,9 @@ live providers. Limits are stated where a fix is narrower than the suggested rep
 | 56 | Fixed | `-c constraints.txt`; base images pinned by digest. |
 | 57 | Fixed | `restart: unless-stopped`, `mem_limit` on api-media, grace period; launcher skips `up` when healthy. |
 
-P2/P3 list: done, except **mypy on `tests/`** (885 `services.x` imports need a rewrite; `scripts/` is now
-type-checked, three offline probes excluded). Temporal reset continuation covers runs started after the
-deploy only.
+P2/P3 list: done. mypy now type-checks `packages/`, `services/`, `scripts/` (three offline audio probes
+excluded) and `tests/` (447 files, 0 errors; tests import services by their top-level names) in CI.
+Temporal reset continuation covers runs started after the deploy only.
 
 Owner actions: replace the `change-me` service token (refused now); set `PLM_FLOW_MUSIC_TERMS_REF`
 (Flow Music songs hold as `COMMERCIAL_LICENSE_UNCERTAIN` until then); create the P9 channel-facts file

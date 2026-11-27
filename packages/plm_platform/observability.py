@@ -27,7 +27,7 @@ import logging
 import sys
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, replace
@@ -260,8 +260,8 @@ class MetricsApp:
         await send({"type": "http.response.body", "body": payload})
 
 
-_Scope = dict[str, Any]
-_Message = dict[str, Any]
+_Scope = MutableMapping[str, Any]
+_Message = MutableMapping[str, Any]
 _Receive = Callable[[], Awaitable[_Message]]
 _Send = Callable[[_Message], Awaitable[None]]
 

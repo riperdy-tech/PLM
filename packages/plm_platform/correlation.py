@@ -21,7 +21,7 @@ Usage:
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Any, Final
@@ -43,8 +43,8 @@ _MAX_HEADER_LENGTH: Final[int] = 128
 
 _correlation_id: ContextVar[str | None] = ContextVar("plm_correlation_id", default=None)
 
-_Scope = dict[str, Any]
-_Message = dict[str, Any]
+_Scope = MutableMapping[str, Any]
+_Message = MutableMapping[str, Any]
 _Receive = Callable[[], Awaitable[_Message]]
 _Send = Callable[[_Message], Awaitable[None]]
 _ASGIApp = Callable[[_Scope, _Receive, _Send], Awaitable[None]]

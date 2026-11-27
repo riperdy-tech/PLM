@@ -12,7 +12,7 @@ import io
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -101,9 +101,9 @@ async def test_middleware_reads_the_header_and_echoes_it() -> None:
     seen: list[str | None] = []
 
     async def app(
-        scope: dict[str, Any],
-        receive: Callable[[], Awaitable[dict[str, Any]]],
-        send: Callable[[dict[str, Any]], Awaitable[None]],
+        scope: MutableMapping[str, Any],
+        receive: Callable[[], Awaitable[MutableMapping[str, Any]]],
+        send: Callable[[MutableMapping[str, Any]], Awaitable[None]],
     ) -> None:
         seen.append(current_correlation_id())
         await send(
@@ -111,8 +111,7 @@ async def test_middleware_reads_the_header_and_echoes_it() -> None:
         )
         await send({"type": "http.response.body", "body": b"ok"})
 
-    # plm_platform types ASGI scope/messages as dict; httpx wants MutableMapping.
-    transport = httpx.ASGITransport(app=CorrelationIdMiddleware(app))  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=CorrelationIdMiddleware(app))
     async with httpx.AsyncClient(transport=transport, base_url="http://plm.test") as client:
         response = await client.get("/", headers={CORRELATION_HEADER: "incoming-1"})
         minted = (await client.get("/")).headers[CORRELATION_HEADER.lower()]
@@ -155,8 +154,7 @@ def test_metrics_counter_and_histogram_are_recorded() -> None:
 @pytest.mark.asyncio
 
 async def test_metrics_app_serves_the_registry_over_http() -> None:
-    # plm_platform types ASGI scope/messages as dict; httpx wants MutableMapping.
-    transport = httpx.ASGITransport(app=MetricsApp())  # type: ignore[arg-type]
+    transport = httpx.ASGITransport(app=MetricsApp())
     async with httpx.AsyncClient(transport=transport, base_url="http://plm.test") as client:
         response = await client.get(METRICS_PATH)
         missing = await client.get("/not-metrics")
