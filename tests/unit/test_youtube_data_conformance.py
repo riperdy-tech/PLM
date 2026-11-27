@@ -149,3 +149,32 @@ def test_permanent_refusals_are_neither_quota_nor_transient(mock_http: MockHTTP,
     with pytest.raises(YouTubeClientError) as raised:
         _client(mock_http).insert_resumable_session(snippet={}, status={}, content_length=1)
     assert type(raised.value) is YouTubeClientError
+
+
+@pytest.mark.parametrize("error", ["error_403_rate_limit", "error_429_too_many_requests"])
+def test_a_rate_limit_is_transient_and_refused(mock_http: MockHTTP, error: str) -> None:
+    """A short-term rate limit is retried later; YouTube refused it, so nothing happened."""
+    enqueue(mock_http, P, "oauth_token", error)
+    with pytest.raises(YouTubeTransientError) as raised:
+        _client(mock_http).insert_resumable_session(snippet={}, status={}, content_length=1)
+    assert raised.value.refused
+
+
+@pytest.mark.parametrize(("error", "refused"), [
+    ("error_403_quota", True), ("error_401", True), ("error_403_forbidden", True),
+    ("error_400_upload_limit", True), ("error_503", False),
+])
+def test_a_4xx_answer_marks_the_write_as_refused(mock_http: MockHTTP, error: str,
+                                                 refused: bool) -> None:
+    """A 4xx is a definite "not performed"; a 5xx leaves the outcome unknown (review #31)."""
+    enqueue(mock_http, P, "oauth_token", error)
+    with pytest.raises(YouTubeClientError) as raised:
+        _client(mock_http).insert_resumable_session(snippet={}, status={}, content_length=1)
+    assert raised.value.refused is refused
+
+
+def test_a_rejected_token_refresh_is_refused(mock_http: MockHTTP) -> None:
+    enqueue(mock_http, P, "oauth_invalid_grant")
+    with pytest.raises(YouTubeAuthError) as raised:
+        _client(mock_http).insert_resumable_session(snippet={}, status={}, content_length=1)
+    assert raised.value.refused
