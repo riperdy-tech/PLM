@@ -81,10 +81,11 @@ def test_beatless_audio_is_not_judged(tmp_path: Path) -> None:
     assert check["bpm"] is None and check["unknown_reason"] is not None
 
 
-def test_a_genre_without_a_profile_is_not_checked(tmp_path: Path) -> None:
+def test_a_genre_without_a_profile_has_no_tempo_or_rise_check(tmp_path: Path) -> None:
     result = evaluate_identity_audio("ev", _clicks(tmp_path / "t.wav", 124.0), ["rnb"],
                                      now=NOW)
-    assert result.checks == [] and result.findings == []
+    assert [c.check_type for c in result.checks] == ["identity_loop_repetition"]
+    assert "TEMPO_OUTSIDE_IDENTITY" not in _codes(result)
 
 
 def test_a_sudden_rise_warns_without_blocking(tmp_path: Path) -> None:
@@ -106,4 +107,5 @@ def test_a_steady_track_has_no_rise_warning(tmp_path: Path) -> None:
 def test_the_policy_declares_the_focus_band() -> None:
     profile = load_identity_audio_policy().profiles["focus_electronic"]
     assert (profile.bpm_min, profile.bpm_max) == (70.0, 110.0)
-    assert profile.tempo_inside(140.0) and not profile.tempo_inside(124.0)
+    assert profile.in_band(100.0) and not profile.in_band(124.0)
+    assert profile.fast_tempo_warn_bpm == 136.0

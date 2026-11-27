@@ -25,6 +25,7 @@ from plm_contracts import ProvenanceStatus
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.clock import Clock
 
+from ..audio.decode import shared_decodes
 from ..detectors.fingerprint import AudioFingerprint
 from ..detectors.outcome import DetectorResult
 from ..detectors.reason_codes import P5_HOLD_REASON_CODES
@@ -107,7 +108,23 @@ def run_candidate_evaluation(
 
     All twelve P28 provenance facts come from the event (C4 3.0, ADR-0035); a fact P4
     declares as unknown quarantines with ``INCOMPLETE_P28_PROVENANCE``.
+
+    The audio is decoded once for every evaluator (:func:`shared_decodes`).
     """
+    with shared_decodes():
+        return _evaluate(event=event, audio_path=audio_path, clock=clock, detectors=detectors,
+                         evaluation_policy_version=evaluation_policy_version, trigger=trigger)
+
+
+def _evaluate(
+    *,
+    event: CandidateReadyPayload,
+    audio_path: str | Path,
+    clock: Clock,
+    detectors: RightsDetectors | None,
+    evaluation_policy_version: str,
+    trigger: str,
+) -> GateEngineResult:
     now = clock.now()
     candidate_id = event.candidate_id
     artifact_id = event.artifact_id
@@ -194,7 +211,8 @@ def run_candidate_evaluation(
     evaluation.composite_quality_score = musical_res.composite_score
     evaluation.composite_quality_confidence = musical_res.confidence
 
-    identity_res = evaluate_identity_audio(evaluation.id, audio_path, genre_tags, now=now)
+    identity_res = evaluate_identity_audio(evaluation.id, audio_path, genre_tags, now=now,
+                                           vocal_mode=vocal_mode)
     evaluation.musical_checks.extend(identity_res.checks)
     evaluation.risk_findings.extend(identity_res.findings)
 

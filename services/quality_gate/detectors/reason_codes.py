@@ -1,6 +1,6 @@
 """P5's hold reason codes and their P29 categories (R4).
 
-Every code here is emitted by a P5 rights, provenance or policy check as a hold: the
+Every code here is emitted by a P5 rights, provenance, policy or identity check as a hold: the
 candidate is quarantined (never passed, never silently rejected) and the code is raised
 into the platform exception queue, where ``plm_platform/policy/hold_classes.json``
 classifies it. ``tests/unit/test_qa_detectors_reason_codes.py`` checks both directions:
@@ -28,6 +28,7 @@ __all__ = [
     "SAMPLE_PROVENANCE_UNCERTAIN",
     "UNAUTHORIZED_VOICE_CLONE_DETECTED",
     "UNKNOWN_COMMERCIAL_LICENSE",
+    "VOCAL_PRESENCE_SUSPECTED",
 ]
 
 # Provenance and commercial use (evaluators/rights.py)
@@ -47,6 +48,8 @@ LYRIC_SIMILARITY_UNKNOWN: Final = "LYRIC_SIMILARITY_UNKNOWN"
 # Prompt / metadata / lyrics screening (evaluators/policy.py, shared policy file)
 PROTECTED_ARTIST_REFERENCE_DETECTED: Final = "PROTECTED_ARTIST_REFERENCE_DETECTED"
 AI_POLICY_CONFLICT: Final = "AI_POLICY_CONFLICT"
+# Sung vocals suspected in an instrumental (evaluators/identity.py)
+VOCAL_PRESENCE_SUSPECTED: Final = "VOCAL_PRESENCE_SUSPECTED"
 
 P5_HOLD_REASON_CODES: Final[frozenset[str]] = frozenset(
     {
@@ -63,6 +66,7 @@ P5_HOLD_REASON_CODES: Final[frozenset[str]] = frozenset(
         LYRIC_SIMILARITY_UNKNOWN,
         PROTECTED_ARTIST_REFERENCE_DETECTED,
         AI_POLICY_CONFLICT,
+        VOCAL_PRESENCE_SUSPECTED,
     }
 )
 """Codes a P5 check emits as a hold: the candidate is quarantined with this reason."""

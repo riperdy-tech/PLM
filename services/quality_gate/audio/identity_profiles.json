@@ -1,9 +1,11 @@
 {
-  "policy_version": "p5-identity-audio-v1",
+  "policy_version": "p5-identity-audio-v2",
   "notes": [
     "Audio checks that a track fits the channel identity (ADR-0044): per genre, the tempo band and the loudness-rise warning. The C4 event's first genre tag selects the profile; a genre without a profile is not checked here.",
     "Tempo is measured with P6's onset-autocorrelation estimator (media_factory.audio.features) over 50-200 BPM with the tempo prior centred on the band. A tempo half or double the band counts as inside it (half-time feel, for example 140 BPM chillstep felt at 70), so the check catches the dance range between the band and its double, not high-BPM drum and bass. tolerance_bpm absorbs the estimator's error at the band edges (a 140 BPM click track measures 69.98). Below min_confidence, or with no beat (ambient), the tempo is unknown and nothing is judged.",
-    "Calibration 2026-11-01 on 39 real tracks in output_media (Suno, Lyria, Stable Audio; lo-fi and chill): every measured tempo was 72-89 BPM or had no beat, so none would be held. The 3 s RMS level rose by up to 17.3 dB inside 4 s in calm tracks (breakdown returns), so a rise cannot separate an EDM drop from a breakdown: it is a non-blocking warning above loudness_rise_warn_db, recorded for later calibration."
+    "Calibration 2026-11-01 on 39 real tracks in output_media (Suno, Lyria, Stable Audio; lo-fi and chill): every measured tempo was 72-89 BPM or had no beat, so none would be held. The 3 s RMS level rose by up to 17.3 dB inside 4 s in calm tracks (breakdown returns), so a rise cannot separate an EDM drop from a breakdown: it is a non-blocking warning above loudness_rise_warn_db, recorded for later calibration.",
+    "v2 (review 2026-11-26 #50): a tempo outside the band counts as half-time (or double-time) only when the onset autocorrelation at that tempo is at least half_time_min_strength times the measured tempo's: a beat felt at half its tempo. Whenever the double of the accepted tempo is that strong too, the track's fastest pulse is the double; above fast_tempo_warn_bpm it is a non-blocking TEMPO_POSSIBLY_FAST warning (a 140-174 BPM drum & bass track felt half-time). Synthetic click tracks: 120 and 128 BPM are held outside the band; 140 and 170 BPM pass as half-time with the warning.",
+    "v2 (review 2026-11-26 #51): for an instrumental track, vocal_presence_hold_share of frames with a voice-like moving pitch (quality_gate.audio.rhythm.vocal_presence) holds the song as VOCAL_PRESENCE_SUSPECTED for a listening review; a song whose 5 s windows repeat one period (1-60 s) later with waveform correlation >= 0.98 over loop_repeated_share_warn of the track, while it is not that steady under 1 s (loop_steady_share_max), is a non-blocking STUCK_LOOP_SUSPECTED warning. Both apply to every genre. Calibrated only on synthetic signals (a vibrato voice scores 1.0; held pads, clicks, noise and a stepped melody 0.0; a 4 s clip tiled 30 times repeats 1.0): conservative estimates, not a listening review."
   ],
   "profiles": {
     "focus_electronic": {
@@ -16,7 +18,12 @@
       "rise_window_seconds": 4.0,
       "edge_skip_seconds": 10.0,
       "loudness_rise_warn_db": 18.0,
-      "source": "ADR-0044 decision 2 (70-110 BPM on every track; no EDM drops)."
+      "source": "ADR-0044 decision 2 (70-110 BPM on every track; no EDM drops).",
+      "half_time_min_strength": 0.8,
+      "fast_tempo_warn_bpm": 136.0
     }
-  }
+  },
+  "vocal_presence_hold_share": 0.3,
+  "loop_repeated_share_warn": 0.8,
+  "loop_steady_share_max": 0.5
 }
