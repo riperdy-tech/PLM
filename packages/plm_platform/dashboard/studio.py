@@ -693,23 +693,28 @@ class Studio:
         """The owner's pictures for A, B and C (each from the package's art library) replace
         the package's art: P6 re-renders the video from A and the package comes back to
         review. The run stays held for approval throughout."""
-        case = self._review_package(case_id, package_id)
         if self.reopen is None:
             raise _refuse(503, "edit_not_configured", "P6 edits are not configured")
+        reopen = self.reopen
         missing = [letter for letter in _LETTERS if not choices.get(letter)]
         if missing:
             raise _refuse(422, "art_choice_missing", f"choose a picture for {', '.join(missing)}")
         if (self._remakes.get(package_id) or {}).get("state") == "running":
             raise _refuse(409, "remake_running", f"{package_id} is already being made again")
-        picked = {letter: self._library_path(package_id, choices[letter]).read_bytes()
-                  for letter in _LETTERS}
-        for letter, data in picked.items():
-            self.save_art(package_id, letter, data)
-        self.reopen(package_id)
-        entry = self._add_note("swap_art", note or "pictures changed in the review",
-                               case_id=case_id, media_package_id=package_id,
-                               workflow_id=(case.get("pipeline") or {}).get("workflow_id"),
-                               choices={k: choices[k] for k in _LETTERS})
+
+        def swap() -> dict[str, Any]:  # off the event loop (review 2026-11-26 #20)
+            case = self._review_package(case_id, package_id)
+            picked = {letter: self._library_path(package_id, choices[letter]).read_bytes()
+                      for letter in _LETTERS}
+            for letter, data in picked.items():
+                self.save_art(package_id, letter, data)
+            reopen(package_id)
+            return self._add_note("swap_art", note or "pictures changed in the review",
+                                  case_id=case_id, media_package_id=package_id,
+                                  workflow_id=(case.get("pipeline") or {}).get("workflow_id"),
+                                  choices={k: choices[k] for k in _LETTERS})
+
+        entry = await asyncio.to_thread(swap)
         # The render takes minutes: it runs on its own, so closing or refreshing the page
         # cannot lose it, and the Studio shows it until it is done.
         self._remakes[package_id] = {"since": self.clock.now().isoformat(),
@@ -1052,7 +1057,7 @@ class Studio:
                             note: str) -> dict[str, Any]:
         """Take songs out: the run goes back to assembly, which asks P3 for as many new
         songs (the songs step), then renders a new package."""
-        case = self._approval_case(case_id)
+        case = await asyncio.to_thread(self._approval_case, case_id)  # review 2026-11-26 #20
         note = note.strip() or "replace these songs (no note)"
         members = {str(c) for p in (case.get("details") or {}).get("packages") or []
                    for c in p.get("candidate_ids") or []}
@@ -1062,9 +1067,9 @@ class Studio:
             raise _refuse(422, "song_not_in_package",
                           f"choose songs of this package (unknown: {', '.join(unknown)})")
         workflow_id = (case.get("pipeline") or {}).get("workflow_id")
-        entry = self._add_note("replace_song", note, case_id=case_id,
-                               workflow_id=workflow_id, song_ids=chosen,
-                               media_package_id=next(iter(self._package_ids(case)), None))
+        entry = await asyncio.to_thread(
+            self._add_note, "replace_song", note, case_id=case_id, workflow_id=workflow_id,
+            song_ids=chosen, media_package_id=next(iter(self._package_ids(case)), None))
         answer = await self._resume(
             case_id, "production_owner",
             {"publish_approval_ref": f"changes requested in the Studio: replace "
@@ -1074,7 +1079,7 @@ class Studio:
         return {**answer, "note": entry}
 
     async def reject(self, case_id: str) -> dict[str, Any]:
-        self._approval_case(case_id)
+        await asyncio.to_thread(self._approval_case, case_id)
         return await self.actions.reject(case_id, actor=OWNER, role="production_owner",
                                          notes="rejected in the Studio")
 
@@ -1242,14 +1247,14 @@ class Studio:
 
     async def cancel_project(self, number: int, reason: str = "") -> dict[str, Any]:
         """Stop a project for good (the run is cancelled; nothing more is made or sent)."""
-        run = self._run_of(number)
+        run = await asyncio.to_thread(self._run_of, number)  # review 2026-11-26 #20
         if run["state"] in FINISHED:
             raise _refuse(409, "project_finished", f"project #{number} has already ended")
         if self.cancel is None:
             raise _refuse(503, "cancel_not_configured", "cancelling runs is not configured")
         why = reason.strip() or "cancelled in the Studio"
         await self.cancel(run["workflow_id"], why)
-        self._add_note("cancel", why, workflow_id=run["workflow_id"])
+        await asyncio.to_thread(self._add_note, "cancel", why, workflow_id=run["workflow_id"])
         return {"cancelled": number, "workflow_id": run["workflow_id"]}
 
     async def retry_hold(self, case_id: str) -> dict[str, Any]:
@@ -1280,8 +1285,11 @@ class Studio:
                                     note: str) -> dict[str, Any]:
         """Take songs out at the thumbnail step or the review: the run goes back to make as
         many new ones (the songs step), then builds the video again."""
-        run = self._run_of(number)
-        hold = self._holds_by_run().get(run["workflow_id"])
+        def read() -> tuple[dict[str, Any], dict[str, Any] | None]:
+            run = self._run_of(number)
+            return run, self._holds_by_run().get(run["workflow_id"])
+
+        run, hold = await asyncio.to_thread(read)  # review 2026-11-26 #20
         reason = None if hold is None else hold.get("reason_code")
         if hold is None or reason not in (ART_REASON, APPROVAL_REASON):
             raise _refuse(409, "songs_not_replaceable",
@@ -1292,17 +1300,17 @@ class Studio:
         package_id = next(iter(self._package_ids(hold)), None)
         members: set[str] = set()
         if package_id:
-            members = {str(c.get("song_id")) for c in
-                       self.package(package_id).get("chapters") or []}
+            chapters = (await asyncio.to_thread(self.package, package_id)).get("chapters")
+            members = {str(c.get("song_id")) for c in chapters or []}
         chosen = sorted({str(x) for x in song_ids})
         unknown = [x for x in chosen if x not in members]
         if not chosen or unknown:
             raise _refuse(422, "song_not_in_package",
                           f"choose songs of this video (unknown: {', '.join(unknown)})")
         note = note.strip() or "replace these songs (no note)"
-        entry = self._add_note("replace_song", note, case_id=hold["case_id"],
-                               workflow_id=run["workflow_id"], song_ids=chosen,
-                               media_package_id=package_id)
+        entry = await asyncio.to_thread(
+            self._add_note, "replace_song", note, case_id=hold["case_id"],
+            workflow_id=run["workflow_id"], song_ids=chosen, media_package_id=package_id)
         answer = await self._resume(
             str(hold["case_id"]), str(hold.get("reviewer_role") or "production_owner"),
             {str(key): f"Studio: the owner replaced {', '.join(chosen)} at the thumbnail step"
@@ -1330,8 +1338,9 @@ class Studio:
             raise _refuse(503, "music_inbox_not_configured",
                           f"the {source} inbox is not configured: set "
                           f"{'PLM_SUNO_MANUAL_INBOX' if music == 'suno' else 'PLM_FLOW_MUSIC_MANUAL_INBOX'}")
+        styles = await asyncio.to_thread(self.style_choices)  # review 2026-11-26 #20
         if subgenre is not None:
-            available = self.style_choices().get("available") or []
+            available = styles.get("available") or []
             if subgenre not in available:
                 raise _refuse(422, "style_unavailable",
                               f"P2 has no usable arm for {subgenre!r}; choose one of "
@@ -1339,7 +1348,7 @@ class Studio:
         avoid: tuple[str, ...] = ()
         if subgenre is None:  # P2 picks: away from the last videos' sub-styles
             seen: list[str] = []
-            for item in self.style_choices().get("recent") or []:
+            for item in styles.get("recent") or []:
                 name = item.get("subgenre") if isinstance(item, dict) else None
                 if name and name not in seen:
                     seen.append(name)

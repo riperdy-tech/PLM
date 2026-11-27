@@ -431,7 +431,7 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.get("/api/studio/songs/{stem}/audio")
     async def studio_song_audio(stem: str, request: Request) -> Response:
-        path = guarded(lambda: studio.song_file(stem))
+        path = await asyncio.to_thread(guarded, lambda: studio.song_file(stem))
         data = await asyncio.to_thread(path.read_bytes)
         return _range(request, data, "audio/wav")
 
@@ -462,7 +462,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     async def studio_art_upload(package_id: str, letter: str,
                                 request: Request) -> dict[str, Any]:
         data = await request.body()
-        saved: dict[str, Any] = guarded(lambda: studio.save_art(package_id, letter, data))
+        saved: dict[str, Any] = await asyncio.to_thread(
+            guarded, lambda: studio.save_art(package_id, letter, data))
         return saved
 
     @app.post("/api/studio/thumbnails/{package_id}/import",
@@ -515,7 +516,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     @app.put("/api/studio/art-library/{package_id}", dependencies=[Depends(require_token)])
     async def studio_library_upload(package_id: str, request: Request) -> dict[str, Any]:
         data = await request.body()
-        added: dict[str, Any] = guarded(lambda: studio.add_to_library(package_id, data))
+        added: dict[str, Any] = await asyncio.to_thread(
+            guarded, lambda: studio.add_to_library(package_id, data))
         return added
 
     @app.post("/api/studio/approvals/{case_id}/changes/swap-art",
@@ -541,8 +543,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.post("/api/studio/thumbnails/{package_id}/reuse", dependencies=[Depends(require_token)])
     async def studio_reuse_art(package_id: str, body: ReuseArtBody) -> dict[str, Any]:
-        result: dict[str, Any] = guarded(lambda: studio.reuse_art(package_id,
-                                                                  body.from_package_id))
+        result: dict[str, Any] = await asyncio.to_thread(
+            guarded, lambda: studio.reuse_art(package_id, body.from_package_id))
         return result
 
     @app.post("/api/studio/approvals/{case_id}/reject", dependencies=[Depends(require_token)])

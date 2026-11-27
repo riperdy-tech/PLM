@@ -265,6 +265,44 @@ def test_step_2_controls_show_when_a_reopened_package_has_nothing_running(
     assert studio.project(2)["art_waiting"] is False
 
 
+def test_studio_actions_read_holds_and_runs_off_the_event_loop(tmp_path: Path) -> None:
+    """Review 2026-11-26 #20: the async actions did their DB / P6 reads on the event
+    loop, so a slow source froze every poll and the video stream."""
+    import threading
+
+    other_run = {**APPROVAL_HOLD, "pipeline": {"run_state": "HELD",
+                                               "workflow_id": "pipeline.other"}}
+    studio, _ = _project_studio(tmp_path, [ART_HOLD, other_run])
+    on_loop: list[str] = []
+    holds, runs = studio.open_holds, studio.store.runs
+
+    def watched(name: str, read: Any) -> Any:
+        def call(*args: Any) -> Any:
+            if threading.current_thread() is threading.main_thread():
+                on_loop.append(name)
+            return read(*args)
+        return call
+
+    studio.open_holds = watched("holds", holds)
+    studio.store.runs = watched("runs", runs)
+    studio.package = watched("package", studio.package)
+
+    async def cancel(workflow_id: str, reason: str) -> None:
+        return None
+
+    studio.cancel = cancel
+
+    async def run() -> None:
+        await studio.replace_project_songs(2, ["cand_1"], "")
+        await studio.reject("c-ok")
+        await studio.cancel_project(2)
+        with pytest.raises(ActionRefused):
+            await studio.retry_hold("c-art")
+
+    asyncio.run(run())
+    assert on_loop == []
+
+
 def test_start_takes_a_length_choice(tmp_path: Path) -> None:
     studio, _ = _studio(tmp_path, [])
     (tmp_path / "suno").mkdir()
