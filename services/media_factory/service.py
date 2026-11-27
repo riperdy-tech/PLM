@@ -198,6 +198,16 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:
+        # The package id does not include the visual world: the same songs asked for in
+        # another world would otherwise replay the stored package with the old one.
+        stored_world = (replay.package.render_report.get("variation") or {}).get(
+            "visual_world")
+        if stored_world is not None and stored_world != request.visual_profile:
+            raise MediaAssemblyError(
+                "package_visual_profile_conflict",
+                f"{replay.package.media_package_id} was assembled in the visual world "
+                f"{stored_world!r}, not {request.visual_profile!r}; the same songs cannot "
+                "be packaged again in another world", ["visual_profile"]) from None
         _write_art_job(replay.package, request, thumbnail_art_inbox)
         return replay.package
     except Exception as exc:

@@ -12,6 +12,7 @@ import pytest
 from media_factory.api.schemas import AssemblePackageRequest
 from media_factory.domain.enums import PackageStatus, RenderJobStatus
 from media_factory.domain.models import MediaPackage
+from media_factory.errors import MediaAssemblyError
 from media_factory.service import assemble_and_persist
 from media_factory.storage.repositories import get_media_package_by_id, get_render_job
 from plm_platform.clock import FixedClock
@@ -57,6 +58,17 @@ def _assemble(factory: Callable[[], Session], inbox: Path | None,
             worker_id_factory=lambda: "w1", thumbnail_art_inbox=inbox)
         session.commit()
     return pkg, store
+
+
+def test_a_replay_with_another_visual_world_is_refused(
+        factory: Callable[[], Session]) -> None:
+    """The package id does not include the visual world, so the same songs asked for
+    in another world replayed the stored package with the old one, silently."""
+    pkg, _ = _assemble(factory, None)
+    again, _ = _assemble(factory, None)
+    assert again.media_package_id == pkg.media_package_id
+    with pytest.raises(MediaAssemblyError, match="package_visual_profile_conflict"):
+        _assemble(factory, None, visual_profile="blueprint_hall")
 
 
 def test_a_failed_art_job_write_does_not_strand_the_render_claim(
