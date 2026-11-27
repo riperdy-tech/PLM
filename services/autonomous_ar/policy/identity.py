@@ -40,12 +40,12 @@ class BrandIdentity:
     genres: frozenset[str]
     allow_unset_genre: bool
     excluded_vocal_modes: frozenset[str]
-    languages: frozenset[str] = frozenset()
-    """Admitted languages besides unset (review #43); empty: the language is not checked."""
+    excluded_languages: frozenset[str] = frozenset()
+    """Spoken languages an arm may not carry (review #43); empty: not checked."""
 
     def admits(self, dims: ArmDimensions) -> bool:
-        """In identity: a focus use case, a focus (or unset) genre, not excluded vocals and
-        an admitted (or unset) language.
+        """In identity: a focus use case, a focus (or unset) genre, and neither excluded
+        vocals nor an excluded (spoken) language.
 
         An arm whose genre is one of the identity's own genres may leave its use case
         unset (its genre already names the use); an unset genre needs the use case.
@@ -62,8 +62,7 @@ class BrandIdentity:
                 return False
         elif genre_unset:
             return False
-        if (self.languages and dims.language is not None and dims.language not in _UNSET
-                and dims.language not in self.languages):
+        if dims.language in self.excluded_languages:
             return False
         return dims.vocal_mode not in self.excluded_vocal_modes
 
@@ -86,7 +85,7 @@ def load_brand_identities(path: Path = IDENTITY_FILE) -> dict[str, BrandIdentity
             genres=frozenset(str(g) for g in spec["genres"]),
             allow_unset_genre=bool(spec["allow_unset_genre"]),
             excluded_vocal_modes=frozenset(str(v) for v in spec["excluded_vocal_modes"]),
-            languages=frozenset(str(v) for v in spec.get("languages", ())),
+            excluded_languages=frozenset(str(v) for v in spec.get("excluded_languages", ())),
         )
     return identities
 
