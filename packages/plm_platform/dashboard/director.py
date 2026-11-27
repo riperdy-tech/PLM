@@ -478,8 +478,13 @@ SONGS_SYSTEM: Final = (
     "style of\" or \"like <artist>\", no URLs; at most 1000 characters on one line of "
     "comma-separated style phrases. Make the songs of this video clearly distinct from "
     "each other (lead instrument, groove, texture, arrangement) while staying inside the "
-    "video's sub-style, and clearly different from the recent videos' prompts. Answer "
-    "only with the requested JSON.")
+    "video's sub-style, and clearly different from the recent videos' prompts. The tool "
+    "weighs the first words most: open every text with what makes that song different "
+    "(its lead, texture, groove or scene), never with the genre, mood, tempo or key, and "
+    "do not start two songs with the same words; put genre, mood, BPM, key and "
+    "\"instrumental, no vocals\" later in the text. Name a mood only as one of the "
+    "allowed words followed by \"mood\" (never \"study mood\"). Answer only with the "
+    "requested JSON.")
 
 STYLE_SYSTEM: Final = (
     "You advise the owner of a YouTube channel of instrumental deep-focus electronic "
