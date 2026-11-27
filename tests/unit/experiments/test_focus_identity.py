@@ -251,8 +251,40 @@ def test_a_sub_style_package_keeps_its_sound_through_a_top_up() -> None:
         assert arrangement["subgenre"] == "organic_electronic"
         assert arrangement["lead_instrument"] in organic_leads
         assert spec.creative_latitude["energy"] in ("low", "medium")
-        assert spec.bounded_preferences.bpm == 96
+        assert 90 <= spec.bounded_preferences.bpm <= 102  # the sub-style's own range
         assert spec.vocal_spec == {"vocal_mode": "instrumental", "vocal_gender": "none"}
+
+
+def test_tracks_vary_their_tempo_inside_the_genome_range_reproducibly() -> None:
+    """Review 2026-11-26: every track got the template's target BPM, so a whole video
+    (and the channel) sat on one tempo. The first track keeps the target; the others
+    take seeded tempos inside the genome's range, the same on every rebuild. (A manual
+    supply run is control-only: no treatment tests tempo.)"""
+    directive = _focus({"subgenre": "organic_electronic"})
+    genome = build_genome_from_directive(directive)
+    exp = design_experiment(directive, genome, created_at=FIXED_NOW, control_only=True)
+    exp = promote_to_validated(exp, validate_experiment(exp, genome))
+    package = materialize_package(exp, exp.treatments[0], genome, created_at=FIXED_NOW)
+    again = materialize_package(exp, exp.treatments[0], genome, created_at=FIXED_NOW)
+    bpms = [spec.bounded_preferences.bpm for spec in package.track_specs]
+    assert bpms == [spec.bounded_preferences.bpm for spec in again.track_specs]
+    assert bpms[0] == genome.bpm.target_bpm == 96
+    assert all(genome.bpm.min_bpm <= bpm <= genome.bpm.max_bpm for bpm in bpms)
+    assert len(set(bpms)) >= 3
+    _, extra = extend_package(package, count=2, idempotency_key="k", created_at=FIXED_NOW)
+    assert all(genome.bpm.min_bpm <= s.bounded_preferences.bpm <= genome.bpm.max_bpm
+               for s in extra)
+
+
+def test_a_bpm_experiment_keeps_one_tempo_per_package() -> None:
+    """When tempo is what the experiment tests, a package keeps its treatment's tempo."""
+    directive = _focus({"subgenre": "organic_electronic"}, quantity=3)
+    genome = build_genome_from_directive(directive)
+    exp = design_experiment(directive, genome, target_variable="bpm", created_at=FIXED_NOW)
+    exp = promote_to_validated(exp, validate_experiment(exp, genome))
+    for treatment in exp.treatments:
+        package = materialize_package(exp, treatment, genome, created_at=FIXED_NOW)
+        assert len({spec.bounded_preferences.bpm for spec in package.track_specs}) == 1
 
 
 @pytest.mark.parametrize("sub_style", SUB_STYLES)

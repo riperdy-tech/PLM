@@ -36,8 +36,12 @@ def test_album_tracks_have_distinct_arrangement_briefs_and_provider_prompts() ->
     for direction, prompt in zip(directions, prompts, strict=False):
         assert direction["melodic_motion"] in prompt.prompt
         assert direction["rhythmic_feel"] in prompt.prompt
-    # The experiment's controlled factors are unchanged across all tracks.
-    assert {spec.bounded_preferences.bpm for spec in package.track_specs} == {80}
+    # The experiment's controlled factors are unchanged across all tracks. Tempo is not
+    # tested by this treatment, so it varies inside the genome's range (review
+    # 2026-11-26); the first track keeps the target.
+    bpms = [spec.bounded_preferences.bpm for spec in package.track_specs]
+    assert bpms[0] == 80
+    assert all(genome.bpm.min_bpm <= bpm <= genome.bpm.max_bpm for bpm in bpms)
     assert {spec.hard_constraints.genre for spec in package.track_specs} == {"rnb"}
 
 

@@ -71,6 +71,18 @@ def derived_bpm(bpm: BpmRange) -> int:
     return round((bpm.min_bpm + bpm.max_bpm) / 2)
 
 
+def track_bpm(bpm: BpmRange, package_id: str, position: int, *, fixed: bool) -> int:
+    """One track's tempo (review 2026-11-26: every track used to get the target, so the
+    whole channel sat near one tempo). The first track keeps :func:`derived_bpm`; the
+    others take a stable hash of (package, position) inside the genome's range. ``fixed``
+    (a treatment of the experiment varies ``bpm``): every track keeps the treatment's."""
+    target = derived_bpm(bpm)
+    if position == 0 or fixed or bpm.min_bpm == bpm.max_bpm:
+        return target
+    digest = hashlib.sha256(f"{package_id}|bpm|{position}".encode()).digest()
+    return bpm.min_bpm + int.from_bytes(digest[:4], "big") % (bpm.max_bpm - bpm.min_bpm + 1)
+
+
 def derived_duration_seconds(duration: DurationRange) -> int:
     """R5 rule: the genome's target duration, else the rounded midpoint of its range."""
     if duration.target_seconds is not None:
@@ -169,6 +181,9 @@ def materialize_package(
     # What this experiment tests stays as the treatment set it; the palette never varies it.
     held = sorted(v.name for v in experiment.variables
                   if v.variable_class == VariableClass.EXPERIMENTAL)
+    # Tempo is held only when a treatment actually tests it (a control-only run, the
+    # manual-supply case, tests nothing, so its tracks vary their tempo).
+    tempo_fixed = any("bpm" in t.genome_delta for t in experiment.treatments)
     track_specs: list[TrackSpec] = []
     track_spec_ids: list[str] = []
 
@@ -187,8 +202,11 @@ def materialize_package(
             subgenre=effective_genome.subgenre, held=held,
         )
         direction["held"] = held
+        # the range rides on the arrangement so a top-up varies its tempo the same way
+        direction["bpm_range"] = [effective_genome.bpm.min_bpm, effective_genome.bpm.max_bpm,
+                                  derived_bpm(effective_genome.bpm), tempo_fixed]
         bounded_preferences = BoundedPreferences(
-            bpm=derived_bpm(effective_genome.bpm),
+            bpm=track_bpm(effective_genome.bpm, pkg_id, i, fixed=tempo_fixed),
             key_profile=direction.get("key_profile", effective_genome.key_profile),
             mood=tuple(effective_genome.mood),
             use_case=tuple(effective_genome.use_case),
@@ -351,17 +369,26 @@ def extend_package(
     genre = template.hard_constraints.genre
     subgenre = first.get("subgenre")
 
+    span = first.get("bpm_range")
+    tempo = (BpmRange(min_bpm=span[0], max_bpm=span[1], target_bpm=span[2])
+             if isinstance(span, list) and len(span) == 4 else None)
+
     def extension_spec(j: int) -> TrackSpec:
+        position = len(package.track_specs) + used + j
         direction = arrangement_direction(
-            package.package_id, len(package.track_specs) + used + j, base, genre=genre,
+            package.package_id, position, base, genre=genre,
             subgenre=subgenre, held=held)
         direction["held"] = held
+        if tempo is not None:
+            direction["bpm_range"] = list(span)
         return template.model_copy(update={
             "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),
             "track_role": TrackRole.SECONDARY,
             "bounded_preferences": template.bounded_preferences.model_copy(update={
                 "key_profile": direction.get(
-                    "key_profile", template.bounded_preferences.key_profile)}),
+                    "key_profile", template.bounded_preferences.key_profile),
+                "bpm": (track_bpm(tempo, package.package_id, position, fixed=bool(span[3]))
+                        if tempo is not None else template.bounded_preferences.bpm)}),
             "creative_latitude": {
                 **template.creative_latitude, "track_arrangement": direction,
                 "energy": direction.get("energy", template.creative_latitude.get("energy")),
