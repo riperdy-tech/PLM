@@ -13,10 +13,10 @@ the ruling fails long before anyone pushes.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 from plm_platform.migration_safety import DISPOSABLE_DATABASE_NAME
 
 from tests.support import REPO_ROOT
@@ -36,7 +36,7 @@ def _index_of(commands: list[str], needle: str) -> int:
 def workflow() -> dict[str, Any]:
     parsed = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert isinstance(parsed, dict)
-    return parsed
+    return cast(dict[str, Any], parsed)
 
 
 @pytest.fixture(scope="module")
@@ -46,12 +46,13 @@ def job(workflow: dict[str, Any]) -> dict[str, Any]:
         "the workflow declares the PR gate (ci), the Windows unit tests and the R5 "
         "full-chain gate (full-chain)"
     )
-    return jobs["ci"]
+    return cast(dict[str, Any], jobs["ci"])
 
 
 def test_triggers_cover_push_and_pull_request(workflow: dict[str, Any]) -> None:
     # YAML 1.1 parses a bare `on:` key as boolean True; accept both spellings.
-    triggers = workflow.get("on", workflow.get(True))
+    any_keys: dict[Any, Any] = workflow
+    triggers = workflow.get("on", any_keys.get(True))
     assert isinstance(triggers, dict)
     assert set(triggers) == {"push", "pull_request"}
 
@@ -86,6 +87,7 @@ def test_gate_commands_present_and_in_order(job: dict[str, Any]) -> None:
     assert "ruff check ." in joined
     assert "mypy packages services" in joined
     assert "mypy --explicit-package-bases scripts" in joined
+    assert "mypy --explicit-package-bases tests" in joined
     assert 'pytest -q -m "not integration"' in joined
     assert "docker compose up -d --wait" in joined
     assert joined.index("plm migrate") < joined.index("pytest -q -m integration"), (

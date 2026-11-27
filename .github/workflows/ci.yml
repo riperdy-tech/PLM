@@ -65,6 +65,13 @@ jobs:
           MYPYPATH: "packages:services:."
         run: mypy --explicit-package-bases scripts
 
+      # tests/ imports `tests.*` from the repo root and services by their top-level
+      # names, so it is checked the same way as scripts/.
+      - name: Type-check tests (mypy)
+        env:
+          MYPYPATH: "packages:services:."
+        run: mypy --explicit-package-bases tests
+
       # Hermetic: no services, no .env (the unit tests inject their settings).
       - name: Unit and contract tests
         run: pytest -q -m "not integration"

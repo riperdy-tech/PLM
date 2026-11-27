@@ -71,6 +71,7 @@ files = ["packages", "services"]
 mypy_path = ["$MYPY_CONFIG_FILE_DIR/packages", "$MYPY_CONFIG_FILE_DIR/services"]
 # scripts/ is checked separately (it imports `scripts.*` and `tests.*` from the repo
 # root): MYPYPATH="packages:services:." mypy --explicit-package-bases scripts (CI).
+# tests/ is checked the same way: mypy --explicit-package-bases tests (CI).
 
 [[tool.mypy.overrides]]
 # Offline audio probes written before scripts/ was type-checked: their Optional
