@@ -27,6 +27,15 @@ listening/embedding QA remains necessary.
   pulsing, octave), takes its melody from :data:`_FOCUS_MELODIES` instead of the shared
   patterns, and carries :data:`FOCUS_MIX` (``mix_balance``) and :data:`FOCUS_AVOID`
   (``avoid``, which P4 adds to the negative prompt).
+* **Each focus song has its own character (v9, owner 2026-11-27).** The real sheets all
+  opened with the same seven terms and one mood per video. A focus track now carries a
+  ``track_mood`` (from :data:`FOCUS_MOODS`, every other track the video's own mood, the
+  rest the other moods in a per-video order), an ``energy_shape``, a ``texture`` (the
+  sub-style's own atmosphere phrases) and a ``scene``; ``album_moods`` keeps the video's
+  moods so a top-up rebuilds the same order. No two tracks of one package share a
+  (lead, texture, energy shape) combination. Each sub-style has wider lead, bass, drum,
+  pad, production and texture sets of its own, so videos of different sub-styles (P3
+  picks a fresh one per video) share no texture. P4 opens the prompt with this character.
 """
 from __future__ import annotations
 
@@ -34,7 +43,7 @@ import hashlib
 from collections.abc import Collection, Sequence
 from typing import Any, Final
 
-ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v8"
+ARRANGEMENT_VERSION: Final[str] = "p3-album-contrast-v9"
 _PATTERNS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("syncopated offbeat accents", "short ascending question phrases", "sparse sustained voicings", "minimal opening, gradual layers"),
     ("straight laid-back pulse", "long descending legato lines", "moving inner voices", "melody-first opening, sparse ending"),
@@ -60,6 +69,20 @@ _FOCUS_MELODIES: Final[tuple[str, ...]] = (
     "few notes over sustained chords", "quiet fragments that fade into the pads",
 )
 """Melodic motion for focus tracks: present but never the thing the listener notices."""
+
+FOCUS_MOODS: Final[tuple[str, ...]] = ("focused", "calm", "dreamy", "hopeful", "uplifting")
+"""The focus identity's moods (ADR-0044; the templates' ``mood_limits``)."""
+_ENERGY_SHAPES: Final[tuple[str, ...]] = (
+    "slow gentle build", "steady even flow", "gentle swell and fade",
+    "soft rise then settle", "slow breathing dynamics", "gradual unfolding layers",
+)
+"""How a focus track's energy moves: always gentle, never a drop or a big lift."""
+_SCENES: Final[tuple[str, ...]] = (
+    "late night desk glow", "early morning light", "quiet library hours",
+    "city lights at dusk", "snow outside the window", "night train window",
+    "open sky calm", "soft sunrise haze", "warm lamp light", "rooftop at blue hour",
+)
+"""A scene phrase per focus track: an everyday place or time to work in."""
 
 _NON_MELODIC: Final[tuple[str, ...]] = (
     "crackle", "hiss", "noise", "rain", "ambience", "field_recording", "room_tone",
@@ -199,6 +222,9 @@ _GENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         "groove": ("steady spacious groove", "straight laid-back pulse",
                    "half-time with silent gaps", "restrained pulse with brief fills",
                    "soft shuffled pulse"),
+        "texture": ("soft studio air", "warm analog hum", "gentle shimmer",
+                    "quiet desk ambience", "slow reverb tails", "faint tape hiss",
+                    "calm room tone"),
     },
 }
 """Per-genre values each track rotates through (v4: lofi; v5: all seven template genres;
@@ -207,83 +233,134 @@ v6: focus_electronic)."""
 _SUBGENRE_PALETTES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "future_garage_focus": {
         "lead": ("pitched_synth_chops", "airy_synth_lead", "felt_piano", "muted_synth_pluck",
-                 "echo_electric_guitar", "soft_bell_synth"),
-        "bass": ("soft_round_sub_bass", "warm_sub_bass", "filtered_sub_bass"),
+                 "echo_electric_guitar", "soft_bell_synth", "warm_synth_keys",
+                 "soft_detuned_synth"),
+        "bass": ("soft_round_sub_bass", "warm_sub_bass", "filtered_sub_bass", "deep_sine_bass"),
         "drums": ("shuffled_soft_garage_drums", "swung_soft_garage_drums",
-                  "sparse_garage_percussion", ""),
+                  "sparse_garage_percussion", "soft_two_step_drums", ""),
         "color": ("airy_synth_pad", "granular_pad", "tape_delay_wash", "soft_string_pad",
-                  "filtered_pad", "distant_room_tone"),
+                  "filtered_pad", "distant_room_tone", "foggy_chord_pad"),
+        "production_style": ("deep_reverb_spacious", "hazy_wide", "dark_spacious",
+                             "muted_warm"),
+        "texture": ("night rain hush", "distant city hum", "soft tape hiss",
+                    "foggy reverb tails", "muffled street ambience", "wet pavement shimmer",
+                    "late night air"),
     },
     "soft_cyber_electronica": {
         "lead": ("glassy_fm_synth", "digital_bell_lead", "soft_arp_synth", "crystal_pluck_synth",
-                 "muted_synth_pluck", "fm_electric_piano"),
-        "bass": ("filtered_sub_bass", "round_synth_bass", "warm_sub_bass"),
+                 "muted_synth_pluck", "fm_electric_piano", "soft_square_lead",
+                 "glass_mallet_synth"),
+        "bass": ("filtered_sub_bass", "round_synth_bass", "warm_sub_bass", "soft_fm_bass"),
         "drums": ("soft_glitch_percussion", "minimal_electronic_drums", "soft_electronic_drums",
-                  ""),
+                  "clicky_micro_beats", ""),
         "color": ("digital_pad", "granular_pad", "shimmer_pad", "soft_noise_bed",
-                  "bitcrushed_texture", "glass_pad"),
+                  "bitcrushed_texture", "glass_pad", "data_stream_pad"),
+        "production_style": ("crisp_digital", "clean_modern", "glossy_minimal", "precise_wide"),
+        "texture": ("soft data hum", "tiny digital clicks", "glassy shimmer", "server room air",
+                    "fine bitcrushed sparkle", "cool screen glow", "gentle glitch dust"),
     },
     "minimal_pulse": {
         "lead": ("sequenced_synth_pluck", "muted_synth_pluck", "marimba_synth", "soft_bell_synth",
-                 "felt_piano", "filtered_arp_synth"),
-        "bass": ("filtered_sub_bass", "warm_sub_bass", "round_synth_bass"),
+                 "felt_piano", "filtered_arp_synth", "soft_mallet_synth", "sine_pluck"),
+        "bass": ("filtered_sub_bass", "warm_sub_bass", "round_synth_bass", "soft_sine_bass"),
         "drums": ("muted_kick_pulse", "minimal_electronic_drums", "soft_shaker_perc",
-                  "soft_rimshot_pulse"),
+                  "soft_rimshot_pulse", "soft_clicks_and_kick"),
         "color": ("filtered_pad", "soft_analog_pad", "dub_chord_echo", "tape_hiss",
-                  "granular_pad", "digital_pad"),
+                  "granular_pad", "digital_pad", "thin_string_pad"),
+        "production_style": ("minimalist", "clean_modern", "dry_precise", "analog_warm"),
+        "texture": ("steady ticking clock", "soft metronomic clicks", "quiet room tone",
+                    "faint dub echo", "dry analog hum", "subtle filter movement",
+                    "pencil on paper"),
     },
     "ambient_breakbeat": {
         "lead": ("echo_electric_guitar", "felt_piano", "soft_analog_lead",
-                 "ambient_electric_guitar_swells", "muted_synth_pluck", "vibraphone"),
-        "bass": ("soft_round_sub_bass", "warm_sub_bass", "round_synth_bass"),
+                 "ambient_electric_guitar_swells", "muted_synth_pluck", "vibraphone",
+                 "soft_rhodes", "glassy_guitar_harmonics"),
+        "bass": ("soft_round_sub_bass", "warm_sub_bass", "round_synth_bass",
+                 "muted_electric_bass"),
         "drums": ("soft_breakbeat_drums", "brushed_breakbeat_drums", "filtered_breakbeat_drums",
-                  ""),
+                  "lazy_soft_breaks", ""),
         "color": ("ambient_synth_pad", "shimmer_pad", "granular_pad", "soft_string_pad",
-                  "tape_delay_wash", "airy_synth_pad"),
+                  "tape_delay_wash", "airy_synth_pad", "slow_chorus_pad"),
+        "production_style": ("warm_spacious", "analog_warm", "dusty_wide", "clean_modern"),
+        "texture": ("passing train rumble", "wind through open windows", "distant traffic wash",
+                    "soft tape flutter", "warm air movement", "faraway station echoes",
+                    "gentle motion blur"),
     },
     "downtempo_synth": {
         "lead": ("analog_poly_synth", "fm_electric_piano", "soft_analog_lead", "felt_piano",
-                 "chorused_electric_guitar", "muted_synth_pluck"),
-        "bass": ("round_synth_bass", "fretless_electric_bass", "warm_sub_bass"),
-        "drums": ("downtempo_drums", "soft_electronic_drums", "brushed_drums", ""),
+                 "chorused_electric_guitar", "muted_synth_pluck", "warm_brass_synth",
+                 "soft_saw_lead"),
+        "bass": ("round_synth_bass", "fretless_electric_bass", "warm_sub_bass",
+                 "soft_analog_bass"),
+        "drums": ("downtempo_drums", "soft_electronic_drums", "brushed_drums", "lazy_soft_beat",
+                  ""),
         "color": ("string_pad", "soft_analog_pad", "chorus_pad", "tape_hiss", "granular_pad",
-                  "warm_string_pad"),
+                  "warm_string_pad", "slow_sweep_pad"),
+        "production_style": ("analog_warm", "tape_warm", "soft_saturated", "smooth_wide"),
+        "texture": ("fireplace warmth", "soft wind outside", "warm tape saturation",
+                    "wooden cabin room tone", "slow analog drift", "frosted window hush",
+                    "low amber glow"),
     },
     "deep_work_chillstep": {
         "lead": ("felt_piano", "lush_synth_lead", "soft_bell_synth",
-                 "ambient_electric_guitar_swells", "airy_synth_lead", "celesta"),
-        "bass": ("smooth_sub_bass", "warm_sub_bass", "round_synth_bass"),
+                 "ambient_electric_guitar_swells", "airy_synth_lead", "celesta",
+                 "soft_pluck_synth", "warm_glass_keys"),
+        "bass": ("smooth_sub_bass", "warm_sub_bass", "round_synth_bass", "deep_sine_bass"),
         "drums": ("half_time_soft_drums", "half_time_brushed_drums", "minimal_electronic_drums",
-                  ""),
+                  "sparse_half_time_kit", ""),
         "color": ("lush_synth_pad", "shimmer_pad", "soft_string_pad", "granular_pad",
-                  "airy_synth_pad", "glass_pad"),
+                  "airy_synth_pad", "glass_pad", "wide_reverb_pad"),
+        "production_style": ("smooth_wide", "deep_reverb_spacious", "polished_cinematic",
+                             "soft_wide"),
+        "texture": ("page turns in a quiet hall", "deep reverb haze", "soft library air",
+                    "distant thunder roll", "slow sub swells", "dim lamp hum",
+                    "high ceiling echoes"),
     },
     "restrained_retro_future": {
         "lead": ("warm_analog_arpeggio", "analog_poly_synth", "fm_electric_piano",
-                 "soft_analog_lead", "chorused_electric_guitar", "arpeggiated_pluck_synth"),
-        "bass": ("soft_analog_bass", "soft_synth_bass", "round_synth_bass"),
-        "drums": ("soft_gated_drums", "soft_electronic_drums", "linn_drum_machine", ""),
+                 "soft_analog_lead", "chorused_electric_guitar", "arpeggiated_pluck_synth",
+                 "vintage_string_synth", "glowing_poly_keys"),
+        "bass": ("soft_analog_bass", "soft_synth_bass", "round_synth_bass", "warm_sub_bass"),
+        "drums": ("soft_gated_drums", "soft_electronic_drums", "linn_drum_machine",
+                  "soft_drum_machine", ""),
         "color": ("chorus_pad", "lush_string_pad", "tape_hiss", "bell_synth", "soft_analog_pad",
-                  "slow_filter_sweep_pad"),
+                  "slow_filter_sweep_pad", "vintage_string_pad"),
+        "production_style": ("analog_warm", "retro_tape", "soft_chorused", "clean_modern"),
+        "texture": ("warm cassette hiss", "crt monitor hum", "night highway glow",
+                    "soft chorus shimmer", "old computer room air", "faded vhs warmth",
+                    "distant skyline hum"),
     },
     "organic_electronic": {
-        "lead": ("kalimba", "marimba", "nylon_guitar", "soft_flute", "handpan", "felt_piano"),
-        "bass": ("warm_sub_bass", "upright_bass", "round_synth_bass"),
-        "drums": ("hand_percussion", "soft_frame_drum_kit", "shaker_and_rim_perc", ""),
+        "lead": ("kalimba", "marimba", "nylon_guitar", "soft_flute", "handpan", "felt_piano",
+                 "wooden_mallet_synth", "acoustic_guitar_harmonics"),
+        "bass": ("warm_sub_bass", "upright_bass", "round_synth_bass", "soft_acoustic_bass"),
+        "drums": ("hand_percussion", "soft_frame_drum_kit", "shaker_and_rim_perc",
+                  "brushed_wood_perc", ""),
         "color": ("granular_pad", "wooden_click_texture", "soft_string_pad", "airy_synth_pad",
-                  "glass_pad", "soft_analog_pad"),
+                  "glass_pad", "soft_analog_pad", "warm_reed_pad"),
+        "production_style": ("organic_warm", "natural_airy", "earthy_clean", "warm_spacious"),
+        "texture": ("morning birdsong far away", "leaves in a soft breeze", "wooden room warmth",
+                    "flowing stream hush", "sunlit dust in the air", "soft footsteps on wood",
+                    "garden morning air"),
     },
     "piano_synth_concentration": {
         "lead": ("felt_piano", "upright_piano", "soft_synth_lead", "celesta",
-                 "felt_piano_with_delay", "music_box_synth"),
-        "bass": ("warm_sub_bass", "soft_synth_bass", "bowed_double_bass"),
-        "drums": ("minimal_electronic_drums", "", "soft_brushed_kit", ""),
+                 "felt_piano_with_delay", "music_box_synth", "soft_grand_piano",
+                 "warm_electric_piano"),
+        "bass": ("warm_sub_bass", "soft_synth_bass", "bowed_double_bass", "soft_cello_drone"),
+        "drums": ("minimal_electronic_drums", "", "soft_brushed_kit", "", "gentle_kick_pulse"),
         "color": ("soft_synth_pad", "soft_string_pad", "tape_hiss", "granular_pad",
-                  "shimmer_pad", "felt_piano_resonance"),
+                  "shimmer_pad", "felt_piano_resonance", "slow_string_swells"),
+        "production_style": ("intimate_clean", "close_warm", "soft_room", "clean_modern"),
+        "texture": ("piano hammer softness", "quiet room close up", "rain against the window",
+                    "soft pedal resonance", "gentle tape warmth", "midnight lamp glow",
+                    "cool night air"),
     },
 }
-"""Sub-style instrument sets (v6, ADR-0044 decision 1): each replaces its genre palette's
-lead, bass, drums and colour; the genre palette's other dimensions still rotate."""
+"""Sub-style sets (v6, ADR-0044 decision 1; v9 wider, with production and texture): each
+replaces its genre palette's lead, bass, drums, colour, production and texture; the genre
+palette's other dimensions still rotate."""
 
 # (step, lag) per dimension: a different stride and a per-cycle shift each, so no two
 # dimensions move in lockstep and a lead never always meets the same bass or key.
@@ -291,6 +368,7 @@ _ROTATION: Final[dict[str, tuple[int, int]]] = {
     "lead": (1, 0), "bass": (2, 6), "drums": (3, 6), "color": (1, 3),
     "key_profile": (5, 0), "production_style": (1, 5), "hook_profile": (2, 5),
     "song_structure": (2, 7), "energy": (1, 7), "groove": (2, 3), "melody": (1, 4),
+    "texture": (3, 0), "energy_shape": (1, 5), "scene": (3, 0),
 }
 
 STYLE_DIMENSIONS: Final[tuple[str, ...]] = (
@@ -320,14 +398,52 @@ def _is_drum(instrument: str) -> bool:
     return any(fragment in instrument.lower() for fragment in _DRUMS)
 
 
-def _pick(values: tuple[str, ...], dimension: str, turn: int) -> str:
+def _index(dimension: str, turn: int, size: int) -> int:
     step, lag = _ROTATION[dimension]
-    return values[(step * turn + (turn // lag if lag else 0)) % len(values)]
+    return (step * turn + (turn // lag if lag else 0)) % size
+
+
+def _pick(values: tuple[str, ...], dimension: str, turn: int) -> str:
+    return values[_index(dimension, turn, len(values))]
+
+
+def _focus_character(palette: dict[str, tuple[str, ...]], offset: int,
+                     position: int) -> tuple[str, str]:
+    """The (texture, energy shape) of the track at ``position``: its rotation's values,
+    moved on to the next unused pair when an earlier track of the package already has
+    the same lead, texture and energy shape."""
+    textures, shapes = palette["texture"], _ENERGY_SHAPES
+    used: set[tuple[str, str, str]] = set()
+    pair = ("", "")
+    for earlier in range(position + 1):
+        turn = earlier + offset
+        lead = _pick(palette["lead"], "lead", turn)
+        first_texture = _index("texture", turn, len(textures))
+        first_shape = _index("energy_shape", turn, len(shapes))
+        for bump in range(len(textures) * len(shapes)):
+            pair = (textures[(first_texture + bump // len(shapes)) % len(textures)],
+                    shapes[(first_shape + bump) % len(shapes)])
+            if (lead, *pair) not in used:
+                break
+        used.add((lead, *pair))
+    return pair
+
+
+def _focus_mood(package_id: str, position: int, moods: Sequence[str]) -> str:
+    """Every other track takes the video's own mood; the others take the remaining focus
+    moods in an order seeded by the package, so a video is not one mood throughout."""
+    primary = next((mood for mood in moods if mood in FOCUS_MOODS), FOCUS_MOODS[0])
+    if position % 2 == 0:
+        return primary
+    others = sorted((mood for mood in FOCUS_MOODS if mood != primary),
+                    key=lambda mood: hashlib.sha256(f"{package_id}|mood|{mood}".encode()).digest())
+    return others[(position // 2) % len(others)]
 
 
 def arrangement_direction(
     package_id: str, position: int, instrumentation: Sequence[str],
     *, genre: str | None = None, subgenre: str | None = None, held: Collection[str] = (),
+    moods: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Return reproducible, index-distinct track instructions from declared instruments.
 
@@ -335,6 +451,8 @@ def arrangement_direction(
     its ``album_instruments`` (to rebuild extensions from) and every
     :data:`STYLE_DIMENSIONS` value not in ``held``, for the builder to apply. A
     ``subgenre`` in :data:`_SUBGENRE_PALETTES` swaps in its instruments and is recorded.
+    A focus track also gets its own character (v9): ``track_mood`` (from ``moods``, the
+    video's), ``energy_shape``, ``texture`` and ``scene``, with ``album_moods``.
     """
     if position < 0:
         raise ValueError("track position must be nonnegative")
@@ -372,6 +490,12 @@ def arrangement_direction(
         direction["melodic_motion"] = _pick(_FOCUS_MELODIES, "melody", turn)
         direction["mix_balance"] = FOCUS_MIX
         direction["avoid"] = FOCUS_AVOID
+        # each song its own character (v9)
+        direction["album_moods"] = list(moods)
+        direction["track_mood"] = _focus_mood(package_id, position, moods)
+        direction["texture"], direction["energy_shape"] = _focus_character(
+            palette, offset, position)
+        direction["scene"] = _pick(_SCENES, "scene", turn)
     lead = _pick(palette["lead"], "lead", turn)
     drums = _pick(palette["drums"], "drums", turn)
     ambient = ("song_structure" not in held

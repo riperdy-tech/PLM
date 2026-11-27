@@ -199,7 +199,7 @@ def materialize_package(
         )
         direction = arrangement_direction(
             pkg_id, i, effective_genome.instrumentation_profile, genre=effective_genome.genre,
-            subgenre=effective_genome.subgenre, held=held,
+            subgenre=effective_genome.subgenre, held=held, moods=effective_genome.mood,
         )
         direction["held"] = held
         # the range rides on the arrangement so a top-up varies its tempo the same way
@@ -208,7 +208,9 @@ def materialize_package(
         bounded_preferences = BoundedPreferences(
             bpm=track_bpm(effective_genome.bpm, pkg_id, i, fixed=tempo_fixed),
             key_profile=direction.get("key_profile", effective_genome.key_profile),
-            mood=tuple(effective_genome.mood),
+            # a focus track has its own mood (v9), else the video's
+            mood=((direction["track_mood"],) if "track_mood" in direction
+                  else tuple(effective_genome.mood)),
             use_case=tuple(effective_genome.use_case),
         )
         creative_latitude = {
@@ -368,6 +370,7 @@ def extend_package(
     held = list(first.get("held", []))
     genre = template.hard_constraints.genre
     subgenre = first.get("subgenre")
+    album_moods = list(first.get("album_moods", template.bounded_preferences.mood))
 
     span = first.get("bpm_range")
     tempo = (BpmRange(min_bpm=span[0], max_bpm=span[1], target_bpm=span[2])
@@ -377,7 +380,7 @@ def extend_package(
         position = len(package.track_specs) + used + j
         direction = arrangement_direction(
             package.package_id, position, base, genre=genre,
-            subgenre=subgenre, held=held)
+            subgenre=subgenre, held=held, moods=album_moods)
         direction["held"] = held
         if tempo is not None:
             direction["bpm_range"] = list(span)
@@ -385,6 +388,8 @@ def extend_package(
             "track_spec_id": spec_id("trk", package.package_id, f"ext:{idempotency_key}:{j}"),
             "track_role": TrackRole.SECONDARY,
             "bounded_preferences": template.bounded_preferences.model_copy(update={
+                "mood": ((direction["track_mood"],) if "track_mood" in first
+                         else template.bounded_preferences.mood),
                 "key_profile": direction.get(
                     "key_profile", template.bounded_preferences.key_profile),
                 "bpm": (track_bpm(tempo, package.package_id, position, fixed=bool(span[3]))
