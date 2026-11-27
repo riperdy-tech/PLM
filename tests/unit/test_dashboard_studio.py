@@ -821,3 +821,25 @@ def test_the_review_serves_the_new_video_after_a_remake_and_refuses_a_stale_appr
     assert actions.calls == []
     asyncio.run(studio.approve("c3", {PKG: "b" * 64}))
     assert actions.calls[-1][:2] == ("resume", "c3")
+
+
+def test_a_repeated_start_sends_the_pages_request_id(tmp_path: Path) -> None:
+    """Review 2026-11-26 #14: the page's id of one Start reaches P2 as the cycle's
+    Idempotency-Key, so a repeated click starts no second run."""
+    seen: list[str | None] = []
+
+    async def start(provider: str, subgenre: str | None, avoid: tuple[str, ...],
+                    length: str, request_id: str | None = None) -> dict[str, Any]:
+        seen.append(request_id)
+        return {"workflow_id": "pipeline.d"}
+
+    studio, _ = _studio(tmp_path, [])
+    flow = tmp_path / "flow"
+    flow.mkdir()
+    studio.paths = StudioPaths(music_inbox=flow, art_inbox=tmp_path / "art",
+                               grants_file=None)
+    studio.start = start
+    for _ in range(2):
+        asyncio.run(studio.start_run("flow_music", request_id="page-1-flow_music"))
+    asyncio.run(studio.start_run("flow_music"))
+    assert seen == ["page-1-flow_music", "page-1-flow_music", None]

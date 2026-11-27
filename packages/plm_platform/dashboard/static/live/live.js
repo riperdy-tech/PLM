@@ -634,9 +634,14 @@ function startCard(s) {
   };
   lengthSelect.addEventListener('input', showPreview);
   showPreview();
+  // One id per Start form: a repeated click (or a retry after a lost answer) sends the
+  // same id, and P2 answers with the cycle it already started (review 2026-11-26 #14).
+  const requestId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : `start-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const start = (label, music) => actionButton(`Start with ${label} prompts`, 'btn-ok big',
     () => authedSend('/api/studio/start', 'POST', JSON.stringify({
-      music, subgenre: styleSelect.value || null, length: `${lengthSelect.value.trim()}m` }), 'application/json'),
+      music, subgenre: styleSelect.value || null, length: `${lengthSelect.value.trim()}m`,
+      request_id: `${requestId}-${music}` }), 'application/json'),
     { confirm: () => `Start a new ${lengthSelect.value}-minute video, style: ${styleSelect.selectedOptions[0].textContent}, song prompts for ${label}?`,
       busy: 'Asking P2 for the next video and starting it...' });
   return h('section', { class: 'step' },

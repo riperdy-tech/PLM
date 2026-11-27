@@ -328,7 +328,7 @@ class Studio:
     """Stored bytes by ``(uri, checksum)``, verified."""
     import_art: Callable[[str, Path], dict[str, Any]]
     """P6's importer for one package's folder; raises on refusal."""
-    start: Callable[[str, str | None, tuple[str, ...], str], Any] | None = None
+    start: Callable[..., Any] | None = None
     """Starts a new run (async) whose songs come from the named P4 provider
     (:data:`MUSIC_PROVIDERS`), of the owner's sub-style or P2's pick (``None``);
     ``None`` here: the Start button is refused."""
@@ -1349,10 +1349,12 @@ class Studio:
         return {**answer, "note": entry}
 
     async def start_run(self, music: str, subgenre: str | None = None,
-                        length: str = "90_120m") -> Any:
+                        length: str = "90_120m", request_id: str | None = None) -> Any:
         """Start a run whose song prompts are for ``music`` (``suno`` or ``flow_music``);
         its inbox must be configured, or nobody could hand the songs in. ``subgenre`` is
-        the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick."""
+        the owner's sub-style, one P2 has an arm for; ``None`` lets P2 pick.
+        ``request_id`` is the page's id of this Start (one per form): a repeated click
+        sends the same id, so P2 answers with the first cycle (review 2026-11-26 #14)."""
         if self.start is None:
             raise _refuse(503, "start_not_configured", "starting runs is not configured")
         if length not in LENGTH_CHOICES and minutes_length(length) is None:
@@ -1382,7 +1384,8 @@ class Studio:
                 if name and name not in seen:
                     seen.append(name)
             avoid = tuple(seen[:STYLE_MEMORY])
-        started = await self.start(MUSIC_PROVIDERS[music], subgenre, avoid, length)
+        extra = {} if request_id is None else {"request_id": request_id}
+        started = await self.start(MUSIC_PROVIDERS[music], subgenre, avoid, length, **extra)
         self._styles_cache = None  # the new run is now one of the last videos
         return started
 
@@ -1501,7 +1504,8 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
         token = platform.service_token.get_secret_value()
 
         async def start(music_provider: str, subgenre: str | None,
-                        avoid: tuple[str, ...], length: str) -> dict[str, Any]:
+                        avoid: tuple[str, ...], length: str,
+                        request_id: str | None = None) -> dict[str, Any]:
             from dataclasses import asdict
 
             from ..pipeline.config import load_pipeline_config
@@ -1519,7 +1523,8 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
                     await connect_client(platform), ar_url=urls[Phase.AR], token=token,
                     brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now(),
                     options=PipelineOptions(music_provider=music_provider),
-                    subgenre=subgenre, avoid_subgenres=avoid, duration_bucket=length)
+                    subgenre=subgenre, avoid_subgenres=avoid, duration_bucket=length,
+                    request_id=request_id)
             except RunNotStarted as exc:
                 raise _refuse(409, exc.code, str(exc)) from exc
             return {**asdict(started), "music_provider": music_provider,

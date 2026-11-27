@@ -206,6 +206,9 @@ class StudioStartBody(BaseModel):
     length: str = Field(default="90_120m",
                         description="the video length: whole minutes from 20 to 120 "
                                     "(e.g. 95m), or 20_30m, 45_75m or 90_120m")
+    request_id: str | None = Field(
+        default=None, min_length=8, max_length=80,
+        description="the page's id of this Start; a repeat with it starts nothing new")
 
 
 def _http(refused: ActionRefused) -> HTTPException:
@@ -472,7 +475,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     @app.post("/api/studio/start", dependencies=[Depends(require_token)])
     async def studio_start(body: StudioStartBody) -> dict[str, Any]:
         return {"started": await guarded_async(
-            lambda: studio.start_run(body.music, body.subgenre, body.length))}
+            lambda: studio.start_run(body.music, body.subgenre, body.length,
+                                     body.request_id))}
 
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:
