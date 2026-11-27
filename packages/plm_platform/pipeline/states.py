@@ -180,6 +180,10 @@ class Step(StrEnum):
     """A playlist top-up: P3 adds track specs to a package whose cleared supply is short."""
     LEARN = "learn"
     """P2 applies the reward to its posterior, then runs the next allocation cycle."""
+    QA_RESOLVE = "qa_resolve"
+    """A cleared QA quarantine hold: P5 resolves its quarantine cases with the
+    reviewer's evidence, so the cleared songs get their release manifests (review
+    2026-11-26 #11)."""
 
 
 STEP_ORIGIN_PHASE: Final = MappingProxyType(
@@ -196,6 +200,7 @@ STEP_ORIGIN_PHASE: Final = MappingProxyType(
         Step.DISPATCH_REWARD: "P9",
         Step.EXTEND: "P3",
         Step.LEARN: "P2",
+        Step.QA_RESOLVE: "P5",
     }
 )
 """The phase that owns each step: the ``origin_phase`` of a hold the step raises."""
@@ -228,3 +233,4 @@ class PlatformActivity(StrEnum):
     RAISE_HOLD = "pipeline.raise_hold"
     AUTHORIZE_RESUME = "pipeline.authorize_resume"
     RECORD_EXTERNAL_RESOLUTION = "pipeline.record_external_resolution"
+    WITHDRAW_HOLDS = "pipeline.withdraw_holds"

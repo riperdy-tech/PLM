@@ -32,6 +32,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 import httpx
+from temporalio import activity
 
 from ..config import SERVICE_TOKEN_HEADER, SERVICE_TOKEN_VAR
 from ..ledger import Reason
@@ -234,6 +235,12 @@ class PhaseClient:
             )
         if not idempotency_key.strip():
             raise ValueError("every phase request carries an idempotency key")
+        if activity.in_activity() and activity.is_cancelled():
+            # Review 2026-11-26 #12: a step runs in a thread that cancelling the activity
+            # does not stop; checking before every request keeps a cancelled run from
+            # sending the next write (an upload's publish after the owner's Cancel).
+            raise PhaseRequestFailed(self.phase, path, "step_cancelled",
+                                     "the run was cancelled; nothing was sent")
         headers = {SERVICE_TOKEN_HEADER: self._token, IDEMPOTENCY_KEY_HEADER: idempotency_key}
         try:
             response = self._client.request(

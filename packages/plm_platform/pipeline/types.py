@@ -32,6 +32,7 @@ __all__ = [
     "StepResult",
     "TransitionAck",
     "TransitionRecord",
+    "WithdrawHoldsRequest",
     "WriteCost",
     "WriteCostsRequest",
 ]
@@ -71,6 +72,13 @@ class PipelineOptions:
     require_publish_approval: bool = True
     """Hold every package as ``PUBLISH_APPROVAL_AWAITED`` before the upload step until the
     owner approves it (owner decision 2026-11-05)."""
+    waiting_step_initial_interval_seconds: float = 30.0
+    waiting_step_maximum_interval_seconds: float = 600.0
+    waiting_step_schedule_to_close_seconds: float = 86400.0
+    """The steps that wait on another system (``await_processing``: YouTube processing;
+    ``dispatch_reward``: P2's acknowledgement) poll with this backoff, without an attempt
+    limit, until this long has passed; only then do their retries run out (review
+    2026-11-26 #10: 5 attempts at 1-8 s ended a slow processing in a hold)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +228,16 @@ class ExternalResolutionRequest:
     """``CLEARED`` or ``ADVERSE`` (:class:`plm_platform.exceptions.ExternalOutcome`)."""
     evidence: dict[str, str]
     notes: str
+    requested_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WithdrawHoldsRequest:
+    """A cancelled run's open holds, closed as withdrawn (review 2026-11-26)."""
+
+    case_ids: tuple[str, ...]
+    actor: str
+    reason: str
     requested_at: datetime
 
 

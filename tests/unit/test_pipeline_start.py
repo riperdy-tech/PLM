@@ -103,3 +103,29 @@ def test_an_owner_chosen_sub_style_goes_to_the_p2_cycle(
         transport=_p2(1, queued, seen)))
     body = json.loads(seen[-3].content)
     assert body["avoid_subgenres"] == ["minimal_pulse"] and "subgenre" not in body
+
+
+def test_the_cycle_post_carries_the_callers_request_id_as_idempotency_key(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2026-11-26 #14: a double click sends the same client-generated request id,
+    so P2 can answer the second POST /ar/cycles with the first cycle."""
+    async def fake_start(client: Any, *, directive_id: str, brand_id: str,
+                         options: Any = None) -> _Handle:
+        return _Handle(f"pipeline.{directive_id}")
+
+    monkeypatch.setattr(start_module, "start_pipeline", fake_start)
+    monkeypatch.setattr(start_module, "pipeline_workflow_id", lambda d: f"pipeline.{d}")
+    seen: list[httpx.Request] = []
+    queued = [{"directive_id": "dir_1", "decision_id": "dec_1", "arm_id": "arm_mp"}]
+    for _ in range(2):
+        asyncio.run(start_new_run(
+            object(), ar_url="http://p2", token="t", brand_id="b",  # type: ignore[arg-type]
+            policy_version="p2-v1", now=NOW, request_id="start-7f3a",
+            transport=_p2(1, queued, seen)))
+    posts = [r for r in seen if r.method == "POST"]
+    assert [r.headers["Idempotency-Key"] for r in posts] == ["start-7f3a", "start-7f3a"]
+    with pytest.raises(ValueError, match="request id"):
+        asyncio.run(start_new_run(
+            object(), ar_url="http://p2", token="t", brand_id="b",  # type: ignore[arg-type]
+            policy_version="p2-v1", now=NOW, request_id=" ",
+            transport=_p2(1, queued, [])))
