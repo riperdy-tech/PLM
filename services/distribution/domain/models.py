@@ -70,9 +70,12 @@ class CanonicalReleasePackage(BaseModel):
     brand_id: str
     release_type: ReleaseType = ReleaseType.SINGLE
     title: str
-    label_name: str = "Longform Signal"
-    copyright_line: str = "2026 Longform Signal"
-    publisher_line: str = "2026 Longform Signal Publishing"
+    # Development placeholders, the same as config/dev/pipeline.json: no legal label has
+    # been recorded ("Longform Signal" was a placeholder channel name, ADR-0044). A real
+    # release names its label, copyright and publisher (the API requires all three).
+    label_name: str = "PLM Development Label"
+    copyright_line: str = "(C) 2026 PLM Development Label"
+    publisher_line: str = "(P) 2026 PLM Development Label"
     release_date: str  # YYYY-MM-DD
     tracks: list[DistributionTrack]
     artwork_asset_uri: str
