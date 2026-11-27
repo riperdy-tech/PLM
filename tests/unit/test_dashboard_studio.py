@@ -214,7 +214,7 @@ def test_thumbnail_import_waits_for_all_packages_in_the_same_hold(
     assert [call[1] for call in actions.calls] == ["joint"]
 
 
-def test_approval_grants_this_upload_for_two_hours_then_resumes(tmp_path: Path) -> None:
+def test_approval_grants_this_upload_for_a_day_then_resumes(tmp_path: Path) -> None:
     hold = {"case_id": "c3", "reason_code": "PUBLISH_APPROVAL_AWAITED",
             "details": {"media_package_ids": [PKG]},
             "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
@@ -226,13 +226,13 @@ def test_approval_grants_this_upload_for_two_hours_then_resumes(tmp_path: Path) 
     with pytest.raises(ActionRefused, match="approval_not_awaited"):
         asyncio.run(studio.approve("c-other"))
     answer = asyncio.run(studio.approve("c3"))
-    assert answer["grants_expire_at"] == "2026-11-05T14:00:00+00:00"
+    assert answer["grants_expire_at"] == "2026-11-06T12:00:00+00:00"
     grants = json.loads((tmp_path / "write-authorizations.json").read_text(encoding="utf-8"))
     by_cap = {g["capability"]: g for g in grants}
     assert set(by_cap) == {"music.import", "youtube.upload", "youtube.thumbnail",
                            "youtube.playlist"}
     assert by_cap["music.import"]["expires_at"] == "2026-11-30T00:00:00+00:00"  # untouched
-    assert by_cap["youtube.upload"]["expires_at"] == "2026-11-05T14:00:00+00:00"
+    assert by_cap["youtube.upload"]["expires_at"] == "2026-11-06T12:00:00+00:00"
     assert PKG in by_cap["youtube.upload"]["reference"]
     (call,) = actions.calls
     assert call[:2] == ("resume", "c3") and call[2]["actor"] == "owner"
@@ -420,7 +420,7 @@ def test_an_approval_keeps_a_longer_manual_grant(tmp_path: Path) -> None:
     assert answer["grants_kept"] == ["youtube.upload"]
     grants = _grants(tmp_path)
     assert grants["youtube.upload"] == manual
-    assert grants["youtube.thumbnail"]["expires_at"] == "2026-11-05T14:00:00+00:00"
+    assert grants["youtube.thumbnail"]["expires_at"] == "2026-11-06T12:00:00+00:00"
 
 
 def test_the_approvals_grants_are_revoked_once_the_run_has_published(tmp_path: Path) -> None:

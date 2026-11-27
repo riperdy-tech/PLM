@@ -49,7 +49,11 @@ from .projects import FINISHED, explain_hold, number_runs, plain_log, state_labe
 __all__ = ["APPROVAL_GRANT_HOURS", "OWNER", "Studio", "StudioPaths", "build_studio"]
 
 OWNER: Final[str] = "owner"
-APPROVAL_GRANT_HOURS: Final[int] = 2
+APPROVAL_GRANT_HOURS: Final[int] = 24
+"""Long enough for the upload, YouTube's processing (a long video took over 2 hours on
+2026-11-24 and its thumbnail write was refused ``authorization_expired``) and the
+thumbnail and playlist writes after it; the Studio removes the grants once the run is
+published or has ended (review 2026-11-26 #18), so the window is not left open."""
 APPROVAL_CAPABILITIES: Final[tuple[str, ...]] = (
     "youtube.upload", "youtube.thumbnail", "youtube.playlist")
 SONGS_REASON: Final[str] = "MANUAL_AUDIO_AWAITED"
