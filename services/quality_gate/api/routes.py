@@ -17,10 +17,15 @@ from sqlalchemy.orm import Session
 from ..config import QualityGateSettings
 from ..detectors.config import load_detector_policy
 from ..detectors.suite import RightsDetectors
-from ..domain.enums import ResolutionCode
+from ..domain.enums import GateDisposition, ResolutionCode
 from ..domain.ids import evaluation_id as derive_evaluation_id
 from ..domain.ids import quarantine_case_id
-from ..domain.models import CandidateEvaluation, LegacyManifestError, QuarantineCase
+from ..domain.models import (
+    CandidateEvaluation,
+    LegacyManifestError,
+    QuarantineCase,
+    RiskFinding,
+)
 from ..gate.engine import run_candidate_evaluation
 from ..gate.persistence import persist_gate_result
 from ..gate.quarantine import (
@@ -29,6 +34,7 @@ from ..gate.quarantine import (
     QuarantineAlreadyResolvedError,
     quarantine_holds,
     resolve_quarantine,
+    sweep_orphan_quarantine_cases,
 )
 from ..ingestion.artifact_fetch import (
     ARTIFACT_INTEGRITY_FAILED,
@@ -48,6 +54,7 @@ from ..storage.repositories import (
     get_quarantine_case,
     get_release_manifest_by_candidate,
     list_open_quarantine_cases,
+    list_risk_findings,
 )
 from .schemas import (
     EvaluationRequest,
@@ -55,6 +62,8 @@ from .schemas import (
     HoldResponse,
     QuarantineCaseResponse,
     QuarantineResolutionRequest,
+    QuarantineSweepRequest,
+    QuarantineSweepResponse,
     ReleaseManifestPayload,
 )
 from .service_token import require_service_token
@@ -74,6 +83,20 @@ _FETCH_REFUSAL_STATUS = {
     ARTIFACT_STORE_NOT_CONFIGURED: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 """HTTP status per artifact-read reason code (see :mod:`..ingestion.artifact_fetch`)."""
+
+MAX_RE_EVALUATIONS = 3
+"""How often one candidate is evaluated again: after a rejection made only of
+measurements that could not be made (``UNKNOWN``, a transient read or decode failure),
+or after its quarantine case was resolved ``RE_EVALUATE``."""
+
+
+def _blocking_codes(findings: list[RiskFinding]) -> list[str]:
+    return sorted({f.finding_code for f in findings if f.blocking})
+
+
+def re_evaluation_trigger(trigger: str, attempt: int) -> str:
+    """The trigger of the ``attempt``-th evaluation of a candidate (0: the first)."""
+    return trigger if attempt == 0 else f"{trigger}#re{attempt}"
 
 
 def get_clock() -> Clock:
@@ -127,12 +150,22 @@ def build_router(
             composite_quality_score=ev.composite_quality_score,
             quarantine_case_id=case.id if case else None,
             quarantine_reason_codes=list(case.reason_codes) if case else [],
+            blocking_finding_codes=_blocking_codes(list_risk_findings(session, ev.id)),
             release_manifest_id=(
                 manifest.p5_manifest_id
                 if manifest is not None and manifest.evaluation_id == ev.id
                 else None
             ),
         )
+
+    def _evaluate_again(session: Session, ev: CandidateEvaluation) -> bool:
+        """Whether a stored evaluation is to be made again rather than replayed."""
+        case = get_quarantine_case(session, quarantine_case_id(ev.candidate_id, ev.id))
+        if case is not None and case.resolution is ResolutionCode.RE_EVALUATE:
+            return True
+        blocking = [f for f in list_risk_findings(session, ev.id) if f.blocking]
+        return (ev.disposition is GateDisposition.REJECTED and bool(blocking)
+                and all(f.status == "UNKNOWN" for f in blocking))
 
     def _require_session() -> Iterator[Session]:
         if session_factory is None:
@@ -207,11 +240,17 @@ def build_router(
                 ).model_dump(),
             ) from exc
         # The evaluation id is deterministic per (candidate, policy, trigger): a retried
-        # request replays the stored evaluation instead of evaluating twice.
-        stored = get_candidate_evaluation(
-            session,
-            derive_evaluation_id(event.candidate_id, req.evaluation_policy_version, req.trigger),
-        )
+        # request replays the stored evaluation instead of evaluating twice, unless that
+        # evaluation is to be made again (then under the next re-evaluation trigger).
+        trigger = req.trigger
+        stored = None
+        for attempt in range(MAX_RE_EVALUATIONS + 1):
+            trigger = re_evaluation_trigger(req.trigger, attempt)
+            stored = get_candidate_evaluation(session, derive_evaluation_id(
+                event.candidate_id, req.evaluation_policy_version, trigger))
+            if (stored is None or stored.artifact_id != event.artifact_id
+                    or attempt == MAX_RE_EVALUATIONS or not _evaluate_again(session, stored)):
+                break
         if stored is not None:
             if stored.artifact_id != event.artifact_id:
                 raise HTTPException(
@@ -262,7 +301,7 @@ def build_router(
                     policy=detector_policy,
                 ),
                 evaluation_policy_version=req.evaluation_policy_version,
-                trigger=req.trigger,
+                trigger=trigger,
             )
 
         # Persist aggregate to database. A concurrent request for the same evaluation id
@@ -303,6 +342,7 @@ def build_router(
             quarantine_reason_codes=(
                 list(result.quarantine_case.reason_codes) if result.quarantine_case else []
             ),
+            blocking_finding_codes=_blocking_codes(result.evaluation.risk_findings),
             release_manifest_id=result.release_manifest.p5_manifest_id if result.release_manifest else None,
         )
 
@@ -338,6 +378,23 @@ def build_router(
         session: Annotated[Session, Depends(_require_session)],
     ) -> list[QuarantineCaseResponse]:
         return [_case_response(session, c) for c in list_open_quarantine_cases(session)]
+
+    @router.post(
+        "/quarantine/sweep",
+        response_model=QuarantineSweepResponse,
+        tags=["quarantine"],
+        dependencies=[Depends(auth_dep)],
+    )
+    def sweep_quarantine_endpoint(
+        req: QuarantineSweepRequest,
+        session: Annotated[Session, Depends(_require_session)],
+        clock: Annotated[Clock, Depends(get_clock)],
+    ) -> QuarantineSweepResponse:
+        """Close the open cases whose holds were all closed in the exception queue."""
+        closed = sweep_orphan_quarantine_cases(session, queue, auditor_id=req.auditor_id,
+                                               now=clock.now())
+        session.commit()
+        return QuarantineSweepResponse(closed=closed)
 
     @router.post(
         "/quarantine/{case_id}/resolve",

@@ -42,6 +42,7 @@ from ..storage.repositories import (
     get_quarantine_case,
     insert_release_manifest,
     list_evidence_items,
+    list_open_quarantine_cases,
     resolve_quarantine_case,
     update_candidate_evaluation_status,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "quarantine_holds",
     "raise_quarantine_holds",
     "resolve_quarantine",
+    "sweep_orphan_quarantine_cases",
 ]
 
 _BLOCKED = (GateDisposition.QUARANTINED, GateDisposition.REJECTED)
@@ -157,7 +159,9 @@ def resolve_quarantine(
     hold as ``auditor_id`` acting in ``reviewer_role`` with ``evidence``. Any refusal
     raises :class:`OverrideRefusedError` before anything in ``qa`` changes; the refusals
     are recorded in the queue. ``CONFIRMED_REJECTED`` rejects the open holds and
-    ``RE_EVALUATE`` withdraws them; neither lets the workflow continue.
+    ``RE_EVALUATE`` withdraws them; neither lets the workflow continue. After
+    ``RE_EVALUATE`` the next evaluation request for the candidate evaluates it again
+    (``POST /qa/evaluations``) instead of replaying this evaluation.
     """
     case = get_quarantine_case(session, case_id)
     if not case:
@@ -302,3 +306,26 @@ def _override_manifest(
 def _rights_risk(commercial_use_status: str) -> str:
     """The risk the rights evaluator assigns to a status (see ``evaluators.rights``)."""
     return {"eligible": "LOW", "ineligible": "CRITICAL"}.get(commercial_use_status, "MEDIUM")
+
+
+def sweep_orphan_quarantine_cases(
+    session: Session, queue: ExceptionQueue, *, auditor_id: str, now: datetime
+) -> list[str]:
+    """Close every open case whose holds were all closed in the exception queue already
+    (the pipeline cancelled the run, or a reviewer decided the hold there): one rejected
+    hold closes it ``CONFIRMED_REJECTED``, all withdrawn ``RE_EVALUATE``. A case with an
+    open hold, no hold, or a hold resumed (only an override issues a manifest) is left.
+    Returns the closed case ids."""
+    closed: list[str] = []
+    for case in list_open_quarantine_cases(session):
+        holds = quarantine_holds(session, queue, case.id)
+        statuses = {hold.status for hold in holds}
+        if not holds or not statuses <= {CaseStatus.REJECTED, CaseStatus.WITHDRAWN}:
+            continue
+        resolution = (ResolutionCode.CONFIRMED_REJECTED if CaseStatus.REJECTED in statuses
+                      else ResolutionCode.RE_EVALUATE)
+        resolve_quarantine(session, case.id, resolution, auditor_id,
+                           "swept: every hold was already closed in the exception queue",
+                           now=now, queue=queue)
+        closed.append(case.id)
+    return closed
