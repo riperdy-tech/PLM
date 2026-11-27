@@ -12,6 +12,7 @@ import json
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 import sqlalchemy as sa
 from plm_platform.config import load_settings
@@ -52,7 +53,8 @@ def main() -> int:
             raise RuntimeError("refusing non-loopback P6 database")
         with engine.connect() as conn:
             conn.exec_driver_sql("SET TRANSACTION READ ONLY")
-            counts = audit_rows(conn.execute(_QUERY).all())
+            counts = audit_rows(cast(Iterable[tuple[str, float, str]],
+                                     conn.execute(_QUERY).all()))
         print(json.dumps(counts, sort_keys=True))
     finally:
         engine.dispose()

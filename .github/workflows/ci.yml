@@ -58,6 +58,13 @@ jobs:
       - name: Type-check (mypy)
         run: mypy packages services
 
+      # scripts/ imports `scripts.*` and `tests.*` from the repo root, so it is checked
+      # on its own (pyproject.toml [tool.mypy]).
+      - name: Type-check scripts (mypy)
+        env:
+          MYPYPATH: "packages:services:."
+        run: mypy --explicit-package-bases scripts
+
       # Hermetic: no services, no .env (the unit tests inject their settings).
       - name: Unit and contract tests
         run: pytest -q -m "not integration"

@@ -6,6 +6,7 @@ See docs/runbooks/oauth-rotation.md.
 """
 
 import http.server
+import io
 import os
 import secrets
 import socketserver
@@ -17,7 +18,8 @@ from pathlib import Path
 
 import httpx
 
-sys.stdout.reconfigure(line_buffering=True)
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(line_buffering=True)
 
 PORT = 8090
 REDIRECT_URI = f"http://127.0.0.1:{PORT}/"

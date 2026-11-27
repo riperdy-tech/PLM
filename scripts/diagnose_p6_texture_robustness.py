@@ -14,7 +14,7 @@ import sys
 from collections.abc import Iterator
 
 import numpy as np
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 import sqlalchemy as sa
 from media_factory.artifacts import MinioArtifactStore
 from media_factory.audio.features import measure_features
