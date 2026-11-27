@@ -150,6 +150,29 @@ def test_doctor_exit_code_follows_the_check_table(monkeypatch: pytest.MonkeyPatc
     assert "2 PASS, 1 FAIL" in result.output
 
 
+def test_doctor_warns_when_the_disk_with_the_stack_runs_low(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Renders and WAV masters live on this disk (review 2026-11-26, #55): a long render
+    needs several GB, so doctor fails the row below the threshold."""
+    gib = 1024 ** 3
+    monkeypatch.setattr(cli.shutil, "disk_usage",
+                        lambda _: SimpleNamespace(total=500 * gib, used=495 * gib, free=5 * gib))
+    low = cli._disk_check(tmp_path)
+    assert low.name == "disk" and not low.passed
+    assert "5.0 GiB free" in low.detail and "below" in low.detail
+    monkeypatch.setattr(cli.shutil, "disk_usage",
+                        lambda _: SimpleNamespace(total=500 * gib, used=300 * gib, free=200 * gib))
+    ok = cli._disk_check(tmp_path)
+    assert ok.passed and "200.0 GiB free" in ok.detail
+
+    def no_settings(**_: Any) -> None:
+        raise cli.SettingsError("not loaded in this test")
+
+    monkeypatch.setattr(cli, "load_settings", no_settings)  # no .env, no services
+    monkeypatch.setattr(cli, "_readyz_checks", list)
+    assert "disk" in [check.name for check in cli.run_doctor()]
+
+
 def test_migration_check_refuses_unknown_revision_without_upgrade_advice() -> None:
     known = frozenset({"0037_dashboard_views", "0038_youtube_candidate_selection"})
     result = cli._migration_revision_result(

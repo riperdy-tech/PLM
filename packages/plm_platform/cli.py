@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from collections.abc import Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -163,8 +164,29 @@ def run_doctor(
         checks.append(_temporal_check(settings, temporal_timeout))
         checks.append(_worker_pollers_check(settings, temporal_timeout))
     checks.append(_task_queues_check())
+    checks.append(_disk_check(REPO_ROOT))
     checks.extend(_readyz_checks())
     return checks
+
+
+_MIN_FREE_GIB: Final[float] = 20.0
+"""Below this the disk FAILs: a two-hour render needs its ~2 GB WAV master, the video and
+the temporary copies, and Docker keeps Postgres, MinIO and the renders on this disk."""
+
+
+def _disk_check(path: Path, min_free_gib: float = _MIN_FREE_GIB) -> Check:
+    """Free space on the disk holding the checkout (and, by the ops rule, Docker's data:
+    renders and WAV masters grow there until archived after upload)."""
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        return Check("disk", False, f"cannot read free space of {path.anchor or path} - {exc}")
+    free = usage.free / 1024 ** 3
+    where = f"{path.anchor or path}: {free:.1f} GiB free of {usage.total / 1024 ** 3:.0f} GiB"
+    if free < min_free_gib:
+        return Check("disk", False, f"{where}, below {min_free_gib:g} GiB - archive "
+                     "published renders or free space before the next render")
+    return Check("disk", True, where)
 
 
 def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
