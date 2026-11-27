@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from itertools import islice
-from typing import Final, Protocol
+from typing import Final, Protocol, runtime_checkable
 
 import urllib3
 from minio import Minio
@@ -54,6 +54,7 @@ __all__ = [
     "SOURCE_URI_INVALID",
     "STORE_UNAVAILABLE",
     "ArtifactStore",
+    "ClaimListingStore",
     "ClaimObjectEvidence",
     "ClaimObjectPage",
     "MinioArtifactStore",
@@ -113,6 +114,16 @@ class ArtifactStore(Protocol):
 
     def put(self, resource_path: str, data: bytes, *, content_type: str) -> StoredArtifact:
         """Store ``data`` under ``media/<resource_path>/<sha256>``; idempotent per content."""
+        ...
+
+
+@runtime_checkable
+class ClaimListingStore(Protocol):
+    def list_claim_objects(
+        self, *, brand_id: str, media_package_id: str,
+        claim_namespace: str, limit: int = 20,
+    ) -> ClaimObjectPage:
+        """Metadata-only listing of one claimed render's output prefixes."""
         ...
 
 

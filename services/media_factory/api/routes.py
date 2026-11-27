@@ -20,7 +20,7 @@ from ..config import MediaFactorySettings
 from ..domain.enums import PackageStatus
 from ..domain.models import LegacyPackageError, MediaPackage
 from ..errors import MediaAssemblyError, MediaInfrastructureError
-from ..service import assemble_and_persist
+from ..service import assemble_and_persist, retry_render
 from ..storage.repositories import (
     get_media_package_by_id,
     get_playlist_session,
@@ -33,10 +33,18 @@ from .schemas import (
     MediaPackageResponse,
     PlaylistSessionResponse,
     RenderJobResponse,
+    RetryRenderRequest,
 )
 from .service_token import require_service_token
 
 __all__ = ["build_router"]
+
+_CONFLICTS = frozenset({
+    "render_job_reconciliation_required", "render_ownership_lost", "render_input_changed",
+    "render_intent_conflict", "render_retry_input_changed", "render_retry_not_allowed",
+    "render_retry_package_exists",
+})
+"""Refusals about the state of a render job, not the request: 409."""
 
 
 def _package_response(pkg: MediaPackage) -> MediaPackageResponse:
@@ -154,26 +162,61 @@ def build_router(
                     message="no clearance authority, artifact store or toolchain is configured",
                 ).model_dump(),
             )
+        # One render at a time per process, held until the package is committed: a
+        # caller's retry after its read timeout (the render outlived the request)
+        # then waits and replays the stored package instead of rendering it a second
+        # time beside the first; concurrent long renders exhausted the container's
+        # memory (R5). A durable render job is later work.
+        return _rendered(lambda: assemble_and_persist(
+            session, backend, payload, clock=clock,
+            default_render_profile=settings.default_render_profile,
+            render_session_factory=session_factory,
+            worker_id_factory=lambda: uuid4().hex,
+            thumbnail_art_inbox=settings.thumbnail_art_inbox), session)
+
+    @router.post(
+        "/packages/{package_id}/retry-render",
+        response_model=MediaPackageResponse,
+        dependencies=[Depends(auth_dep)],
+    )
+    def retry_render_endpoint(
+        package_id: str,
+        payload: RetryRenderRequest,
+        session: Annotated[Session, Depends(_require_session)],
+    ) -> MediaPackageResponse:
+        """Render a package again after its claimed render failed (review #22): records
+        the failed claim's output inventory, stages the next attempt and runs it with the
+        package's own assembly request. 409 when the render cannot be retried
+        (``render_job_reconciliation_required`` for a claim still RUNNING,
+        ``render_retry_not_allowed``, ``render_retry_input_changed`` for another
+        request), 422 for the other refusals, as ``assemble`` answers."""
+        if backend is None or session_factory is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=ErrorShape(
+                    code="media_backend_unavailable",
+                    field_paths=[],
+                    message="no clearance authority, artifact store or toolchain is configured",
+                ).model_dump(),
+            )
+        factory = session_factory
+        return _rendered(lambda: retry_render(
+            session, backend, payload.assembly, package_id=package_id, clock=clock,
+            default_render_profile=settings.default_render_profile,
+            render_session_factory=factory, worker_id_factory=lambda: uuid4().hex,
+            recorded_by=payload.recorded_by,
+            orphan_evidence_ref=payload.orphan_evidence_ref,
+            thumbnail_art_inbox=settings.thumbnail_art_inbox), session)
+
+    def _rendered(render: Callable[[], MediaPackage], session: Session) -> MediaPackageResponse:
         try:
-            # One render at a time per process, held until the package is committed: a
-            # caller's retry after its read timeout (the render outlived the request)
-            # then waits and replays the stored package instead of rendering it a second
-            # time beside the first; concurrent long renders exhausted the container's
-            # memory (R5). A durable render job is later work.
             with render_lock:
-                package = assemble_and_persist(
-                    session, backend, payload, clock=clock,
-                    default_render_profile=settings.default_render_profile,
-                    render_session_factory=session_factory,
-                    worker_id_factory=lambda: uuid4().hex,
-                    thumbnail_art_inbox=settings.thumbnail_art_inbox)
+                package = render()
                 session.commit()
         except MediaAssemblyError as exc:
             raise HTTPException(
-                status_code=(status.HTTP_409_CONFLICT if exc.code in {
-                    "render_job_reconciliation_required", "render_ownership_lost",
-                    "render_input_changed",
-                } else status.HTTP_422_UNPROCESSABLE_ENTITY),
+                status_code=(status.HTTP_409_CONFLICT if exc.code in _CONFLICTS
+                             else status.HTTP_422_UNPROCESSABLE_ENTITY),
                 detail=exc.detail(),
             ) from exc
         except MediaInfrastructureError as exc:

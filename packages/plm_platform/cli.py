@@ -961,6 +961,24 @@ def media_render_attest_termination(
                                   recorded_by=recorded_by)
 
 
+@media_app.command(name="retry-render")
+def media_retry_render(
+    package_id: str = typer.Argument(..., help="Package whose claimed render failed"),
+    request_path: str = typer.Option(
+        ..., "--request", "-r", help="The package's own assembly request JSON"),
+    recorded_by: str = typer.Option(..., "--recorded-by", help="Operator identity"),
+    orphan_evidence_ref: str | None = typer.Option(
+        None, "--orphan-evidence-ref",
+        help="Where you recorded checking the failed render's output (only when nothing "
+        "could be listed)"),
+) -> None:
+    """Render a package again after its claimed render failed (inventory, stage, run)."""
+    from media_factory.cli import cli_retry_render
+
+    cli_retry_render(package_id=package_id, request_path=request_path,
+                     recorded_by=recorded_by, orphan_evidence_ref=orphan_evidence_ref)
+
+
 @media_app.command(name="package")
 def media_package(
     package_id: str = typer.Option(..., "--package-id", "-p", help="Media package ID to inspect"),

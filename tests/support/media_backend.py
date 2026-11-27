@@ -26,7 +26,10 @@ from media_factory.artifacts import (
     SOURCE_ARTIFACT_MISSING,
     SOURCE_CHECKSUM_MISMATCH,
     SOURCE_URI_INVALID,
+    ClaimObjectEvidence,
+    ClaimObjectPage,
     StoredArtifact,
+    scoped_artifact_root,
 )
 from media_factory.backend import MediaBackend
 from media_factory.brands.registry import BrandRegistry
@@ -90,6 +93,20 @@ class InMemoryArtifactStore:
         if hashlib.sha256(data).hexdigest() != sha256:
             raise MediaAssemblyError(SOURCE_CHECKSUM_MISMATCH, f"{key} does not hash to {sha256}")
         return data
+
+    def list_claim_objects(self, *, brand_id: str, media_package_id: str,
+                           claim_namespace: str, limit: int = 20) -> ClaimObjectPage:
+        """The claimed render's objects, as :class:`MinioArtifactStore` lists them."""
+        prefixes = tuple(
+            f"media/{scoped_artifact_root(f'{tree}/{brand_id}/{media_package_id}', claim_namespace)}/"
+            for tree in ("renders", "thumbnails"))
+        keys = sorted(k for k in self.objects if k.startswith(prefixes))
+        return ClaimObjectPage(
+            objects=tuple(ClaimObjectEvidence(uri=f"{_SCHEME}{k}",
+                                              pinned_sha256=k.rsplit("/", 1)[-1],
+                                              size_bytes=len(self.objects[k]))
+                          for k in keys[:limit]),
+            truncated=len(keys) > limit)
 
     def get(self, uri: str) -> bytes:
         return self.objects[uri[len(_SCHEME):]]
