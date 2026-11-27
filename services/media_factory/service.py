@@ -9,6 +9,7 @@ existing package returns that package without rendering.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,8 @@ from .thumbnail_art.guide import build_prompts, load_style_guide
 from .thumbnail_art.inbox import write_job
 
 __all__ = ["assemble_and_persist"]
+
+logger = logging.getLogger(__name__)
 
 
 def assemble_and_persist(session: Session, backend: MediaBackend,
@@ -206,7 +209,15 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             session.rollback()
             _quarantine_own_claim(render_session_factory, claim, exc, clock)
         raise
-    _write_art_job(persisted, request, thumbnail_art_inbox)
+    # Outside the fenced block and never fatal: a raise here would roll back the fenced
+    # completion with the caller's transaction and leave the claim RUNNING for good. A
+    # replay of the same request (or ``plm media thumbnail-job``) writes the job later.
+    try:
+        _write_art_job(persisted, request, thumbnail_art_inbox)
+    except Exception as exc:  # noqa: BLE001 - the package is rendered; only the job is late
+        logger.warning("art job for %s not written (%s: %s); replay the request or run "
+                       "`plm media thumbnail-job` to write it", persisted.media_package_id,
+                       type(exc).__name__, exc)
     return persisted
 
 
