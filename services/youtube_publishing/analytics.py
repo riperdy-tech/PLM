@@ -30,6 +30,7 @@ __all__ = [
     "ANALYTICS_PACIFIC",
     "FINALITY_LAG",
     "AnalyticsNotFinal",
+    "AnalyticsReportMalformed",
     "AnalyticsUnavailable",
     "MockYouTubeAnalytics",
     "RealYouTubeAnalytics",
@@ -55,6 +56,10 @@ class AnalyticsNotFinal(Exception):
 
 class AnalyticsUnavailable(Exception):
     """YouTube Analytics could not be read now (the request may succeed later)."""
+
+
+class AnalyticsReportMalformed(Exception):
+    """YouTube Analytics answered without the report's columns: not a measurement."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +170,18 @@ class RealYouTubeAnalytics:
                 end_date=end.isoformat())
         except self._unavailable as exc:
             raise AnalyticsUnavailable(str(exc)) from exc
+        if metrics.views is None:
+            # The window is final (checked above): a well-formed report without rows is
+            # zero activity, measured. Ratios over zero views are undefined (None), and
+            # estimated revenue stays unknown. A report without its columns is refused.
+            if not getattr(metrics, "columns_reported", False):
+                raise AnalyticsReportMalformed(
+                    f"YouTube Analytics returned no rows and no metric columns for "
+                    f"{record.youtube_video_id} ({start}..{end})")
+            return VideoAnalyticsSnapshot(
+                views=0, watch_time_minutes=Decimal(0), average_view_duration_seconds=None,
+                average_percentage_viewed=None, subscribers_gained=0, subscribers_lost=0,
+                estimated_revenue=None)
         return VideoAnalyticsSnapshot(
             views=metrics.views,
             watch_time_minutes=_decimal(metrics.watch_time_minutes),

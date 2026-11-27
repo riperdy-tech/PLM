@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -48,7 +49,17 @@ PUBLISHED = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 NOW = PUBLISHED + timedelta(days=32)  # 28d window + Pacific day rounding + 3 days
 
 
-def _p7() -> TestClient:
+class _NoActivity:
+    """A final, well-formed Analytics report without rows (no views in the window)."""
+
+    def fetch_video_metrics(self, **_: str) -> Any:
+        return SimpleNamespace(views=None, watch_time_minutes=None,
+                               average_view_duration_seconds=None,
+                               average_percentage_viewed=None, subscribers_gained=None,
+                               subscribers_lost=None, columns_reported=True)
+
+
+def _p7(reader: Any = None) -> TestClient:
     factory = sessionmaker(bind=create_youtube_engine(static_pool=True))
     lineage = lineage_fields()
     with factory() as session:
@@ -65,7 +76,8 @@ def _p7() -> TestClient:
         session_factory=lambda: factory(), settings=load_settings(env=MINIMAL_ENV),
         client=youtube, clock=FixedClock(NOW),
         clearance=p5_holding(release_manifest(candidate_id="cand_r5")),
-        analytics=RealYouTubeAnalytics(_Analytics(), unavailable=YouTubeAnalyticsError),
+        analytics=RealYouTubeAnalytics(reader or _Analytics(),
+                                       unavailable=YouTubeAnalyticsError),
         analytics_from_env=False))
 
 
@@ -117,6 +129,13 @@ def _request() -> StepRequest:
             "submit_distribution": {"releases": [], "external_writes": [],
                                     "skipped": "distribution_disabled"},
             "costs": [cost]})
+
+
+def test_a_video_nobody_watched_is_measured_as_zero_not_missing() -> None:
+    result = asyncio.run(_steps(_p7(_NoActivity()), _p9(attested=True)).evaluate_outcome(
+        _request()))
+    (reward,) = result.outputs["rewards"]
+    assert reward["status"] == "mature" and reward["normalized_reward"] is not None
 
 
 def test_a_youtube_only_video_with_distribution_disabled_produces_a_reward() -> None:

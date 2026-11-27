@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/analytics/reference/reports/query",
+    "captured": "2026-11-27",
+    "notes": "Malformed: a resultTable with neither columnHeaders nor rows. The docs always return columnHeaders; this is the shape P7 must refuse rather than read as zero."
+  },
+  "status": 200,
+  "json": {
+    "kind": "youtubeAnalytics#resultTable"
+  }
+}

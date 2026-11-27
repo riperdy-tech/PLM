@@ -40,6 +40,9 @@ class YouTubeVideoMetrics:
     average_percentage_viewed: float | None
     subscribers_gained: int | None
     subscribers_lost: int | None
+    columns_reported: bool = True
+    """Whether the report named every requested metric column. A report with them and no
+    rows is "no activity in the window"; one without them is malformed (all ``None``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +239,7 @@ class RealYouTubeAnalyticsClient:
                 average_percentage_viewed=None,
                 subscribers_gained=None,
                 subscribers_lost=None,
+                columns_reported=set(params["metrics"].split(",")) <= set(headers_list),
             )
 
         row = rows[0]

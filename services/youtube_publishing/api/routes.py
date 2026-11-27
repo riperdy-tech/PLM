@@ -22,7 +22,12 @@ from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, WriteDecision, provider_mode_of
 from pydantic import AwareDatetime
 
-from ..analytics import AnalyticsNotFinal, AnalyticsUnavailable, YouTubeAnalyticsSource
+from ..analytics import (
+    AnalyticsNotFinal,
+    AnalyticsReportMalformed,
+    AnalyticsUnavailable,
+    YouTubeAnalyticsSource,
+)
 from ..client.base import YouTubeClientError
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import FailureReasonCode, OperatingMode
@@ -440,6 +445,8 @@ def create_youtube_router(
             raise _refused(409, "analytics_not_final", str(exc)) from exc
         except AnalyticsUnavailable as exc:
             raise _refused(503, "analytics_unavailable", str(exc)) from exc
+        except AnalyticsReportMalformed as exc:
+            raise _refused(409, "analytics_report_malformed", str(exc)) from exc
         revenue = snapshot.estimated_revenue
 
         def number(value: Decimal | None) -> float | None:

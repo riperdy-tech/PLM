@@ -161,3 +161,31 @@ def test_a_video_that_is_not_public_is_not_measured(resource: dict[str, Any] | N
     res = _get(_app(resource, _Analytics()), datetime(2026, 11, 20, tzinfo=UTC))
     assert res.status_code == 409
     assert res.json()["detail"]["code"] == code
+
+
+def _real_reader(mock_http: MockHTTP, reply: str) -> RealYouTubeAnalyticsClient:
+    enqueue(mock_http, "youtube_analytics", "oauth_token", reply)
+    return RealYouTubeAnalyticsClient(client_id="c", client_secret="s", refresh_token="r",
+                                      http_client=mock_http.client())
+
+
+def test_a_final_window_with_no_rows_is_a_measured_zero(mock_http: MockHTTP) -> None:
+    """Once final, a well-formed report (column headers) without rows is zero activity:
+    counts are 0, ratios over zero views are undefined (null), and estimated revenue
+    stays unknown (null), never 0."""
+    client = _app(_public(MADE_PUBLIC), _real_reader(mock_http, "metrics_no_rows"))
+    res = _get(client, datetime(2026, 11, 20, tzinfo=UTC))
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["source"] == "youtube_analytics"
+    assert body["metrics"] == {
+        "views": 0, "watch_time_minutes": 0.0, "average_view_duration_seconds": None,
+        "average_percentage_viewed": None, "subscribers_gained": 0, "subscribers_lost": 0,
+        "estimated_revenue": None}
+
+
+def test_a_report_without_column_headers_is_refused(mock_http: MockHTTP) -> None:
+    client = _app(_public(MADE_PUBLIC), _real_reader(mock_http, "metrics_no_columns"))
+    res = _get(client, datetime(2026, 11, 20, tzinfo=UTC))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "analytics_report_malformed"

@@ -55,6 +55,13 @@ def test_omitted_rows_are_no_data_not_zero(mock_http: MockHTTP) -> None:
     enqueue(mock_http, P, "oauth_token", "metrics_no_rows")
     metrics = _client(mock_http).fetch_video_metrics(**WINDOW)
     assert metrics.views is None and metrics.watch_time_minutes is None
+    assert metrics.columns_reported  # well formed: the caller may read it as no activity
+
+
+def test_a_report_without_its_columns_is_marked_malformed(mock_http: MockHTTP) -> None:
+    enqueue(mock_http, P, "oauth_token", "metrics_no_columns")
+    metrics = _client(mock_http).fetch_video_metrics(**WINDOW)
+    assert metrics.views is None and not metrics.columns_reported
 
 
 def test_one_token_refresh_serves_several_reads(mock_http: MockHTTP) -> None:
