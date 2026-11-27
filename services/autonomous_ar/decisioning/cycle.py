@@ -97,14 +97,12 @@ def _same_request(cycle: Any, request: CycleRequest, *, policy_id: str,
     sub-style or length choice is not stored on the row and is not compared.)"""
     started = cycle["started_at"]
     started = started if started.tzinfo else started.replace(tzinfo=UTC)
-    if (int(cycle["slot_count"]) != request.slot_count
-            or float(cycle["budget"]) != request.budget or started != now
-            or str(cycle["policy_id"]) != str(policy_id)
-            or cycle["activation_state"] != activation.value
-            or (request.random_seed is not None
-                and int(cycle["random_seed"]) != request.random_seed)):
-        return False
-    return True
+    return (int(cycle["slot_count"]) == request.slot_count
+            and float(cycle["budget"]) == request.budget and started == now
+            and str(cycle["policy_id"]) == str(policy_id)
+            and cycle["activation_state"] == activation.value
+            and (request.random_seed is None
+                 or int(cycle["random_seed"]) == request.random_seed))
 
 
 @dataclass(frozen=True, slots=True)
