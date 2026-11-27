@@ -16,6 +16,8 @@ __all__ = [
     "HoldResponse",
     "QuarantineCaseResponse",
     "QuarantineResolutionRequest",
+    "QuarantineSweepRequest",
+    "QuarantineSweepResponse",
     "ReleaseManifestPayload",
 ]
 
@@ -51,6 +53,8 @@ class EvaluationResponse(BaseModel):
     quarantine_case_id: str | None = None
     quarantine_reason_codes: list[str] = Field(default_factory=list)
     """The quarantine case's reason codes; empty when there is no case."""
+    blocking_finding_codes: list[str] = Field(default_factory=list)
+    """Why a REJECTED candidate was rejected (sorted, distinct); empty otherwise."""
     release_manifest_id: str | None = None
 
 
@@ -99,3 +103,15 @@ class QuarantineResolutionRequest(BaseModel):
     notes: str = ""
     reviewer_role: str | None = None
     evidence: dict[str, str] = Field(default_factory=dict)
+
+
+class QuarantineSweepRequest(BaseModel):
+    """Close the open quarantine cases whose every hold was already closed elsewhere."""
+
+    auditor_id: str
+
+
+class QuarantineSweepResponse(BaseModel):
+    closed: list[str] = Field(default_factory=list)
+    """The case ids closed: CONFIRMED_REJECTED when a hold was rejected, else
+    RE_EVALUATE (every hold withdrawn)."""

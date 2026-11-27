@@ -13,13 +13,19 @@ its own identity, terms and sheet wording.
   (``PLM_FLOW_MUSIC_ACCOUNT_REF``). Only ``google_ai_pro`` yields terms: Google's AI Pro
   benefits page lists Flow Music's Plus plan with "Commercial use rights", and Google's
   Terms of Service say Google won't claim ownership of generated content. Flow Music's
-  own terms page was not found (read 2026-10-31); other plans stay commercially unknown.
+  own terms page was not found (read 2026-10-31), so until the owner records where and
+  when they read Flow Music's terms (``PLM_FLOW_MUSIC_TERMS_REF``) the declaration is
+  ``expired_or_unverified``: P5 holds each song as ``COMMERCIAL_LICENSE_UNCERTAIN``.
+  Other plans stay commercially unknown.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+
+from plm_contracts import CommercialUseEligibility
+from plm_contracts.seams.c4 import ProviderLicenseTerms
 
 from ..domain.models import GenerationRequest
 from .suno_manual import (
@@ -38,6 +44,7 @@ INBOX_VAR = "PLM_FLOW_MUSIC_MANUAL_INBOX"
 PLAN_TIER_VAR = "PLM_FLOW_MUSIC_PLAN_TIER"
 ACCOUNT_REF_VAR = "PLM_FLOW_MUSIC_ACCOUNT_REF"
 MODEL_VERSION_VAR = "PLM_FLOW_MUSIC_MODEL_VERSION"
+TERMS_REF_VAR = "PLM_FLOW_MUSIC_TERMS_REF"
 
 
 def load_flow_music_manual_settings(
@@ -46,7 +53,8 @@ def load_flow_music_manual_settings(
 ) -> SunoManualSettings:
     """Read the ``PLM_FLOW_MUSIC_*`` declarations (env, then ``.env``)."""
     return load_manual_settings(
-        (INBOX_VAR, PLAN_TIER_VAR, ACCOUNT_REF_VAR, MODEL_VERSION_VAR), env, dotenv_path)
+        (INBOX_VAR, PLAN_TIER_VAR, ACCOUNT_REF_VAR, MODEL_VERSION_VAR), env, dotenv_path,
+        terms_var=TERMS_REF_VAR)
 
 
 class FlowMusicManualAdapter(SunoManualAdapter):
@@ -69,6 +77,17 @@ class FlowMusicManualAdapter(SunoManualAdapter):
     def provider_id(self) -> str:
         return "lyria"
 
+    def license_terms(self) -> ProviderLicenseTerms | None:
+        """The declared plan's terms; unverified until Flow Music's own terms are recorded."""
+        terms = super().license_terms()
+        recorded = self._settings.terms_ref
+        if terms is None:
+            return None
+        if recorded is None:
+            return terms.model_copy(update={
+                "commercial_use_status": CommercialUseEligibility.EXPIRED_OR_UNVERIFIED})
+        return terms.model_copy(update={"terms_version": f"Flow Music terms: {recorded}"[:64]})
+
     def _sheet_header(self, track_spec_id: str) -> list[str]:
         model = self._settings.model_version or f"(not declared: set {self.model_version_var})"
         return [
@@ -76,7 +95,6 @@ class FlowMusicManualAdapter(SunoManualAdapter):
             f"Instrument: {model}. Start a new session, paste the Prompt text into the",
             "prompt box and send it. If Flow Music makes more than one song, pick the",
             "better one, download it as WAV and save it in this folder under the name given.",
-            "",
         ]
 
     def _prompt_lines(self, request: GenerationRequest) -> list[str]:

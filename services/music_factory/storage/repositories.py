@@ -38,6 +38,7 @@ from .models import (
 )
 
 __all__ = [
+    "artifact_sha256_index",
     "get_audio_artifact",
     "get_candidate",
     "get_generation_attempt",
@@ -476,6 +477,18 @@ def list_artifacts_for_candidate(session: Session, candidate_id: str) -> list[Au
         )
         for r in rows
     ]
+
+
+def artifact_sha256_index(session: Session) -> dict[str, str]:
+    """Every stored artifact's SHA-256 -> its candidate id (the first one stored)."""
+    rows = session.execute(
+        sa.select(audio_artifacts_table.c.sha256, audio_artifacts_table.c.candidate_id)
+        .order_by(audio_artifacts_table.c.created_at, audio_artifacts_table.c.id)
+    ).all()
+    index: dict[str, str] = {}
+    for sha, candidate in rows:
+        index.setdefault(str(sha), str(candidate))
+    return index
 
 
 def insert_rights_snapshot(session: Session, snapshot: RightsSnapshot) -> None:

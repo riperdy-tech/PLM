@@ -47,7 +47,7 @@ from tests.unit.music.test_suno_manual_import import NOW, FreeBudget, _drop, _gu
 def _spec() -> dict[str, Any]:
     fields = track_spec_fields(
         track_spec_id="trk_manual_01", requested_duration=20,
-        duration_range={"min_seconds": 10, "max_seconds": 30}, candidate_target=2,
+        duration_range={"min_seconds": 1, "max_seconds": 30}, candidate_target=2,
         lineage=lineage_fields(experiment_id="exp_manual_01"),
         provider_policy={"allowed_providers": ["lyria"]},
     )
@@ -57,7 +57,7 @@ def _spec() -> dict[str, Any]:
 def _adapter(inbox: Path, *, tier: str | None = "google_ai_pro") -> FlowMusicManualAdapter:
     return FlowMusicManualAdapter(SunoManualSettings(
         inbox=inbox, plan_tier=tier, account_ref="google-account:owner" if tier else None,
-        model_version="lyria-3.5",
+        model_version="lyria-3.5", terms_ref="Flow Music terms read 2026-11-27",
     ))
 
 
@@ -106,6 +106,7 @@ def test_usable_files_import_as_lyria_with_flow_music_terms(tmp_path: Path) -> N
         assert event.rights.plan_or_tier == "google_ai_pro"
         assert "googleone" in (event.rights.license_reference or "")
         assert "suno" not in (event.rights.terms_version or "").lower()
+        assert event.rights.terms_version == "Flow Music terms: Flow Music terms read 2026-11-27"
 
 
 @pytest.mark.parametrize("tier", [None, "free", "pro"])

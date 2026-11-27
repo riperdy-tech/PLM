@@ -12,6 +12,10 @@
 
 A decode that cannot be completed returns :class:`DecodeFailure` with a reason code. It
 is never a pass: the technical evaluator turns it into a blocking finding.
+
+Inside :func:`shared_decodes` (one candidate evaluation) a file is decoded once: every
+evaluator that asks for the same file version (path, size, modification time) gets the
+same result. Outside it nothing is kept.
 """
 
 from __future__ import annotations
@@ -19,6 +23,9 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -34,6 +41,7 @@ __all__ = [
     "DecodeFailure",
     "DecodedAudio",
     "decode_audio",
+    "shared_decodes",
     "sniff_container",
 ]
 
@@ -185,10 +193,41 @@ def _container_label(path: Path) -> str:
     return suffix or "unknown"
 
 
+_SHARED: ContextVar[dict[tuple[str, int, int, str | None], DecodedAudio | DecodeFailure]
+                   | None] = ContextVar("plm_p5_shared_decodes", default=None)
+
+
+@contextmanager
+def shared_decodes() -> Iterator[None]:
+    """Decode each file version at most once inside this block."""
+    token = _SHARED.set({})
+    try:
+        yield
+    finally:
+        _SHARED.reset(token)
+
+
 def decode_audio(
     path: Path, *, timeout_seconds: float, ffmpeg_path: str | None = None
 ) -> DecodedAudio | DecodeFailure:
     """Decode ``path`` to float PCM, or say why it could not be decoded."""
+    cache = _SHARED.get()
+    if cache is None:
+        return _decode_audio(path, timeout_seconds=timeout_seconds, ffmpeg_path=ffmpeg_path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return _decode_audio(path, timeout_seconds=timeout_seconds, ffmpeg_path=ffmpeg_path)
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns, ffmpeg_path)
+    if key not in cache:
+        cache[key] = _decode_audio(path, timeout_seconds=timeout_seconds,
+                                   ffmpeg_path=ffmpeg_path)
+    return cache[key]
+
+
+def _decode_audio(
+    path: Path, *, timeout_seconds: float, ffmpeg_path: str | None
+) -> DecodedAudio | DecodeFailure:
     try:
         with path.open("rb") as handle:
             header = handle.read(_HEADER_BYTES)

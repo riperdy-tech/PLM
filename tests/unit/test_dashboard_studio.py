@@ -24,7 +24,9 @@ from starlette.requests import Request
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
 PKG = "mpkg_5d780a5bb27358a0"
-WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 32
+WAV = (b"RIFF" + (36 + 16000).to_bytes(4, "little") + b"WAVEfmt "  # 1 s, 8 kHz mono PCM
+       + bytes.fromhex("1000000001000100401f0000803e000002001000")
+       + b"data" + (16000).to_bytes(4, "little") + b"\x01\x00" * 8000)
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 

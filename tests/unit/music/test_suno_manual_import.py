@@ -79,7 +79,7 @@ ENV = {
 def _spec(track_spec_id: str = "trk_manual_01") -> dict[str, Any]:
     fields = track_spec_fields(
         track_spec_id=track_spec_id, requested_duration=20,
-        duration_range={"min_seconds": 10, "max_seconds": 30}, candidate_target=2,
+        duration_range={"min_seconds": 1, "max_seconds": 30}, candidate_target=2,
         lineage=lineage_fields(experiment_id="exp_manual_01"),
         provider_policy={"allowed_providers": ["suno"]},
     )
@@ -417,7 +417,7 @@ def test_styles_text_keeps_every_descriptor_of_the_prompt() -> None:
         "melody: answering melody in a contrasting register",
         "harmony: open intervals and delayed resolutions",
         "arrangement: gradual thinning toward the ending",
-        "Within the declared groove, leave space around the melody",
+        "space between phrases, short phrases with rests and light accents",
     ):
         assert phrase in styles
     assert "_" not in styles

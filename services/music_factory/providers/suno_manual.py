@@ -6,13 +6,23 @@ prompts of the songs it wants into the inbox, the owner makes each song in Suno'
 interface, downloads it as WAV and saves it under the file name the prompt sheet gives.
 Executing the plan then imports those files.
 
-* **Prompt sheet.** ``<inbox>/<track_spec_id>.prompts.txt``: one entry per song still
-  needed, with the file name to save it as.
+* **Prompt sheet.** ``<inbox>/<track_spec_id>.prompts.txt``: the plan, then one entry per
+  song still needed, with the file name to save it as, the accepted length and every
+  problem found in a file already saved (``Problem:``).
+* **Names.** A song is ``<track_spec_id>-<variant>`` (``trk_1-v2``). The name and the
+  prompt text are recorded in ``<track_spec_id>.songs.json`` when the sheet first asks
+  for the song and never change after, so a later prompt-code change cannot turn a saved
+  file into a missing one. A name of the earlier form ``<track>-<sha256(prompt)[:8]>``
+  (a sheet written before 2026-11-27, or a file already saved under it) is kept.
 * **All or nothing.** :meth:`SunoManualAdapter.awaiting_audio` checks every song a plan
   still needs before any is imported; while one is missing or unusable nothing is
-  imported and the plan waits (``manual_audio_awaited``).
-* **Files.** ``<name>.wav`` (PCM WAV, as Suno's WAV download), and for a vocal track
-  ``<name>.lyrics.txt`` with the lyrics as sung: P5 screens them.
+  imported and the plan waits (``manual_audio_awaited``). Unusable: not a WAV, cut
+  short, outside the accepted length, or the same audio as another WAV in the inbox or
+  a song already imported.
+* **Files.** ``<name>.wav`` (PCM or float WAV, read by libsndfile: the length is the
+  frames the file holds, not its header), and for a vocal track ``<name>.lyrics.txt``
+  with the lyrics as sung: P5 screens them. A file is read and hashed once per version
+  (path, size, modification time).
 * **Identity.** The provider is ``suno`` (P3's allowlist applies) and the model
   :data:`MANUAL_MODEL_ID`. The job id is ``manual:<sha256 of the WAV>``.
 * **Rights.** The owner declares the plan tier and account (``PLM_SUNO_PLAN_TIER``,
@@ -26,15 +36,16 @@ Executing the plan then imports those files.
 from __future__ import annotations
 
 import hashlib
-import io
+import json
 import os
 import re
-import wave
+import struct
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+import soundfile as sf  # type: ignore[import-untyped]
 from plm_contracts import CommercialUseEligibility, ProviderMode
 from plm_contracts.seams.c4 import ProviderLicenseTerms
 from plm_platform.dotenv import load_env_file
@@ -45,10 +56,14 @@ from ..domain.models import GenerationRequest, GenerationResponse
 __all__ = [
     "IMPORT_CAPABILITY",
     "MANUAL_MODEL_ID",
+    "STYLES_LIMIT",
     "SunoManualAdapter",
     "SunoManualSettings",
+    "WavFacts",
     "load_manual_settings",
     "load_suno_manual_settings",
+    "song_problem",
+    "wav_facts",
 ]
 
 IMPORT_CAPABILITY = "music.import"
@@ -65,6 +80,9 @@ MODEL_VERSION_VAR = "PLM_SUNO_MODEL_VERSION"
 PAID_TIERS = frozenset({"pro", "premier"})
 """Suno tiers whose terms include commercial use (suno.com/pricing, read 2026-10-30)."""
 
+STYLES_LIMIT: Final = 1000
+"""Characters Suno's Styles box takes (v4.5 and later)."""
+
 TERMS_VERSION = "suno.com/terms as read 2026-10-30"
 LICENSE_REFERENCE = "https://suno.com/terms (Permitted Commercial Use)"
 BASIS = ("owner-declared paid plan; song made by the account owner in Suno's interface "
@@ -79,15 +97,19 @@ class SunoManualSettings:
     plan_tier: str | None = None
     account_ref: str | None = None
     model_version: str | None = None
+    terms_ref: str | None = None
+    """Where and when the owner read the tool's own terms (Flow Music); unset: not read."""
 
 
 def load_manual_settings(
     names: tuple[str, str, str, str],
     env: Mapping[str, str] | None = None,
     dotenv_path: str | Path | None = None,
+    *,
+    terms_var: str | None = None,
 ) -> SunoManualSettings:
-    """Read the inbox, plan tier, account and model version variables ``names`` (env,
-    then ``.env``); unset means unknown."""
+    """Read the inbox, plan tier, account and model version variables ``names`` (and
+    ``terms_var``) from env, then ``.env``; unset means unknown."""
     process_env: Mapping[str, str] = os.environ if env is None else env
     dotenv_values = load_env_file(Path(".env") if dotenv_path is None else dotenv_path)
 
@@ -103,6 +125,7 @@ def load_manual_settings(
         plan_tier=None if tier is None else tier.lower(),
         account_ref=value(account_var),
         model_version=value(model_var),
+        terms_ref=None if terms_var is None else value(terms_var),
     )
 
 
@@ -135,13 +158,30 @@ _STYLE_PHRASES = {
 }
 
 
+def _plain_instruction(sentence: str) -> str | None:
+    """A variant's arrangement instruction (P4's planner) as plain style phrases, or
+    ``None`` when ``sentence`` is not one. The planner's wording is written for a model
+    ("within the declared ..., without replacing the supplied ..."); the owner pastes
+    style words, and the constraints it repeats are already in the other phrases."""
+    if sentence.startswith("Within the declared"):
+        return "space between phrases, short phrases with rests and light accents"
+    if sentence.startswith("Develop the declared"):
+        lead = re.search(r"contrast around (.+?);", sentence)
+        who = lead.group(1).replace("_", " ") if lead else "the parts"
+        return (f"{who} moving between foreground and background, "
+                "phrase density and dynamics changing across sections")
+    if sentence.startswith("For independent interpretation"):
+        return "its own placement of phrases and rests"
+    return None
+
+
 def suno_styles(request: GenerationRequest) -> str:
     """Every descriptor of P4's prompt, phrased for Suno's Styles box.
 
     The owner pastes this one text into Styles (Advanced mode has no description box),
     so nothing in the prompt may be dropped: each ``label: value`` sentence becomes a
-    phrase, ``snake_case`` values become words, and any sentence without a known label
-    (a candidate's variation instruction) is kept as written.
+    phrase, ``snake_case`` values become words, a variant's arrangement instruction
+    becomes plain style phrases, and any other sentence is kept as written.
     """
     phrases: list[str] = []
     for sentence in (s.strip() for s in request.prompt.split(". ")):
@@ -149,7 +189,10 @@ def suno_styles(request: GenerationRequest) -> str:
         if not sentence:
             continue
         label, sep, value = sentence.partition(": ")
-        if sep and label.lower() in _STYLE_PHRASES:
+        plain = _plain_instruction(sentence)
+        if plain is not None:
+            phrase = plain
+        elif sep and label.lower() in _STYLE_PHRASES:
             words = value.replace("_", " ")
             template = _STYLE_PHRASES[label.lower()]
             # "airy_synth_lead" is already a lead: "airy synth lead", not "... lead lead";
@@ -166,17 +209,124 @@ def suno_styles(request: GenerationRequest) -> str:
     return ", ".join(dict.fromkeys(phrases))
 
 
-def _wav_problem(data: bytes) -> str | None:
-    """Why ``data`` is not a usable PCM WAV, or ``None``."""
-    if not (data.startswith(b"RIFF") and b"WAVE" in data[:16]):
-        return "is not a WAV file (download it as WAV)"
+# -- reading a saved WAV -------------------------------------------------------------
+
+_SAMPLE_BYTES: Final = {"PCM_U8": 1, "PCM_16": 2, "PCM_24": 3, "PCM_32": 4,
+                        "FLOAT": 4, "DOUBLE": 8}
+"""The WAV sample formats an import accepts (Suno's and Flow Music's downloads, and a
+32-bit float export), with their bytes per sample."""
+
+_ACCEPTED: Final = re.compile(r"^Accepted length: (\d+):(\d\d) to (\d+):(\d\d)", re.MULTILINE)
+
+
+@dataclass(frozen=True, slots=True)
+class WavFacts:
+    """What one saved file is: why it cannot be imported (``None``: usable), its SHA-256
+    and the length of the audio it holds."""
+
+    problem: str | None
+    sha256: str | None = None
+    seconds: float | None = None
+
+
+def _clock(seconds: float) -> str:
+    whole = int(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
+def _declared_data_bytes(path: Path) -> int | None:
+    """The ``data`` chunk size the RIFF header declares; ``None`` when it does not say
+    (a streamed or RF64 file) or cannot be read."""
     try:
-        with wave.open(io.BytesIO(data), "rb") as wf:
-            if wf.getnframes() <= 0 or wf.getframerate() < 8000:
-                return "has no audio"
-    except (wave.Error, EOFError) as exc:
-        return f"is not a readable PCM WAV ({exc})"
-    return None
+        with path.open("rb") as f:
+            if f.read(12)[:4] != b"RIFF":
+                return None
+            while True:
+                head = f.read(8)
+                if len(head) < 8:
+                    return None
+                chunk, size = head[:4], struct.unpack("<I", head[4:])[0]
+                if chunk == b"data":
+                    return None if size in (0, 0xFFFFFFFF) else int(size)
+                f.seek(size + (size & 1), 1)
+    except (OSError, struct.error):
+        return None
+
+
+def _read_wav_facts(path: Path) -> WavFacts:
+    try:
+        with path.open("rb") as f:
+            head = f.read(12)
+    except OSError as exc:
+        return WavFacts(f"cannot be read ({exc})")
+    if not (head[:4] in (b"RIFF", b"RF64") and head[8:12] == b"WAVE"):
+        return WavFacts("is not a WAV file (download it as WAV)")
+    try:
+        info = sf.info(str(path))
+    except (RuntimeError, OSError, ValueError, TypeError) as exc:
+        return WavFacts(f"is not a readable WAV ({exc})")
+    if info.subtype not in _SAMPLE_BYTES:
+        return WavFacts(f"is a {info.subtype} WAV; download it as a PCM or float WAV")
+    if info.frames <= 0 or info.samplerate < 8000:
+        return WavFacts("has no audio")
+    # libsndfile counts the frames the file holds; a header promising more is a file
+    # cut short (an interrupted download), whose header length would be a lie.
+    seconds = info.frames / info.samplerate
+    declared = _declared_data_bytes(path)
+    if declared is not None:
+        declared_frames = declared // (info.channels * _SAMPLE_BYTES[info.subtype])
+        if declared_frames > info.frames:
+            return WavFacts(f"is cut short: its header says "
+                            f"{_clock(declared_frames / info.samplerate)} but it holds "
+                            f"{_clock(seconds)} (download it again)")
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return WavFacts(None, digest.hexdigest(), seconds)
+
+
+_FACTS: dict[str, tuple[tuple[int, int], WavFacts]] = {}
+
+
+def wav_facts(path: Path) -> WavFacts:
+    """:func:`_read_wav_facts`, read once per file version (path, size, mtime)."""
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        return WavFacts(f"cannot be read ({exc})")
+    key, version = str(path.resolve()), (stat.st_size, stat.st_mtime_ns)
+    cached = _FACTS.get(key)
+    if cached is not None and cached[0] == version:
+        return cached[1]
+    facts = _read_wav_facts(path)
+    _FACTS[key] = (version, facts)
+    return facts
+
+
+def _length_problem(seconds: float, low: int | None, high: int | None) -> str | None:
+    if low is None or high is None or low <= seconds <= high:
+        return None
+    return (f"is {_clock(seconds)} long; the accepted length is "
+            f"{_clock(low)} to {_clock(high)}")
+
+
+def song_problem(path: Path, sheet_block: str | None = None) -> str | None:
+    """Why the saved song at ``path`` cannot be imported, or ``None``: the check P4
+    makes, for the Studio to run when the owner saves a file. ``sheet_block`` is the
+    song's entry on the prompt sheet; its accepted length is checked too."""
+    facts = wav_facts(path)
+    if facts.problem is not None or facts.seconds is None:
+        return facts.problem
+    accepted = _ACCEPTED.search(sheet_block or "")
+    if accepted is None:
+        return None
+    low_m, low_s, high_m, high_s = (int(g) for g in accepted.groups())
+    return _length_problem(facts.seconds, low_m * 60 + low_s, high_m * 60 + high_s)
+
+
+def _safe(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)
 
 
 class SunoManualAdapter:
@@ -203,6 +353,10 @@ class SunoManualAdapter:
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    @property
+    def inbox(self) -> Path | None:
+        return self._settings.inbox
 
     def check_health(self) -> bool:
         return self._settings.inbox is not None and self._settings.inbox.is_dir()
@@ -235,50 +389,121 @@ class SunoManualAdapter:
     # -- files -----------------------------------------------------------------------
 
     @staticmethod
-    def file_stem(request: GenerationRequest) -> str:
-        """The name the owner saves a song under: track spec id and a prompt digest."""
-        track = re.sub(r"[^A-Za-z0-9_-]", "_", request.track_spec_id)
+    def legacy_stem(request: GenerationRequest) -> str:
+        """The name sheets gave a song before 2026-11-27: track id and a prompt digest."""
         digest = hashlib.sha256(request.prompt.encode("utf-8")).hexdigest()[:8]
-        return f"{track}-{digest}"
+        return f"{_safe(request.track_spec_id)}-{digest}"
 
     def _inbox(self) -> Path:
         if self._settings.inbox is None:
             raise RuntimeError(f"{self.inbox_var} is not set: there is no inbox to import from")
         return self._settings.inbox
 
-    def awaiting_audio(self, requests: Sequence[GenerationRequest]) -> list[str]:
+    @staticmethod
+    def _record_path(inbox: Path, track_spec_id: str) -> Path:
+        return inbox / f"{_safe(track_spec_id)}.songs.json"
+
+    def _record(self, inbox: Path, track_spec_id: str, plan_id: str | None) -> dict[str, Any]:
+        """The track's recorded names and prompt texts (a new record for another plan)."""
+        path = self._record_path(inbox, track_spec_id)
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            loaded = None
+        if (not isinstance(loaded, dict) or not isinstance(loaded.get("songs"), dict)
+                or (plan_id is not None and loaded.get("plan_id") != plan_id)):
+            return {"plan_id": plan_id, "provider": self.provider_id, "songs": {}}
+        return loaded
+
+    def records_plan(self, track_spec_id: str, plan_id: str) -> bool:
+        """Whether this inbox already asked the owner for ``plan_id``'s songs."""
+        inbox = self._settings.inbox
+        if inbox is None:
+            return False
+        try:
+            loaded = json.loads(self._record_path(inbox, track_spec_id).read_text(
+                encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(loaded, dict) and loaded.get("plan_id") == plan_id
+
+    def _stem(self, inbox: Path, request: GenerationRequest,
+              record: dict[str, Any]) -> str:
+        """The recorded name, else an old prompt-hash name in use, else track + variant."""
+        code = request.variant_code
+        entry = record["songs"].get(code) if code else None
+        if isinstance(entry, dict) and isinstance(entry.get("stem"), str):
+            return str(entry["stem"])
+        legacy = self.legacy_stem(request)
+        if code is None or (inbox / f"{legacy}.wav").is_file():
+            return legacy
+        sheet = inbox / f"{_safe(request.track_spec_id)}.prompts.txt"
+        try:
+            if f"Save as: {legacy}.wav" in sheet.read_text(encoding="utf-8"):
+                return legacy
+        except OSError:
+            pass
+        return f"{_safe(request.track_spec_id)}-{_safe(code)}"
+
+    def file_stem(self, request: GenerationRequest) -> str:
+        """The name the owner saves ``request``'s song under."""
+        inbox = self._inbox()
+        return self._stem(inbox, request,
+                          self._record(inbox, request.track_spec_id, request.plan_id))
+
+    def _inbox_index(self, inbox: Path) -> dict[str, list[str]]:
+        """SHA-256 -> names of every usable WAV in the inbox."""
+        index: dict[str, list[str]] = {}
+        for wav in sorted(inbox.glob("*.wav")):
+            facts = wav_facts(wav)
+            if facts.sha256 is not None:
+                index.setdefault(facts.sha256, []).append(wav.name)
+        return index
+
+    def awaiting_audio(self, requests: Sequence[GenerationRequest], *,
+                       imported: Mapping[str, str] | None = None) -> list[str]:
         """What is still missing or unusable for ``requests`` (empty: ready to import).
 
-        Writes the prompt sheet of the songs still awaited, so the owner sees what to make.
+        ``imported`` maps the SHA-256 of audio already imported to its candidate: a file
+        with that audio is not a new song. Writes the prompt sheet of the songs still
+        awaited, with each saved file's problem, so the owner sees what to make or fix.
         """
         inbox = self._inbox()
+        index = self._inbox_index(inbox)
+        records: dict[str, dict[str, Any]] = {}
         problems: list[str] = []
-        awaited: list[GenerationRequest] = []
-        seen: dict[str, str] = {}
+        awaited: list[tuple[GenerationRequest, str, list[str]]] = []
         for request in requests:
-            stem = self.file_stem(request)
+            record = records.setdefault(
+                request.track_spec_id,
+                self._record(inbox, request.track_spec_id, request.plan_id))
+            stem = self._stem(inbox, request, record)
             wav = inbox / f"{stem}.wav"
-            before = len(problems)
+            found: list[str] = []
             if not wav.is_file():
                 problems.append(f"{wav.name} is missing")
             else:
-                data = wav.read_bytes()
-                problem = _wav_problem(data)
+                facts = wav_facts(wav)
+                problem = facts.problem or (None if facts.seconds is None else _length_problem(
+                    facts.seconds, request.duration_min_seconds, request.duration_max_seconds))
+                if problem is None and facts.sha256 is not None:
+                    others = [n for n in index.get(facts.sha256, []) if n != wav.name]
+                    if others:
+                        problem = f"is the same audio as {others[0]}"
+                    elif imported and facts.sha256 in imported:
+                        problem = (f"is the same audio as song {imported[facts.sha256]}, "
+                                   "already imported")
                 if problem is not None:
+                    found.append(problem)
                     problems.append(f"{wav.name} {problem}")
-                else:
-                    sha = hashlib.sha256(data).hexdigest()
-                    if sha in seen:
-                        problems.append(f"{wav.name} is the same audio as {seen[sha]}")
-                    seen[sha] = wav.name
-            if request.vocal_mode != "instrumental" and not (
-                inbox / f"{stem}.lyrics.txt"
-            ).is_file():
+            missing_lyrics = request.vocal_mode != "instrumental" and not (
+                inbox / f"{stem}.lyrics.txt").is_file()
+            if missing_lyrics:
                 problems.append(f"{stem}.lyrics.txt is missing (the lyrics as sung)")
-            if len(problems) > before:
-                awaited.append(request)
+            if found or missing_lyrics or not wav.is_file():
+                awaited.append((request, stem, found))
         if awaited:
-            self._write_sheet(inbox, awaited)
+            self._write_sheet(inbox, awaited, records)
         return problems
 
     def _sheet_header(self, track_spec_id: str) -> list[str]:
@@ -288,45 +513,73 @@ class SunoManualAdapter:
             f"Suno Advanced mode, model {model}. Paste the Styles text into Styles and",
             "the Exclude styles into Exclude. Pick the better of Suno's two clips,",
             "download it as WAV and save it in this folder under the name given.",
-            "",
         ]
 
     def _prompt_lines(self, request: GenerationRequest) -> list[str]:
         styles = suno_styles(request)
+        warning: list[str] = []
+        if len(styles) > STYLES_LIMIT:
+            cut = styles.rfind(", ", 0, STYLES_LIMIT + 1)
+            kept = styles[:cut] if cut > 0 else styles[:STYLES_LIMIT]
+            warning = [(f"Warning: Suno takes at most {STYLES_LIMIT} characters of Styles, "
+                       f"so this end was left out: {styles[len(kept):].lstrip(', ')}")]
+            styles = kept
         return [
             f"Styles ({len(styles)} characters; paste all of it into Styles):",
             styles,
             *([f"Exclude styles: {request.negative_prompt}"] if request.negative_prompt else []),
+            *warning,
         ]
 
-    def _write_sheet(self, inbox: Path, requests: Sequence[GenerationRequest]) -> None:
-        by_track: dict[str, list[GenerationRequest]] = {}
-        for request in requests:
-            by_track.setdefault(request.track_spec_id, []).append(request)
+    def _write_sheet(self, inbox: Path,
+                     awaited: Sequence[tuple[GenerationRequest, str, list[str]]],
+                     records: dict[str, dict[str, Any]]) -> None:
+        by_track: dict[str, list[tuple[GenerationRequest, str, list[str]]]] = {}
+        for item in awaited:
+            by_track.setdefault(item[0].track_spec_id, []).append(item)
         for track_spec_id, wanted in by_track.items():
-            lines = self._sheet_header(track_spec_id)
-            for n, request in enumerate(wanted, start=1):
+            record = records[track_spec_id]
+            plan_id = wanted[0][0].plan_id
+            lines = [*self._sheet_header(track_spec_id),
+                     *([f"Plan: {plan_id}"] if plan_id else []), ""]
+            for n, (request, stem, found) in enumerate(wanted, start=1):
                 instrumental = request.vocal_mode == "instrumental"
+                code = request.variant_code
+                entry = record["songs"].get(code) if code else None
+                if not isinstance(entry, dict):
+                    # The text the owner is first asked for is kept as written.
+                    entry = {"stem": stem, "prompt": request.prompt,
+                             "lines": self._prompt_lines(request)}
+                    if code:
+                        record["songs"][code] = entry
+                low, high = request.duration_min_seconds, request.duration_max_seconds
                 lines += [
                     f"--- Song {n} ---",
-                    f"Save as: {self.file_stem(request)}.wav",
+                    f"Save as: {stem}.wav",
                     *([] if instrumental else [
-                        f"Lyrics:  save the lyrics as sung in {self.file_stem(request)}.lyrics.txt",
+                        f"Lyrics:  save the lyrics as sung in {stem}.lyrics.txt",
                     ]),
                     f"Instrumental: {'yes' if instrumental else 'no'}",
-                    (f"Length: about {request.duration_seconds} seconds "
-                     "(any length the track accepts is fine)"),
-                    *self._prompt_lines(request),
+                    f"Length: about {request.duration_seconds} seconds",
+                    *([] if low is None or high is None else [
+                        (f"Accepted length: {_clock(low)} to {_clock(high)} "
+                        "(a song outside it is not imported)")]),
+                    *(f"Problem: {problem}" for problem in found),
+                    *[str(line) for line in entry["lines"]],
                     "",
                 ]
-            name = re.sub(r"[^A-Za-z0-9_-]", "_", track_spec_id)
+            name = _safe(track_spec_id)
             (inbox / f"{name}.prompts.txt").write_text("\n".join(lines), encoding="utf-8")
+            if record["songs"]:
+                self._record_path(inbox, track_spec_id).write_text(
+                    json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def generate(self, request: GenerationRequest) -> GenerationResponse:
         """Import the owner's WAV for ``request``; nothing is sent anywhere."""
         inbox = self._inbox()
         stem = self.file_stem(request)
         wav = inbox / f"{stem}.wav"
+        facts = wav_facts(wav)
         try:
             data = wav.read_bytes()
         except OSError as exc:
@@ -334,23 +587,22 @@ class SunoManualAdapter:
                 provider_job_id="", status=AttemptStatus.FAILED,
                 error_message=f"cannot read {wav.name}: {exc}", confirmed_unsubmitted=True,
             )
-        problem = _wav_problem(data)
-        if problem is not None:
+        sha = hashlib.sha256(data).hexdigest()
+        if facts.problem is not None or facts.seconds is None or facts.sha256 != sha:
             return GenerationResponse(
                 provider_job_id="", status=AttemptStatus.FAILED,
-                error_message=f"{wav.name} {problem}", confirmed_unsubmitted=True,
+                error_message=f"{wav.name} {facts.problem or 'changed while it was read'}",
+                confirmed_unsubmitted=True,
             )
         lyrics_path = inbox / f"{stem}.lyrics.txt"
         lyrics = (lyrics_path.read_text(encoding="utf-8").strip() or None
                   if lyrics_path.is_file() else None)
-        with wave.open(io.BytesIO(data), "rb") as wf:
-            duration = wf.getnframes() / wf.getframerate()
         return GenerationResponse(
-            provider_job_id=f"manual:{hashlib.sha256(data).hexdigest()}",
+            provider_job_id=f"manual:{sha}",
             status=AttemptStatus.SUCCEEDED,
             audio_data=data,
             mime_type="audio/wav",
-            actual_duration_seconds=round(duration, 4),
+            actual_duration_seconds=round(facts.seconds, 4),
             cost_credits=None,  # spent in Suno's interface; PLM never sees the amount
             model_version=self._settings.model_version,
             lyrics_text=None if request.vocal_mode == "instrumental" else lyrics,
