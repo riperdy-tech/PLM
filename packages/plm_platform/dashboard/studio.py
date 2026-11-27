@@ -459,8 +459,14 @@ class Studio:
         if not inboxes:
             return {"configured": False, "sheets": []}
         sheets = []
+        # Only running runs' sheets: a cancelled or finished run's sheet stays in the
+        # inbox, but nothing waits for it (no project store: every sheet).
+        tracks = None if self.store is None else {
+            track for run in self.store.runs()
+            if str(run.get("state")) not in _FINISHED_STATES and run.get("experiment_id")
+            for track in self.store.track_ids(str(run["experiment_id"]))}
         for source, inbox in inboxes:
-            sheets += self._sheets(source, inbox)
+            sheets += self._sheets(source, inbox, tracks=tracks)
         return {"configured": True, "inbox": str(inboxes[0][1]),
                 "inboxes": {source: str(inbox) for source, inbox in inboxes},
                 "sheets": sheets}
@@ -511,6 +517,17 @@ class Studio:
         if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE"):
             raise _refuse(422, "not_a_wav", "the file is not a WAV or M4A (download it as one)")
         _write_atomic(target, data)
+        try:  # P4's own check (format, cut short, accepted length), so a saved song imports
+            from music_factory.providers.suno_manual import song_problem
+        except ImportError:
+            problem = None
+        else:
+            problem = song_problem(target, next(
+                (s["text"] for sheet in self.songs()["sheets"] for s in sheet["songs"]
+                 if s["stem"] == stem), None))
+        if problem is not None:
+            target.unlink()
+            raise _refuse(422, "song_unusable", f"{stem}.wav {problem}")
         return {"saved": f"{stem}.wav", "bytes": len(data), "seconds": wav_seconds(target)}
 
     def song_file(self, stem: str) -> Path:
