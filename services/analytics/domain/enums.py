@@ -15,6 +15,9 @@ class MetricSource(str, Enum):
     DISTRIBUTOR_STATEMENT = "distributor_statement"
     INTERNAL_COST = "internal_cost"
     SYNTHETIC = "synthetic"
+    OPERATOR_ATTESTED_NON_MONETIZED = "operator_attested_non_monetized"
+    """Realized revenue 0 from the operator's dated statement that the channel is not
+    monetized (a YouTube-only channel outside the Partner Program); never a stored row."""
 
 
 class MetricStatus(str, Enum):
