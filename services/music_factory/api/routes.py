@@ -14,7 +14,7 @@ key, so the same execute imports once the files are there.
 """
 
 from collections.abc import Callable, Iterator
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -48,7 +48,7 @@ from ..ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
 from ..observability.metrics import metrics
 from ..providers.adapters import get_provider_adapter
 from ..providers.registry import list_providers
-from ..providers.suno_manual import IMPORT_CAPABILITY
+from ..providers.suno_manual import IMPORT_CAPABILITY, SunoManualAdapter
 from ..storage.artifacts import ArtifactStorageProtocol, ArtifactStorageUnavailable
 from ..storage.models import idempotency_records_table
 from ..storage.repositories import (
@@ -290,6 +290,30 @@ def build_router(
         return _idempotent(session, request, idempotency_key, spec_payload,
                            lambda: _execute(plan_id, spec_payload, session, provider))
 
+    def _manual_adapter(track_spec_id: str, plan_id: str,
+                        provider: str | None) -> SunoManualAdapter:
+        """The owner's song tool for this plan: the one whose inbox already asked for its
+        songs (a run's choice sticks to its plan), else ``provider``, else the default.
+        Two tools sharing one inbox are refused: their sheets would mix."""
+        adapters = {name: cast(SunoManualAdapter, get_provider_adapter(name))
+                    for name in sorted(MANUAL_PROVIDERS)}
+        inboxes = [a.inbox.resolve() for a in adapters.values() if a.inbox is not None]
+        if len(inboxes) != len(set(inboxes)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ErrorShape(
+                code="music_inboxes_shared", field_paths=["provider"],
+                message="PLM_SUNO_MANUAL_INBOX and PLM_FLOW_MUSIC_MANUAL_INBOX are the same "
+                        "folder; give each song tool its own inbox",
+            ).model_dump())
+        recorded = [name for name, a in adapters.items()
+                    if a.records_plan(track_spec_id, plan_id)]
+        if provider is not None and recorded and provider not in recorded:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=ErrorShape(
+                code="music_provider_conflict", field_paths=["provider"],
+                message=f"plan {plan_id} already asks for its songs in {recorded[0]}, "
+                        f"not {provider}",
+            ).model_dump())
+        return adapters[provider or (recorded[0] if recorded else settings.default_provider)]
+
     def _execute(plan_id: str, spec_payload: dict[str, Any],
                  session: Session, provider: str | None = None) -> tuple[int, Any]:
         plan = get_generation_plan(session, plan_id)
@@ -317,6 +341,8 @@ def build_router(
                 ).model_dump(),
             )
         variants = list_creative_variants(session, plan_id)
+        adapter = (None if settings.default_provider not in MANUAL_PROVIDERS
+                   else _manual_adapter(plan.track_spec_id, plan_id, provider))
         engine = GenerationEngine(
             clock=service_clock, storage=storage, default_provider_id=settings.default_provider,
             write_guard=guard,
@@ -328,7 +354,7 @@ def build_router(
                 plan=plan,
                 variants=variants,
                 spec=spec,
-                provider_adapter=None if provider is None else get_provider_adapter(provider),
+                provider_adapter=adapter,
                 # Paid calls commit their SUBMITTED and settled attempts, so a
                 # later failure in this request cannot erase a provider job.
                 checkpoint=session.commit,

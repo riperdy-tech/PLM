@@ -375,11 +375,14 @@ class GenerationEngine:
         # An import re-reads the owner's file from the inbox and spends nothing through
         # PLM. One stored without its candidate (before 2026-11-02 an import's attempt
         # was committed ahead of it) is abandoned, not a paid job to reconcile: it is
-        # imported again without using up a retry.
+        # imported again without using up a retry. So is a failed import of an earlier
+        # run (refused before anything was stored: the file was unreadable): once the
+        # owner fixes the file, the next run tries it again with fresh retries.
         abandoned = {
             a.attempt_id for a in stored_attempts
-            if free and a.status is not AttemptStatus.FAILED
-            and a.attempt_id not in stored_candidates
+            if free and a.attempt_id not in stored_candidates
+            and (a.status is not AttemptStatus.FAILED
+                 or a.failure_code == _CONFIRMED_NO_SUBMISSION_FAILURE)
         }
         total_attempts = len(stored_attempts) - len(abandoned)
         candidate_count = 0
