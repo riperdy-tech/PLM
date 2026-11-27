@@ -8,9 +8,10 @@ Frozen design rules (P0 §5 C9, ruling R13):
   :func:`put_content` computes that digest, :func:`put_verified` takes a
   caller-supplied digest and verifies it first, and :func:`get_verified`
   re-computes it on every read.
-* **No silent overwrite.** Writing a key that already exists raises
-  :class:`ObjectAlreadyExistsError`; :func:`replace_object` is the single,
-  explicitly documented, deliberate exception.
+* **No silent overwrite.** :func:`put_verified` to a key that already exists
+  raises :class:`ObjectAlreadyExistsError`; :func:`put_content` returns the object
+  already stored there (the key pins the same bytes) and uploads nothing;
+  :func:`replace_object` is the single, explicitly documented, deliberate exception.
 * **Artifact URIs are opaque.** Database rows carry ``plm://<bucket>/<key>``
   strings produced by :func:`to_uri`; consumers hand them back to
   :func:`from_uri`, which mechanically checks scheme and bucket and never
@@ -311,13 +312,19 @@ def put_content(
 ) -> StoredObject:
     """Content-addressed put: the digest is computed from ``data`` right here.
 
-    Raises :class:`ObjectAlreadyExistsError` when the key already exists —
-    there is no silent overwrite path anywhere in this module.
+    Idempotent (review 2026-11-26): the key pins the sha256 of ``data``, so an object
+    already stored under it is these bytes and a retried put returns it without
+    uploading again. Nothing is ever overwritten; :func:`get_verified` re-hashes the
+    stored bytes on every read.
     """
     digest = sha256_digest(data)
     key = build_key(prefix, resource_path, digest)
     active = _default_client() if client is None else client
-    _put_new(active, bucket_name(settings), key, data, content_type)
+    bucket = bucket_name(settings)
+    if _exists(active, bucket, key):
+        return StoredObject(key=key, digest=digest, size=len(data))
+    active.put_object(bucket, key, io.BytesIO(data), length=len(data),
+                      content_type=content_type)
     return StoredObject(key=key, digest=digest, size=len(data))
 
 

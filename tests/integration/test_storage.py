@@ -114,15 +114,18 @@ def test_put_content_is_content_addressed_and_get_verified_round_trips(
     assert from_uri(to_uri(stored.key, settings=settings), settings=settings) == stored.key
 
 
-def test_second_put_to_the_same_key_fails_loudly(
+def test_second_put_of_the_same_bytes_is_the_stored_object(
     run: Run, settings: Settings, client: Minio
 ) -> None:
+    """Review 2026-11-26: a same-digest retry is idempotent, not an error."""
     data = b"same-bytes"
     path = f"integration/w06/{run.run_id}/same.bin"
     stored = put_content(MEDIA_PREFIX, path, data, settings=settings, client=client)
     run.keys.append(stored.key)
+    assert put_content(MEDIA_PREFIX, path, data, settings=settings, client=client) == stored
     with pytest.raises(ObjectAlreadyExistsError, match="refusing to overwrite"):
-        put_content(MEDIA_PREFIX, path, data, settings=settings, client=client)
+        put_verified(MEDIA_PREFIX, path, data, stored.digest, settings=settings,
+                     client=client)
 
 
 def test_put_verified_refuses_a_wrong_digest_before_uploading(

@@ -140,3 +140,40 @@ class TestArtifactUri:
     def test_from_uri_does_not_interpret_the_key(self) -> None:
         """Opaque by contract: only scheme and bucket are checked, nothing else."""
         assert from_uri("plm://plm-media/free/form/path", settings=settings()) == "free/form/path"
+
+
+class _FakeMinio:
+    """Just enough of the MinIO client for the put paths: stat and put by key."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+        self.puts: list[str] = []
+
+    def stat_object(self, bucket: str, key: str) -> object:
+        from types import SimpleNamespace
+
+        from minio.error import S3Error
+
+        if key not in self.objects:
+            raise S3Error(None, "NoSuchKey", "missing", key, "r", "h")  # type: ignore[arg-type]
+        return SimpleNamespace(size=len(self.objects[key]))
+
+    def put_object(self, bucket: str, key: str, data: object, *, length: int,
+                   content_type: str) -> None:
+        self.puts.append(key)
+        self.objects[key] = data.read()  # type: ignore[attr-defined]
+
+
+class TestPutContent:
+    def test_a_same_digest_retry_is_the_stored_object_not_an_error(self) -> None:
+        """Review 2026-11-26 (P2): the key pins the bytes' sha256, so a retried put of
+        the same bytes is the object already stored; it uploads nothing again."""
+        from plm_platform.storage import put_content
+
+        client = _FakeMinio()
+        first = put_content(MEDIA_PREFIX, RESOURCE, b"abc", settings=settings(),
+                            client=client)  # type: ignore[arg-type]
+        again = put_content(MEDIA_PREFIX, RESOURCE, b"abc", settings=settings(),
+                            client=client)  # type: ignore[arg-type]
+        assert again == first and first.key == MEDIA_KEY
+        assert client.puts == [MEDIA_KEY]
