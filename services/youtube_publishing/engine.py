@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from plm_contracts import ExecutionPolicy, ProviderMode
@@ -28,6 +29,7 @@ from .client.base import (
 from .domain.enums import (
     FailureReasonCode,
     OperatingMode,
+    PrivacyStatus,
     PublishState,
 )
 from .domain.ids import build_attempt_id, build_publication_record_id
@@ -170,6 +172,24 @@ class YouTubePublishingEngine:
         )
         self.decisions.append(decision)
         return decision
+
+    @staticmethod
+    def effective_visibility(
+        manifest: PublishManifest, operating_mode: OperatingMode
+    ) -> tuple[PrivacyStatus, datetime | None]:
+        """The privacy and schedule the upload asks YouTube for under ``operating_mode``.
+
+        ``private_only`` (the private smoke test) is always private and never scheduled;
+        ``staged`` is private or unlisted, never scheduled to go public, until an operator
+        publishes it; ``autonomous`` (and ``dry_run``, which writes nothing) follow the
+        manifest (P7 §52, review 2026-11-26 #32).
+        """
+        if operating_mode is OperatingMode.PRIVATE_ONLY:
+            return PrivacyStatus.PRIVATE, None
+        if operating_mode is OperatingMode.STAGED:
+            privacy = manifest.privacy_status
+            return (PrivacyStatus.PRIVATE if privacy is PrivacyStatus.PUBLIC else privacy), None
+        return manifest.privacy_status, manifest.publish_at
 
     def _media_bytes(self, supplied: bytes | None, placeholder_attr: str) -> bytes | None:
         """The bytes to upload: the supplied media, or a mock client's own placeholder.
@@ -346,6 +366,7 @@ class YouTubePublishingEngine:
             return self._missing_media(session, attempt, "video")
         total_bytes = len(video_bytes)
 
+        privacy, publish_at = self.effective_visibility(manifest, operating_mode)
         # The funded write whose provider call is under way; settled once it returns.
         pending: GuardDecision | None = None
         try:
@@ -386,12 +407,12 @@ class YouTubePublishingEngine:
                     # videos.insert writes selfDeclaredMadeForKids; madeForKids is the
                     # read-only effective value YouTube derives from it.
                     status: dict[str, Any] = {
-                        "privacyStatus": manifest.privacy_status.value,
+                        "privacyStatus": privacy.value,
                         "containsSyntheticMedia": manifest.contains_synthetic_media,
                         "selfDeclaredMadeForKids": manifest.made_for_kids,
                     }
-                    if manifest.publish_at:
-                        status["publishAt"] = manifest.publish_at.isoformat()
+                    if publish_at:
+                        status["publishAt"] = publish_at.isoformat()
 
                     session_uri = self.client.insert_resumable_session(
                         snippet=snippet,
@@ -580,7 +601,7 @@ class YouTubePublishingEngine:
                 pending = None
 
             # 7. Final State: Scheduled or Published
-            final_state = PublishState.SCHEDULED if manifest.publish_at else PublishState.VERIFIED
+            final_state = PublishState.SCHEDULED if publish_at else PublishState.VERIFIED
             completed_time = self._clock.now()
 
             update_publish_attempt(
@@ -607,7 +628,7 @@ class YouTubePublishingEngine:
                 content_genome_id=manifest.content_genome_id,
                 production_directive_id=manifest.production_directive_id,
                 title=manifest.title,
-                privacy_status=manifest.privacy_status,
+                privacy_status=privacy,
                 contains_synthetic_media=manifest.contains_synthetic_media,
                 published_at=completed_time,
                 video_url=f"https://www.youtube.com/watch?v={youtube_video_id}",
