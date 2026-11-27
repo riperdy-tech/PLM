@@ -48,6 +48,7 @@ def isolate_platform_env(request: pytest.FixtureRequest,
     monkeypatch.setattr(config, "_DEFAULT_DOTENV", Path("__no_dotenv_in_unit_tests__"))
     for name in PLATFORM_VARS:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("CI", raising=False)
     yield
 
 
@@ -57,4 +58,6 @@ def platform_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     values = example_env()
     for name, value in values.items():
         monkeypatch.setenv(name, value)
+    # The example's change-me service token is accepted only in CI (plm_platform.config).
+    monkeypatch.setenv("CI", "true")
     return values

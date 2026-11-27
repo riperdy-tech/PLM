@@ -254,6 +254,26 @@ def load_execution_settings(
     )
 
 
+def effective_execution_summary() -> str:
+    """One line naming the effective provider modes, policies and grant count (no secrets).
+
+    Services print it at boot, so a mode or policy set silently by the bind-mounted
+    ``.env`` shows in the container log (review 2026-11-26, finding 54).
+    """
+    try:
+        settings = load_execution_settings()
+        grants = load_write_authorizations()
+    except SettingsError as exc:
+        return f"execution settings invalid: {exc}"
+    modes = ", ".join(f"{k}={v.value}" for k, v in sorted(settings.provider_modes.items()))
+    policies = ", ".join(f"{k}={v.value}" for k, v in sorted(settings.policies.items()))
+    return (
+        f"provider modes [{modes or 'all mock'}] (default {DEFAULT_PROVIDER_MODE.value}); "
+        f"policies [{policies or 'none set'}] (default {DEFAULT_EXECUTION_POLICY.value}); "
+        f"write grants {len(grants)}; ledger currency {settings.budget_currency or 'unset'}"
+    )
+
+
 def load_write_authorizations(
     env: Mapping[str, str] | None = None,
     dotenv_path: str | Path | None = None,

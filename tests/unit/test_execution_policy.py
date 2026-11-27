@@ -482,3 +482,19 @@ def test_p7_real_client_never_uploads_placeholder_bytes() -> None:
     assert _yt_writes(client) == []
     assert result.attempt.state is PublishState.FAILED_PERMANENT
     assert result.error is not None and "no video bytes" in result.error
+
+
+def test_effective_execution_summary_names_modes_and_policies_without_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+) -> None:
+    from plm_platform.execution import effective_execution_summary
+
+    monkeypatch.chdir(tmp_path)  # no .env here: only the process environment counts
+    monkeypatch.setenv("PLM_PROVIDER_MODE__YOUTUBE", "real")
+    monkeypatch.setenv("PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD", "live")
+    monkeypatch.setenv("YOUTUBE_API_KEY", "secret-never-printed")
+    summary = effective_execution_summary()
+    assert "youtube=real" in summary and "youtube.upload=live" in summary
+    assert "write grants 0" in summary and "secret-never-printed" not in summary
+    monkeypatch.setenv("PLM_PROVIDER_MODE__MUSIC", "bogus")
+    assert "invalid" in effective_execution_summary()

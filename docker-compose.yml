@@ -1,4 +1,9 @@
-name: plm
+# The live stack is project `plm`, started from the main checkout only
+# (C:\Users\riper\Downloads\PLM). A git worktree must set its own COMPOSE_PROJECT_NAME
+# (e.g. plm_wt_<name>) before any `docker compose` command, or it would recreate the live
+# containers with unmerged code. make.ps1, the Makefile and the Studio launcher refuse that;
+# a worktree has no .env, so the required ${...:?} values below stop a bare compose too.
+name: ${COMPOSE_PROJECT_NAME:-plm}
 
 # Every published port binds to 127.0.0.1: the stack is for this machine only and
 # its credentials are development placeholders. Containers reach each other by
@@ -8,6 +13,9 @@ x-plm-app: &plm-app
   build:
     context: .
     dockerfile: Dockerfile.dev
+  # Restart after a crash or a Docker Desktop restart; give a render or upload time to stop.
+  restart: unless-stopped
+  stop_grace_period: 120s
   environment:
     # Compose services reach each other by service name; these win over .env.
     - TEMPORAL_HOST=temporal:7233
@@ -45,6 +53,27 @@ x-plm-app: &plm-app
     # P6 copies a published video's renders here and frees them locally (the api-media
     # /archive mount below); unset, nothing is archived.
     - PLM_ARCHIVE_DIR=${PLM_ARCHIVE_DIR:-}
+    # Provider modes, execution policies, the owner's grants and the manual-song inboxes,
+    # passed explicitly so `docker compose config` shows what the containers run with
+    # (each service also logs its effective modes and policies at boot). Unset here, the
+    # code still reads the bind-mounted .env, then its safe default (mock, dry_run, none).
+    # A new PLM_PROVIDER_MODE__* / PLM_EXECUTION_POLICY__* key belongs in this list.
+    - PLM_PROVIDER_MODE__YOUTUBE=${PLM_PROVIDER_MODE__YOUTUBE:-}
+    - PLM_PROVIDER_MODE__MUSIC=${PLM_PROVIDER_MODE__MUSIC:-}
+    - PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD=${PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD:-}
+    - PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL=${PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL:-}
+    - PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST=${PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST:-}
+    - PLM_EXECUTION_POLICY__MUSIC_IMPORT=${PLM_EXECUTION_POLICY__MUSIC_IMPORT:-}
+    - PLM_WRITE_AUTHORIZATIONS_FILE=${PLM_WRITE_AUTHORIZATIONS_FILE:-}
+    - PLM_FLOW_MUSIC_MANUAL_INBOX=${PLM_FLOW_MUSIC_MANUAL_INBOX:-}
+    - PLM_FLOW_MUSIC_PLAN_TIER=${PLM_FLOW_MUSIC_PLAN_TIER:-}
+    - PLM_FLOW_MUSIC_ACCOUNT_REF=${PLM_FLOW_MUSIC_ACCOUNT_REF:-}
+    - PLM_FLOW_MUSIC_MODEL_VERSION=${PLM_FLOW_MUSIC_MODEL_VERSION:-}
+    - PLM_SUNO_MANUAL_INBOX=${PLM_SUNO_MANUAL_INBOX:-}
+    - PLM_SUNO_PLAN_TIER=${PLM_SUNO_PLAN_TIER:-}
+    - PLM_SUNO_ACCOUNT_REF=${PLM_SUNO_ACCOUNT_REF:-}
+    - PLM_SUNO_MODEL_VERSION=${PLM_SUNO_MODEL_VERSION:-}
+    - PLM_EXPERIMENTS_MANUAL_SUPPLY=${PLM_EXPERIMENTS_MANUAL_SUPPLY:-}
   volumes:
     - .:/app
   depends_on:
@@ -57,13 +86,17 @@ x-plm-app: &plm-app
 
 services:
   postgres:
-    image: postgres:16
+    # Pinned by digest (tag kept for readability and the migration rollout's image check).
+    # To upgrade: docker pull postgres:16, then take the new RepoDigest.
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    restart: unless-stopped
+    stop_grace_period: 120s
     environment:
       # PLM_POSTGRES_DB / PLM_POSTGRES_HOST_PORT default to the development values; CI sets
       # a disposable name and port (see .github/workflows/ci.yml and migration_safety.py).
       POSTGRES_DB: ${PLM_POSTGRES_DB:-plm}
       POSTGRES_USER: plm
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (a git worktree has none - set COMPOSE_PROJECT_NAME, see the top of this file)}
     # Host port for alembic / psql runs from the dev venv (DATABASE_URL uses localhost).
     ports:
       - "127.0.0.1:${PLM_POSTGRES_HOST_PORT:-5432}:5432"
@@ -94,9 +127,10 @@ services:
     # tier. The hardened image has no curl, so the healthcheck uses the bundled `mc`.
     image: cgr.dev/chainguard/minio@sha256:2136d593beacf4461187035eca949fe49abd589d5079735025c711ca58fee0c8
     command: server /data --console-address ":9001"
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -114,6 +148,7 @@ services:
 
   temporal:
     image: temporalio/auto-setup:1.29.2
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,6 +174,7 @@ services:
 
   temporal-ui:
     image: temporalio/ui:2.54.1
+    restart: unless-stopped
     depends_on:
       - temporal
     environment:
@@ -164,6 +200,8 @@ services:
     # truth, so code changes need no rebuild.
     command: ["python", "-m", "plm_platform.worker", "--task-queue", "ph1.market",
               "--load", "market_intelligence.jobs:REGISTRATIONS"]
+    restart: unless-stopped
+    stop_grace_period: 120s
     environment:
       # Compose services reach each other by service name; the localhost values in
       # .env are for tools on the host, and these explicit values win over .env.
@@ -279,6 +317,9 @@ services:
   api-media:
     <<: *plm-app
     command: ["plm", "media", "serve", "--host", "0.0.0.0", "--port", "8006"]
+    # FFmpeg renders run here; a cap keeps a runaway render from starving Postgres and
+    # Temporal in the Docker VM (about 7.7 GiB on the owner's machine).
+    mem_limit: 5g
     volumes:
       - .:/app
       # The backup drive (PLM_ARCHIVE_HOST_DIR, e.g. E:/PLM-backups); P6 archives only when

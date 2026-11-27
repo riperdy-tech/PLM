@@ -6,13 +6,19 @@ Brings everything up that the Studio needs, in order, and opens it:
   2. Ports: if Windows has reserved a port the PLM services publish (it happens after
      a restart, e.g. Postgres 5432), offers to free them with one administrator prompt
      (net stop winnat / net start winnat).
-  3. The PLM services (docker compose up -d), then waits until every one is healthy.
+  3. The PLM services: docker compose up -d only when a service is missing or unhealthy
+     (an up on a healthy stack can recreate a container mid-render), then waits until
+     every one is healthy.
   4. The dashboard (plm dashboard serve on 127.0.0.1:8000) if it does not answer.
   5. The Studio in the default browser.
 
 A small window shows the current step. Every failure ends in a message that says what
 is wrong and what to do; everything is also written to data\logs\launcher.log.
 Running it again while everything is up just opens the Studio.
+
+It refuses to run from a git worktree unless COMPOSE_PROJECT_NAME names another project:
+the live stack (project plm) belongs to the main checkout. It warns when the disk holding
+the repository (Docker's data is on C: too) is low on free space.
 #>
 [CmdletBinding()]
 param()
@@ -120,9 +126,48 @@ function Get-EnvValue([string]$Name, [string]$Default) {
     return $Default
 }
 
+function Get-ServiceState {
+    # Returns @{ Healthy; Bad; Failed } for every service the compose file declares.
+    Invoke-Native 'docker' @('compose', 'config', '--services') | Out-Null
+    $declared = @($script:LastOutput -split "`r?`n" | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() })
+    Invoke-Native 'docker' @('compose', 'ps', '-a', '--format',
+                             '{{.Service}} {{.State}} {{.ExitCode}} {{.Health}}') | Out-Null
+    $rows = @($script:LastOutput -split "`r?`n" | Where-Object { $_.Trim() })
+    # Fine: running and healthy (or without a health check); a one-off container that
+    # finished cleanly (exited 0). Anything else is not ready yet, or failed.
+    $bad = @($rows | Where-Object {
+        -not ($_ -match '^\S+ running \d+ (healthy)?\s*$' -or $_ -match '^\S+ exited 0\s*$') })
+    $failed = @($rows | Where-Object { $_ -match '^\S+ (exited [1-9]\d*|dead)' })
+    $present = @($rows | ForEach-Object { ($_ -split ' ')[0] })
+    $missing = @($declared | Where-Object { $present -notcontains $_ })
+    return @{
+        Healthy = ($rows.Count -gt 0 -and $bad.Count -eq 0 -and $missing.Count -eq 0)
+        Bad = @($bad + ($missing | ForEach-Object { "$_ not created" }))
+        Failed = $failed
+    }
+}
+
 Write-Log '---- launch ----'
 
 try {
+    # 0. Only the main checkout may run the live stack ----------------------------------
+    $project = if ($env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME } else { 'plm' }
+    if ((Test-Path -PathType Leaf (Join-Path $Root '.git')) -and $project -eq 'plm') {
+        Stop-WithError "This copy ($Root) is a git worktree. Starting the services from here would replace the live PLM stack with this copy's code. Use PLM_Studio.vbs in the main checkout (C:\Users\riper\Downloads\PLM)."
+    }
+
+    # Free disk space: renders, WAV masters and Docker's volumes all live on this disk.
+    $drive = Get-PSDrive -Name ((Split-Path -Qualifier $Root).TrimEnd(':')) -ErrorAction SilentlyContinue
+    if ($drive -and $drive.Free -lt 20GB) {
+        $freeGb = [math]::Round($drive.Free / 1GB, 1)
+        Write-Log "low disk: $freeGb GB free on $($drive.Name):"
+        [System.Windows.Forms.MessageBox]::Show(
+            "Only $freeGb GB is free on drive $($drive.Name):. A render can need 20 GB or more and fails when the disk fills.`n`n" +
+            "See docs\runbooks\full-disk.md. The Studio will still open.",
+            'PLM Studio', [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+    }
+
     # 1. Docker ---------------------------------------------------------------------------
     Set-Status 'Checking Docker...'
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -179,29 +224,28 @@ try {
     }
 
     # 3. The PLM services -----------------------------------------------------------------
-    Set-Status 'Starting the PLM services...'
-    if ((Invoke-Native 'docker' @('compose', 'up', '-d')) -ne 0) {
-        Stop-WithError "The PLM services did not start (docker compose up failed):`n$($script:LastOutput.Trim())"
-    }
-    $healthy = $false
-    for ($i = 0; $i -lt 60; $i++) {
-        Set-Status ('Waiting for the PLM services to be healthy... ({0}s)' -f ($i * 5))
-        Invoke-Native 'docker' @('compose', 'ps', '-a', '--format',
-                                 '{{.Service}} {{.State}} {{.ExitCode}} {{.Health}}') | Out-Null
-        $rows = @($script:LastOutput -split "`r?`n" | Where-Object { $_.Trim() })
-        # Fine: running and healthy (or without a health check); a one-off container that
-        # finished cleanly (exited 0). Anything else is not ready yet, or failed.
-        $bad = @($rows | Where-Object {
-            -not ($_ -match '^\S+ running \d+ (healthy)?\s*$' -or $_ -match '^\S+ exited 0\s*$') })
-        $failed = @($rows | Where-Object { $_ -match '^\S+ (exited [1-9]\d*|dead)' })
-        if ($rows.Count -gt 0 -and $bad.Count -eq 0) { $healthy = $true; break }
-        if ($i -ge 6 -and $failed.Count -gt 0) {
-            Stop-WithError "A PLM service stopped while starting:`n$($failed -join "`n")"
+    Set-Status 'Checking the PLM services...'
+    $state = Get-ServiceState
+    if ($state.Healthy) {
+        Write-Log 'all services healthy: docker compose up skipped'
+    } else {
+        Set-Status 'Starting the PLM services...'
+        if ((Invoke-Native 'docker' @('compose', 'up', '-d')) -ne 0) {
+            Stop-WithError "The PLM services did not start (docker compose up failed):`n$($script:LastOutput.Trim())"
         }
-        Wait-Seconds 5
-    }
-    if (-not $healthy) {
-        Stop-WithError "The PLM services were not all healthy within 5 minutes:`n$($bad -join "`n")"
+        $healthy = $false
+        for ($i = 0; $i -lt 60; $i++) {
+            Set-Status ('Waiting for the PLM services to be healthy... ({0}s)' -f ($i * 5))
+            $state = Get-ServiceState
+            if ($state.Healthy) { $healthy = $true; break }
+            if ($i -ge 6 -and $state.Failed.Count -gt 0) {
+                Stop-WithError "A PLM service stopped while starting:`n$($state.Failed -join "`n")"
+            }
+            Wait-Seconds 5
+        }
+        if (-not $healthy) {
+            Stop-WithError "The PLM services were not all healthy within 5 minutes:`n$($state.Bad -join "`n")"
+        }
     }
 
     # 4. The dashboard --------------------------------------------------------------------

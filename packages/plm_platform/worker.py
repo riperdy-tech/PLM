@@ -193,6 +193,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.error("worker cannot start: %s", exc)
         return 2
     configure_logging(level=settings.log_level)
+    if not args.healthcheck:
+        from .execution import effective_execution_summary
+
+        logger.info("worker execution settings: %s", effective_execution_summary())
 
     try:
         sets = tuple(

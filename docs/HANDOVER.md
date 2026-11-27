@@ -1,7 +1,7 @@
 # PLM handover — 2026-10-16 (paused mid-R5)
 
 > [!NOTE]
-> **Latest Session Update (2026-10-21)**: See [`docs/SESSION_HANDOFF_2026-10-21.md`](SESSION_HANDOFF_2026-10-21.md) for the latest status covering the live closed-loop Bayesian cycle (P9 → P2), the Autonomous Loop Worker with 72h cadence (~2.3 releases/week), the mandatory Human Go/No-Go Gate, and the Desktop Control Deck GUI app (`scripts/plm_desktop_control.py`).
+> **Historical (2026-10-16).** The 2026-10-21 session handoff it pointed to was superseded (its Control Deck and loop-worker claims were overstated; both were disabled, the Deck deleted 2026-11-27). Current state: [`docs/STATUS.md`](STATUS.md).
 
 Work was paused at the owner's request so Docker can be used for another project. Read
 this file first, then `AGENTS.md`, `docs/STATUS.md`, and the plan

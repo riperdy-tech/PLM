@@ -202,14 +202,15 @@ def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
     return Check("postgres", True, f"reachable at {target} (PostgreSQL {version})")
 
 
-# Heads installed in CODE ONLY: `plm migrate` refuses to apply them without a
-# separately approved rollout. Every new code-only revision must be added here,
-# otherwise becoming the head would silently lift the refusal.
-_CODE_ONLY_HEADS = frozenset({
-    "0039_merge_0038_branches", "0040_p4_unpriced_costs",
-    "0041_p4_credit_provenance", "0042_media_render_evidence",
-    "0043_youtube_localizations",
-})
+def _is_code_only_head(head: str) -> bool:
+    """Every head from 0039 on is installed in CODE ONLY on a shared database.
+
+    Plain `plm migrate` refuses to apply it there; `plm migrate --approved-backup ID`
+    applies it with a retained, restore-verified backup. A new revision needs no edit
+    here, and a head without the numeric prefix is held too (fail closed).
+    """
+    prefix = head[:4]
+    return not (prefix.isdigit() and int(prefix) < 39)
 
 
 def _migration_revision_result(
@@ -226,11 +227,12 @@ def _migration_revision_result(
     if current == head:
         return Check("migrations", True, f"at {current} (head)")
     if current is None:
-        if head in _CODE_ONLY_HEADS:
+        if _is_code_only_head(head):
             return Check(
                 "migrations", False,
                 f"database not migrated; {head} installed in CODE ONLY - "
-                "do NOT run plm migrate without separate database rollout approval",
+                "do NOT run plm migrate without separate database rollout approval "
+                "(approved: plm migrate --prepare-backup, then --approved-backup ID)",
             )
         return Check(
             "migrations", False,
@@ -244,11 +246,12 @@ def _migration_revision_result(
             f"(head {head}); possible divergent worktree/branch - do NOT run plm migrate "
             "until revision history is reconciled and reviewed",
         )
-    if head in _CODE_ONLY_HEADS:
+    if _is_code_only_head(head):
         return Check(
             "migrations", False,
             f"database at {current}, head {head}; pending revisions installed in CODE ONLY - "
-            "do NOT run plm migrate without separate database rollout approval",
+            "do NOT run plm migrate without separate database rollout approval "
+            "(approved: plm migrate --prepare-backup, then --approved-backup ID)",
         )
     return Check("migrations", False, f"database at {current}, head is {head} - run: plm migrate")
 
@@ -493,11 +496,12 @@ def _merge_code_only_refusal(
     A disposable target (`is_disposable_migration_target`, the rule raw Alembic
     already applies) is exempt; every other database stays held.
     """
-    if head in _CODE_ONLY_HEADS and current != head and not disposable:
+    if _is_code_only_head(head) and current != head and not disposable:
         return (
-            "0039-0042 revisions are installed in code only; database migration "
+            f"{head} is installed in code only; database migration "
             "is NOT approved. Refusing plm migrate until a separately "
-            "reviewed rollout/restore plan."
+            "reviewed rollout/restore plan (owner-approved: plm migrate "
+            "--prepare-backup, then plm migrate --approved-backup ID)."
         )
     return None
 
@@ -526,7 +530,7 @@ def _migration_preflight(config: Config) -> None:
                 reason = _unversioned_target_refusal(user_object_count(connection))
                 if reason is not None:
                     raise RuntimeError(reason)
-            if head in _CODE_ONLY_HEADS and current != head:
+            if _is_code_only_head(head) and current != head:
                 url = database_url(settings)
                 disposable = is_disposable_migration_target(
                     configured_database=url.database,
@@ -548,11 +552,50 @@ def _migration_preflight(config: Config) -> None:
         raise RuntimeError(merge_hold)
 
 
+def _approved_rollout(prepare: bool, backup_id: str | None) -> None:
+    """The owner-approved local ``plm`` rollout (:mod:`plm_platform.migration_rollout`).
+
+    Prepare backs up the local database and proves restore + upgrade on an isolated
+    clone; apply upgrades to head only with that intact, matching proof.
+    """
+    from datetime import UTC
+
+    from . import migration_rollout as rollout
+
+    def now() -> datetime:
+        return datetime.now(UTC)
+
+    def say(line: str) -> None:
+        typer.echo(line)
+
+    try:
+        result = (rollout.prepare(now, say) if prepare
+                  else rollout.apply(str(backup_id), now, say))
+    except Exception as exc:
+        typer.echo(f"migrate: approved rollout stopped - {_describe_for_cli(exc)}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(result, sort_keys=True))
+
+
 @app.command()
 def migrate(
     revision: str = typer.Argument("head", help="Target revision (default: head)."),
+    prepare_backup: bool = typer.Option(
+        False, "--prepare-backup",
+        help="Back up the local plm database and prove restore + upgrade on a clone.",
+    ),
+    approved_backup: str | None = typer.Option(
+        None, "--approved-backup",
+        help="Upgrade the local plm database to head with this prepared backup's proof.",
+    ),
 ) -> None:
     """Upgrade the database along the alembic chain to REVISION (default: head)."""
+    if prepare_backup or approved_backup is not None:
+        if (prepare_backup and approved_backup is not None) or revision != "head":
+            typer.echo("migrate: use --prepare-backup or --approved-backup ID alone", err=True)
+            raise typer.Exit(code=2)
+        _approved_rollout(prepare_backup, approved_backup)
+        return
     config = _alembic_config()
     try:
         _migration_preflight(config)
@@ -585,6 +628,13 @@ def _not_implemented(phase: str) -> NoReturn:
         err=True,
     )
     raise typer.Exit(code=NOT_IMPLEMENTED_EXIT_CODE)
+
+
+def _announce_execution() -> None:
+    """Print the effective provider modes and policies at API boot (to the container log)."""
+    from .execution import effective_execution_summary
+
+    typer.echo(f"plm: {effective_execution_summary()}", err=True)
 
 
 market_app = typer.Typer(help="P1 market intelligence: evidence collection and scoring.")
@@ -635,6 +685,7 @@ def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
     """Serve the `/market/v1` API (P1)."""
     from market_intelligence.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -701,6 +752,7 @@ def ar_serve(host: str = "127.0.0.1", port: int = 8082) -> None:
     """Serve the `/ar` API (P2). (`ar_serve` because the market group owns `serve`.)"""
     from autonomous_ar.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -776,6 +828,7 @@ def experiments_serve(host: str = "127.0.0.1", port: int = 8083) -> None:
     """Serve the `/experiments` API (P3)."""
     from experiments.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -818,6 +871,7 @@ def music_serve(host: str = "127.0.0.1", port: int = 8004) -> None:
     """Serve the `/music` API (P4)."""
     from music_factory.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -892,6 +946,7 @@ def qa_serve(host: str = "127.0.0.1", port: int = 8005) -> None:
     """Serve the `/qa` API (P5)."""
     from quality_gate.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1080,6 +1135,7 @@ def media_serve(host: str = "127.0.0.1", port: int = 8006) -> None:
     """Serve the `/media` API (P6)."""
     from media_factory.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1154,6 +1210,7 @@ def youtube_serve(host: str = "127.0.0.1", port: int = 8007) -> None:
     """Serve the `/youtube` API (P7)."""
     from youtube_publishing.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1209,6 +1266,7 @@ def distribution_serve(host: str = "127.0.0.1", port: int = 8008) -> None:
     """Serve the `/distribution` API (P8)."""
     from distribution.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1278,6 +1336,7 @@ def analytics_serve(host: str = "127.0.0.1", port: int = 8009) -> None:
     """Serve the `/analytics` API (P9)."""
     from analytics.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 

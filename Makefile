@@ -5,12 +5,18 @@
 
 PY ?= python
 
-.PHONY: up down logs test lint fmt typecheck doctor migrate
+.PHONY: up down logs test lint fmt typecheck doctor migrate worktree-guard
 
-up:  ## start the local stack (postgres, minio, temporal, temporal-ui, worker)
+# The live stack (compose project plm) belongs to the main checkout: from a git worktree
+# (.git is a file there) up/down need their own COMPOSE_PROJECT_NAME.
+worktree-guard:
+	@if [ -f .git ] && [ "$${COMPOSE_PROJECT_NAME:-plm}" = plm ]; then \
+		echo "refused: git worktree; set COMPOSE_PROJECT_NAME (not plm)"; exit 1; fi
+
+up: worktree-guard  ## start the local stack (postgres, minio, temporal, temporal-ui, worker)
 	docker compose up -d
 
-down:  ## stop the local stack
+down: worktree-guard  ## stop the local stack
 	docker compose down
 
 logs:  ## follow stack logs

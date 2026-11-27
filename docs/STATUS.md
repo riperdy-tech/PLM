@@ -4,10 +4,13 @@
 commit messages and the dashboard record intent or progress; this file records verified
 capability. Update it in the same change that alters a capability.
 
-- Last verified: 2026-10-15, branch `review/r5-full-chain` (R5 of the remediation plan;
-  R4, R3, R2, R1 and R0 on their own `review/*` branches). That is the date of the last
-  **gate** record. Later entries (to 2026-10-29) are uncommitted work on local branch
-  `review/r6-live-adapters` at `4a35ce2`; none of them is a re-verified gate.
+- Header updated 2026-11-27. Last **gate** record: 2026-10-15, branch
+  `review/r5-full-chain` (R5 of the remediation plan; R4, R3, R2, R1 and R0 on their own
+  `review/*` branches). Later entries (to 2026-11-27) are committed on branch
+  `review/r6-live-adapters`; none of them is a re-verified gate.
+- Latest full review (findings and fix status):
+  [`reviews/2026-11-26-full-repo-review.md`](reviews/2026-11-26-full-repo-review.md).
+  Runbooks: [`runbooks/`](runbooks/).
 - Unified view of all remaining work across P0–P9, R0–R6 and A/B:
   [`reviews/2026-10-29-unified-remaining-work-roadmap.md`](reviews/2026-10-29-unified-remaining-work-roadmap.md).
 - Evidence: the review in
@@ -1467,7 +1470,7 @@ separately against its own evidence gate.
 | Experiment lineage | real | `ExperimentLineage` (ADR-0026) travels from P3 through C3–C7 to P9's ISRC links and P2's reward. Placeholder ids are refused. |
 | Injected time and derived seeds | real | `plm_platform/clock.py`: `Clock`/`SystemClock`/`FixedClock`, `stable_seed` (sha256). P3–P9 domain and engine code take `now` or a `Clock`; only API routes, CLIs, smoke scripts and connectors read the wall clock. The external-write guard takes `now` per decision. Enforced by `tests/unit/test_no_ambient_nondeterminism.py` (static) and `tests/unit/test_cross_process_determinism.py` (two interpreters with different `PYTHONHASHSEED` produce identical P2 draws, P3 experiments/track specs, and P4 plans, seeds, attempt/candidate ids and artifact digests). |
 | Fail-open regression guard | real | `tests/contract/test_no_fail_open_defaults.py`, a narrow static scan that supplements the behavioural seam tests |
-| Dashboard & Desktop Control Deck | partial (cycle disabled) | `plm_platform/dashboard/`: the six PART XVII views read the database (read-only) and the phase APIs with reviewer authorization (`config/dev/reviewers.json`). Desktop GUI Control Deck (`scripts/plm_desktop_control.py`, `PLM_Control_Deck.bat` and Desktop shortcut `PLM Control Deck.lnk`) provides single-click orchestration: automatic Docker Desktop boot check, web deck launcher, manual cycle trigger, live console/audit progress, and human Go/No-Go gate (video, title, thumbnail review). **2026-10-30: the Deck's production cycle is disabled** (`_run_cycle_steps` raises before any step, as `autonomous_loop_worker.run_cycle` already did). It never generated or rendered anything (steps 3–5 only slept), reported the old hardcoded `lPYmaPHPQr4` as the upload, opened a live AUTONOMOUS P2 cycle, and posted a fabricated MATURE D28 reward (`exp_desktop_cycle_01`, confidence 0.95) to P2. Whether earlier clicks left such rewards in the shared dev DB is **unchecked** (the DB was not running). Pinned by `tests/unit/test_prototype_cycles_disabled.py`. |
+| Dashboard | partial | `plm_platform/dashboard/`: the six PART XVII views read the database (read-only) and the phase APIs with reviewer authorization (`config/dev/reviewers.json`). The owner's launcher is `PLM_Studio.vbs` (Studio). **2026-11-27: the Desktop Control Deck (`scripts/plm_desktop_control.py`, `PLM_Control_Deck.bat`) and `run_dashboard.bat` are deleted** (full-repo review 2026-11-26: hard-coded `change-me` token, a `/healthz` that does not exist, a fake GO/NO-GO, a "DEMO DATA" banner over the live dashboard). Its cycle had been disabled since 2026-10-30: it never generated or rendered anything, reported the old hardcoded `lPYmaPHPQr4` as the upload and posted a fabricated MATURE D28 reward (`exp_desktop_cycle_01`) to P2. Whether earlier clicks left such rewards in the shared dev DB is **unchecked**. |
 
 ## Phases (`services/`)
 
