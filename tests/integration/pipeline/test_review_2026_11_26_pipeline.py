@@ -140,7 +140,8 @@ async def test_evaluation_waits_for_final_analytics_past_the_step_attempt_limit(
         scripts[Step.EVALUATE_OUTCOME], transient_failures=not_ready)
     steps = MockPhaseSteps(scripts)
     directive_id, workflow_id = new_run()
-    options = dataclasses.replace(OPTIONS, waiting_step_maximum_interval_seconds=0.1,
+    options = dataclasses.replace(OPTIONS, waiting_step_initial_interval_seconds=0.1,
+                                  waiting_step_maximum_interval_seconds=0.5,
                                   evaluate_poll_maximum_seconds=0.5)
     async with running(worker_for(client, steps, platform)):
         handle = await start_pipeline(client, directive_id=directive_id,

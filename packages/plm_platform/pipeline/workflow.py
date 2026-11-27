@@ -685,7 +685,7 @@ class PipelineWorkflow:
         elif step is Step.EVALUATE_OUTCOME and workflow.patched(PATCH_EVALUATE_WAITS):
             retry = RetryPolicy(
                 initial_interval=timedelta(
-                    seconds=options.waiting_step_maximum_interval_seconds),
+                    seconds=options.waiting_step_initial_interval_seconds),
                 backoff_coefficient=2.0,
                 maximum_interval=timedelta(seconds=options.evaluate_poll_maximum_seconds),
                 maximum_attempts=0,
