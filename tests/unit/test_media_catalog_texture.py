@@ -264,6 +264,23 @@ def test_db_catalog_is_same_brand_only_and_legacy_is_visible() -> None:
         assert len(list_catalog_albums(session, "brand_a", max_packages=1)) == 1
 
 
+def test_db_catalog_includes_packages_waiting_for_thumbnail_art() -> None:
+    """A package rendered and waiting for the owner's art is already spoken for: a run
+    rendered before that art is imported must not reuse its recordings or titles."""
+    with media_db_session() as session:
+        waiting = _sample_package("rel_wait", "brand_a", report={"variation": {
+            "titles": ["Deep Focus"]}}, tracks=[{"song_id": "a"}])
+        waiting.status = PackageStatus.AWAITING_THUMBNAIL_ART
+        insert_media_package(session, waiting)
+        failed = _sample_package("rel_failed", "brand_a", report={},
+                                 tracks=[{"song_id": "b"}])
+        failed.status = PackageStatus.FAILED
+        insert_media_package(session, failed)
+        history = list_catalog_albums(session, "brand_a")
+        assert [album.release_manifest_id for album in history] == ["rel_wait"]
+        assert history[0].variation == {"titles": ["Deep Focus"]}
+
+
 @pytest.mark.parametrize("damage", [
     "missing_header", "checksum", "source_artifact_id", "audio_uri",
     "playlist_arm", "missing_track",

@@ -424,7 +424,8 @@ def update_render_job_status(
 def list_catalog_albums(
     session: Session, brand_id: str, *, max_packages: int = 100,
 ) -> tuple[CatalogAlbum, ...]:
-    """Load prior ready/published album fingerprint evidence, or hold on truncation.
+    """Load prior ready/published/awaiting-art album fingerprint evidence, or hold on
+    truncation.
 
     Includes all releases for a brand (caller ignores same-release render
     profiles). The limit is a safety ceiling, not an incomplete silent sample.
@@ -443,8 +444,11 @@ def list_catalog_albums(
             media_packages_table.c.tracklist_json,
         )
         .where(media_packages_table.c.brand_id == brand_id)
+        # A package waiting for the owner's art is already rendered and spoken for:
+        # another run rendered before that import must still see its recordings and titles.
         .where(media_packages_table.c.status.in_((
             PackageStatus.READY_FOR_PUBLISH.value, PackageStatus.PUBLISHED.value,
+            PackageStatus.AWAITING_THUMBNAIL_ART.value,
         )))
         .order_by(media_packages_table.c.created_at.desc(), media_packages_table.c.id.desc())
         .limit(max_packages + 1)
