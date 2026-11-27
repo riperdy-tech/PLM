@@ -24,7 +24,7 @@ class ARSettings:
     platform: Settings | None = None
     policy_version: str = "p2-v2"
     model_version: str = "p2-nn-v1"
-    prior_version: str = "p2-prior-v1"
+    prior_version: str = "p2-prior-v2"
     feature_version: str = "p2-features-v1"
     proxy_normalization_version: str = "p2-proxy-norm-v1"
     directive_version: str = "p2-directive-v1"

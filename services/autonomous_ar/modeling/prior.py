@@ -1,5 +1,5 @@
 # services/autonomous_ar/modeling/prior.py
-"""Cold-start prior (§10) and bounded transfer learning (§64/§65), versioned `p2-prior-v1`.
+"""Cold-start prior (§10) and bounded transfer learning (§64/§65), versioned `p2-prior-v2`.
 
 The transform is deterministic once the version string is fixed. Module constants are the
 transform's parameters — they move only with `prior_version`, never silently.
@@ -13,7 +13,15 @@ from ..domain.policy import PolicyConfig
 from ..domain.posterior import PosteriorState, PriorParameters
 from .similarity import structural_overlap
 
-__all__ = ["cold_start_prior", "transfer_contribution"]
+__all__ = ["CHANNEL_BASELINE", "PRIOR_TILT", "cold_start_prior", "transfer_contribution"]
+
+CHANNEL_BASELINE = 0.5
+"""The channel's median video on the ranked reward scale (`modeling.evidence`)."""
+
+PRIOR_TILT = 0.4
+"""`p2-prior-v2` (review 2026-11-26): P1 is market evidence, not this channel's results,
+so it only tilts the prior off the channel baseline: at most ±0.2 at full confidence.
+`p2-prior-v1` spread priors over 0.05-0.95, which a few videos could barely move."""
 
 BASE_VARIANCE = 0.04
 """Variance at perfect confidence, fresh data — the transform's floor for a new arm."""
@@ -31,7 +39,7 @@ def cold_start_prior(arm: ContentArm, *, settings: ARSettings,
     confidence and staleness (§10, §83). No first-party performance is fabricated."""
     base = arm.p1_score / 100.0
     confidence = arm.p1_confidence
-    mean = min(0.95, max(0.05, 0.5 + (base - 0.5) * confidence))
+    mean = CHANNEL_BASELINE + (min(1.0, max(0.0, base)) - 0.5) * confidence * PRIOR_TILT
     max_age_seconds = policy.max_market_data_age_hours * 3600.0
     staleness = min(1.0, arm.freshness_seconds / max_age_seconds)
     variance = BASE_VARIANCE + CONFIDENCE_SPREAD * (1.0 - confidence) ** 2 \

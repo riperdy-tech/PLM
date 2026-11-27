@@ -20,6 +20,7 @@ from ..domain.enums import ArmLifecycleStatus, ObservationMaturity
 from ..domain.policy import DEFAULT_POLICY, PolicyConfig
 from ..domain.posterior import PosteriorState
 from ..domain.reward import RewardObservation
+from ..modeling.decay import recency_weight
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel
 from ..policy.constraints import apply_portfolio_constraints
@@ -82,6 +83,13 @@ def _simulated_observation(spec: ScenarioSpec, arm_id: str,
     )
 
 
+def _weight(observed_at: datetime, *, as_of: datetime, policy: PolicyConfig) -> float:
+    if not policy.nonstationarity.enabled:
+        return 1.0
+    return recency_weight(observed_at, now=as_of,
+                          half_life_days=policy.nonstationarity.decay_half_life_days)
+
+
 def run_simulation(spec: ScenarioSpec, config: SimConfig) -> SimulationTrace:
     """`cycles` allocation decisions, with simulated outcomes, entirely in memory."""
     settings = load_ar_settings(similarity_threshold=0.6)
@@ -94,6 +102,8 @@ def run_simulation(spec: ScenarioSpec, config: SimConfig) -> SimulationTrace:
     selected_by_cycle: list[tuple[str, ...]] = []
     exploration_by_cycle: list[float] = []
     posteriors: dict[str, PosteriorState] = {}
+    priors: dict[str, PosteriorState] = {}
+    evidence: dict[str, list[tuple[float, datetime]]] = {arm.arm_id: [] for arm in spec.arms}
     true_means = {arm.arm_id: arm.true_mean for arm in spec.arms}
 
     for cycle_index in range(config.cycles):
@@ -107,9 +117,15 @@ def run_simulation(spec: ScenarioSpec, config: SimConfig) -> SimulationTrace:
                      for arm in spec.arms)
         arm_map = {arm.arm_id: arm for arm in arms}
         for arm in arms:
-            if arm.arm_id not in posteriors:
+            if arm.arm_id not in priors:
                 prior = cold_start_prior(arm, settings=settings, policy=policy)
-                posteriors[arm.arm_id] = model.initialize_prior(arm, prior)
+                priors[arm.arm_id] = model.initialize_prior(arm, prior)
+            # As production does (ADR-0031): the posterior is the prior plus every
+            # outcome, each discounted by its age at this cycle, so old evidence fades.
+            posteriors[arm.arm_id] = model.posterior_at(
+                priors[arm.arm_id],
+                [(value, _weight(observed_at, as_of=as_of, policy=policy))
+                 for value, observed_at in evidence[arm.arm_id]], as_of=as_of)
         measured = frozenset(arm_id for arm_id, state in posteriors.items()
                              if state.observation_count > 0)
         classes = {arm.arm_id: evidence_class(arm.arm_id, measured_arm_ids=measured,
@@ -130,9 +146,7 @@ def run_simulation(spec: ScenarioSpec, config: SimConfig) -> SimulationTrace:
             selection_counts[selection.arm_id] += 1
             observation = _simulated_observation(spec, selection.arm_id, true_means,
                                                  rng, as_of, settings)
-            posteriors[selection.arm_id] = model.update(
-                posteriors[selection.arm_id], observation, effective_weight=1.0,
-                received_at=as_of)
+            evidence[selection.arm_id].append((observation.normalized_reward.unwrap(), as_of))
             rewards.append(observation.normalized_reward.unwrap())
         selected_by_cycle.append(tuple(selected))
         exploration = sum(1 for selection in portfolio.selections

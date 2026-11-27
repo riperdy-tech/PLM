@@ -31,7 +31,7 @@ from ..domain.enums import (
 )
 from ..domain.posterior import PosteriorState
 from ..modeling.decay import detect_regime_shift
-from ..modeling.evidence import posterior_as_of
+from ..modeling.evidence import channel_reward_scale, posterior_as_of
 from ..modeling.fatigue import decayed_exposure
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
@@ -165,6 +165,15 @@ def _apply_subgenre_rules(session: Any, request: CycleRequest, arms: dict[str, C
         warnings.append(ReasonCode.SUBGENRE_MEMORY_RELAXED.value)
 
 
+def _prior_is_refreshable(session: Any, posterior: PosteriorState, settings: ARSettings, *,
+                          now: datetime) -> bool:
+    """A stored prior is re-derived from today's P1 evidence while the arm has no applied
+    outcome, or when it was made by another prior transform version."""
+    if posterior.context_state_json.get("prior_version") != settings.prior_version:
+        return True
+    return not repositories.load_applied_evidence(session, posterior.arm_id, as_of=now)
+
+
 def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                          market: MarketSnapshot, model: RewardModel | None = None,
                          now: datetime) -> CycleResult:
@@ -186,8 +195,12 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                now: datetime) -> CycleResult:
     """The body of `run_allocation_cycle` (split out so the failure counter can wrap it)."""
     started = time.perf_counter()
+    # #39: rewards are ranked against the channel's own videos and the observation
+    # variance is estimated from them (the configured value while the channel is young).
+    scale = channel_reward_scale(session, brand_id=request.brand_id, as_of=now,
+                                 default_variance=settings.observation_variance)
     resolved_model = model or NormalNormalRewardModel(
-        observation_variance=settings.observation_variance,
+        observation_variance=scale.observation_variance,
         variance_floor=settings.posterior_variance_floor,
     )
     # 0 — the policy must exist (§102); no silent default
@@ -237,9 +250,9 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     posteriors: dict[str, PosteriorState] = {}
     for arm in market.arms:
         existing = repositories.load_posterior(session, arm.arm_id)
-        if existing is None:
+        if existing is None or _prior_is_refreshable(session, existing, settings, now=now):
             prior = cold_start_prior(arm, settings=settings, policy=policy)
-            existing = replace(
+            fresh = replace(
                 resolved_model.initialize_prior(arm, prior),
                 # Version binding: the prior transform's version and the cycle's value
                 # model ride on the state they produced, so the posterior row alone
@@ -247,12 +260,25 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                 context_state_json={"prior_version": prior.prior_version,
                                     "value_model": policy.value_model},
             )
-            repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
-                                          expected_version=0)
+            if existing is None:
+                existing = fresh
+                repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
+                                              expected_version=0)
+            elif (fresh.prior_mean, fresh.prior_variance, fresh.context_state_json) != (
+                    existing.prior_mean, existing.prior_variance, existing.context_state_json):
+                # Review 2026-11-26: a cold-start prior used to be frozen at the arm's
+                # first sighting. It follows P1 until first-party evidence exists (and is
+                # re-derived once when the prior transform's version changes).
+                existing = replace(fresh, update_version=existing.update_version,
+                                   observation_count=existing.observation_count,
+                                   effective_observation_count=(
+                                       existing.effective_observation_count))
+                repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
+                                              expected_version=existing.update_version)
         # ADR-0031: draw from the posterior as of this cycle, recomputed from the stored
         # effective outcomes, so evidence decays from the draw's own instant.
         posteriors[arm.arm_id] = posterior_as_of(session, existing, model=resolved_model,
-                                                 policy=policy, as_of=now)
+                                                 policy=policy, as_of=now, scale=scale)
     # 5 — freshness gate; 6 — blocked/policy constraints; 7 — cooldown/fatigue
     # 6a — ADR-0044: an arm outside the brand's identity is blocked before eligibility
     identity = settings.brand_identities.get(request.brand_id)

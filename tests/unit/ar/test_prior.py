@@ -39,7 +39,7 @@ def test_stale_market_evidence_widens_the_prior_without_moving_it() -> None:
                              policy=policy)
     assert stale.mean == fresh.mean
     assert stale.variance > fresh.variance
-    assert fresh.prior_version == "p2-prior-v1"
+    assert fresh.prior_version == "p2-prior-v2"
 
 
 def _proven(dims: ArmDimensions | None = None) -> PosteriorState:
@@ -84,7 +84,7 @@ def test_replay_from_the_same_inputs_is_identical() -> None:
     first = cold_start_prior(arm, settings=settings, policy=policy)
     second = cold_start_prior(arm, settings=settings, policy=policy)
     assert first == second, "same stored inputs + version ⇒ same prior"
-    assert first.prior_version == "p2-prior-v1", "the version travels with the value"
+    assert first.prior_version == "p2-prior-v2", "the version travels with the value"
     dims = ArmDimensions(genre="rnb", language="english", vocal_mode="vocal")
     first_transfer = transfer_contribution(
         first, neighbour=_proven(), similarity=0.8, neighbour_dims=dims, arm_dims=dims,

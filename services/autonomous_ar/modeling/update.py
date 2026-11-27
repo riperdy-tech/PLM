@@ -31,7 +31,7 @@ from ..domain.enums import ObservationMaturity, UpdateStatus
 from ..domain.policy import PolicyConfig
 from ..domain.posterior import UpdateRecord
 from ..domain.reward import RewardObservation
-from ..modeling.evidence import aware, posterior_as_of
+from ..modeling.evidence import aware, channel_reward_scale, posterior_as_of
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
 from ..observability.metrics import record_posterior_updates
 from ..storage import repositories
@@ -107,7 +107,7 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
                           policy: PolicyConfig,
                           model: RewardModel | None = None) -> UpdateSummary:
     """Classify every due observation at most once (§74); deterministic order (§73)."""
-    resolved_model = model or NormalNormalRewardModel(
+    resolved_model = NormalNormalRewardModel(
         observation_variance=settings.observation_variance,
         variance_floor=settings.posterior_variance_floor,
     )
@@ -153,8 +153,13 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
                          status=UpdateStatus.APPLIED, effective_weight=1.0, updated_at=now),
             brand_id=row["brand_id"],
         )
-        recomputed = posterior_as_of(session, posterior, model=resolved_model, policy=policy,
-                                     as_of=now)
+        # #39: the cache is written on the channel's own scale, as the cycle draws it.
+        scale = channel_reward_scale(session, brand_id=row["brand_id"], as_of=now,
+                                     default_variance=settings.observation_variance)
+        scaled_model = model or replace(resolved_model,
+                                        observation_variance=scale.observation_variance)
+        recomputed = posterior_as_of(session, posterior, model=scaled_model, policy=policy,
+                                     as_of=now, scale=scale)
         repositories.upsert_posterior(
             session, replace(recomputed, update_version=posterior.update_version + 1),
             brand_id=row["brand_id"], expected_version=posterior.update_version,
