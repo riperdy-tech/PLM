@@ -29,11 +29,20 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 
 class FakeActions:
+    """Decides, then runs ``before_signal``, then 'signals' (as ExceptionActions does);
+    ``refuse`` makes the decision refuse."""
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.refuse: ActionRefused | None = None
 
     async def resume(self, case_id: str, *, actor: str, role: str | None,
                      evidence: dict[str, str], notes: str, **signal: Any) -> dict[str, Any]:
+        before_signal = signal.pop("before_signal", None)
+        if self.refuse is not None:
+            raise self.refuse
+        if before_signal is not None:
+            await asyncio.to_thread(before_signal)
         self.calls.append(("resume", case_id, {"actor": actor, "role": role, "notes": notes,
                                                **evidence, **signal}))
         return {"case": {"case_id": case_id}}
@@ -240,6 +249,61 @@ def test_an_approval_without_a_grant_file_is_refused_and_resumes_nothing(
     with pytest.raises(ActionRefused, match="grants_file_not_configured"):
         asyncio.run(studio.approve("c4"))
     assert actions.calls == []
+
+
+APPROVE_HOLD = {"case_id": "c3", "reason_code": "PUBLISH_APPROVAL_AWAITED",
+                "details": {"media_package_ids": [PKG]},
+                "pipeline": {"workflow_id": "pipeline.d", "run_state": "HELD"}}
+
+
+def _grants(tmp_path: Path) -> dict[str, dict[str, Any]]:
+    entries = json.loads((tmp_path / "write-authorizations.json").read_text(encoding="utf-8"))
+    return {g["capability"]: g for g in entries}
+
+
+def test_a_refused_approval_grants_nothing(tmp_path: Path) -> None:
+    """Review 2026-11-26 #18: the grants were written before the resume and stayed live
+    when the resume was refused. The case is decided first; a refusal grants nothing."""
+    studio, actions = _studio(tmp_path, [APPROVE_HOLD], status="ready_for_publish")
+    before = (tmp_path / "write-authorizations.json").read_text(encoding="utf-8")
+    actions.refuse = ActionRefused(409, "reviewer_not_authorized", "owner lacks the role")
+    with pytest.raises(ActionRefused, match="reviewer_not_authorized"):
+        asyncio.run(studio.approve("c3"))
+    assert (tmp_path / "write-authorizations.json").read_text(encoding="utf-8") == before
+
+
+def test_an_approval_keeps_a_longer_manual_grant(tmp_path: Path) -> None:
+    """A manual grant that outlasts the approval's is kept, not silently replaced."""
+    studio, _ = _studio(tmp_path, [APPROVE_HOLD], status="ready_for_publish")
+    manual = {"capability": "youtube.upload", "granted_by": "owner",
+              "granted_at": "2026-11-04T00:00:00+00:00",
+              "expires_at": "2026-11-30T00:00:00+00:00", "reference": "owner, by hand"}
+    (tmp_path / "write-authorizations.json").write_text(json.dumps([manual]), encoding="utf-8")
+    answer = asyncio.run(studio.approve("c3"))
+    assert answer["grants_kept"] == ["youtube.upload"]
+    grants = _grants(tmp_path)
+    assert grants["youtube.upload"] == manual
+    assert grants["youtube.thumbnail"]["expires_at"] == "2026-11-05T14:00:00+00:00"
+
+
+def test_the_approvals_grants_are_revoked_once_the_run_has_published(tmp_path: Path) -> None:
+    """After the publish is verified (the run is PUBLISHED or ended), the grants this
+    approval added are removed; other grants stay."""
+    from tests.unit.test_dashboard_projects import FakeStore
+
+    studio, _ = _studio(tmp_path, [APPROVE_HOLD], status="ready_for_publish")
+    asyncio.run(studio.approve("c3"))
+    assert {"youtube.upload", "youtube.thumbnail", "youtube.playlist"} <= set(_grants(tmp_path))
+    store = FakeStore()
+    rows = store.runs()
+    rows[1].update(workflow_id="pipeline.d", state="UPLOADING")
+    store.runs = lambda: rows  # type: ignore[method-assign]
+    studio.store = store
+    studio.projects()
+    assert "youtube.upload" in _grants(tmp_path)  # still uploading: kept
+    rows[1]["state"] = "PUBLISHED"
+    studio.projects()
+    assert set(_grants(tmp_path)) == {"music.import"}
 
 
 def _request(range_header: str | None) -> Request:

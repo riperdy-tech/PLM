@@ -10,9 +10,10 @@ answer, so nothing needs a folder, a command or a hand-typed evidence reference:
   renders the video as image A held still and releases the package (P6's own importer);
   the Studio then resumes the run.
 * **Review** (``PUBLISH_APPROVAL_AWAITED``): the finished package (video, thumbnail,
-  title, description). Approve writes the owner's YouTube grants for this upload,
-  expiring in :data:`APPROVAL_GRANT_HOURS` hours, and resumes the run, which uploads it.
-  Reject ends the run.
+  title, description). Approve has the exception queue decide the resume, then writes
+  the owner's YouTube grants for this upload, expiring in :data:`APPROVAL_GRANT_HOURS`
+  hours, then signals the run, which uploads it; the grants are removed once the run has
+  published. Reject ends the run.
 * **Request changes** (at the review): a new title, description or tags, or another
   thumbnail first, apply at once and the package stays in review; new art sends the
   package back to the thumbnail step (the next import renders the video again); a song
@@ -74,6 +75,9 @@ _STEM: Final = re.compile(r"\A[A-Za-z0-9_-]{1,120}\Z")
 _PACKAGE: Final = re.compile(r"\Ampkg_[0-9a-f]{8,64}\Z")
 _SAVE_AS: Final = re.compile(r"^Save as: ([A-Za-z0-9_-]+)\.wav$", re.MULTILINE)
 _ART_SUFFIXES: Final = (".png", ".jpg", ".jpeg", ".webp")
+_STUDIO_GRANT: Final = "Studio approval "
+"""The reference prefix of the grants an approval writes (and later revokes)."""
+_GRANT_RUN: Final = re.compile(r" for run (\S+) at ")
 _LETTERS: Final = ("A", "B", "C")
 
 
@@ -129,6 +133,13 @@ def _iso(value: Any) -> str:
 
 def _refuse(status: int, code: str, message: str) -> ActionRefused:
     return ActionRefused(status, code, message)
+
+
+def _expires_after(grant: Mapping[str, Any], moment: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(str(grant.get("expires_at"))) > moment
+    except (TypeError, ValueError):
+        return False
 
 
 def m4a_to_wav(data: bytes) -> bytes:
@@ -333,6 +344,7 @@ class Studio:
     """One video in memory, keyed by its own (uri, checksum): a remake re-renders the
     same package with a new video, which must never be served from the old entry."""
     _video_lock: Any = field(default_factory=threading.Lock)
+    _grants_lock: Any = field(default_factory=threading.Lock)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
@@ -880,52 +892,115 @@ class Studio:
                 return case
         raise _refuse(404, "approval_not_awaited", f"{case_id} is not an open approval")
 
-    def _write_grants(self, case_id: str, package_ids: list[str]) -> datetime:
+    def _grants_path(self) -> Path:
         path = self.paths.grants_file
         if path is None:
             raise _refuse(503, "grants_file_not_configured",
                           "PLM_WRITE_AUTHORIZATIONS_FILE is not set: an approval cannot grant "
                           "the upload")
-        now = self.clock.now()
-        expires = now + timedelta(hours=APPROVAL_GRANT_HOURS)
-        grants = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-        kept = [g for g in grants if g.get("capability") not in APPROVAL_CAPABILITIES]
-        reference = (f"Studio approval {case_id} of {', '.join(package_ids)} "
-                     f"at {now.isoformat()}")
-        kept += [{"capability": cap, "granted_by": OWNER, "granted_at": now.isoformat(),
-                  "expires_at": expires.isoformat(), "reference": reference}
-                 for cap in APPROVAL_CAPABILITIES]
-        _write_atomic(path, (json.dumps(kept, indent=2) + "\n").encode("utf-8"))
-        return expires
+        return path
+
+    @staticmethod
+    def _read_grants(path: Path) -> list[dict[str, Any]]:
+        try:
+            grants = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        except (OSError, ValueError) as exc:
+            raise _refuse(503, "grants_file_unreadable", f"{path}: {exc}") from exc
+        if not isinstance(grants, list):
+            raise _refuse(503, "grants_file_unreadable", f"{path}: not a JSON list")
+        return grants
+
+    def _write_grants(self, case_id: str, package_ids: list[str], workflow_id: str | None,
+                      now: datetime, expires: datetime) -> list[str]:
+        """This approval's YouTube grants, until ``expires``. The grant file has one grant
+        per capability and no package field (``execution.load_write_authorizations``), so
+        a grant cannot name the package: it is kept short, names the run in its
+        reference and is removed once that run has published (:meth:`_revoke_spent_grants`).
+        A manual grant that outlasts this one is kept, not replaced; the capabilities kept
+        that way are returned (review 2026-11-26 #18)."""
+        path = self._grants_path()
+        with self._grants_lock:
+            grants = self._read_grants(path)
+            kept_manual = sorted(
+                str(g["capability"]) for g in grants
+                if g.get("capability") in APPROVAL_CAPABILITIES
+                and not str(g.get("reference") or "").startswith(_STUDIO_GRANT)
+                and _expires_after(g, expires))
+            out = [g for g in grants if g.get("capability") not in APPROVAL_CAPABILITIES
+                   or g.get("capability") in kept_manual]
+            reference = (f"{_STUDIO_GRANT}{case_id} of {', '.join(package_ids)} "
+                         f"for run {workflow_id} at {now.isoformat()}")
+            out += [{"capability": cap, "granted_by": OWNER, "granted_at": now.isoformat(),
+                     "expires_at": expires.isoformat(), "reference": reference}
+                    for cap in APPROVAL_CAPABILITIES if cap not in kept_manual]
+            _write_atomic(path, (json.dumps(out, indent=2) + "\n").encode("utf-8"))
+        return kept_manual
+
+    def _revoke_spent_grants(self, states: Mapping[str, str]) -> None:
+        """Remove the approval grants whose run has published or ended (``states``:
+        workflow id -> run state). Other grants, manual ones included, stay."""
+        path = self.paths.grants_file
+        if path is None or not path.is_file():
+            return
+        with self._grants_lock:
+            try:
+                grants = self._read_grants(path)
+            except ActionRefused:
+                return  # the page must still load; the grant still expires on its own
+
+            def spent(grant: Mapping[str, Any]) -> bool:
+                found = _GRANT_RUN.search(str(grant.get("reference") or ""))
+                return (grant.get("capability") in APPROVAL_CAPABILITIES
+                        and str(grant.get("reference") or "").startswith(_STUDIO_GRANT)
+                        and found is not None and states.get(found.group(1)) in FINISHED)
+
+            left = [g for g in grants if not spent(g)]
+            if len(left) != len(grants):
+                _write_atomic(path, (json.dumps(left, indent=2) + "\n").encode("utf-8"))
 
     async def approve(self, case_id: str,
                       shown: Mapping[str, str] | None = None) -> dict[str, Any]:
-        """The owner's approval: grant this upload, then resume the run.
+        """The owner's approval: the exception queue decides the resume first; only then
+        are this upload's grants written, and only then is the run signalled. A refused
+        resume grants nothing (review 2026-11-26 #18).
 
         ``shown`` is ``{package_id: video_checksum}`` of the videos the page played. If a
         package's video changed since (a remake finished), the approval is refused: the
         owner approves only what they watched."""
-        case = self._approval_case(case_id)
-        package_ids = self._package_ids(case)
-        current = {p: self.package(p) for p in package_ids}
-        waiting = [p for p, pkg in current.items() if pkg.get("status") != "ready_for_publish"]
-        if waiting:
-            raise _refuse(409, "package_not_ready",
-                          f"{', '.join(waiting)} is not ready (new art still to import)")
-        if shown is not None:
-            changed = [p for p, pkg in current.items()
-                       if shown.get(p) != pkg.get("video_checksum")]
-            if changed:
-                raise _refuse(409, "video_changed",
-                              "the video changed since this page showed it (a remake "
-                              "finished): reload, watch the new video, then approve")
-        expires = self._write_grants(case_id, package_ids)
+        def check() -> tuple[dict[str, Any], list[str]]:
+            case = self._approval_case(case_id)
+            package_ids = self._package_ids(case)
+            current = {p: self.package(p) for p in package_ids}
+            waiting = [p for p, pkg in current.items()
+                       if pkg.get("status") != "ready_for_publish"]
+            if waiting:
+                raise _refuse(409, "package_not_ready",
+                              f"{', '.join(waiting)} is not ready (new art still to import)")
+            if shown is not None:
+                changed = [p for p, pkg in current.items()
+                           if shown.get(p) != pkg.get("video_checksum")]
+                if changed:
+                    raise _refuse(409, "video_changed",
+                                  "the video changed since this page showed it (a remake "
+                                  "finished): reload, watch the new video, then approve")
+            self._read_grants(self._grants_path())  # refused before the decision, not after
+            return case, package_ids
+
+        case, package_ids = await asyncio.to_thread(check)
+        workflow_id = (case.get("pipeline") or {}).get("workflow_id")
+        now = self.clock.now()
+        expires = now + timedelta(hours=APPROVAL_GRANT_HOURS)
+        kept: list[str] = []
+
+        def grant() -> None:
+            kept.extend(self._write_grants(case_id, package_ids, workflow_id, now, expires))
+
         answer = await self._resume(
             case_id, "production_owner",
             {"publish_approval_ref": f"Studio approval of {', '.join(package_ids)}; "
                                      f"YouTube grants until {expires.isoformat()}"},
-            "approved for upload in the Studio")
-        return {**answer, "grants_expire_at": expires.isoformat()}
+            "approved for upload in the Studio", before_signal=grant)
+        return {**answer, "grants_expire_at": expires.isoformat(), "grants_kept": kept}
 
     # -- change requests (at the review) -----------------------------------------------------
 
@@ -1020,6 +1095,7 @@ class Studio:
         holds, roles = self._holds_by_run(), self._owner_roles()
         listed = []
         runs = number_runs(self.store.runs())
+        self._revoke_spent_grants({r["workflow_id"]: str(r["state"]) for r in runs})
         stats = self._stats([r["youtube"]["video_id"] for r in runs if r.get("youtube")])
         for run in runs:
             if run.get("youtube"):
@@ -1084,6 +1160,7 @@ class Studio:
         """One project's page: its status and stop, its log, and every step's content
         (songs, pictures, video, upload), whether done or still to do."""
         run = self._run_of(number)
+        self._revoke_spent_grants({run["workflow_id"]: str(run["state"])})
         if run.get("youtube"):
             video_id = run["youtube"]["video_id"]
             run["youtube"] = {**run["youtube"], "stats": self._stats([video_id]).get(video_id)}

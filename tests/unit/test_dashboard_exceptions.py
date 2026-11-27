@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.dashboard.actions import (
+    ActionRefused,
     ExceptionActions,
     ReviewerConfig,
     SignalRequest,
@@ -397,6 +398,30 @@ def test_a_resume_can_carry_a_rewind_and_the_songs_to_leave_out() -> None:
     assert isinstance(sent.payload, ResumeSignal)
     assert (sent.payload.rewind_to, sent.payload.exclude_candidates) == ("assemble",
                                                                        ("cand-b",))
+
+
+def test_before_signal_runs_after_the_decision_and_before_the_signal() -> None:
+    """The Studio's approval grants the upload in ``before_signal``: only once the queue
+    accepted the resume, and before the run is told to go on (review 2026-11-26 #18)."""
+    import asyncio
+
+    signaller = FakeSignaller()
+    h = _harness(signaller=signaller)
+    actions = ExceptionActions(h.factory, reviewers=REVIEWERS, signaller=signaller,
+                               clock=FixedClock(NOW))
+    case = _pipeline_hold(h, "UNKNOWN_COMMERCIAL_LICENSE")
+    seen: list[tuple[str, int]] = []
+
+    def grant() -> None:
+        seen.append((h.case(case.id).status.value, len(signaller.sent)))
+
+    with pytest.raises(ActionRefused, match="evidence_missing"):
+        asyncio.run(actions.resume(case.id, actor="rita", role="rights_reviewer",
+                                   evidence={}, notes="", before_signal=grant))
+    assert seen == []  # refused: nothing granted
+    asyncio.run(actions.resume(case.id, actor="rita", role="rights_reviewer",
+                               evidence=_evidence(case), notes="", before_signal=grant))
+    assert seen == [("RESOLVED", 0)] and len(signaller.sent) == 1
 
 
 def test_the_page_carries_the_token_so_its_buttons_never_ask_for_it() -> None:

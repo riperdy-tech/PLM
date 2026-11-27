@@ -265,9 +265,14 @@ class ExceptionActions:
     async def resume(self, case_id: str, *, actor: str, role: str | None,
                      evidence: Mapping[str, str], notes: str,
                      rewind_to: str | None = None,
-                     exclude_candidates: tuple[str, ...] = ()) -> dict[str, Any]:
+                     exclude_candidates: tuple[str, ...] = (),
+                     before_signal: Callable[[], Any] | None = None) -> dict[str, Any]:
         """Resume the case; ``rewind_to``/``exclude_candidates`` ride on the pipeline's
-        resume signal (an approval hold sent back to assembly, see ``ResumeSignal``)."""
+        resume signal (an approval hold sent back to assembly, see ``ResumeSignal``).
+
+        ``before_signal`` runs (in a thread) once the queue has accepted and committed the
+        resume and before the run is signalled: the Studio's approval writes its upload
+        grants there, so a refused resume grants nothing (review 2026-11-26 #18)."""
         def decide(session: Session, case: ExceptionCase) -> ExceptionCase:
             try:
                 return self._queue.resolve(
@@ -279,6 +284,8 @@ class ExceptionActions:
                 raise _refused(refused.decision) from None
 
         case = await asyncio.to_thread(self._decide, case_id, decide)
+        if before_signal is not None:
+            await asyncio.to_thread(before_signal)
         signal = await self._signal_after(case, ResumeSignal(
             actor=actor, role=role, evidence=dict(evidence), rewind_to=rewind_to,
             exclude_candidates=tuple(exclude_candidates)), "resume")
