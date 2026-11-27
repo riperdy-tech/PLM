@@ -59,6 +59,23 @@ def test_identity_admits_only_focus_use_case_focus_genre_and_no_vocals() -> None
         _arm("a", genre=None, use_case="focus").dimensions)
 
 
+def test_identity_admits_only_instrumental_or_unset_languages() -> None:
+    """Review #43: an arm whose P1 language is a spoken one ("korean", "english") is not
+    instrumental focus music and is blocked like a vocal arm."""
+    focus = replace(FOCUS, languages=frozenset({"instrumental"}))
+
+    def admits(language: str | None) -> bool:
+        return focus.admits(replace(_arm("a", genre="focus_electronic",
+                                         use_case="study_focus").dimensions,
+                                    language=language))
+
+    assert admits(None) and admits("none") and admits("instrumental")
+    assert not admits("korean") and not admits("english")
+    assert FOCUS.admits(replace(_arm("a", genre="focus_electronic", use_case="focus").dimensions,
+                                language="english")), "no language list: not checked"
+    assert load_brand_identities()["longform_signal"].languages == frozenset({"instrumental"})
+
+
 def test_identity_file_declares_the_production_brand() -> None:
     identities = load_brand_identities()
     assert "longform_signal" in identities

@@ -293,5 +293,43 @@ def test_a_recently_used_visual_world_is_rotated_to_a_fresh_one() -> None:
         directive, recent_visual_worlds=newest_first).visual_world == "train_window_journey"
 
     named = _focus({"subgenre": "future_garage_focus", "visual_world": "snowy_cabin_desk"})
-    assert build_genome_from_directive(
-        named, recent_visual_worlds=("snowy_cabin_desk",)).visual_world == "snowy_cabin_desk"
+    assert build_genome_from_directive(named).visual_world == "snowy_cabin_desk"
+
+
+def test_a_brief_world_is_kept_only_inside_the_templates_worlds_and_when_fresh() -> None:
+    """Review #36: P2's brief world comes from P1 title words ("rainy" -> rainy_city,
+    "neon" -> neon_tokyo) and was used as is, bypassing the focus worlds and the
+    recent-worlds rule. A brief world is kept only if the template allows it and it is
+    not recent; otherwise P3 picks a fresh focus world."""
+    off_identity = _focus({"subgenre": "future_garage_focus", "visual_world": "neon_tokyo"})
+    assert build_genome_from_directive(off_identity).visual_world == "rainy_night_desk"
+    recent = _focus({"subgenre": "future_garage_focus", "visual_world": "snowy_cabin_desk"})
+    fresh = build_genome_from_directive(recent, recent_visual_worlds=("snowy_cabin_desk",))
+    assert fresh.visual_world in FOCUS_WORLDS - {"snowy_cabin_desk"}
+    both = build_genome_from_directive(
+        off_identity, recent_visual_worlds=("rainy_night_desk",))
+    assert both.visual_world in FOCUS_WORLDS - {"rainy_night_desk"}
+
+
+def test_p1_moods_and_languages_never_leave_the_focus_identity() -> None:
+    """Review #43: P3 took P1's mood and language unchecked (sensual, romantic, "korean"
+    on an instrumental spec). Moods outside the template's focus moods are dropped (none
+    left: the template's), and an instrumental genome's language is instrumental."""
+    directive = _focus({"subgenre": "minimal_pulse", "mood": ["sensual", "calm", "romantic"],
+                        "language": "korean"})
+    genome = build_genome_from_directive(directive)
+    assert genome.mood == ("calm",)
+    assert genome.language == "instrumental"
+    only_off = build_genome_from_directive(
+        _focus({"subgenre": "minimal_pulse", "mood": ["sensual", "dark"]}))
+    assert only_off.mood == default_template_library().for_subgenre(
+        "focus_electronic", "minimal_pulse").genome.mood
+    template = default_template_library().for_genre("focus_electronic")
+    assert template.mood_limits is not None and "sensual" not in template.mood_limits
+
+
+def test_template_mood_outside_its_limits_is_refused_at_load() -> None:
+    raw = _raw_library()
+    raw["templates"]["focus_minimal_pulse"]["mood"] = ["sensual"]
+    with pytest.raises(TemplateLibraryError, match="mood_limits"):
+        TemplateLibrary(raw)
