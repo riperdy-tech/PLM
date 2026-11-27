@@ -16,6 +16,15 @@ stored one is a no-op; a different event under a recorded sequence is refused
 :func:`~plm_platform.pipeline.states.check_transition` from the run's current state, so
 the table can never record a lifecycle the workflow could not have taken. Nothing here
 reads the clock: every instant is on the record.
+
+**Reset continuation** (review 2026-11-26). A Temporal reset starts a new run of the same
+workflow id that replays to the reset point and then offers sequences the old run
+already wrote. A record carries its Temporal ``run_id`` (kept in ``outputs_json`` under
+``temporal_run_id``); a different record at a sequence another run wrote is appended
+after the last transition instead of refused, its ``outputs_json`` naming
+``reset_from_run_id`` and ``reset_offered_sequence``, and the assigned sequence is
+acknowledged so the workflow numbers on from it. Its own transition must still be legal;
+only its ``from_state`` may differ from the old run's last state.
 """
 
 from __future__ import annotations
@@ -49,6 +58,9 @@ __all__ = [
     "pipeline_transitions",
     "record_digest",
 ]
+
+RUN_ID_KEY: Final[str] = "temporal_run_id"
+"""``outputs_json`` key naming the Temporal run that wrote a transition."""
 
 PIPELINE_METADATA: Final = sa.MetaData(schema=PLATFORM_SCHEMA)
 
@@ -122,6 +134,9 @@ def _iso(moment: datetime | None) -> str | None:
 def record_digest(record: TransitionRecord) -> str:
     """SHA-256 of the canonical JSON of the whole event (instants normalised to UTC)."""
     body = asdict(record)
+    if record.run_id is None:
+        # A record from before run ids existed hashes exactly as it did then.
+        del body["run_id"]
     body["occurred_at"] = _iso(record.occurred_at)
     body["started_at"] = _iso(record.started_at)
     body["hold_case_ids"] = list(record.hold_case_ids)
@@ -251,18 +266,32 @@ class PipelineStore:
         digest = record_digest(record)
 
         existing = session.execute(
-            sa.select(pipeline_transitions.c.record_sha256).where(
+            sa.select(pipeline_transitions.c.record_sha256,
+                      pipeline_transitions.c.outputs_json).where(
                 pipeline_transitions.c.workflow_id == record.workflow_id,
                 pipeline_transitions.c.sequence == record.sequence,
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if existing is not None:
-            if existing != digest:
-                raise TransitionConflictError(
-                    f"{record.workflow_id} sequence {record.sequence} is already recorded with "
-                    "different content; one sequence names one transition"
-                )
-            return TransitionAck(sequence=record.sequence, created=False)
+            if existing.record_sha256 == digest:
+                return TransitionAck(sequence=record.sequence, created=False)
+            if record.run_id is not None:
+                continued = session.execute(
+                    sa.select(pipeline_transitions.c.sequence).where(
+                        pipeline_transitions.c.workflow_id == record.workflow_id,
+                        pipeline_transitions.c.record_sha256 == digest,
+                    )
+                ).scalar_one_or_none()
+                if continued is not None:  # this continuation, retried
+                    return TransitionAck(sequence=int(continued), created=False)
+                written_by = (existing.outputs_json or {}).get(RUN_ID_KEY)
+                if written_by != record.run_id:
+                    return self._continue_reset(session, record, digest, written_by,
+                                                target, origin, held_from)
+            raise TransitionConflictError(
+                f"{record.workflow_id} sequence {record.sequence} is already recorded with "
+                "different content; one sequence names one transition"
+            )
 
         run = self.run(session, record.workflow_id, for_update=True)
         if run is None:
@@ -294,24 +323,8 @@ class PipelineStore:
                 )
 
         at = require_aware(record.occurred_at)
-        cost_amount = None if record.cost is None else _decimal(record.cost)
-        transition_values: dict[str, Any] = {
-            "id": _transition_id(record.workflow_id, record.sequence),
-            "workflow_id": record.workflow_id, "sequence": record.sequence,
-            "from_state": None if origin is None else origin.value, "to_state": target.value,
-            "held_from": None if held_from is None else held_from.value,
-            "step": record.step, "idempotency_key": record.idempotency_key,
-            "attempt": record.attempt, "retry_count": max(record.attempt - 1, 0),
-            "error_code": record.error_code, "error_detail": record.error_detail,
-            "started_at": None if record.started_at is None else require_aware(record.started_at),
-            "occurred_at": at, "provider_ids_json": dict(record.provider_ids),
-            "cost_amount": cost_amount,
-            "cost_currency": None if record.cost is None else record.cost.currency,
-            "cost_basis": record.cost_basis, "inputs_json": dict(record.inputs),
-            "outputs_json": dict(record.outputs),
-            "hold_case_ids_json": list(record.hold_case_ids),
-            "final": record.final, "record_sha256": digest,
-        }
+        transition_values = self._values(record, record.sequence, origin, target, held_from,
+                                         digest, self._outputs(record))
         if run is None:
             # The run row first: the transition references it.
             session.execute(pipeline_runs.insert().values(
@@ -325,14 +338,78 @@ class PipelineStore:
             return TransitionAck(sequence=record.sequence, created=True)
 
         session.execute(pipeline_transitions.insert().values(**transition_values))
-        if target is PipelineState.HELD:
-            next_held_from: PipelineState | None = held_from
-        else:
-            next_held_from = None
+        self._advance(session, record, record.sequence, target, held_from, at)
+        return TransitionAck(sequence=record.sequence, created=True)
+
+    def _continue_reset(self, session: Session, record: TransitionRecord, digest: str,
+                        written_by: Any, target: PipelineState, origin: PipelineState | None,
+                        held_from: PipelineState | None) -> TransitionAck:
+        """Append a reset run's record after the run's last transition (module docstring).
+
+        The record's own transition is checked: never from creation, never out of a
+        terminal state, never an illegal step (leaving HELD is accepted, since only the
+        reset run knows where it was held from), and a move into HELD names its state."""
+        run = self.run(session, record.workflow_id, for_update=True)
+        if run is None or origin is None:
+            raise TransitionRejectedError(
+                f"{record.workflow_id}: a reset continuation needs a recorded run and a "
+                "from_state")
+        if origin is not PipelineState.HELD:
+            try:
+                check_transition(origin, target)
+            except IllegalTransitionError as exc:
+                raise TransitionRejectedError(str(exc)) from exc
+        if target is PipelineState.HELD and held_from is None:
+            raise TransitionRejectedError("a transition into HELD must name the state the "
+                                          "run returns to")
+        sequence = run.last_sequence + 1
+        at = require_aware(record.occurred_at)
+        outputs = {**self._outputs(record), "reset_from_run_id": written_by,
+                   "reset_offered_sequence": record.sequence}
+        session.execute(pipeline_transitions.insert().values(
+            **self._values(record, sequence, origin, target, held_from, digest, outputs)))
+        self._advance(session, record, sequence, target, held_from, at)
+        return TransitionAck(sequence=sequence, created=True)
+
+    @staticmethod
+    def _outputs(record: TransitionRecord) -> dict[str, Any]:
+        outputs = dict(record.outputs)
+        if record.run_id is not None:
+            outputs[RUN_ID_KEY] = record.run_id
+        return outputs
+
+    @staticmethod
+    def _values(record: TransitionRecord, sequence: int, origin: PipelineState | None,
+                target: PipelineState, held_from: PipelineState | None, digest: str,
+                outputs: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": _transition_id(record.workflow_id, sequence),
+            "workflow_id": record.workflow_id, "sequence": sequence,
+            "from_state": None if origin is None else origin.value, "to_state": target.value,
+            "held_from": None if held_from is None else held_from.value,
+            "step": record.step, "idempotency_key": record.idempotency_key,
+            "attempt": record.attempt, "retry_count": max(record.attempt - 1, 0),
+            "error_code": record.error_code, "error_detail": record.error_detail,
+            "started_at": None if record.started_at is None else require_aware(record.started_at),
+            "occurred_at": require_aware(record.occurred_at),
+            "provider_ids_json": dict(record.provider_ids),
+            "cost_amount": None if record.cost is None else _decimal(record.cost),
+            "cost_currency": None if record.cost is None else record.cost.currency,
+            "cost_basis": record.cost_basis, "inputs_json": dict(record.inputs),
+            "outputs_json": outputs,
+            "hold_case_ids_json": list(record.hold_case_ids),
+            "final": record.final, "record_sha256": digest,
+        }
+
+    @staticmethod
+    def _advance(session: Session, record: TransitionRecord, sequence: int,
+                 target: PipelineState, held_from: PipelineState | None,
+                 at: datetime) -> None:
         values: dict[str, Any] = {
-            "state": target.value, "held_from": None if next_held_from is None
-            else next_held_from.value,
-            "last_sequence": record.sequence, "updated_at": at,
+            "state": target.value,
+            "held_from": held_from.value if target is PipelineState.HELD and held_from
+            else None,
+            "last_sequence": sequence, "updated_at": at,
         }
         if record.error_code is not None:
             values["last_error_code"] = record.error_code
@@ -343,7 +420,6 @@ class PipelineStore:
             pipeline_runs.update().where(pipeline_runs.c.workflow_id == record.workflow_id)
             .values(**values)
         )
-        return TransitionAck(sequence=record.sequence, created=True)
 
     @staticmethod
     def _state(value: str, name: str) -> PipelineState:

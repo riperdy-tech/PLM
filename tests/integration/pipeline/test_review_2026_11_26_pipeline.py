@@ -264,6 +264,140 @@ async def test_cancelling_a_held_run_withdraws_its_open_cases(
     assert case.status.value == "WITHDRAWN"
 
 
+def _reset_point(events: list[Any], transitions_done: int) -> int:
+    """The workflow task completed right after the run's ``transitions_done``-th
+    record_transition finished: a reset there replays that many transitions."""
+    from temporalio.api.enums.v1 import EventType
+
+    scheduled: dict[int, str] = {}
+    recorded = 0
+    for event in events:
+        if event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
+            scheduled[event.event_id] = (
+                event.activity_task_scheduled_event_attributes.activity_type.name)
+        elif event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
+            started = event.activity_task_completed_event_attributes.scheduled_event_id
+            if scheduled.get(started) == "pipeline.record_transition":
+                recorded += 1
+        elif (event.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_COMPLETED
+              and recorded >= transitions_done):
+            return int(event.event_id)
+    raise AssertionError("no workflow task after the transitions")
+
+
+async def test_a_reset_run_continues_its_transitions_instead_of_failing(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """P2: a Temporal reset replays to the reset point, then offers sequences the old run
+    already wrote. The store appends them after the old run's last transition (naming
+    the run it continues) and the new run numbers on from there and completes."""
+    import uuid
+
+    from temporalio.api.common.v1 import WorkflowExecution
+    from temporalio.api.workflowservice.v1 import ResetWorkflowExecutionRequest
+
+    steps = MockPhaseSteps(_scripts(qa=QUARANTINE))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_run(client, directive_id, workflow_id)
+        await wait_until(handle, lambda s: s.state == "HELD", "the first quarantine")
+        old_rows = len(transitions(factory, workflow_id))
+        history = await handle.fetch_history()
+        description = await handle.describe()
+        reset = await client.workflow_service.reset_workflow_execution(
+            ResetWorkflowExecutionRequest(
+                namespace=client.namespace,
+                workflow_execution=WorkflowExecution(workflow_id=workflow_id,
+                                                     run_id=description.run_id),
+                reason="review test: reset after RESEARCHED",
+                workflow_task_finish_event_id=_reset_point(list(history.events), 2),
+                request_id=str(uuid.uuid4())))
+        new = client.get_workflow_handle(workflow_id, run_id=reset.run_id,
+                                         result_type=PipelineOutcome)
+        held = await wait_until(new, lambda s: s.state == "HELD", "the reset run's hold")
+        with factory() as session:
+            case = ExceptionQueue().require(session, held.open_case_ids[0])
+        await new.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="rita", role="rights_reviewer",
+            evidence={name: f"ref-{name}" for name in case.required_evidence}))
+        outcome: PipelineOutcome = await asyncio.wait_for(new.result(), RESULT_TIMEOUT)
+
+    assert outcome.completed
+    rows = transitions(factory, workflow_id)
+    assert [t.sequence for t in rows] == list(range(1, len(rows) + 1))
+    first_new = rows[old_rows]
+    assert first_new.outputs["reset_from_run_id"] == description.run_id
+    assert first_new.outputs["reset_offered_sequence"] == 3
+    assert first_new.outputs["temporal_run_id"] == reset.run_id
+    assert first_new.from_state is PipelineState.RESEARCHED
+    assert first_new.to_state is PipelineState.POLICY_CHECKED
+    assert rows[-1].final and outcome.sequence == rows[-1].sequence
+
+
+class RefusingPlatform(PlatformOperations):
+    """The store or the queue refuses one operation for good (a platform bug)."""
+
+    def __init__(self, *args: Any, refuse_state: str | None = None,
+                 refuse_hold: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.refuse_state = refuse_state
+        self.refuse_hold = refuse_hold
+
+    async def record_transition(self, record: TransitionRecord) -> TransitionAck:
+        if record.to_state == self.refuse_state:
+            raise ValidationFailure(f"store refused {record.to_state}")
+        return await super().record_transition(record)
+
+    async def raise_hold(self, request: HoldRequest) -> HoldInfo:
+        if self.refuse_hold:
+            raise ValidationFailure("queue refused the hold")
+        return await super().raise_hold(request)
+
+
+async def test_a_refused_transition_leaves_a_failure_that_says_what_was_refused(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """#9 remainder: a permanent refusal of record_transition still ends the run, but
+    the store holds a FAILED transition naming the refused one and the error."""
+    from temporalio.client import WorkflowFailureError
+
+    refusing = RefusingPlatform(factory, queue=platform._queue, ledger=platform._ledger,
+                                refuse_state="RESEARCHED")
+    steps = MockPhaseSteps(_scripts())
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, refusing)):
+        handle = await start_run(client, directive_id, workflow_id)
+        with pytest.raises(WorkflowFailureError) as failed:
+            await asyncio.wait_for(handle.result(), 60)
+
+    assert "store refused RESEARCHED" in str(failed.value.cause)
+    last = transitions(factory, workflow_id)[-1]
+    assert (last.from_state, last.to_state) == (PipelineState.IDEA, PipelineState.FAILED)
+    assert last.error_code == "transition_refused" and last.final
+    assert last.outputs["refused_transition"]["to_state"] == "RESEARCHED"
+    assert "store refused RESEARCHED" in (last.error_detail or "")
+
+
+async def test_a_refused_hold_ends_the_run_with_a_failure_record(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """#9 remainder: when the queue refuses a hold for good the run cannot wait; it ends
+    FAILED with ``hold_not_raised`` and the hold it wanted, instead of a bare failure."""
+    refusing = RefusingPlatform(factory, queue=platform._queue, ledger=platform._ledger,
+                                refuse_hold=True)
+    steps = MockPhaseSteps(_scripts(qa=QUARANTINE))
+    directive_id, workflow_id = new_run()
+    async with running(worker_for(client, steps, refusing)):
+        handle = await start_run(client, directive_id, workflow_id)
+        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), 60)
+
+    assert (outcome.final_state, outcome.error_code) == ("FAILED", "hold_not_raised")
+    last = transitions(factory, workflow_id)[-1]
+    assert last.from_state is PipelineState.QA and last.final
+    assert last.outputs["refused_hold"]["reason_code"] == "UNKNOWN_COMMERCIAL_LICENSE"
+    assert "queue refused the hold" in (last.error_detail or "")
+
+
 async def test_songs_taken_out_on_a_hold_that_cannot_swap_are_recorded_as_ignored(
     client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
 ) -> None:

@@ -158,3 +158,89 @@ def test_a_final_transition_completes_the_run_and_terminal_states_are_closed(
     assert run is not None and run.completed_at == T0 + timedelta(seconds=2)
     with pytest.raises(TransitionRejectedError):
         store.record(session, _rec(3, "FAILED", "RESEARCHED"))
+
+
+def _walk_as(store: PipelineStore, session: Session, run_id: str, *states: str) -> None:
+    previous: str | None = None
+    for n, state in enumerate(states, start=1):
+        store.record(session, _rec(n, previous, state, run_id=run_id))
+        previous = state
+
+
+def test_a_reset_run_continues_after_the_old_runs_last_transition(session: Session) -> None:
+    """Review 2026-11-26 (P2): after a Temporal reset the new run offers sequences the old
+    run already wrote. Its different record is appended after the last one as a reset
+    continuation (the old run's rows stay, the table is append-only), and the assigned
+    sequence comes back so the workflow numbers on from it."""
+    store = PipelineStore()
+    _walk_as(store, session, "run-a", "IDEA", "RESEARCHED", "POLICY_CHECKED", "GENERATING")
+    later = timedelta(minutes=5)
+    offered = replace(_rec(3, "RESEARCHED", "POLICY_CHECKED", run_id="run-b"),
+                      occurred_at=T0 + later)
+    ack = store.record(session, offered)
+    assert (ack.sequence, ack.created) == (5, True)
+    rows = store.transitions(session, WF)
+    assert [t.sequence for t in rows] == [1, 2, 3, 4, 5]
+    continued = rows[-1]
+    assert (continued.from_state.value if continued.from_state else None,
+            continued.to_state.value) == ("RESEARCHED", "POLICY_CHECKED")
+    assert continued.outputs["reset_from_run_id"] == "run-a"
+    assert continued.outputs["reset_offered_sequence"] == 3
+    assert continued.outputs["temporal_run_id"] == "run-b"
+    run = store.run(session, WF)
+    assert run is not None and run.state.value == "POLICY_CHECKED" and run.last_sequence == 5
+
+    # The same continuation retried is the stored one, not a second row.
+    again = store.record(session, offered)
+    assert (again.sequence, again.created) == (5, False)
+    # The reset run then numbers on from the assigned sequence, as usual.
+    store.record(session, replace(_rec(6, "POLICY_CHECKED", "GENERATING", run_id="run-b"),
+                                  occurred_at=T0 + later * 2))
+    assert len(store.transitions(session, WF)) == 6
+
+
+def test_a_reset_run_may_continue_into_a_hold(session: Session) -> None:
+    store = PipelineStore()
+    _walk_as(store, session, "run-a", "IDEA", "RESEARCHED", "POLICY_CHECKED", "GENERATING",
+             "GENERATED", "QA", "PASSED")
+    ack = store.record(session, replace(
+        _rec(7, "QA", "HELD", held_from="QA", run_id="run-b", error_code="qa_quarantined"),
+        occurred_at=T0 + timedelta(hours=1)))
+    assert ack.sequence == 8
+    run = store.run(session, WF)
+    assert run is not None and run.state.value == "HELD"
+    assert run.held_from is not None and run.held_from.value == "QA"
+    with pytest.raises(TransitionRejectedError):  # still never an illegal transition
+        store.record(session, replace(_rec(3, "IDEA", "PUBLISHED", run_id="run-c"),
+                                      occurred_at=T0 + timedelta(hours=2)))
+
+
+def test_a_different_record_from_the_same_run_is_still_a_conflict(session: Session) -> None:
+    store = PipelineStore()
+    _walk_as(store, session, "run-a", "IDEA", "RESEARCHED")
+    with pytest.raises(TransitionConflictError):
+        store.record(session, _rec(2, "IDEA", "RESEARCHED", run_id="run-a",
+                                   error_code="other"))
+    with pytest.raises(TransitionConflictError):  # no run id: the old rule, unchanged
+        store.record(session, _rec(2, "IDEA", "RESEARCHED", error_code="other"))
+
+
+def test_a_record_without_a_run_id_hashes_as_before() -> None:
+    """In-flight records from before the change carry no run id; their digest must not
+    move, or a retried activity would conflict with its own stored row."""
+    import hashlib
+    import json
+    from dataclasses import asdict
+
+    from plm_platform.pipeline.store import record_digest
+
+    record = _rec(1, None, "IDEA")
+    body = asdict(record)
+    del body["run_id"]
+    body["occurred_at"] = record.occurred_at.isoformat()
+    body["started_at"] = None
+    body["hold_case_ids"] = []
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                           allow_nan=False, default=str)
+    assert record_digest(record) == hashlib.sha256(canonical.encode()).hexdigest()
+    assert record_digest(replace(record, run_id="r")) != record_digest(record)
