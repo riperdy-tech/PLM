@@ -29,9 +29,11 @@ hold class names, so the queue records who decided and on what.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import re
+import secrets
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -167,9 +169,14 @@ def m4a_to_wav(data: bytes) -> bytes:
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
-    tmp = path.with_name(f".{path.name}.part")
-    tmp.write_bytes(data)
-    tmp.replace(path)
+    # A temp name of its own: two writers never share (or replace) one part file
+    # (review 2026-11-26, P2).
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.part")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _image_suffix(data: bytes) -> str | None:
@@ -182,10 +189,13 @@ def _image_suffix(data: bytes) -> str | None:
     return None
 
 
+@functools.cache
 def song_counts(genre: str = "focus_electronic") -> dict[str, dict[str, int]]:
     """What each Start length asks of the owner, from P3's own plan (its template's song
     length, the bucket's range and the supply policy's spares): ``{bucket: {songs,
-    song_seconds}}``; empty when P3's code is not importable here."""
+    song_seconds}}``; empty when P3's code is not importable here. Worked out once per
+    process: it depends only on P3's code, and the Start card asks every 5 s (review
+    2026-11-26, P2). Callers must not change the answer."""
     try:
         from experiments.genome.engine import default_template_library
         from experiments.materialization.builder import derived_duration_seconds
@@ -345,6 +355,7 @@ class Studio:
     ``plm-studio-video`` folder in the system temp folder)."""
     _video_lock: Any = field(default_factory=threading.Lock)
     _grants_lock: Any = field(default_factory=threading.Lock)
+    _notes_lock: Any = field(default_factory=threading.Lock)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Remakes running or ended in this dashboard: package -> since, state, error."""
     _tasks: set[Any] = field(default_factory=set)
@@ -451,8 +462,9 @@ class Studio:
         path = self.paths.notes_file
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            _write_atomic(path, (json.dumps([*self.notes(), entry][-200:], indent=2)
-                                 + "\n").encode("utf-8"))
+            with self._notes_lock:  # read-modify-write: one writer at a time (review P2)
+                _write_atomic(path, (json.dumps([*self.notes(), entry][-200:], indent=2)
+                                     + "\n").encode("utf-8"))
         return entry
 
     # -- songs ------------------------------------------------------------------------------
@@ -802,10 +814,13 @@ class Studio:
                 released = await asyncio.to_thread(self.import_art, package_id, folder)
             resumed: list[dict[str, Any]] = []
             waiting: set[str] = set()
+
+            def not_ready_of(case: Mapping[str, Any]) -> list[str]:
+                return [p for p in self._package_ids(case)
+                        if self.package(p).get("status") != "ready_for_publish"]
+
             for case in cases:  # none: reopened at the review, still held for approval
-                not_ready = await asyncio.to_thread(
-                    lambda case=case: [p for p in self._package_ids(case)
-                                       if self.package(p).get("status") != "ready_for_publish"])
+                not_ready = await asyncio.to_thread(not_ready_of, case)
                 if not_ready:
                     waiting.update(not_ready)
                     continue
@@ -1381,6 +1396,14 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     from ..storage import ObjectNotFoundError, digest_from_key, from_uri, get_verified
     from ..temporal import Phase
 
+    # One engine (one pool) for every Studio read and P6 change, not one per call
+    # (review 2026-11-26, P2).
+    engine: Any = None
+    if platform is not None:
+        from ..db import build_engine
+
+        engine = build_engine(platform)
+
     def runs() -> list[dict[str, Any]]:
         panel = live.view("production-queue")["panels"]["runs"]
         if panel.get("status") != "ok":
@@ -1418,21 +1441,17 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
         from media_factory.rendering.ffmpeg import FFmpegToolchain
         from media_factory.thumbnail_art.importer import import_owner_art
 
-        from ..db import build_engine, session_factory
+        from ..db import session_factory
 
-        engine = build_engine(platform)
-        try:
-            with session_factory(engine)() as session:
-                try:
-                    pkg = import_owner_art(session, MinioArtifactStore(platform),
-                                           FFmpegToolchain(), package_id, folder,
-                                           now=(clock or SystemClock()).now())
-                except MediaAssemblyError as exc:
-                    session.rollback()
-                    raise _refuse(422, exc.code, str(exc)) from exc
-                session.commit()
-        finally:
-            engine.dispose()
+        with session_factory(engine)() as session:
+            try:
+                pkg = import_owner_art(session, MinioArtifactStore(platform),
+                                       FFmpegToolchain(), package_id, folder,
+                                       now=(clock or SystemClock()).now())
+            except MediaAssemblyError as exc:
+                session.rollback()
+                raise _refuse(422, exc.code, str(exc)) from exc
+            session.commit()
         return {"media_package_id": pkg.media_package_id, "status": pkg.status.value,
                 "video_master_uri": pkg.video_master_uri}
 
@@ -1441,20 +1460,16 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
             raise _refuse(503, "settings_unavailable", "the platform settings did not load")
         from media_factory.errors import MediaAssemblyError
 
-        from ..db import build_engine, session_factory
+        from ..db import session_factory
 
-        engine = build_engine(platform)
-        try:
-            with session_factory(engine)() as session:
-                try:
-                    pkg = change(session, package_id, now=(clock or SystemClock()).now(),
-                                 **kwargs)
-                except MediaAssemblyError as exc:
-                    session.rollback()
-                    raise _refuse(422, exc.code, str(exc)) from exc
-                session.commit()
-        finally:
-            engine.dispose()
+        with session_factory(engine)() as session:
+            try:
+                pkg = change(session, package_id, now=(clock or SystemClock()).now(),
+                             **kwargs)
+            except MediaAssemblyError as exc:
+                session.rollback()
+                raise _refuse(422, exc.code, str(exc)) from exc
+            session.commit()
         return {"media_package_id": pkg.media_package_id, "status": pkg.status.value}
 
     def edit(package_id: str, changes: dict[str, Any]) -> dict[str, Any]:
@@ -1479,10 +1494,9 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
         return client.video_statistics(video_ids)
 
     if platform is not None:
-        from ..db import build_engine as _engine
         from .projects import ProjectStore
 
-        store = ProjectStore(_engine(platform))
+        store = ProjectStore(engine)
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
 
@@ -1525,31 +1539,25 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
             raise _refuse(503, "settings_unavailable", "the platform settings did not load")
         import sqlalchemy as sa
 
-        from ..db import build_engine
-
         brand = (os.environ.get("PLM_STUDIO_BRAND_ID")
                  or load_env_file(dotenv_path).get("PLM_STUDIO_BRAND_ID") or "longform_signal")
-        engine = build_engine(platform)
-        try:
-            with engine.connect() as conn:
-                available = conn.execute(sa.text(
-                    "select distinct m.taxonomy_json::json->>'subgenre' "
-                    "from market.market_arms m "
-                    "left join ar.ar_content_arm_state s on s.arm_id = m.arm_id "
-                    "where m.brand_id = :brand "
-                    "and m.taxonomy_json::json->>'subgenre' is not null "
-                    "and coalesce(s.status, 'candidate') in ('candidate', 'active') "
-                    "order by 1"), {"brand": brand}).scalars().all()
-                # P3's record: it knows the sub-style it chose for an arm naming none.
-                recent = conn.execute(sa.text(
-                    "select g.subgenre, e.created_at from experiments.experiments e "
-                    "join experiments.content_genomes g "
-                    "on g.fingerprint = e.base_genome_fingerprint "
-                    "where g.genre = 'focus_electronic' and g.subgenre is not null "
-                    "and e.created_at <= now() "
-                    "order by e.created_at desc limit 5")).all()
-        finally:
-            engine.dispose()
+        with engine.connect() as conn:  # the shared engine (review 2026-11-26, P2)
+            available = conn.execute(sa.text(
+                "select distinct m.taxonomy_json::json->>'subgenre' "
+                "from market.market_arms m "
+                "left join ar.ar_content_arm_state s on s.arm_id = m.arm_id "
+                "where m.brand_id = :brand "
+                "and m.taxonomy_json::json->>'subgenre' is not null "
+                "and coalesce(s.status, 'candidate') in ('candidate', 'active') "
+                "order by 1"), {"brand": brand}).scalars().all()
+            # P3's record: it knows the sub-style it chose for an arm naming none.
+            recent = conn.execute(sa.text(
+                "select g.subgenre, e.created_at from experiments.experiments e "
+                "join experiments.content_genomes g "
+                "on g.fingerprint = e.base_genome_fingerprint "
+                "where g.genre = 'focus_electronic' and g.subgenre is not null "
+                "and e.created_at <= now() "
+                "order by e.created_at desc limit 5")).all()
         return {"available": [s for s in available if s and s != "none"],
                 "recent": [{"subgenre": r[0], "at": r[1].isoformat()} for r in recent]}
 

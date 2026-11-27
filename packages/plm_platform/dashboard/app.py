@@ -374,9 +374,43 @@ class SongsDoneBody(BaseModel):
     case_id: str = Field(description="the songs hold of the one project to continue")
 
 
+SONG_UPLOAD_LIMIT: Final[int] = 512 * 1024 * 1024
+"""The largest song upload (WAV or M4A) the Studio reads."""
+IMAGE_UPLOAD_LIMIT: Final[int] = 50 * 1024 * 1024
+"""The largest picture upload the Studio reads."""
+
+
+def _too_large(limit: int) -> HTTPException:
+    return HTTPException(status_code=413, detail=ErrorShape(
+        code="upload_too_large", field_paths=[],
+        message=f"the file is larger than {limit // (1024 * 1024)} MB").model_dump())
+
+
+async def _upload(request: Request, limit: int) -> bytes:
+    """The request body, refused (413) by its Content-Length before it is read, and while
+    it is read when it has none or it lies (review 2026-11-26, P2)."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _too_large(limit)
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise _too_large(limit)
+    return bytes(body)
+
+
 def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     """The Studio (``dashboard.studio``): reads are open like the views, every write
     needs the service token."""
+
+    @app.exception_handler(SourceUnavailable)
+    async def source_unavailable(request: Request, exc: SourceUnavailable) -> JSONResponse:
+        # A source that cannot answer is a 503 with its reason, as the views report it,
+        # not a plain 500 (review 2026-11-26, P2).
+        return JSONResponse(status_code=503, content={"detail": ErrorShape(
+            code="source_unavailable", field_paths=[exc.source],
+            message=exc.reason).model_dump()})
 
     def guarded(call: Callable[[], Any]) -> Any:
         try:
@@ -442,7 +476,7 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.put("/api/studio/songs/{stem}", dependencies=[Depends(require_token)])
     async def studio_song(stem: str, request: Request) -> dict[str, Any]:
-        data = await request.body()
+        data = await _upload(request, SONG_UPLOAD_LIMIT)
         # In a thread: an M4A is decoded by ffmpeg, which takes seconds.
         saved: dict[str, Any] = await asyncio.to_thread(
             guarded, lambda: studio.save_song(stem, data))
@@ -461,7 +495,7 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
              dependencies=[Depends(require_token)])
     async def studio_art_upload(package_id: str, letter: str,
                                 request: Request) -> dict[str, Any]:
-        data = await request.body()
+        data = await _upload(request, IMAGE_UPLOAD_LIMIT)
         saved: dict[str, Any] = await asyncio.to_thread(
             guarded, lambda: studio.save_art(package_id, letter, data))
         return saved
@@ -517,7 +551,7 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
 
     @app.put("/api/studio/art-library/{package_id}", dependencies=[Depends(require_token)])
     async def studio_library_upload(package_id: str, request: Request) -> dict[str, Any]:
-        data = await request.body()
+        data = await _upload(request, IMAGE_UPLOAD_LIMIT)
         added: dict[str, Any] = await asyncio.to_thread(
             guarded, lambda: studio.add_to_library(package_id, data))
         return added

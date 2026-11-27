@@ -137,7 +137,7 @@ def test_continue_on_one_projects_songs_resumes_only_that_project(tmp_path: Path
     studio, actions = _studio(tmp_path, [
         {"case_id": "mine", "reason_code": "MANUAL_AUDIO_AWAITED"},
         {"case_id": "other", "reason_code": "MANUAL_AUDIO_AWAITED"}])
-    (answer,) = asyncio.run(studio.songs_done("mine"))
+    asyncio.run(studio.songs_done("mine"))
     assert [c[1] for c in actions.calls] == ["mine"]
     with pytest.raises(ActionRefused, match="no_run_waiting_for_songs"):
         asyncio.run(studio.songs_done("c-unknown"))
@@ -268,14 +268,6 @@ def test_the_video_is_downloaded_once_and_served_from_a_file_by_range(tmp_path: 
     import threading
     import time
 
-    from fastapi.testclient import TestClient
-    from plm_platform.config import load_settings
-    from plm_platform.dashboard.app import create_live_app
-    from plm_platform.dashboard.live import LiveDashboard
-    from plm_platform.dashboard.sources import PhaseApis, ReadOnlyDatabase
-
-    from tests.support.c1_api import PLATFORM_ENV
-
     studio, _ = _studio(tmp_path, [])
     studio.video_dir = tmp_path / "video-cache"
     data = bytes(range(256)) * 4
@@ -295,14 +287,113 @@ def test_the_video_is_downloaded_once_and_served_from_a_file_by_range(tmp_path: 
         t.join()
     assert downloads == ["plm://v/1"]
 
-    live = LiveDashboard(ReadOnlyDatabase(None), PhaseApis({}, token=None), reviewers=None)
-    client = TestClient(create_live_app(live, studio.actions,  # type: ignore[arg-type]
-                                        platform=load_settings(env=PLATFORM_ENV),
-                                        studio=studio))
+    client = _client(studio)
     part = client.get(f"/api/studio/packages/{PKG}/video", headers={"Range": "bytes=10-19"})
     assert part.status_code == 206 and part.content == data[10:20]
     assert part.headers["content-type"] == "video/mp4"
     assert client.get(f"/api/studio/packages/{PKG}/video").content == data
+
+
+def _client(studio: Studio) -> Any:
+    from fastapi.testclient import TestClient
+    from plm_platform.config import load_settings
+    from plm_platform.dashboard.app import create_live_app
+    from plm_platform.dashboard.live import LiveDashboard
+    from plm_platform.dashboard.sources import PhaseApis, ReadOnlyDatabase
+
+    from tests.support.c1_api import PLATFORM_ENV
+
+    live = LiveDashboard(ReadOnlyDatabase(None), PhaseApis({}, token=None), reviewers=None)
+    return TestClient(create_live_app(live, studio.actions,
+                                      platform=load_settings(env=PLATFORM_ENV), studio=studio))
+
+
+def test_an_upload_over_the_size_limit_is_refused_before_it_is_read(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2026-11-26 (P2): uploads had no size limit."""
+    from plm_platform.config import SERVICE_TOKEN_HEADER
+    from plm_platform.dashboard import app as dashboard_app
+
+    from tests.support.c1_api import SEAM_TOKEN
+
+    monkeypatch.setattr(dashboard_app, "IMAGE_UPLOAD_LIMIT", 64)
+    studio, _ = _studio(tmp_path, [])
+    client = _client(studio)
+    auth = {SERVICE_TOKEN_HEADER: SEAM_TOKEN}
+    big = client.put(f"/api/studio/art-library/{PKG}", content=PNG * 10, headers=auth)
+    assert big.status_code == 413 and big.json()["detail"]["code"] == "upload_too_large"
+    assert not (tmp_path / "art" / PKG / "uploads").exists()
+    assert client.put(f"/api/studio/art-library/{PKG}", content=PNG,
+                      headers=auth).status_code == 200
+
+
+def test_a_source_that_cannot_answer_is_a_503_with_its_reason(tmp_path: Path) -> None:
+    """Review 2026-11-26 (P2): SourceUnavailable became a plain 500."""
+    from plm_platform.dashboard.sources import SourceUnavailable
+
+    studio, _ = _studio(tmp_path, [])
+
+    def down() -> list[dict[str, Any]]:
+        raise SourceUnavailable("db", "connection refused")
+
+    studio.open_holds = down
+    answer = _client(studio).get("/api/studio")
+    assert answer.status_code == 503
+    assert answer.json()["detail"] == {"code": "source_unavailable", "field_paths": ["db"],
+                                       "message": "connection refused"}
+
+
+def test_notes_written_at_once_are_all_kept(tmp_path: Path) -> None:
+    """Review 2026-11-26 (P2): the notes file was read-modified-written with no lock and
+    a shared temp name, so two notes at once lost one (or failed on the temp file)."""
+    import threading
+
+    studio, _ = _studio(tmp_path, [])
+    threads = [threading.Thread(target=studio._add_note, args=("edit_text", f"n{i}"))
+               for i in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(n["note"] for n in studio.notes()) == sorted(f"n{i}" for i in range(12))
+
+
+def test_the_song_counts_are_worked_out_once() -> None:
+    """Review 2026-11-26 (P2): start-options recomputed 104 plans every 5 s."""
+    from plm_platform.dashboard.studio import song_counts
+
+    assert song_counts() is song_counts()
+
+
+def test_one_database_engine_serves_every_p6_change(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review 2026-11-26 (P2): import_art and the P6 edits built (and disposed) a new
+    engine on every call."""
+    from media_factory import review_edits
+    from plm_platform import db
+    from plm_platform.config import load_settings
+    from plm_platform.dashboard.studio import build_studio
+
+    from tests.support.c1_api import PLATFORM_ENV
+
+    built: list[Any] = []
+    real = db.build_engine
+
+    def counted(settings: Any) -> Any:
+        built.append(settings)
+        return real(settings)
+
+    monkeypatch.setattr(db, "build_engine", counted)
+
+    class Pkg:
+        media_package_id, status = PKG, type("S", (), {"value": "ready_for_publish"})()
+
+    monkeypatch.setattr(review_edits, "reopen_art", lambda session, package_id, now: Pkg())
+    studio = build_studio(load_settings(env=PLATFORM_ENV), None, None,  # type: ignore[arg-type]
+                          None, {}, dotenv_path=tmp_path / "none.env")
+    for _ in range(3):
+        assert studio.reopen is not None and studio.reopen(PKG)["status"] == "ready_for_publish"
+    assert len(built) == 1
 
 
 def test_a_refused_approval_grants_nothing(tmp_path: Path) -> None:

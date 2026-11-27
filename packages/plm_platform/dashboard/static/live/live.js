@@ -383,7 +383,11 @@ function actionButton(label, cls, run, { confirm: question, busy } = {}) {
     result.className = 'result';
     result.textContent = busy || 'Working...';
     studioBusy += 1;
-    const out = await run().finally(() => { studioBusy -= 1; });
+    // A network error (dashboard stopped, connection lost) is shown and the button comes
+    // back, instead of "Working..." forever (review 2026-11-26).
+    const out = await run()
+      .catch((e) => ({ ok: false, status: 0, body: { detail: { code: 'network_error', message: String(e) } } }))
+      .finally(() => { studioBusy -= 1; });
     button.disabled = false;
     if (!out.ok) { result.className = 'result refused'; result.textContent = refusal(out); return; }
     result.className = 'result done';
@@ -479,7 +483,9 @@ function changesPanel(r, p) {
   const note = h('textarea', { rows: 2, placeholder: 'Optional note: what should change and why (shown at the step it goes back to)' });
   const title = h('input', { type: 'text', maxlength: 100, value: p.title || '' });
   const description = h('textarea', { rows: 8 });
-  description.value = p.description || '';
+  // defaultValue, not value: studioUntouched() compares the two, and an unset default made
+  // the review page stop refreshing once this panel showed (review 2026-11-26).
+  description.defaultValue = p.description || '';
   const tags = h('input', { type: 'text', value: (p.tags || []).join(', ') });
   const thumb = h('select', {}, p.thumbnails.map((t, i) => h('option', { value: t }, i === 0 ? `${t} (now first)` : t)));
   const songs = h('div', { class: 'songs-pick' }, (p.tracks || []).map((t) => h('label', { class: 'pick' },
