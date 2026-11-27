@@ -194,6 +194,8 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             render_attempt=recovery_attempt,
             session_compilation=request.session_compilation,
             subgenre=request.subgenre,
+            # The owner's art replaces P6's thumbnails at import: draw none for the inbox.
+            drawn_thumbnails=thumbnail_art_inbox is None,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:

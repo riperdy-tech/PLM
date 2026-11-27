@@ -172,7 +172,8 @@ def cli_compile_session(
         raise typer.Exit(code=2)
     factory = platform_session_factory()
     with factory() as session:
-        history = list_catalog_albums(session, brand_id)[:albums]
+        # Released tracks only: an album still waiting for its art is not released.
+        history = list_catalog_albums(session, brand_id, include_awaiting_art=False)[:albums]
     candidate_ids: list[str] = []
     for album in history:
         rows = album.track_signatures if isinstance(album.track_signatures, list) else []

@@ -423,12 +423,16 @@ def update_render_job_status(
 # 7. Media Packages
 def list_catalog_albums(
     session: Session, brand_id: str, *, max_packages: int = 100,
+    include_awaiting_art: bool = True,
 ) -> tuple[CatalogAlbum, ...]:
     """Load prior ready/published/awaiting-art album fingerprint evidence, or hold on
     truncation.
 
     Includes all releases for a brand (caller ignores same-release render
     profiles). The limit is a safety ceiling, not an incomplete silent sample.
+    ``include_awaiting_art=False`` leaves out packages still waiting for the owner's art
+    (a session compilation reuses released tracks only); the near-copy and variation
+    history keeps them.
     """
     if not brand_id or max_packages < 1:
         raise ValueError("brand_id and positive max_packages required")
@@ -448,7 +452,7 @@ def list_catalog_albums(
         # another run rendered before that import must still see its recordings and titles.
         .where(media_packages_table.c.status.in_((
             PackageStatus.READY_FOR_PUBLISH.value, PackageStatus.PUBLISHED.value,
-            PackageStatus.AWAITING_THUMBNAIL_ART.value,
+            *((PackageStatus.AWAITING_THUMBNAIL_ART.value,) if include_awaiting_art else ()),
         )))
         .order_by(media_packages_table.c.created_at.desc(), media_packages_table.c.id.desc())
         .limit(max_packages + 1)

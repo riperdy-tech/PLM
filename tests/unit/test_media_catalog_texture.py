@@ -279,6 +279,28 @@ def test_db_catalog_includes_packages_waiting_for_thumbnail_art() -> None:
         history = list_catalog_albums(session, "brand_a")
         assert [album.release_manifest_id for album in history] == ["rel_wait"]
         assert history[0].variation == {"titles": ["Deep Focus"]}
+        # A session compilation reuses released tracks only, never a waiting album's.
+        assert list_catalog_albums(session, "brand_a", include_awaiting_art=False) == ()
+
+
+def test_compile_session_offers_no_tracks_of_a_package_waiting_for_art(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from media_factory import cli
+    from plm_platform.cli import app
+    from typer.testing import CliRunner
+
+    calls: list[dict[str, object]] = []
+
+    def catalog(session: object, brand_id: str, **kwargs: object) -> tuple[()]:
+        calls.append(kwargs)
+        return ()
+
+    monkeypatch.setattr(cli, "platform_session_factory", lambda: media_db_session)
+    monkeypatch.setattr(cli, "list_catalog_albums", catalog)
+    done = CliRunner().invoke(app, ["media", "compile-session", "--brand-id", "brand_a",
+                                    "--visual-profile", "blueprint_hall"])
+    assert done.exit_code == 2 and "no released tracks" in done.output
+    assert calls == [{"include_awaiting_art": False}]
 
 
 @pytest.mark.parametrize("damage", [
