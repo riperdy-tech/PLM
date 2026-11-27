@@ -147,9 +147,12 @@ PATCH_SIGNALS_FORMING: Final[str] = "signals-while-hold-forms"
 PATCH_CANCEL_WITHDRAWS: Final[str] = "cancel-withdraws-holds"
 PATCH_EXCLUSIONS_IGNORED: Final[str] = "record-ignored-exclusions"
 PATCH_RESET_CONTINUATION: Final[str] = "transition-reset-continuation"
-"""A record names its Temporal run, and the run numbers on from the sequence the store
-assigned: after a reset the store appends the new run's transitions after the old run's
-instead of refusing them (which failed the run)."""
+"""Only its marker is kept now: every record names its Temporal run and every run numbers
+on from the sequence the store assigned, without a patch decision (see ``_move``), so a
+reset continues runs started before the deploy too."""
+PATCH_SONG_REPLACEMENT: Final[str] = "topup-replaces-rejected-songs"
+"""#47: a short playlist's extend step is told which songs P5 rejected and the run's song
+tool, so it replaces the owner-made ones (P4) before asking P3 for new specs."""
 PATCH_REFUSAL_RECORDED: Final[str] = "platform-refusal-recorded"
 """#9 remainder: a permanent refusal of record_transition or raise_hold (a platform bug
 no retry fixes) ends the run with a FAILED transition that says what was refused."""
@@ -255,6 +258,8 @@ class PipelineWorkflow:
         self._cleared_by: ResumeSignal | ExternalResolutionSignal | None = None
         """The signal that cleared the last hold (a QA hold resolves P5's cases, #11)."""
         self._refusal_recorded = False
+        self._rejected: list[str] = []
+        """Every candidate a QA step of this run rejected, in order (#47)."""
         """A refused transition is being recorded as the run's failure (once only)."""
 
     # -- signals and query -----------------------------------------------------------------
@@ -420,6 +425,7 @@ class PipelineWorkflow:
         checked = await self._step(Step.QA, {"generate": generated.result.outputs})
         if checked is None:
             return False
+        self._note_rejected(checked)
         disposition = checked.result.outputs.get("disposition")
         if disposition == "PASSED":
             await self._move(PipelineState.PASSED, step=Step.QA, done=checked)
@@ -564,7 +570,13 @@ class PipelineWorkflow:
             if count is None:
                 assert isinstance(missing, int) and isinstance(shortest, int)
                 count = topup_count(missing, shortest, spare)
-            inputs = {"p3_package_id": package_id, "count": count}
+            inputs: dict[str, Any] = {"p3_package_id": package_id, "count": count}
+            if (counts is None and self._rejected
+                    and workflow.patched(PATCH_SONG_REPLACEMENT)):
+                # Review 2026-11-26 #47: the step replaces the owner-made songs P5
+                # rejected (a new file for the same track) before P3 adds new specs.
+                inputs["rejected_candidate_ids"] = list(self._rejected)
+                inputs.update(self._music())
             extended = await self._attempt(Step.EXTEND, inputs,
                                            key_name=f"{Step.EXTEND.value}.r{round_no}.{index}")
             if extended is None:
@@ -594,6 +606,7 @@ class PipelineWorkflow:
                                    key_name=f"{Step.QA.value}.r{round_no}")
         if checked is None:
             return None
+        self._note_rejected(checked)
         # A top-up candidate P5 quarantines or rejects simply adds no supply; its case
         # stays open in P5 and the next assemble offers P6 only cleared recordings.
         await self._move(PipelineState.ASSEMBLING, step=Step.QA, done=checked)
@@ -607,6 +620,13 @@ class PipelineWorkflow:
             Step.ASSEMBLE, [(STEP_ORIGIN_PHASE[Step.ASSEMBLE], SUPPLY_HOLD_REASON, details)],
             error_code="playlist_supply_short",
             error_detail=f"cleared supply still short after {rounds} top-up round(s) ({why})")
+
+    def _note_rejected(self, checked: _Done) -> None:
+        for evaluation in checked.result.outputs.get("evaluations") or []:
+            if (isinstance(evaluation, dict) and evaluation.get("disposition") == "REJECTED"
+                    and evaluation.get("candidate_id")
+                    and str(evaluation["candidate_id"]) not in self._rejected):
+                self._rejected.append(str(evaluation["candidate_id"]))
 
     def _music(self) -> dict[str, Any]:
         """The owner's song tool for this run, passed to every generate step."""
@@ -1105,10 +1125,16 @@ class PipelineWorkflow:
             held_from=None if held_from is None else held_from.value, final=final,
         )
         # Review 2026-11-26: after a Temporal reset the store appends this run's records
-        # after the old run's and says where; the run numbers on from there.
-        continues = workflow.patched(PATCH_RESET_CONTINUATION)
-        if continues:
-            record = replace(record, run_id=workflow.info().run_id)
+        # after the old run's and says where; the run numbers on from there. This needs
+        # no patch decision, and must not take one: patched() is latched for a whole
+        # execution, so a reset of a run started before the deploy (no marker in its
+        # history) would stay on the old path even after its replay. It is replay-safe
+        # by data instead: the run id only changes the activity's input (replay does
+        # not compare inputs), and every ack in an existing history is the offered
+        # sequence, so numbering from the ack replays the same numbers. The patched()
+        # call stays so histories that already carry its marker replay unchanged.
+        workflow.patched(PATCH_RESET_CONTINUATION)
+        record = replace(record, run_id=workflow.info().run_id)
         try:
             ack = await self._platform(PlatformActivity.RECORD_TRANSITION, record,
                                        TransitionAck)
@@ -1117,7 +1143,7 @@ class PipelineWorkflow:
                 raise
             await self._refused(record, error)
             raise  # unreachable: _refused always raises
-        self._sequence = ack.sequence if continues else sequence
+        self._sequence = ack.sequence
         self._state = target
         self._held_from = held_from if target is PipelineState.HELD else None
         if error_code is not None:
