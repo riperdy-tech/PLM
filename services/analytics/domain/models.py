@@ -184,6 +184,9 @@ class UnitEconomics(BaseModel):
     estimated_revenue: Money | None
     estimated_revenue_status: RevenueStatus = RevenueStatus.ESTIMATED
     realized_revenue: Money | None
+    realized_revenue_source: str | None = None
+    """Where ``realized_revenue`` comes from: ``distributor_statement`` lines, or the
+    operator's dated non-monetized attestation (``operator_attested_non_monetized``)."""
     allocated_cost: Money | None
     net_contribution: Money | None
     net_contribution_blocked_reason: str | None = None

@@ -188,7 +188,10 @@ class MeasureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     publication: dict[str, Any]
-    isrcs: list[str] = Field(min_length=1)
+    isrcs: list[str]
+    """The unit's recordings; empty only for a channel in ``youtube_only_channels`` (no
+    release exists), whose realized revenue is then the operator's valid
+    non-monetized attestation (0) or the measurement is refused."""
     window: ObservationWindow
     observed_at: AwareDatetime
     closed_by_source: bool = False

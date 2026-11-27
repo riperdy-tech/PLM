@@ -48,10 +48,11 @@ def create_app(
     when ``PLM_BUDGET_LEDGER_CURRENCY`` is configured, else ``NoBudgetLedger`` (every live
     write refused).
 
-    The YouTube Analytics source is ``analytics`` when injected. Otherwise, for a mock
-    YouTube provider and ``analytics_from_env``, it is the mock source over the outcome
-    model named by ``PLM_MOCK_OUTCOMES_FILE``; unset (or a real provider, before R6),
-    there is none and the analytics route refuses.
+    The YouTube Analytics source is ``analytics`` when injected (``plm youtube serve``
+    injects the real source for a real provider with OAuth credentials). Otherwise, for
+    a mock YouTube provider and ``analytics_from_env``, it is the mock source over the
+    outcome model named by ``PLM_MOCK_OUTCOMES_FILE``; unset, there is none and the
+    analytics route refuses.
     """
     service_clock = SystemClock() if clock is None else clock
     platform_settings = load_settings() if settings is None else settings

@@ -22,6 +22,7 @@ from plm_platform.execution import (
 )
 from plm_platform.ledger import budget_gate_for
 
+from .analytics import RealYouTubeAnalytics
 from .client.mock import MockYouTubeClient
 from .client.real import RealYouTubeClient
 from .domain.enums import OperatingMode
@@ -30,8 +31,8 @@ from .manifests import (
     CandidateSelectionError,
     PackageNotReadyError,
     build_publish_manifest,
+    conflicts_with_stored_choice,
     preflight_metadata,
-    same_publish_choice,
 )
 from .media import artifact_bytes
 from .preflight.gates import evaluate_preflight_all
@@ -100,10 +101,8 @@ def cli_publish(
 
         stored = get_publish_manifest_by_id(session, manifest.manifest_id)
         if stored is not None:
-            if not same_publish_choice(
-                stored, manifest,
-                explicit_requested=metadata_variant_id is not None or thumbnail_id is not None,
-            ):
+            if conflicts_with_stored_choice(stored, metadata_variant_id=metadata_variant_id,
+                                            thumbnail_id=thumbnail_id):
                 typer.echo("candidate_selection_conflict: frozen publication differs", err=True)
                 raise typer.Exit(code=2)
             manifest = stored
@@ -203,7 +202,9 @@ def cli_reconcile(attempt_id: str) -> None:
         if not att.youtube_video_id:
             typer.echo(f"Attempt {attempt_id} has no remote video ID", err=True)
             raise typer.Exit(code=1)
-        client = MockYouTubeClient()
+        # The deployment's configured client: a mock never knows a real video.
+        real = load_execution_settings().provider_mode("youtube") == ProviderMode.REAL
+        client = RealYouTubeClient() if real else MockYouTubeClient()
         remote = client.get_video(att.youtube_video_id) or {}
         typer.echo(
             json.dumps(
@@ -223,10 +224,21 @@ def serve(host: str = "127.0.0.1", port: int = 8007) -> None:
     from .api.app import create_app
 
     exec_settings = load_execution_settings()
-    client = (
-        RealYouTubeClient()
-        if exec_settings.provider_mode("youtube") == ProviderMode.REAL
-        else MockYouTubeClient()
-    )
-    app = create_app(client=client)
+    real = exec_settings.provider_mode("youtube") == ProviderMode.REAL
+    client = RealYouTubeClient() if real else MockYouTubeClient()
+    app = create_app(client=client, analytics=real_analytics_source() if real else None)
     uvicorn.run(app, host=host, port=port)
+
+
+def real_analytics_source() -> RealYouTubeAnalytics | None:
+    """The real YouTube Analytics source over the channel's OAuth credentials (read-only);
+    ``None`` without them, so the analytics route refuses instead of inventing numbers."""
+    from analytics.ingestion.youtube_client import (
+        RealYouTubeAnalyticsClient,
+        YouTubeAnalyticsError,
+    )
+
+    client = RealYouTubeAnalyticsClient()
+    if not client.is_configured:
+        return None
+    return RealYouTubeAnalytics(client, unavailable=YouTubeAnalyticsError)

@@ -52,6 +52,7 @@ def compute_unit_economics(
     blocked_reason: str | None = None,
     conversions: Sequence[FxProvenance] = (),
     unreconciled_record_ids: Sequence[str] = (),
+    realized_revenue_source: str | None = None,
     as_of: datetime,
 ) -> UnitEconomics:
     """Compute unit economics from amounts already in ``reporting_currency``.
@@ -116,6 +117,8 @@ def compute_unit_economics(
         window=window,
         estimated_revenue=estimated_revenue,
         realized_revenue=realized_revenue,
+        realized_revenue_source=(None if realized_revenue is None
+                                 else realized_revenue_source),
         allocated_cost=allocated_cost,
         net_contribution=net,
         net_contribution_blocked_reason=None if net is not None else reason,

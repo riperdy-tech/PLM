@@ -29,7 +29,7 @@ from plm_contracts.measurement import (
 )
 from plm_contracts.money import FxTable, Money
 
-from ..domain.enums import ObservationWindow, RevenueStatus
+from ..domain.enums import MetricSource, ObservationWindow, RevenueStatus
 from ..domain.models import (
     CostItem,
     FxProvenance,
@@ -106,8 +106,15 @@ def entity_economics(
     reporting_currency: str,
     fx: FxTable,
     as_of: datetime,
+    attested_realized_revenue: Money | None = None,
 ) -> UnitEconomics:
-    """Unit economics of one entity from its stored facts (see module docstring)."""
+    """Unit economics of one entity from its stored facts (see module docstring).
+
+    ``attested_realized_revenue`` is the realized revenue of a unit no statement can
+    cover (a YouTube-only video on a channel the operator attested is not monetized:
+    0). It applies only when no realized statement line exists, and is labelled
+    ``operator_attested_non_monetized``.
+    """
     convert = _Converter(fx, reporting_currency)
     unreconciled: list[str] = []
     blocking_unreconciled = False
@@ -152,8 +159,13 @@ def entity_economics(
             )
         )
     realized: Money | None = None
+    realized_source: str | None = None
     if realized_records:
         realized = Money.of(sum_incremental(realized_records), reporting_currency)
+        realized_source = MetricSource.DISTRIBUTOR_STATEMENT.value
+    elif not realized_lines and attested_realized_revenue is not None:
+        realized = attested_realized_revenue
+        realized_source = MetricSource.OPERATOR_ATTESTED_NON_MONETIZED.value
     streams: int | None = None
     if realized_lines and streams_known:
         streams = int(sum_incremental(stream_records))
@@ -190,5 +202,6 @@ def entity_economics(
         blocked_reason="unreconciled_records" if blocking_unreconciled else None,
         conversions=convert.conversions,
         unreconciled_record_ids=unreconciled,
+        realized_revenue_source=realized_source,
         as_of=as_of,
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Literal, NoReturn
 
 import httpx
@@ -112,7 +113,8 @@ def build_analytics_router(
     /analytics/rewards/dispatch`` run the reward outbox; without them it refuses.
     """
     router = APIRouter(prefix="/analytics", tags=["analytics"])
-    reporting_currency = (settings or AnalyticsSettings()).reporting_currency
+    p9_settings = settings or AnalyticsSettings()
+    reporting_currency = p9_settings.reporting_currency
 
     def evaluate_and_enqueue(
         session: Session, *, lineage: ExperimentLineage, unit_id: str, net: Money,
@@ -545,6 +547,12 @@ def build_analytics_router(
         watch time), the economics' blocked reason (``realized_revenue_not_reported``,
         ``cost_not_recorded``, ``unreconciled_records``), ``fx_rate_missing``, and the
         reward/decision conflicts of ``/evaluation/feedback``.
+
+        No ISRC (a YouTube-only unit, review 2026-11-26 #35): refused
+        ``youtube_only_channel_not_configured`` unless the channel is in
+        ``youtube_only_channels``, and ``non_monetized_attestation_missing`` unless the
+        operator's non-monetized attestation is valid at ``observed_at``; with it, the
+        realized revenue is 0 (``operator_attested_non_monetized``).
         """
         try:
             publication = parse_seam(YouTubePublicationPayload, req.publication)
@@ -558,6 +566,19 @@ def build_analytics_router(
             _refuse(422, "observation_precedes_publication",
                     "an observation cannot predate the publication it measures",
                     ["observed_at"])
+        attested_revenue: Money | None = None
+        if not req.isrcs:
+            channel_id = publication.channel_id
+            if channel_id not in p9_settings.youtube_only_channels:
+                _refuse(409, "youtube_only_channel_not_configured",
+                        f"no ISRC was named and {channel_id} is not a YouTube-only channel",
+                        ["isrcs"])
+            if p9_settings.non_monetized_attestation(channel_id, observed_at) is None:
+                _refuse(409, "non_monetized_attestation_missing",
+                        f"{channel_id} has no operator attestation, valid at "
+                        f"{observed_at.isoformat()}, that it earns no YouTube revenue; "
+                        "unreported revenue is not zero")
+            attested_revenue = Money.of(Decimal(0), reporting_currency)
         with session_factory() as session:
             for isrc in req.isrcs:
                 link = lineage_for_isrc(session, isrc)
@@ -588,6 +609,7 @@ def build_analytics_router(
                     entity_id=unit_id, entity_type="video", video_metrics=video,
                     track_metrics=lines, costs=costs, window=req.window,
                     reporting_currency=reporting_currency, fx=fx, as_of=observed_at,
+                    attested_realized_revenue=attested_revenue,
                 )
             except FxRateMissingError as exc:
                 _refuse(409, "fx_rate_missing", str(exc))

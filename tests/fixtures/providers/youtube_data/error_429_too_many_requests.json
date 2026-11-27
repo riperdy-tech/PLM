@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "source": "docs-derived",
+    "reference": "https://developers.google.com/youtube/v3/docs/core_errors",
+    "captured": "2026-11-27",
+    "notes": "429 RESOURCE_EXHAUSTED (rateLimitExceeded): too many requests in a short time; message is illustrative."
+  },
+  "status": 429,
+  "json": {
+    "error": {
+      "code": 429,
+      "message": "Too many requests.",
+      "errors": [
+        {
+          "message": "Too many requests.",
+          "domain": "global",
+          "reason": "rateLimitExceeded"
+        }
+      ],
+      "status": "RESOURCE_EXHAUSTED"
+    }
+  }
+}

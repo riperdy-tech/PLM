@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from plm_contracts import ExecutionPolicy, ProviderMode
@@ -28,6 +29,7 @@ from .client.base import (
 from .domain.enums import (
     FailureReasonCode,
     OperatingMode,
+    PrivacyStatus,
     PublishState,
 )
 from .domain.ids import build_attempt_id, build_publication_record_id
@@ -101,7 +103,7 @@ class YouTubePublishingEngine:
         *,
         clock: Clock,
         clearance: ClearanceVerifier,
-        chunk_size: int = 1024 * 1024,  # 1MB
+        chunk_size: int = 8 * 1024 * 1024,  # 8 MiB, a multiple of Google's 256 KiB
         max_processing_polls: int = 5,
         write_guard: ExternalWriteGuard | None = None,
     ) -> None:
@@ -170,6 +172,24 @@ class YouTubePublishingEngine:
         )
         self.decisions.append(decision)
         return decision
+
+    @staticmethod
+    def effective_visibility(
+        manifest: PublishManifest, operating_mode: OperatingMode
+    ) -> tuple[PrivacyStatus, datetime | None]:
+        """The privacy and schedule the upload asks YouTube for under ``operating_mode``.
+
+        ``private_only`` (the private smoke test) is always private and never scheduled;
+        ``staged`` is private or unlisted, never scheduled to go public, until an operator
+        publishes it; ``autonomous`` (and ``dry_run``, which writes nothing) follow the
+        manifest (P7 §52, review 2026-11-26 #32).
+        """
+        if operating_mode is OperatingMode.PRIVATE_ONLY:
+            return PrivacyStatus.PRIVATE, None
+        if operating_mode is OperatingMode.STAGED:
+            privacy = manifest.privacy_status
+            return (PrivacyStatus.PRIVATE if privacy is PrivacyStatus.PUBLIC else privacy), None
+        return manifest.privacy_status, manifest.publish_at
 
     def _media_bytes(self, supplied: bytes | None, placeholder_attr: str) -> bytes | None:
         """The bytes to upload: the supplied media, or a mock client's own placeholder.
@@ -242,6 +262,28 @@ class YouTubePublishingEngine:
         session.commit()
         updated = get_publish_attempt_by_id(session, attempt.attempt_id)
         return PublishingEngineResult(attempt=updated or attempt, error=message)
+
+    def _release_not_performed(
+        self, session: Session, attempt: PublishAttempt, pending: GuardDecision | None,
+        exc: Exception,
+    ) -> None:
+        """Release the reservation of a write that definitely did not happen (review #31).
+
+        Definitely not performed: YouTube refused the request (a 4xx, ``refused``), or an
+        upload failed before any upload session existed (no bytes could have been sent).
+        Otherwise the outcome is unknown and the reservation stays held, so a retry
+        resumes it. A resumed reservation also stays held: an earlier call under the same
+        key may have performed the write.
+        """
+        if pending is None or pending.reason == RESUMED_RESERVATION_REASON:
+            return
+        refused = isinstance(exc, YouTubeClientError) and exc.refused
+        if not refused and pending.capability == CAPABILITY_UPLOAD:
+            current = get_publish_attempt_by_id(session, attempt.attempt_id)
+            refused = current is not None and not current.upload_session_uri
+        if refused:
+            self.write_guard.settle_external_write(
+                pending, performed=False, reason=f"youtube_refused: {type(exc).__name__}")
 
     def execute_publish(
         self,
@@ -319,11 +361,19 @@ class YouTubePublishingEngine:
             if not report.cleared:
                 return self._not_cleared(session, attempt, report.summary())
 
-        video_bytes = self._media_bytes(video_data, "placeholder_video_bytes")
-        if video_bytes is None:
-            return self._missing_media(session, attempt, "video")
+        # An uploaded video needs no bytes again (a processing poll must not re-read the
+        # master); only an upload still to do does.
+        video_bytes = b""
+        if not attempt.youtube_video_id:
+            supplied = self._media_bytes(video_data, "placeholder_video_bytes")
+            if supplied is None:
+                return self._missing_media(session, attempt, "video")
+            video_bytes = supplied
         total_bytes = len(video_bytes)
 
+        privacy, publish_at = self.effective_visibility(manifest, operating_mode)
+        # The funded write whose provider call is under way; settled once it returns.
+        pending: GuardDecision | None = None
         try:
             # 3. Resumable Upload (if not already uploaded)
             youtube_video_id = attempt.youtube_video_id
@@ -335,6 +385,7 @@ class YouTubePublishingEngine:
                     resuming=bool(attempt.upload_session_uri))
                 if not upload_decision.decision.may_call_provider:
                     return self._halt_for(session, attempt, upload_decision)
+                pending = upload_decision
                 # Step 3a: Create Upload Session
                 if not attempt.upload_session_uri:
                     update_publish_attempt(
@@ -361,12 +412,12 @@ class YouTubePublishingEngine:
                     # videos.insert writes selfDeclaredMadeForKids; madeForKids is the
                     # read-only effective value YouTube derives from it.
                     status: dict[str, Any] = {
-                        "privacyStatus": manifest.privacy_status.value,
+                        "privacyStatus": privacy.value,
                         "containsSyntheticMedia": manifest.contains_synthetic_media,
                         "selfDeclaredMadeForKids": manifest.made_for_kids,
                     }
-                    if manifest.publish_at:
-                        status["publishAt"] = manifest.publish_at.isoformat()
+                    if publish_at:
+                        status["publishAt"] = publish_at.isoformat()
 
                     session_uri = self.client.insert_resumable_session(
                         snippet=snippet,
@@ -426,6 +477,7 @@ class YouTubePublishingEngine:
                 )
                 session.commit()
                 self.write_guard.settle_external_write(upload_decision, performed=True)
+                pending = None
 
             # 4. Processing & Verification
             update_publish_attempt(
@@ -498,6 +550,7 @@ class YouTubePublishingEngine:
                             decision, performed=False, reason="thumbnail_bytes_missing"
                         )
                     return self._missing_media(session, attempt, "thumbnail")
+                pending = decision
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,
@@ -516,6 +569,7 @@ class YouTubePublishingEngine:
                 )
                 session.commit()
                 self.write_guard.settle_external_write(decision, performed=True)
+                pending = None
 
             # 6. Playlist placement (if configured; skipped when an earlier call placed it)
             playlist_id = manifest.playlist_id
@@ -524,6 +578,7 @@ class YouTubePublishingEngine:
                                            resuming=True)
                 if not decision.decision.may_call_provider:
                     return self._halt_for(session, attempt, decision)
+                pending = decision
                 update_publish_attempt(
                     session,
                     attempt.attempt_id,
@@ -548,9 +603,10 @@ class YouTubePublishingEngine:
                 )
                 session.commit()
                 self.write_guard.settle_external_write(decision, performed=True)
+                pending = None
 
             # 7. Final State: Scheduled or Published
-            final_state = PublishState.SCHEDULED if manifest.publish_at else PublishState.VERIFIED
+            final_state = PublishState.SCHEDULED if publish_at else PublishState.VERIFIED
             completed_time = self._clock.now()
 
             update_publish_attempt(
@@ -559,6 +615,7 @@ class YouTubePublishingEngine:
                 state=final_state,
                 completed_at=completed_time,
                 updated_at=completed_time,
+                clear_error=True,
             )
             session.commit()
 
@@ -577,7 +634,7 @@ class YouTubePublishingEngine:
                 content_genome_id=manifest.content_genome_id,
                 production_directive_id=manifest.production_directive_id,
                 title=manifest.title,
-                privacy_status=manifest.privacy_status,
+                privacy_status=privacy,
                 contains_synthetic_media=manifest.contains_synthetic_media,
                 published_at=completed_time,
                 video_url=f"https://www.youtube.com/watch?v={youtube_video_id}",
@@ -611,6 +668,7 @@ class YouTubePublishingEngine:
             )
 
         except YouTubeAuthError as exc:
+            self._release_not_performed(session, attempt, pending, exc)
             logger.error("Publishing auth error: %s", exc)
             update_publish_attempt(
                 session,
@@ -625,6 +683,7 @@ class YouTubePublishingEngine:
             return PublishingEngineResult(attempt=updated_attempt or attempt, error=str(exc))
 
         except YouTubeQuotaExceededError as exc:
+            self._release_not_performed(session, attempt, pending, exc)
             logger.warning("Publishing quota exceeded: %s", exc)
             update_publish_attempt(
                 session,
@@ -639,6 +698,7 @@ class YouTubePublishingEngine:
             return PublishingEngineResult(attempt=updated_attempt or attempt, error=str(exc))
 
         except YouTubeTransientError as exc:
+            self._release_not_performed(session, attempt, pending, exc)
             logger.warning("Publishing transient failure: %s", exc)
             update_publish_attempt(
                 session,
@@ -655,6 +715,7 @@ class YouTubePublishingEngine:
 
         except Exception as exc:
             logger.exception("Unexpected error during YouTube publishing")
+            self._release_not_performed(session, attempt, pending, exc)
             update_publish_attempt(
                 session,
                 attempt.attempt_id,

@@ -58,9 +58,18 @@ class RealYouTubeClient:
         self.timeout = timeout_seconds
         # Injected by tests (R6 conformance); the caller owns its lifetime.
         self._http_client = http_client
+        # Built once on first use and kept, so every chunk of an upload shares one
+        # connection pool (a client per chunk was a TLS handshake per MiB).
+        self._owned_client: httpx.Client | None = None
 
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
+
+    def close(self) -> None:
+        """Close the client's own connection pool (never an injected one)."""
+        if self._owned_client is not None:
+            self._owned_client.close()
+            self._owned_client = None
 
     @contextmanager
     def _http(self) -> Iterator[httpx.Client]:
@@ -70,8 +79,9 @@ class RealYouTubeClient:
             if self._http_client is not None:
                 yield self._http_client
             else:
-                with httpx.Client(timeout=self.timeout) as client:
-                    yield client
+                if self._owned_client is None:
+                    self._owned_client = httpx.Client(timeout=self.timeout)
+                yield self._owned_client
         except httpx.TransportError as exc:
             raise YouTubeTransientError(f"YouTube request did not complete: {exc!r}") from exc
 
@@ -80,9 +90,12 @@ class RealYouTubeClient:
         return bool(self.client_id and self.client_secret and self.refresh_token)
 
     def _get_access_token(self) -> str:
-        """Fetch or refresh access token using the stored refresh token."""
+        """Fetch or refresh access token using the stored refresh token.
+
+        A refusal here comes before the write's own request, so it is ``refused``."""
         if not self.is_configured:
-            raise YouTubeAuthError("YouTube OAuth credentials not configured in environment")
+            raise YouTubeAuthError("YouTube OAuth credentials not configured in environment",
+                                   refused=True)
 
         if self._access_token and time.monotonic() < self._access_token_expires_at - 60:
             return self._access_token
@@ -98,14 +111,18 @@ class RealYouTubeClient:
                 },
             )
             if resp.status_code == 400 or resp.status_code == 401:
-                raise YouTubeAuthError(f"OAuth token refresh rejected (HTTP {resp.status_code}): {resp.text[:200]}")
+                raise YouTubeAuthError(
+                    f"OAuth token refresh rejected (HTTP {resp.status_code}): {resp.text[:200]}",
+                    refused=True)
             if resp.status_code != 200:
-                raise YouTubeTransientError(f"OAuth token endpoint error (HTTP {resp.status_code}): {resp.text[:200]}")
+                raise YouTubeTransientError(
+                    f"OAuth token endpoint error (HTTP {resp.status_code}): {resp.text[:200]}",
+                    refused=True)
 
             data = resp.json()
             token = data.get("access_token")
             if not token or not isinstance(token, str):
-                raise YouTubeAuthError("OAuth token response omitted access_token")
+                raise YouTubeAuthError("OAuth token response omitted access_token", refused=True)
 
             expires_in = float(data.get("expires_in", 3600))
             self._access_token = token
@@ -117,16 +134,31 @@ class RealYouTubeClient:
         return {"Authorization": f"Bearer {token}"}
 
     def _handle_error_response(self, resp: httpx.Response, action: str) -> None:
+        """A 4xx is YouTube refusing the request (``refused``: nothing happened); a 5xx
+        leaves the outcome unknown. A short-term rate limit is transient, the daily quota
+        is not."""
+        text = resp.text
+        refused = 400 <= resp.status_code < 500
+        if resp.status_code == 429 or (resp.status_code == 403 and (
+                "rateLimitExceeded" in text or "userRateLimitExceeded" in text)):
+            raise YouTubeTransientError(
+                f"YouTube rate limit during {action} (HTTP {resp.status_code}): {text[:200]}",
+                refused=True)
         if resp.status_code in (401, 403):
-            text = resp.text
-            if "quotaExceeded" in text or "rateLimitExceeded" in text:
-                raise YouTubeQuotaExceededError(f"YouTube quota exceeded during {action}: {text[:200]}")
+            if "quotaExceeded" in text:
+                raise YouTubeQuotaExceededError(
+                    f"YouTube quota exceeded during {action}: {text[:200]}", refused=True)
             if resp.status_code == 401 or "invalid_grant" in text:
-                raise YouTubeAuthError(f"YouTube authentication failed during {action}: {text[:200]}")
-            raise YouTubeClientError(f"YouTube permission error during {action} (HTTP {resp.status_code}): {text[:200]}")
+                raise YouTubeAuthError(
+                    f"YouTube authentication failed during {action}: {text[:200]}", refused=True)
+            raise YouTubeClientError(
+                f"YouTube permission error during {action} (HTTP {resp.status_code}): {text[:200]}",
+                refused=True)
         if resp.status_code >= 500:
-            raise YouTubeTransientError(f"YouTube server error during {action} (HTTP {resp.status_code}): {resp.text[:200]}")
-        raise YouTubeClientError(f"YouTube API call {action} failed (HTTP {resp.status_code}): {resp.text[:200]}")
+            raise YouTubeTransientError(f"YouTube server error during {action} (HTTP {resp.status_code}): {text[:200]}")
+        raise YouTubeClientError(
+            f"YouTube API call {action} failed (HTTP {resp.status_code}): {text[:200]}",
+            refused=refused)
 
     def insert_resumable_session(
         self,

@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 import pytest
 from analytics.api.app import create_app
+from analytics.config import AnalyticsSettings, NonMonetizedAttestation, parse_channel_facts
 from analytics.domain.enums import MetricSource
 from analytics.storage.repositories import get_video_metrics
 from fastapi.testclient import TestClient
@@ -51,7 +52,8 @@ class _P2:
                                          "experiment_result_id": "res-1", "stored": True})
 
 
-def _client(p2: _P2 | None = None) -> tuple[TestClient, Any]:
+def _client(p2: _P2 | None = None,
+            analytics_settings: AnalyticsSettings | None = None) -> tuple[TestClient, Any]:
     engine = create_analytics_engine(static_pool=True)
     log_allocation_decision(engine, directive_id=lineage_fields()["production_directive_id"],
                             arm_id="arm_test_01", decided_at=PUBLISHED - timedelta(days=1))
@@ -59,7 +61,8 @@ def _client(p2: _P2 | None = None) -> tuple[TestClient, Any]:
     reward_client = (None if p2 is None else httpx.Client(
         base_url="http://p2.test", transport=httpx.MockTransport(p2.handler)))
     app = create_app(session_factory=lambda: factory(), settings=load_settings(env=MINIMAL_ENV),
-                     clock=FixedClock(NOW), reward_client=reward_client)
+                     clock=FixedClock(NOW), reward_client=reward_client,
+                     analytics_settings=analytics_settings)
     return TestClient(app), factory
 
 
@@ -160,7 +163,9 @@ def test_attribution_and_timing_are_checked() -> None:
     assert early.json()["detail"]["code"] == "observation_precedes_publication"
     broken = _measure(client, publication={"event": "youtube_video_published"})
     assert broken.status_code == 422
-    assert _measure(client, isrcs=[]).status_code == 422
+    no_isrc = _measure(client, isrcs=[])  # UC_test is not a YouTube-only channel
+    assert no_isrc.status_code == 409
+    assert no_isrc.json()["detail"]["code"] == "youtube_only_channel_not_configured"
     conflicting = client.post("/analytics/ingest/releases", headers=HEADERS, json={
         "record": _record({**lineage_fields(), "content_arm_id": "arm_other"})})
     assert conflicting.status_code == 409
@@ -182,3 +187,75 @@ def test_dispatch_runs_the_outbox_and_reports_each_fact() -> None:
     unknown = client.post("/analytics/rewards/dispatch", headers=HEADERS, json={
         "facts": [{**fact, "content_id": "never"}]}).json()
     assert unknown["facts"][0]["delivery_status"] is None
+
+
+# -- A YouTube-only channel (review 2026-11-26 #35) -------------------------------------
+
+def _attestation(*, until: datetime) -> NonMonetizedAttestation:
+    return NonMonetizedAttestation(channel_id="UC_test", attested_by="owner",
+                                   attested_at=PUBLISHED - timedelta(days=30),
+                                   valid_until=until, reference="not in YPP")
+
+
+def _youtube_only(*, until: datetime | None = OBSERVED + timedelta(days=30),
+                  channels: frozenset[str] = frozenset({"UC_test"})) -> TestClient:
+    settings = AnalyticsSettings(
+        youtube_only_channels=channels,
+        non_monetized_attestations=() if until is None else (_attestation(until=until),))
+    client, _ = _client(analytics_settings=settings)
+    _seed(client, link=False, statement=False)
+    return client
+
+
+def test_a_youtube_only_video_is_measured_with_attested_zero_revenue() -> None:
+    """No release, no ISRC: the operator's dated "not monetized" fact is realized revenue
+    0, so the net contribution is known and the reward is computed (no invented data)."""
+    res = _measure(_youtube_only(), isrcs=[])
+    assert res.status_code == 200, res.text
+    reward = res.json()
+    assert (reward["content_id"], reward["status"]) == (VIDEO, "mature")
+    assert reward["raw_metrics"]["views"] == 3360
+
+
+@pytest.mark.parametrize(("until", "channels", "code"), [
+    (None, frozenset({"UC_test"}), "non_monetized_attestation_missing"),
+    (OBSERVED, frozenset({"UC_test"}), "non_monetized_attestation_missing"),  # expired
+    (OBSERVED + timedelta(days=30), frozenset(), "youtube_only_channel_not_configured"),
+])
+def test_a_youtube_only_measurement_needs_the_channel_and_a_valid_attestation(
+        until: datetime | None, channels: frozenset[str], code: str) -> None:
+    res = _measure(_youtube_only(until=until, channels=channels), isrcs=[])
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == code
+
+
+def test_the_app_reads_channel_facts_from_the_named_file(tmp_path: Any) -> None:
+    from analytics.api.app import CHANNEL_FACTS_FILE_VAR, load_channel_facts
+
+    path = tmp_path / "channel-facts.json"
+    path.write_text('{"youtube_only_channels": ["UC_test"]}', encoding="utf-8")
+    empty = tmp_path / "no.env"
+    assert load_channel_facts({CHANNEL_FACTS_FILE_VAR: str(path)}, empty)[
+        "youtube_only_channels"] == {"UC_test"}
+    assert load_channel_facts({}, empty) == {}
+
+
+def test_channel_facts_are_parsed_strictly() -> None:
+    facts = parse_channel_facts({
+        "youtube_only_channels": ["UC_test"],
+        "non_monetized_attestations": [{
+            "channel_id": "UC_test", "attested_by": "owner",
+            "attested_at": "2026-11-27T00:00:00+00:00",
+            "valid_until": "2026-12-31T00:00:00+00:00"}]})
+    settings = AnalyticsSettings(**facts)  # type: ignore[arg-type]
+    assert settings.youtube_only_channels == {"UC_test"}
+    assert settings.non_monetized_attestation(
+        "UC_test", datetime(2026, 12, 1, tzinfo=UTC)) is not None
+    assert settings.non_monetized_attestation(
+        "UC_test", datetime(2026, 12, 31, tzinfo=UTC)) is None
+    for broken in ({"youtube_only_channel": []},
+                   {"non_monetized_attestations": [{"channel_id": "UC", "attested_by": "o",
+                                                    "attested_at": "2026-11-27T00:00:00",
+                                                    "valid_until": "2026-12-31T00:00:00"}]}):
+        with pytest.raises(ValueError):
+            parse_channel_facts(broken)

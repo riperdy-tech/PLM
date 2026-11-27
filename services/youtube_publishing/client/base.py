@@ -6,7 +6,16 @@ from typing import Any, Protocol, runtime_checkable
 
 
 class YouTubeClientError(Exception):
-    """Base exception for YouTube client operations."""
+    """Base exception for YouTube client operations.
+
+    ``refused``: YouTube (or Google's token endpoint) answered and refused the request
+    (HTTP 4xx), so the write it asked for definitely did not happen. ``False`` means the
+    outcome is unknown (a 5xx, a lost response, a local check after the call).
+    """
+
+    def __init__(self, message: str = "", *, refused: bool = False) -> None:
+        super().__init__(message)
+        self.refused = refused
 
 
 class YouTubeAuthError(YouTubeClientError):
@@ -18,7 +27,7 @@ class YouTubeQuotaExceededError(YouTubeClientError):
 
 
 class YouTubeTransientError(YouTubeClientError):
-    """Retryable network or 5xx server error."""
+    """Retryable network or 5xx server error, or a short-term rate limit (429)."""
 
 
 @runtime_checkable

@@ -2,21 +2,54 @@
 
 from __future__ import annotations
 
-from typing import Any
+import json
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Final
 
 import httpx
 from fastapi import FastAPI
 from plm_platform.clock import Clock, SystemClock
-from plm_platform.config import Settings, load_settings
+from plm_platform.config import Settings, SettingsError, load_settings
+from plm_platform.dotenv import load_env_file
 from plm_platform.health import health_router
 from plm_platform.service_urls import service_url
 from plm_platform.temporal import Phase
 
-from ..config import AnalyticsSettings, load_analytics_settings
+from ..config import (
+    AnalyticsSettings,
+    ChannelFactsError,
+    load_analytics_settings,
+    parse_channel_facts,
+)
 from ..ingestion.youtube_client import RealYouTubeAnalyticsClient
 from ..ingestion.youtube_reporting import AuthenticatedReachDownloader
 from .routes import build_analytics_router
 from .service_token import require_service_token
+
+CHANNEL_FACTS_FILE_VAR: Final[str] = "PLM_ANALYTICS_CHANNEL_FACTS_FILE"
+"""JSON file of the operator's channel facts (:func:`analytics.config.parse_channel_facts`):
+YouTube-only channels and dated non-monetized attestations. Unset: none."""
+
+
+def load_channel_facts(env: Mapping[str, str] | None = None,
+                       dotenv_path: str | Path | None = None) -> dict[str, object]:
+    """Settings overrides from ``PLM_ANALYTICS_CHANNEL_FACTS_FILE`` (process env, then
+    ``.env``); unset is no overrides, an unreadable or malformed file fails the boot."""
+    process_env: Mapping[str, str] = os.environ if env is None else env
+    dotenv_values = load_env_file(Path(".env") if dotenv_path is None else dotenv_path)
+    path = (process_env.get(CHANNEL_FACTS_FILE_VAR)
+            or dotenv_values.get(CHANNEL_FACTS_FILE_VAR) or "").strip()
+    if not path:
+        return {}
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ChannelFactsError("expected a JSON object")
+        return parse_channel_facts(raw)
+    except (OSError, ValueError) as exc:
+        raise SettingsError(f"{CHANNEL_FACTS_FILE_VAR}={path!r}: {exc}") from exc
 
 
 def create_app(
@@ -37,7 +70,7 @@ def create_app(
     """
     platform_settings = load_settings() if settings is None else settings
     p9_settings = (
-        load_analytics_settings(platform=platform_settings)
+        load_analytics_settings(platform=platform_settings, **load_channel_facts())
         if analytics_settings is None
         else analytics_settings
     )

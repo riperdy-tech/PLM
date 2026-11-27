@@ -24,7 +24,11 @@ from plm_platform.execution import (
 )
 from plm_platform.ledger import BudgetLedger, EntryStatus, PersistentBudgetGate
 from youtube_publishing import engine as engine_module
-from youtube_publishing.client.base import YouTubeTransientError
+from youtube_publishing.client.base import (
+    YouTubeClientError,
+    YouTubeQuotaExceededError,
+    YouTubeTransientError,
+)
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.enums import OperatingMode, PublishState
 from youtube_publishing.engine import (
@@ -55,6 +59,20 @@ class RealModeClient(MockYouTubeClient):
         self.fail_chunk_at: int | None = None
         self.lose_playlist_response = False
         self.inserted_items = 0
+        self.session_error: Exception | None = None
+        self.thumbnail_error: Exception | None = None
+
+    def insert_resumable_session(self, **kwargs: Any) -> str:
+        if self.session_error is not None:
+            error, self.session_error = self.session_error, None
+            raise error
+        return super().insert_resumable_session(**kwargs)
+
+    def set_thumbnail(self, video_id: str, thumbnail_bytes: bytes) -> dict[str, Any]:
+        if self.thumbnail_error is not None:
+            error, self.thumbnail_error = self.thumbnail_error, None
+            raise error
+        return super().set_thumbnail(video_id, thumbnail_bytes)
 
     def upload_video_chunk(self, **kwargs: Any) -> dict[str, Any] | None:
         if kwargs["start_byte"] == self.fail_chunk_at:
@@ -168,3 +186,65 @@ def test_a_committed_write_is_never_resumed() -> None:
     again = decide(True)
     assert again.decision is WriteDecision.DENY
     assert again.reason == "budget_reservation_replayed"
+
+
+@pytest.mark.parametrize("error", [
+    YouTubeQuotaExceededError("quotaExceeded (simulated)", refused=True),
+    YouTubeTransientError("HTTP 503 before any session (simulated)"),
+])
+def test_an_upload_that_never_started_releases_its_reservation(error: Exception) -> None:
+    """A refused (4xx) session request, or any failure before a session existed, sent no
+    video: the reservation is released, so the retry is funded again, not wedged (#31)."""
+    manifest = _sample_manifest()
+    client, ledger = RealModeClient(), _ledger()
+    client.session_error = error
+    upload_key = YouTubePublishingEngine.write_key(manifest, CAPABILITY_UPLOAD)
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        first = _publish(_engine(client, ledger), session, manifest)
+        assert first.attempt.state is PublishState.FAILED_RETRYABLE
+        assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.RELEASED
+
+        retry_engine = _engine(client, ledger)
+        second = _publish(retry_engine, session, manifest)
+
+    assert second.is_success
+    assert retry_engine.decisions[0].reason == "authorized"
+    assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.COMMITTED
+
+
+def test_a_resume_after_the_upload_needs_no_media_and_clears_the_old_error() -> None:
+    """A processing poll must not re-read the master (review P2: P7), and a VERIFIED
+    attempt must not keep the error code of the failure it recovered from."""
+    manifest = _sample_manifest()
+    client, ledger = RealModeClient(), _ledger()
+    client.lose_playlist_response = True
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        first = _publish(_engine(client, ledger), session, manifest)
+        assert first.attempt.error_code is not None
+        second = _engine(client, ledger).execute_publish(
+            session, manifest, video_data=None, thumbnail_data=None,
+            operating_mode=OperatingMode.AUTONOMOUS)
+    assert second.is_success, second.error
+    assert second.attempt.state is PublishState.VERIFIED
+    assert (second.attempt.error_code, second.attempt.error_message) == (None, None)
+
+
+def test_a_refused_thumbnail_is_released_and_an_unknown_one_stays_held() -> None:
+    manifest = _sample_manifest()
+    client, ledger = RealModeClient(), _ledger()
+    thumb_key = YouTubePublishingEngine.write_key(manifest, CAPABILITY_THUMBNAIL)
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        client.thumbnail_error = YouTubeClientError("HTTP 400 (simulated)", refused=True)
+        _publish(_engine(client, ledger), session, manifest)
+        assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.RELEASED
+
+        client.thumbnail_error = YouTubeTransientError("HTTP 503 (simulated)")
+        _publish(_engine(client, ledger), session, manifest)
+        assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.RESERVED
+
+        final = _publish(_engine(client, ledger), session, manifest)
+    assert final.is_success
+    assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.COMMITTED

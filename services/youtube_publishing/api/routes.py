@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -21,9 +22,11 @@ from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, WriteDecision, provider_mode_of
 from pydantic import AwareDatetime
 
-from ..analytics import YouTubeAnalyticsSource
+from ..analytics import AnalyticsNotFinal, AnalyticsUnavailable, YouTubeAnalyticsSource
+from ..client.base import YouTubeClientError
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import FailureReasonCode, OperatingMode
+from ..domain.ids import build_manifest_id
 from ..domain.models import (
     ChannelProfile,
     PublishManifest,
@@ -35,8 +38,8 @@ from ..manifests import (
     CandidateSelectionError,
     PackageNotReadyError,
     build_publish_manifest,
+    conflicts_with_stored_choice,
     preflight_metadata,
-    same_publish_choice,
 )
 from ..preflight.gates import evaluate_preflight_all
 from ..series import load_series_playlists
@@ -45,6 +48,7 @@ from ..storage.repositories import (
     get_publication_record_by_package_id,
     get_publication_record_by_video_id,
     get_publish_attempt_by_id,
+    get_publish_attempt_by_idempotency_key,
     get_publish_manifest_by_id,
     insert_channel_profile,
     insert_publish_manifest,
@@ -93,6 +97,36 @@ def _refused(status: int, code: str, message: str,
         status_code=status,
         detail=ErrorShape(code=code, field_paths=fields or [], message=message).model_dump(),
     )
+
+
+def _youtube_publish_time(client: Any, video_id: str) -> datetime:
+    """When YouTube says the video became public (``snippet.publishedAt``), read now.
+
+    Refuses a video YouTube does not show as public: its audience is not the one the
+    window measures (review 2026-11-26 #33)."""
+    try:
+        resource = client.get_video(video_id)
+    except YouTubeClientError as exc:
+        raise _refused(503, "analytics_unavailable",
+                       f"YouTube could not be asked about {video_id}: {exc}") from exc
+    if not resource:
+        raise _refused(409, "video_not_found_on_youtube", f"YouTube has no video {video_id!r}")
+    status = resource.get("status") or {}
+    privacy = status.get("privacyStatus")
+    if privacy != "public":
+        raise _refused(409, "video_not_public",
+                       f"{video_id} is {privacy or 'of unknown privacy'}; only a public "
+                       "video is measured")
+    raw = (resource.get("snippet") or {}).get("publishedAt")
+    published_at: datetime | None
+    try:
+        published_at = datetime.fromisoformat(raw) if isinstance(raw, str) else None
+    except ValueError:
+        published_at = None
+    if published_at is None or published_at.tzinfo is None:
+        raise _refused(409, "publish_time_unknown",
+                       f"YouTube returned no publish time for {video_id}")
+    return published_at
 
 
 def _channel_response(profile: ChannelProfile, *, created: bool) -> ChannelProfileResponse:
@@ -199,65 +233,64 @@ def create_youtube_router(
                     ).model_dump(),
                 )
 
-            # 2. Manifest from the package's facts, then preflight
-            try:
-                manifest = build_publish_manifest(
-                    pkg, profile, publish_at=req.publish_at, now=now,
-                    metadata_variant_id=req.metadata_variant_id, thumbnail_id=req.thumbnail_id,
-                    series_playlists=load_series_playlists(),
-                )
-            except PackageNotReadyError as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail=ErrorShape(
-                        code="package_not_ready",
-                        field_paths=["media_package.status"],
-                        message=str(exc),
-                    ).model_dump(),
-                ) from exc
-            except CandidateSelectionError as exc:
-                raise _refused(
-                    422, "candidate_selection_invalid", str(exc),
-                    ["metadata_variant_id", "thumbnail_id"],
-                ) from exc
-            passed, results, reason = evaluate_preflight_all(
-                profile, pkg.to_wire(),
-                preflight_metadata(pkg, metadata_variant_id=manifest.metadata_version),
-                req.publish_at, now=now,
-                selected_thumbnail_id=manifest.selection.thumbnail_id if manifest.selection else None,
-            )
-            if not passed:
-                diags = [d for r in results for d in r.diagnostics]
-                raise HTTPException(
-                    status_code=422,
-                    detail=ErrorShape(
-                        code=reason.value if reason else "preflight_failed",
-                        message="; ".join(diags),
-                    ).model_dump(),
-                )
-
-            # The manifest id is derived from the channel, the package and its video
-            # checksum, so a repeated publish (a caller's retry after a lost answer)
-            # resumes the stored manifest and attempt instead of failing on the key.
-            stored = get_publish_manifest_by_id(session, manifest.manifest_id)
-            if stored is None:
-                insert_publish_manifest(session, manifest)
-                session.commit()
-            else:
-                # One package/channel/video identity is one immutable publication.
-                # Never silently switch its thumbnail, title, or experiment arm
-                # under the same idempotency key on a later call.
-                if not same_publish_choice(
-                    stored, manifest,
-                    explicit_requested=req.metadata_variant_id is not None
-                    or req.thumbnail_id is not None,
-                ):
+            # 2. The manifest id is derived from the channel, the package and its video
+            # checksum, so a repeated publish (a caller's retry, a processing poll)
+            # resumes the stored manifest and attempt. One identity is one immutable
+            # publication: a configuration edit since then changes nothing, and an
+            # explicit selection naming other candidates is refused.
+            stored = get_publish_manifest_by_id(session, build_manifest_id(
+                profile.channel_id, pkg.media_package_id, pkg.video.checksum))
+            if stored is not None:
+                if conflicts_with_stored_choice(
+                        stored, metadata_variant_id=req.metadata_variant_id,
+                        thumbnail_id=req.thumbnail_id):
                     raise _refused(
                         409, "candidate_selection_conflict",
                         "this publication identity already has a different frozen assignment",
                         ["metadata_variant_id", "thumbnail_id"],
                     )
                 manifest = stored
+            else:
+                # A new publication: manifest from the package's facts, then preflight.
+                try:
+                    manifest = build_publish_manifest(
+                        pkg, profile, publish_at=req.publish_at, now=now,
+                        metadata_variant_id=req.metadata_variant_id,
+                        thumbnail_id=req.thumbnail_id,
+                        series_playlists=load_series_playlists(),
+                    )
+                except PackageNotReadyError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=ErrorShape(
+                            code="package_not_ready",
+                            field_paths=["media_package.status"],
+                            message=str(exc),
+                        ).model_dump(),
+                    ) from exc
+                except CandidateSelectionError as exc:
+                    raise _refused(
+                        422, "candidate_selection_invalid", str(exc),
+                        ["metadata_variant_id", "thumbnail_id"],
+                    ) from exc
+                passed, results, reason = evaluate_preflight_all(
+                    profile, pkg.to_wire(),
+                    preflight_metadata(pkg, metadata_variant_id=manifest.metadata_version),
+                    req.publish_at, now=now,
+                    selected_thumbnail_id=(manifest.selection.thumbnail_id
+                                           if manifest.selection else None),
+                )
+                if not passed:
+                    diags = [d for r in results for d in r.diagnostics]
+                    raise HTTPException(
+                        status_code=422,
+                        detail=ErrorShape(
+                            code=reason.value if reason else "preflight_failed",
+                            message="; ".join(diags),
+                        ).model_dump(),
+                    )
+                insert_publish_manifest(session, manifest)
+                session.commit()
 
             # 4. Execute Publishing Engine. A real upload sends the package's own bytes,
             # fetched by their pinned digests; a mock client uses its placeholders.
@@ -266,13 +299,22 @@ def create_youtube_router(
             # which may be archived off this machine by now (P6, 2026-11-27).
             published = get_publication_record_by_package_id(
                 session, manifest.media_package_id) is not None
-            if provider_mode_of(yt_client) is ProviderMode.REAL and not published:
+            # A processing poll of an uploaded video fetches (and hashes) nothing it
+            # already sent: the 821 MB master was re-read on every poll.
+            attempt = get_publish_attempt_by_idempotency_key(session, manifest.idempotency_key)
+            need_video = attempt is None or not attempt.youtube_video_id
+            need_thumbnail = attempt is None or not attempt.thumbnail_uploaded
+            if (provider_mode_of(yt_client) is ProviderMode.REAL and not published
+                    and (need_video or need_thumbnail)):
                 if media_bytes is None:
                     raise _refused(503, "media_store_not_configured",
                                    "a real upload needs the package's stored bytes", [])
-                video_data = media_bytes(manifest.video_master_uri, manifest.video_checksum)
-                thumbnail_data = media_bytes(manifest.thumbnail_uri,
-                                             manifest.thumbnail_checksum)
+                if need_video:
+                    video_data = media_bytes(manifest.video_master_uri,
+                                             manifest.video_checksum)
+                if need_thumbnail:
+                    thumbnail_data = media_bytes(manifest.thumbnail_uri,
+                                                 manifest.thumbnail_checksum)
             engine = YouTubePublishingEngine(
                 yt_client, clock=clock, clearance=clearance,
                 write_guard=guard if write_guard_factory is None else write_guard_factory(),
@@ -356,43 +398,68 @@ def create_youtube_router(
         """One cumulative snapshot of a video P7 published, for ``window`` as of ``as_of``.
 
         The video must have a publication record (404 otherwise); the source is keyed by
-        the record's stored arm and publication time. ``as_of`` is the caller's instant
-        (the pipeline's ``workflow.now()``); one before the publication is 422.
+        the record's stored arm. ``as_of`` is the caller's instant (the pipeline's
+        ``workflow.now()``).
+
+        A real source measures from YouTube's own publish time (``snippet.publishedAt``,
+        when the video became public), read again now, never from when P7 finished: a
+        video uploaded private and made public later starts its window then (review
+        2026-11-26 #33). A video that is not public is refused (409
+        ``video_not_public``). Until the window's Analytics numbers are final (Pacific
+        days, plus three days) the answer is 409 ``analytics_not_final``; the caller
+        asks again later. A mock source keeps the record's publication time, and an
+        observation before it is 422.
         """
         if analytics is None:
             raise _refused(
                 409, "analytics_source_not_configured",
-                "no YouTube Analytics source: the mock needs PLM_MOCK_OUTCOMES_FILE and a "
-                "real client is R6")
+                "no YouTube Analytics source: the mock needs PLM_MOCK_OUTCOMES_FILE; a "
+                "real one needs YouTube OAuth credentials")
         with session_factory() as session:
             record = get_publication_record_by_video_id(session, video_id)
         if record is None:
             raise _refused(404, "video_not_published", f"P7 published no video {video_id!r}",
                            ["video_id"])
         observed_at: datetime = as_of
-        if observed_at < record.published_at:
+        real = analytics.provider_mode is ProviderMode.REAL
+        published_at = record.published_at
+        if real:
+            published_at = _youtube_publish_time(yt_client, video_id)
+        if observed_at < published_at:
+            if real:
+                raise _refused(409, "analytics_not_final",
+                               f"{video_id} became public at {published_at.isoformat()}, "
+                               "after the observation")
             raise _refused(422, "observation_precedes_publication",
                            "an observation cannot predate the publication it measures",
                            ["as_of"])
-        snapshot = analytics.snapshot(record, window=window, observed_at=observed_at)
+        try:
+            snapshot = analytics.snapshot(record, window=window, observed_at=observed_at,
+                                          published_at=published_at)
+        except AnalyticsNotFinal as exc:
+            raise _refused(409, "analytics_not_final", str(exc)) from exc
+        except AnalyticsUnavailable as exc:
+            raise _refused(503, "analytics_unavailable", str(exc)) from exc
         revenue = snapshot.estimated_revenue
+
+        def number(value: Decimal | None) -> float | None:
+            return None if value is None else float(value)
+
         return VideoAnalyticsResponse(
             video_id=video_id, channel_id=record.channel_id,
             content_arm_id=record.content_arm_id, window=window.value,
-            published_at=record.published_at, observed_at=observed_at,
+            published_at=published_at, observed_at=observed_at,
             provider_mode=analytics.provider_mode.value, source=analytics.source_name,
             model_version=analytics.model_version,
             metrics={
                 "views": snapshot.views,
-                "watch_time_minutes": float(snapshot.watch_time_minutes),
-                "average_view_duration_seconds": (
-                    None if snapshot.average_view_duration_seconds is None
-                    else float(snapshot.average_view_duration_seconds)),
-                "average_percentage_viewed": float(snapshot.average_percentage_viewed),
+                "watch_time_minutes": number(snapshot.watch_time_minutes),
+                "average_view_duration_seconds": number(snapshot.average_view_duration_seconds),
+                "average_percentage_viewed": number(snapshot.average_percentage_viewed),
                 "subscribers_gained": snapshot.subscribers_gained,
                 "subscribers_lost": snapshot.subscribers_lost,
-                "estimated_revenue": {"amount": str(revenue.amount),
-                                      "currency": revenue.currency},
+                "estimated_revenue": None if revenue is None else {
+                    "amount": str(revenue.amount), "currency": revenue.currency},
             },
         )
 
