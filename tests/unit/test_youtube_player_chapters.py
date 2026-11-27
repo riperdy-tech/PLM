@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from youtube_publishing.preflight.gates import evaluate_gate_d_chapters
@@ -10,7 +11,7 @@ from youtube_publishing.preflight.gates import evaluate_gate_d_chapters
 NOW = datetime(2026, 10, 23, tzinfo=UTC)
 
 
-def _package() -> dict:
+def _package() -> dict[str, Any]:
     return {
         "video": {"duration_seconds": 1800},
         "tracklist": [{"song_id": str(n)} for n in range(3)],
@@ -22,7 +23,7 @@ def _package() -> dict:
     }
 
 
-def _metadata() -> dict:
+def _metadata() -> dict[str, Any]:
     return {"description": (
         "Listening session\n\nTracklist:\n"
         "00:00 - Track 1\n10:00 - Track 2\n20:00 - Track 3\n"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from click import unstyle
@@ -18,6 +19,7 @@ from media_factory.storage.models import media_packages_table
 from media_factory.storage.repositories import insert_media_package
 from media_factory.texture_inventory import inspect_brand_album_textures
 from plm_platform.cli import app
+from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from tests.support.media_audio import synth_track
@@ -27,7 +29,10 @@ from tests.support.seams import sample_lineage
 NOW = datetime(2026, 10, 25, tzinfo=UTC)
 
 
-def _package(suffix: str, brand: str, *, report: dict, status=PackageStatus.READY_FOR_PUBLISH):
+def _package(
+    suffix: str, brand: str, *, report: dict[str, Any],
+    status: PackageStatus = PackageStatus.READY_FOR_PUBLISH,
+) -> MediaPackage:
     return MediaPackage.create(
         release_manifest_id="rel_" + suffix,
         experiment_id="exp_" + suffix,
@@ -47,7 +52,7 @@ def _package(suffix: str, brand: str, *, report: dict, status=PackageStatus.READ
     )
 
 
-def _evidence(suffix: str) -> dict:
+def _evidence(suffix: str) -> dict[str, Any]:
     signature = measure_features("song_" + suffix, synth_track(seconds=4)).texture_signature
     assert signature is not None
     return {
@@ -61,7 +66,7 @@ def _evidence(suffix: str) -> dict:
 
 
 def _seed_original_metadata(
-    session, package: MediaPackage, *, checksum: str = "a" * 64,
+    session: Session, package: MediaPackage, *, checksum: str = "a" * 64,
 ) -> None:
     """Populate P6 recorded sources without storing or reading audio bytes."""
     media_tracks = package.tracklist

@@ -26,11 +26,12 @@ from market_intelligence.observability.metrics import (
 from market_intelligence.observability.run_summary import summarize_run
 from market_intelligence.storage import repositories
 from plm_platform.observability import JSONFormatter
+from sqlalchemy.orm import Session
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
-def _running_run(market_session) -> str:
+def _running_run(market_session: Session) -> str:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -42,7 +43,7 @@ def _running_run(market_session) -> str:
     )
 
 
-def test_run_summary_answers_every_ac14_question(market_session, caplog) -> None:
+def test_run_summary_answers_every_ac14_question(market_session: Session, caplog: pytest.LogCaptureFixture) -> None:
     run_id = _running_run(market_session)
     repositories.add_run_cost(market_session, run_id, api_calls=2, api_quota_units=200,
                               llm_calls=1, llm_tokens=900, llm_cost_estimate=0.0135,
@@ -76,7 +77,7 @@ def test_run_summary_answers_every_ac14_question(market_session, caplog) -> None
     assert payload["llm_tokens"] == 900 and payload["api_calls"] == 2
 
 
-def test_metrics_increment_the_platform_registry(market_session) -> None:
+def test_metrics_increment_the_platform_registry(market_session: Session) -> None:
     run_id = _running_run(market_session)
     repositories.add_run_cost(market_session, run_id, api_quota_units=100)
     summary = summarize_run(market_session, run_id)
@@ -91,12 +92,12 @@ def test_metrics_increment_the_platform_registry(market_session) -> None:
         before_quarantined  # zero quarantined records is a real zero
 
 
-def test_an_unknown_run_id_is_a_key_error(market_session) -> None:
+def test_an_unknown_run_id_is_a_key_error(market_session: Session) -> None:
     with pytest.raises(KeyError):
         summarize_run(market_session, "00000000-0000-0000-0000-000000000000")
 
 
-def test_a_collection_result_emits_its_six_counters(market_session, caplog) -> None:
+def test_a_collection_result_emits_its_six_counters(market_session: Session, caplog: pytest.LogCaptureFixture) -> None:
     """Every collection entry point routes through `_emit_run_costs` (P1.14 proves it live)."""
     from market_intelligence.cli import _emit_run_costs
 
@@ -116,7 +117,7 @@ def test_a_collection_result_emits_its_six_counters(market_session, caplog) -> N
     assert caplog.records[-1].getMessage() == "market run summary"
 
 
-def test_a_collection_with_no_run_emits_nothing(market_session) -> None:
+def test_a_collection_with_no_run_emits_nothing(market_session: Session) -> None:
     from market_intelligence.cli import _emit_run_costs
 
     assert _emit_run_costs(market_session, {"queries": 0}) is None

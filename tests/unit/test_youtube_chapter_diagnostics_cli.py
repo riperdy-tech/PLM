@@ -4,10 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.diagnose_youtube_chapters import main
 
 
-def test_offline_video_diagnostics(tmp_path: Path, capsys) -> None:
+def test_offline_video_diagnostics(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     resource = {
         "items": [{
             "id": "album_test",
@@ -34,7 +36,7 @@ def test_offline_video_diagnostics(tmp_path: Path, capsys) -> None:
     assert output["player_chapters_visibility"] == "UNVERIFIED"
 
 
-def test_cli_refuses_summary_from_unrelated_video(tmp_path: Path, capsys) -> None:
+def test_cli_refuses_summary_from_unrelated_video(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source_json = tmp_path / "other.json"
     source_json.write_text(json.dumps({"video_id": "different", "tracks": []}), encoding="utf-8")
     result = main(["album_test", "--summary", str(source_json)])

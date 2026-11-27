@@ -103,7 +103,7 @@ def seed(value: int = DEFAULT_SEED) -> int:
 
 def _numpy() -> ModuleType | None:
     try:
-        import numpy  # type: ignore[import-not-found]
+        import numpy
     except ImportError:
         return None
-    return numpy  # type: ignore[no-any-return]
+    return numpy

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from experiments.domain.experiment import Experiment, Hypothesis, Treatment
@@ -81,7 +81,7 @@ def _wire(**genome_kw: Any) -> dict[str, Any]:
     package = materialize_package(
         exp, trt, genome, created_at=datetime(2026, 9, 25, tzinfo=UTC)
     )
-    return json.loads(json.dumps(package.track_specs[0].to_wire()))
+    return cast(dict[str, Any], json.loads(json.dumps(package.track_specs[0].to_wire())))
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:

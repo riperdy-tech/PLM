@@ -13,12 +13,13 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from market_intelligence.cli import _run_due_collection
 from market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
 from market_intelligence.collection.scheduler import daily_quota_state, due_queries
-from market_intelligence.config import load_market_settings
+from market_intelligence.config import MarketSettings, load_market_settings
 from market_intelligence.connectors.youtube import (
     BASE_URL,
     YouTubeCredentials,
@@ -28,6 +29,7 @@ from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryT
 from market_intelligence.storage import repositories
 from plm_platform.config import Secret
 from plm_platform.storage import StoredObject, sha256_digest
+from sqlalchemy.orm import Session
 
 from tests.support.http import MockHTTP
 
@@ -45,8 +47,9 @@ class _MemoryObjects:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def __call__(self, prefix, resource_path, data, *, content_type="application/octet-stream",
-                 settings=None, client=None) -> StoredObject:
+    def __call__(self, prefix: str, resource_path: str, data: bytes, *,
+                 content_type: str = "application/octet-stream",
+                 settings: object = None, client: object = None) -> StoredObject:
         digest = sha256_digest(data)
         key = f"{prefix}{resource_path}/{digest}"
         self.calls.append(key)
@@ -60,7 +63,7 @@ def memory_objects(monkeypatch: pytest.MonkeyPatch) -> _MemoryObjects:
     return store
 
 
-def _install(market_session) -> str:
+def _install(market_session: Session) -> str:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -74,7 +77,7 @@ def _install(market_session) -> str:
     return source_id
 
 
-def _book_spend(market_session, *, units: int, at: datetime | None = None) -> None:
+def _book_spend(market_session: Session, *, units: int, at: datetime | None = None) -> None:
     """Write the day's ledger the way a finished run does.
 
     `start_collection_run` ids are derived from (source, query, version, instant), so an
@@ -92,8 +95,8 @@ def _book_spend(market_session, *, units: int, at: datetime | None = None) -> No
     repositories.add_run_cost(market_session, run_id, api_quota_units=units)
 
 
-def _fixture(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def _fixture(name: str) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads((FIXTURES / name).read_text(encoding="utf-8")))
 
 
 def _connector(mock: MockHTTP, *, units: int) -> YouTubeDataAPIConnector:
@@ -104,13 +107,13 @@ def _connector(mock: MockHTTP, *, units: int) -> YouTubeDataAPIConnector:
     )
 
 
-def test_a_spent_day_refuses_the_run_without_a_single_http_attempt(market_session) -> None:
+def test_a_spent_day_refuses_the_run_without_a_single_http_attempt(market_session: Session) -> None:
     _install(market_session)
     _book_spend(market_session, units=SETTINGS.quota_units_per_day)
     mock = MockHTTP()  # empty queue: any request would raise
     factory_calls: list[int] = []
 
-    def factory(settings, units):  # pragma: no cover - must never run
+    def factory(settings: MarketSettings, units: int) -> YouTubeDataAPIConnector:  # pragma: no cover - must never run
         factory_calls.append(units)
         return _connector(mock, units=units)
 
@@ -129,7 +132,7 @@ def test_a_spent_day_refuses_the_run_without_a_single_http_attempt(market_sessio
 
 
 def test_a_thin_day_reduces_the_budget_and_the_run_stops_at_the_remainder(
-    market_session, memory_objects
+    market_session: Session, memory_objects: _MemoryObjects
 ) -> None:
     _install(market_session)
     _book_spend(market_session, units=SETTINGS.quota_units_per_day - 100)
@@ -138,7 +141,7 @@ def test_a_thin_day_reduces_the_budget_and_the_run_stops_at_the_remainder(
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))
     seen_units: list[int] = []
 
-    def factory(settings, units):
+    def factory(settings: MarketSettings, units: int) -> YouTubeDataAPIConnector:
         seen_units.append(units)
         return _connector(mock, units=units)
 
@@ -157,7 +160,7 @@ def test_a_thin_day_reduces_the_budget_and_the_run_stops_at_the_remainder(
     assert len(mock.requests) == 1  # the hydration call that would have crossed it never left
 
 
-def test_a_day_with_room_runs_and_charges_the_ledger(market_session, memory_objects) -> None:
+def test_a_day_with_room_runs_and_charges_the_ledger(market_session: Session, memory_objects: _MemoryObjects) -> None:
     _install(market_session)
     mock = MockHTTP(repeat_last=True)
     mock.enqueue_json(_fixture("search_lofi_p1.json"))
@@ -179,7 +182,7 @@ def test_a_day_with_room_runs_and_charges_the_ledger(market_session, memory_obje
     assert state.remaining_units == SETTINGS.quota_units_per_day - 102
 
 
-def test_the_ledger_ignores_previous_days(market_session) -> None:
+def test_the_ledger_ignores_previous_days(market_session: Session) -> None:
     _install(market_session)
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
@@ -196,7 +199,7 @@ def test_the_ledger_ignores_previous_days(market_session) -> None:
 
 
 def test_a_run_cut_short_keeps_the_queries_it_finished_and_moves_on_next_time(
-    market_session, memory_objects
+    market_session: Session, memory_objects: _MemoryObjects
 ) -> None:
     """2026-11-10: every daily run hit the per-run budget and rescheduled every query,
     finished ones included, so the next run began at the same head again and the pool's

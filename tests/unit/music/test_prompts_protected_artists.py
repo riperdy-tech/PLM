@@ -88,7 +88,7 @@ def test_protected_artist_in_the_spec_never_reaches_the_provider() -> None:
     with music_db_session() as session:
         result = engine.execute_plan(
             session, plan=plan, variants=variants, spec=spec,
-            provider_adapter=spy,  # type: ignore[arg-type]
+            provider_adapter=spy,
         )
         assert result.status is PlanStatus.FAILED
         assert "PROTECTED_ARTIST_REFERENCE_DETECTED" in result.errors[0]

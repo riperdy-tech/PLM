@@ -11,6 +11,7 @@ import io
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 from alembic.migration import MigrationContext
@@ -42,7 +43,7 @@ def _compile(path: Path, *, downgrade: bool = False) -> str:
         opts={"as_sql": True, "output_buffer": output},
     )
     assert context.as_sql is True
-    revision = _module(path)
+    revision: Any = _module(path)  # a loaded revision script: attributes are dynamic
     revision.op = Operations(context)
     if downgrade:
         revision.downgrade()

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from autonomous_ar.domain.arm import ArmDimensions, ContentArm
@@ -6,6 +7,7 @@ from autonomous_ar.domain.decision import ArmSample
 from autonomous_ar.domain.enums import ArmLifecycleStatus, ReasonCode
 from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
 from autonomous_ar.policy.constraints import (
+    Portfolio,
     apply_portfolio_constraints,
     directive_budget_share,
 )
@@ -115,7 +117,7 @@ def test_baseline_reservation_is_honoured_and_budget_shares_stay_under_the_ceili
 
 def test_the_walk_is_deterministic_for_the_same_inputs() -> None:
     samples, arms = _ranked(6)
-    args: dict[str, object] = {
+    args: dict[str, Any] = {
         "classes": {arm_id: AllocationType.EXPLOIT for arm_id in arms}, "arms": arms,
         "states": {arm_id: ArmLifecycleStatus.ACTIVE for arm_id in arms},
         "policy": DEFAULT_POLICY, "slot_count": 6,
@@ -268,7 +270,7 @@ def test_a_repeated_candidate_cannot_take_a_second_slot() -> None:
 
 
 def _one_identity_cycle(policy: PolicyConfig, *, clusters: int = 13,
-                        genre: str | None = "focus_electronic"):
+                        genre: str | None = "focus_electronic") -> Portfolio:
     """ADR-0044: 13 eligible arms, all `study_focus`, focus_electronic, instrumental."""
     samples, arms = _ranked(13, genre=genre, use_case="study_focus",
                             language="instrumental")

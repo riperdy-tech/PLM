@@ -60,7 +60,7 @@ def _downloader(
 
 def test_jobs_discovery_visits_pages_and_filters_without_guessing_a_job() -> None:
     seen: list[tuple[str, str | None]] = []
-    pages = {
+    pages: dict[tuple[str, str | None], dict[str, Any]] = {
         ("/v1/jobs", None): {
             "jobs": [
                 {"id": "job_2", "reportTypeId": "channel_basic_a2"},
@@ -79,7 +79,7 @@ def test_jobs_discovery_visits_pages_and_filters_without_guessing_a_job() -> Non
 
 def test_report_catalog_preserves_revisions_across_pages() -> None:
     seen: list[tuple[str, str | None]] = []
-    pages = {
+    pages: dict[tuple[str, str | None], dict[str, Any]] = {
         ("/v1/jobs/job_1/reports", None): {
             "reports": [OLDER, OTHER], "nextPageToken": "page_two",
         },
@@ -105,7 +105,7 @@ def test_older_revision_timestamp_collision_is_also_refused() -> None:
         **OLDER, "id": "old_dup",
         "downloadUrl": f"{ROOT}/v1/media/old_dup?alt=media",
     }
-    pages = {
+    pages: dict[tuple[str, str | None], dict[str, Any]] = {
         ("/v1/jobs/job_1/reports", None): {
             "reports": [NEWER, OLDER, same_period_older],
         },
@@ -124,7 +124,9 @@ def test_older_revision_timestamp_collision_is_also_refused() -> None:
 def test_bad_report_list_refused_before_any_download(
     report_rows: list[dict[str, str]], reason: str,
 ) -> None:
-    pages = {("/v1/jobs/job_1/reports", None): {"reports": report_rows}}
+    pages: dict[tuple[str, str | None], dict[str, Any]] = {
+        ("/v1/jobs/job_1/reports", None): {"reports": report_rows},
+    }
     seen: list[tuple[str, str | None]] = []
     with pytest.raises(ReportingDownloadError, match=reason):
         _downloader(pages, seen).list_reach_reports(job_id="job_1")
@@ -133,7 +135,7 @@ def test_bad_report_list_refused_before_any_download(
 
 @pytest.mark.parametrize("next_token", ["loop", 3, "x" * 1100])
 def test_catalog_pagination_requires_completion(next_token: Any) -> None:
-    pages = {
+    pages: dict[tuple[str, str | None], dict[str, Any]] = {
         ("/v1/jobs", None): {
             "jobs": [{"id": "job_1", "reportTypeId": "channel_reach_basic_a1"}],
             "nextPageToken": next_token,
@@ -163,10 +165,10 @@ def test_catalog_cli_reads_only_analytics_oauth_and_never_polls_uploads(
         def __init__(self, **kwargs: Any):
             assert callable(kwargs["access_token"])
 
-        def list_reach_jobs(self):
+        def list_reach_jobs(self) -> tuple[SimpleNamespace, ...]:
             return (SimpleNamespace(job_id="job_1", report_type="channel_reach_basic_a1"),)
 
-        def list_reach_reports(self, *, job_id: str):
+        def list_reach_reports(self, *, job_id: str) -> tuple[SimpleNamespace, ...]:
             assert job_id == "job_1"
             return (SimpleNamespace(
                 job_id=job_id, report_id="revised",
@@ -182,7 +184,7 @@ def test_catalog_cli_reads_only_analytics_oauth_and_never_polls_uploads(
     )
     monkeypatch.setattr(poll_live_analytics, "AuthenticatedReachDownloader", FakeCatalog)
 
-    def unexpected_data_client():
+    def unexpected_data_client() -> None:
         pytest.fail("Catalog listing must not require the YouTube Data API")
 
     monkeypatch.setattr(poll_live_analytics, "RealYouTubeClient", unexpected_data_client)

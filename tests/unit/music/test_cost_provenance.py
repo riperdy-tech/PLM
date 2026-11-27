@@ -43,7 +43,7 @@ def _attempt(**changes: object) -> GenerationAttempt:
         "credit_basis": "legacy_unverified",
     }
     data.update(changes)
-    return GenerationAttempt(**data)
+    return GenerationAttempt.model_validate(data)
 
 
 def _cost(**changes: object) -> CostRecord:
@@ -55,7 +55,7 @@ def _cost(**changes: object) -> CostRecord:
         "created_at": NOW,
     }
     data.update(changes)
-    return CostRecord(**data)
+    return CostRecord.model_validate(data)
 
 
 def test_unknown_money_remains_unknown_even_with_provider_credits() -> None:

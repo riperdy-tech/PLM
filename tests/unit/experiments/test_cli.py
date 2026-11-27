@@ -29,7 +29,7 @@ from experiments.storage import repositories
 from experiments.storage.ids import deterministic_id
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.cli import app
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 from tests.support.experiments_db import create_experiments_engine
@@ -51,7 +51,7 @@ SAMPLE_DIRECTIVE = ProductionDirectivePayload.build(
 ).to_wire()
 
 
-def _setup_seeded_db() -> tuple[sessionmaker, str, str]:
+def _setup_seeded_db() -> tuple[sessionmaker[Session], str, str]:
     engine = create_experiments_engine(static_pool=True)
     factory = sessionmaker(bind=engine)
     with factory() as session:

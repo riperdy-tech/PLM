@@ -372,7 +372,7 @@ def test_migration_0026_creates_exactly_the_outbox_table_the_runtime_uses() -> N
     engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS analytics")
-        module.op = Operations(MigrationContext.configure(connection))
+        setattr(module, "op", Operations(MigrationContext.configure(connection)))  # noqa: B010 - ModuleType declares no `op`
         module.upgrade()
         inspector = sa.inspect(connection)
         columns = {c["name"]: c

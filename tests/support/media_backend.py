@@ -39,6 +39,7 @@ from media_factory.rendering.profiles import RenderProfile
 from media_factory.rendering.toolchain import (
     AudioMasterSpec,
     LoudnessMeasurement,
+    MediaToolchain,
     ProbeReport,
     StreamInfo,
 )
@@ -247,7 +248,7 @@ class FakeHolds:
 
 
 def backend_for(store: InMemoryArtifactStore, manifests: list[ReleaseManifestPayload], *,
-                 toolchain: StandInToolchain | None = None, holds: FakeHolds | None = None,
+                 toolchain: MediaToolchain | None = None, holds: FakeHolds | None = None,
                  brands: BrandRegistry | None = None) -> MediaBackend:
     return MediaBackend(
         manifests=FakeP5(manifests), holds=holds or FakeHolds(), store=store,

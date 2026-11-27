@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from youtube_publishing.diagnostics import inspect_uploaded_video
 
@@ -14,7 +15,7 @@ TRACKS = [
 ]
 
 
-def _resource(description: str | None = None) -> dict:
+def _resource(description: str | None = None) -> dict[str, Any]:
     return {
         "id": "live_123",
         "snippet": {"description": description if description is not None else (

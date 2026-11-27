@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
-from media_factory.audio.features import DEFAULT_FEATURE_POLICY
+from media_factory.audio.features import DEFAULT_FEATURE_POLICY, TrackFeatures
 from media_factory.domain.enums import PackageStatus, PlaylistStatus
 from media_factory.domain.models import MediaPackage
 from media_factory.errors import MediaAssemblyError
@@ -16,6 +17,7 @@ from media_factory.playlist.catalog import (
 from media_factory.playlist.diversity import DEFAULT_ALBUM_TEXTURE_POLICY
 from media_factory.storage.models import playlist_sessions_table, playlist_tracks_table
 from media_factory.storage.repositories import insert_media_package, list_catalog_albums
+from sqlalchemy.orm import Session
 
 from tests.support.media_audio import synth_track
 from tests.support.media_db import media_db_session
@@ -24,7 +26,7 @@ from tests.support.seams import sample_lineage
 NOW = datetime(2026, 10, 23, tzinfo=UTC)
 
 
-def _record(package_id: str, release_id: str, evidence) -> CatalogAlbum:
+def _record(package_id: str, release_id: str, evidence: object) -> CatalogAlbum:
     return CatalogAlbum(
         package_id, release_id, evidence,
         policy_version=DEFAULT_ALBUM_TEXTURE_POLICY.version,
@@ -32,7 +34,7 @@ def _record(package_id: str, release_id: str, evidence) -> CatalogAlbum:
     )
 
 
-def _measured_pair():
+def _measured_pair() -> dict[str, TrackFeatures]:
     from media_factory.audio.features import measure_features
 
     a = measure_features("a", synth_track(seconds=4, bpm=120, tonic=0))
@@ -156,7 +158,9 @@ def test_non_hex_saved_sha256_is_not_accepted_as_evidence() -> None:
     assert exc.value.code == "album_catalog_unmeasurable"
 
 
-def _sample_package(release_id: str, brand: str, *, report: dict, tracks: list[dict]):
+def _sample_package(
+    release_id: str, brand: str, *, report: dict[str, Any], tracks: list[dict[str, Any]],
+) -> MediaPackage:
     return MediaPackage.create(
         release_manifest_id=release_id,
         experiment_id="exp",
@@ -190,7 +194,7 @@ def _sample_package(release_id: str, brand: str, *, report: dict, tracks: list[d
 
 
 def _seed_archived_source_records(
-    session, package: MediaPackage, *, checksum: str = "a" * 64,
+    session: Session, package: MediaPackage, *, checksum: str = "a" * 64,
     source_id: str | None = None,
 ) -> None:
     """Create original playlist metadata for catalog tests, never audio files."""
@@ -419,7 +423,7 @@ def test_repo_requires_historical_signature_order_not_just_matching_id_set() -> 
     {"source_artifact_id": ""},
     {"song_id": ""},
 ])
-def test_repo_refuses_corrupt_saved_track_identity(invalid_track: dict) -> None:
+def test_repo_refuses_corrupt_saved_track_identity(invalid_track: dict[str, Any]) -> None:
     with media_db_session() as session:
         insert_media_package(session, _sample_package(
             "corrupt_track", "brand_corrupt",
@@ -461,7 +465,9 @@ def test_repo_treats_unexpected_render_report_shape_as_unmeasurable() -> None:
     with media_db_session() as session:
         insert_media_package(session, _sample_package(
             "invalid_report_type", "brand_invalid",
-            report=[], tracks=[{"song_id": "song_a"}],
+            # deliberately the wrong shape: a list where a dict render report belongs
+            report=[],  # type: ignore[arg-type]
+            tracks=[{"song_id": "song_a"}],
         ))
         history = list_catalog_albums(session, "brand_invalid")
         assert len(history) == 1 and history[0].track_signatures is None

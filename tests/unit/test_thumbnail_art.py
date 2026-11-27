@@ -28,6 +28,7 @@ from media_factory.thumbnail_art.inbox import MAX_BYTES, check_image, write_job
 from PIL import Image
 from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clock import FixedClock
+from sqlalchemy.orm import Session
 
 from tests.support.media_backend import (
     InMemoryArtifactStore,
@@ -186,7 +187,9 @@ def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> N
         "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
         "render_profile": "preview_360p_v1", "thumbnail_family": "monumental_minimal",
     })
-    factory = lambda: media_session(engine)
+    def factory() -> Session:
+        return media_session(engine)
+
     try:
         with factory() as session:
             pkg = assemble_and_persist(
@@ -268,7 +271,9 @@ def test_a_still_video_that_fails_qa_keeps_the_package_waiting(tmp_path: Path) -
         "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
         "render_profile": "preview_360p_v1",
     })
-    factory = lambda: media_session(engine)
+    def factory() -> Session:
+        return media_session(engine)
+
     try:
         with factory() as session:
             pkg = assemble_and_persist(
@@ -327,7 +332,9 @@ def test_the_owners_pick_is_the_video_picture_and_first_thumbnail(tmp_path: Path
         "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
         "render_profile": "preview_360p_v1",
     })
-    factory = lambda: media_session(engine)
+    def factory() -> Session:
+        return media_session(engine)
+
     try:
         with factory() as session:
             pkg = assemble_and_persist(
@@ -382,7 +389,9 @@ def test_a_1440p_still_needs_a_picked_image_at_least_2560_px_wide(tmp_path: Path
         "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
         "render_profile": "yt_longform_1080p_v1",
     })
-    factory = lambda: media_session(engine)
+    def factory() -> Session:
+        return media_session(engine)
+
     try:
         with factory() as session:
             pkg = assemble_and_persist(

@@ -1,11 +1,16 @@
 """Retention API shape and truthful missing/invalid evidence handling."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import httpx
 import pytest
-from analytics.ingestion.youtube_client import RealYouTubeAnalyticsClient, YouTubeAnalyticsError
+from analytics.ingestion.youtube_client import (
+    RealYouTubeAnalyticsClient,
+    YouTubeAnalyticsError,
+    YouTubeRetentionReport,
+)
 
 
 def _client() -> RealYouTubeAnalyticsClient:
@@ -17,7 +22,9 @@ def _client() -> RealYouTubeAnalyticsClient:
     return client
 
 
-def _fetch(json_payload: dict) -> tuple:
+def _fetch(
+        json_payload: dict[str, Any],
+) -> tuple[YouTubeRetentionReport, list[httpx.Request]]:
     seen: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -63,7 +70,7 @@ def test_retention_unavailable_is_empty_not_zero() -> None:
     [[0.0, 0.5, 1.1]],
     [[0.0, None, 0.5]],
 ])
-def test_retention_refuses_corrupt_series(rows: list) -> None:
+def test_retention_refuses_corrupt_series(rows: list[list[float | None]]) -> None:
     with pytest.raises(YouTubeAnalyticsError):
         _fetch({"columnHeaders": _HEADERS, "rows": rows})
 

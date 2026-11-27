@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import httpx
 import pytest
@@ -29,7 +30,7 @@ REPORT = {
 
 
 def _client(
-    *, job: dict | None = None, report: dict | None = None,
+    *, job: dict[str, Any] | None = None, report: dict[str, Any] | None = None,
     download: bytes = CSV, code: int = 200,
     seen: list[str] | None = None,
 ) -> AuthenticatedReachDownloader:
@@ -80,7 +81,7 @@ def test_authenticated_download_validates_job_report_and_exact_bytes() -> None:
     (None, {**REPORT, "endTime": "2026-09-30T00:00:00Z"}, "interval"),
 ])
 def test_untrustworthy_google_metadata_refused(
-    job: dict | None, report: dict | None, expected: str,
+    job: dict[str, Any] | None, report: dict[str, Any] | None, expected: str,
 ) -> None:
     with pytest.raises(ReportingDownloadError, match=expected):
         _client(job=job, report=report).fetch(

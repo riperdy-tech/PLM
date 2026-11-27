@@ -16,13 +16,13 @@ import subprocess
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from media_factory.artifacts import MinioArtifactStore
 from media_factory.domain.enums import PackageStatus, RenderJobStatus, TransitionType
 from media_factory.errors import MediaAssemblyError
-from media_factory.rendering import ffmpeg as ffmpeg_module
 from media_factory.rendering.assembler import AssemblyPipelineResult, assemble_media_package
 from media_factory.rendering.ffmpeg import FFmpegToolchain
 from media_factory.rendering.profiles import RENDER_PROFILES
@@ -165,18 +165,18 @@ def test_a_failed_post_render_check_blocks_the_package(toolchain: StandInToolcha
 
 
 def _probe(**overrides: object) -> ProbeReport:
-    fields: dict[str, object] = {"width": PROFILE.width, "height": PROFILE.height,
+    fields: dict[str, Any] = {"width": PROFILE.width, "height": PROFILE.height,
                                  "fps": float(PROFILE.fps), "streams": None}
     fields.update(overrides)
     streams = fields["streams"] if fields["streams"] is not None else (
-        StreamInfo(codec_type="video", codec_name="h264", width=fields["width"],  # type: ignore[arg-type]
+        StreamInfo(codec_type="video", codec_name="h264", width=fields["width"],
                    height=fields["height"], fps=fields["fps"], pixel_format="yuv420p",
-                   duration_seconds=100.0),  # type: ignore[arg-type]
+                   duration_seconds=100.0),
         StreamInfo(codec_type="audio", codec_name="aac", sample_rate=48000, channels=2,
                    duration_seconds=100.0),
     )
     return ProbeReport(format_name="mov,mp4,m4a", duration_seconds=100.0, size_bytes=10,
-                       streams=streams)  # type: ignore[arg-type]
+                       streams=streams)
 
 
 def test_post_render_qa_codes() -> None:
@@ -332,7 +332,8 @@ def test_nonfinite_qa_readings_stay_strict_json_serializable(field: str) -> None
         def measure_loudness(self, path: Path) -> LoudnessMeasurement:
             reading = super().measure_loudness(path)
             if field in ("true_peak_dbtp", "integrated_lufs"):
-                return replace(reading, **{field: float("nan")})
+                nan: dict[str, Any] = {field: float("nan")}
+                return replace(reading, **nan)
             return reading
 
         def probe(self, path: Path) -> ProbeReport:
@@ -408,8 +409,8 @@ def test_ffmpeg_step_timeouts_scale_with_the_programme_length(
                   '"normalization_type": "linear"}')
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr=stderr)
 
-    monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
-    monkeypatch.setattr(ffmpeg_module.shutil, "which", lambda name: name)
+    monkeypatch.setattr("media_factory.rendering.ffmpeg.subprocess.run", fake_run)
+    monkeypatch.setattr("media_factory.rendering.ffmpeg.shutil.which", lambda name: name)
     tool = FFmpegToolchain()
     segments = tuple(AudioSegment(Path(f"t{n}.wav"), 180.0) for n in range(40))  # 120 min
     spec = AudioMasterSpec(segments, TransitionType.HARD_CUT, 0.0)

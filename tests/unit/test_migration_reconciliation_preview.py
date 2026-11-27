@@ -63,6 +63,7 @@ def test_draft_merge_has_one_head_and_preserves_both_revisions(
     assert draft_graph.get_bases() == ["0001_baseline"]
     merge = draft_graph.get_revision(MERGE_REV)
     assert merge is not None
+    assert merge.down_revision is not None and not isinstance(merge.down_revision, str)
     assert set(merge.down_revision) == {RELEASE_REV, YOUTUBE_REV}
     assert draft_graph.get_revision(RELEASE_REV) is not None
     assert draft_graph.get_revision(YOUTUBE_REV) is not None
@@ -107,7 +108,7 @@ def test_missing_sibling_upgrade_uses_only_expected_schema_operations(
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
     operations = MagicMock()
-    revision.op = operations
+    vars(revision)["op"] = operations  # set the module global mypy cannot see
     revision.upgrade()
     observed = [
         (call[0], call.args[0], call.kwargs.get("schema"))

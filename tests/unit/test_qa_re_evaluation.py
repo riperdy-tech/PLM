@@ -6,15 +6,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
+import sqlalchemy as sa
+from fastapi.testclient import TestClient
 from plm_platform.config import SERVICE_TOKEN_HEADER
 from plm_platform.exceptions import ExceptionQueue, ReviewDecision
-from quality_gate.audio.decode import DECODE_FAILED, DecodeFailure
+from quality_gate.audio.decode import DECODE_FAILED, DecodeFailure, decode_audio
 from quality_gate.domain.enums import ResolutionCode
 from quality_gate.gate.quarantine import quarantine_holds, sweep_orphan_quarantine_cases
 from quality_gate.storage.repositories import get_quarantine_case
 
+from tests.support.fake_minio import FakeMinio
 from tests.support.qa_db import qa_session
 from tests.support.rights_detectors import synthetic_music, write_wav
 from tests.support.seams import lineage_fields, rights_fields
@@ -30,7 +34,9 @@ HEADERS = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
 NOW = datetime(2026, 11, 27, 12, 0, tzinfo=UTC)
 
 
-def _body(store, wav: Path, name: str, **fields: object) -> dict:  # type: ignore[no-untyped-def]  # noqa: F811
+def _body(
+    store: FakeMinio, wav: Path, name: str, **fields: object,  # noqa: F811
+) -> dict[str, Any]:
     return {"candidate_event": _stored_event(
         store, wav, candidate_id=f"cand_{name}", artifact_id=f"art_{name}",
         track_spec_id=f"spec_{name}",
@@ -46,12 +52,14 @@ def wav(tmp_path: Path) -> Path:
 
 
 def test_an_unmeasured_file_is_evaluated_again_at_once(
-    qa_client, store, wav, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    qa_client: TestClient, store: FakeMinio, wav: Path,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from quality_gate.evaluators import musical
 
     body = _body(store, wav, "flaky")
-    real, calls = musical.decode_audio, []
+    real = decode_audio  # what musical imported
+    calls: list[int] = []
 
     def flaky(*args: object, **kwargs: object) -> object:
         calls.append(1)
@@ -75,7 +83,7 @@ def test_an_unmeasured_file_is_evaluated_again_at_once(
 
 
 def test_a_measured_rejection_is_replayed_not_evaluated_again(
-    qa_client, store, wav,  # noqa: F811
+    qa_client: TestClient, store: FakeMinio, wav: Path,  # noqa: F811
 ) -> None:
     body = _body(store, wav, "free_tier", rights=rights_fields(plan_or_tier="free"))
     first = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
@@ -85,7 +93,9 @@ def test_a_measured_rejection_is_replayed_not_evaluated_again(
     assert again["evaluation_id"] == first["evaluation_id"]
 
 
-def test_re_evaluate_runs_a_new_evaluation(qa_client, store, wav) -> None:  # noqa: F811
+def test_re_evaluate_runs_a_new_evaluation(
+    qa_client: TestClient, store: FakeMinio, wav: Path,  # noqa: F811
+) -> None:
     body = _body(store, wav, "re_eval", rights=rights_fields(commercial_use_status="unknown"))
     first = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
     assert first["disposition"] == "QUARANTINED"
@@ -100,7 +110,7 @@ def test_re_evaluate_runs_a_new_evaluation(qa_client, store, wav) -> None:  # no
 
 
 def test_cases_whose_holds_were_closed_elsewhere_are_swept(
-    qa_client, qa_engine, store, wav,  # noqa: F811
+    qa_client: TestClient, qa_engine: sa.Engine, store: FakeMinio, wav: Path,  # noqa: F811
 ) -> None:
     rejected = qa_client.post("/qa/evaluations", headers=HEADERS, json=_body(
         store, wav, "orphan_a", rights=rights_fields(commercial_use_status="unknown"))).json()
@@ -122,16 +132,19 @@ def test_cases_whose_holds_were_closed_elsewhere_are_swept(
     assert sorted(swept.json()["closed"]) == sorted(
         [rejected["quarantine_case_id"], withdrawn["quarantine_case_id"]])
     with qa_session(qa_engine) as session:
-        assert get_quarantine_case(session, rejected["quarantine_case_id"]).resolution is \
-            ResolutionCode.CONFIRMED_REJECTED
-        assert get_quarantine_case(session, withdrawn["quarantine_case_id"]).resolution is \
-            ResolutionCode.RE_EVALUATE
-        assert get_quarantine_case(session, still_open["quarantine_case_id"]).resolution is None
+        rejected_case = get_quarantine_case(session, rejected["quarantine_case_id"])
+        withdrawn_case = get_quarantine_case(session, withdrawn["quarantine_case_id"])
+        open_case = get_quarantine_case(session, still_open["quarantine_case_id"])
+        assert rejected_case is not None and withdrawn_case is not None and open_case is not None
+        assert rejected_case.resolution is ResolutionCode.CONFIRMED_REJECTED
+        assert withdrawn_case.resolution is ResolutionCode.RE_EVALUATE
+        assert open_case.resolution is None
         assert sweep_orphan_quarantine_cases(session, queue, auditor_id="x", now=NOW) == []
 
 
 def test_a_measurement_that_stays_unknown_ends_as_a_reviewable_hold(
-    qa_client, store, wav, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    qa_client: TestClient, store: FakeMinio, wav: Path,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from quality_gate.evaluators import musical
 

@@ -98,9 +98,9 @@ def test_p6_stores_the_fingerprint_and_refuses_a_repeated_concept_over_http() ->
 
     from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain, backend_for
     from tests.support.media_db import create_media_engine, media_session
+    from tests.unit.test_media_api import MINIMAL_ENV
     from tests.unit.test_media_session_compilation import (
         HEADERS,
-        MINIMAL_ENV,
         NOW,
         TOKEN,
         _album,

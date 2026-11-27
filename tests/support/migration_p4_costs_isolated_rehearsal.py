@@ -13,6 +13,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -230,7 +231,7 @@ def rehearse(*, include_credit_revision: bool = False) -> dict[str, Any]:
             if restored != original:
                 raise RuntimeError("restored P4 data differs from read-only source")
             clone_rest = read_only_review_snapshot(settings=isolated)
-            comparable = lambda value: {
+            comparable: Callable[[dict[str, Any]], dict[str, Any]] = lambda value: {
                 key: val for key, val in value.items()
                 if key not in ("database", "alembic_revision")
             }

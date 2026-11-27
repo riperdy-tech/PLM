@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
+from sqlalchemy.orm import Session
 from youtube_publishing.api.app import create_app
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.models import ChannelProfile
@@ -35,7 +37,7 @@ T0 = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 def client() -> TestClient:
     engine = create_youtube_engine(static_pool=True)
 
-    def session_factory():
+    def session_factory() -> Session:
         from sqlalchemy.orm import sessionmaker
 
         return sessionmaker(bind=engine)()
@@ -114,7 +116,7 @@ def test_publish_and_status_roundtrip(client: TestClient) -> None:
     assert rec_data["youtube_video_id"] == data["youtube_video_id"]
 
 
-def _multi_candidate_package() -> dict:
+def _multi_candidate_package() -> dict[str, Any]:
     package = media_package(
         "cand_api_01", media_package_id="pkg_candidate_assignment_test",
     ).to_wire()

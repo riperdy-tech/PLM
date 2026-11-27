@@ -115,7 +115,10 @@ def _measure(client: TestClient, **overrides: Any) -> httpx.Response:
     body = {"publication": _event(),
             "isrcs": ISRCS, "window": "28d", "observed_at": OBSERVED.isoformat(),
             "quality_status": None, **overrides}
-    return client.post("/analytics/evaluation/measure", json=body, headers=HEADERS)
+    response: httpx.Response = client.post(
+        "/analytics/evaluation/measure", json=body, headers=HEADERS,
+    )
+    return response
 
 
 def test_measure_computes_the_outcome_from_stored_facts_and_enqueues_it() -> None:
@@ -253,6 +256,7 @@ def test_channel_facts_are_parsed_strictly() -> None:
         "UC_test", datetime(2026, 12, 1, tzinfo=UTC)) is not None
     assert settings.non_monetized_attestation(
         "UC_test", datetime(2026, 12, 31, tzinfo=UTC)) is None
+    broken: dict[str, Any]
     for broken in ({"youtube_only_channel": []},
                    {"non_monetized_attestations": [{"channel_id": "UC", "attested_by": "o",
                                                     "attested_at": "2026-11-27T00:00:00",

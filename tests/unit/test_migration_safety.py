@@ -5,12 +5,14 @@ These unit tests never open a DB or invoke migration commands.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from plm_platform.migration_safety import (
     code_only_0039_alembic_refusal,
     user_object_count,
 )
+from sqlalchemy import Connection
 
 from tests.support.migration_safety import (
     destructive_migration_name_refusal,
@@ -81,7 +83,7 @@ def test_shared_read_only_object_count_accepts_valid_catalog_evidence(count: int
         return SimpleNamespace(scalar_one=lambda: count)
 
     connection = SimpleNamespace(execute=execute)
-    assert user_object_count(connection) == count
+    assert user_object_count(cast(Connection, connection)) == count
     assert len(inspected_sql) == 1
     for catalog in (
         "pg_catalog.pg_namespace", "pg_catalog.pg_class",
@@ -98,7 +100,7 @@ def test_shared_read_only_object_count_rejects_unknown_evidence(count: object) -
         execute=lambda statement: SimpleNamespace(scalar_one=lambda: count),
     )
     with pytest.raises(RuntimeError, match="cannot verify"):
-        user_object_count(connection)
+        user_object_count(cast(Connection, connection))
 
 
 def test_shared_read_only_object_count_propagates_failed_catalog_inspection() -> None:
@@ -107,7 +109,7 @@ def test_shared_read_only_object_count_propagates_failed_catalog_inspection() ->
 
     connection = SimpleNamespace(execute=raise_on_query)
     with pytest.raises(RuntimeError, match="catalog unavailable"):
-        user_object_count(connection)
+        user_object_count(cast(Connection, connection))
 
 
 @pytest.mark.parametrize(

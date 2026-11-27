@@ -2,7 +2,7 @@
 """P1.10: the read-only `/market/v1` endpoints against the fixture-backed app."""
 
 from dataclasses import replace
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 
 from market_intelligence.config import load_market_settings
 from market_intelligence.domain.value_objects import TaxonomyProfile
@@ -17,19 +17,20 @@ from market_intelligence.scoring.opportunity import (
 from market_intelligence.storage import repositories
 from market_intelligence.taxonomy.arms import ArmDraft
 from plm_contracts import Tri
+from sqlalchemy.orm import Session
 
-from tests.support.c1_api import ARM_ID, AS_OF, open_c1_client, seed_market
+from tests.support.c1_api import ARM_ID, AS_OF, SyncASGIClient, open_c1_client, seed_market
 
 SETTINGS = load_market_settings()
 UNDER_COVERED_ARM_ID = "coverage_probe"
 
 
-def _as_utc(moment):
+def _as_utc(moment: datetime) -> datetime:
     """SQLite (the seam harness) drops tzinfo on read-back; production is strict."""
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
-def _seed_with_an_under_covered_arm(session) -> None:
+def _seed_with_an_under_covered_arm(session: Session) -> None:
     """The standard fixture plus one arm whose high score rests on a single component."""
     seed_market(session)
     entity_id = repositories.deterministic_id("entity", UNDER_COVERED_ARM_ID)
@@ -86,7 +87,7 @@ def test_under_covered_arms_are_returned_after_the_ranked_ones() -> None:
         assert scores[1] > scores[0], "the under-covered arm's number is higher — it still ranks last"
 
 
-def test_list_supports_filters_and_cursors(c1_api_client) -> None:
+def test_list_supports_filters_and_cursors(c1_api_client: SyncASGIClient) -> None:
     first = c1_api_client.get("/market/v1/opportunities", params={"limit": 1}).json()
     assert first["score_version"] == "p1-v2"
     assert first["next_cursor"] is None or isinstance(first["next_cursor"], str)
@@ -97,7 +98,7 @@ def test_list_supports_filters_and_cursors(c1_api_client) -> None:
     assert empty["items"] == []
 
 
-def test_detail_returns_the_arm_with_all_thirteen_dimensions(c1_api_client) -> None:
+def test_detail_returns_the_arm_with_all_thirteen_dimensions(c1_api_client: SyncASGIClient) -> None:
     body = c1_api_client.get(
         "/market/v1/opportunities/rnb_late_night_drive_english_vocal_45_75m"
     ).json()
@@ -107,7 +108,7 @@ def test_detail_returns_the_arm_with_all_thirteen_dimensions(c1_api_client) -> N
     assert body["arm"]["vocal_mode"] == "vocal"
 
 
-def test_unknown_identifiers_are_404_with_the_platform_error_shape(c1_api_client) -> None:
+def test_unknown_identifiers_are_404_with_the_platform_error_shape(c1_api_client: SyncASGIClient) -> None:
     response = c1_api_client.get("/market/v1/runs/does-not-exist")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "not_found"

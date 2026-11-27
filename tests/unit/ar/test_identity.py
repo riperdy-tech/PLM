@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from autonomous_ar.config import load_ar_settings, production_settings
 from autonomous_ar.decisioning.cycle import (
     CycleRequest,
+    CycleResult,
     MarketSnapshot,
     run_allocation_cycle,
 )
@@ -85,7 +86,7 @@ def test_identity_file_declares_the_production_brand() -> None:
     assert load_ar_settings().brand_identities == {}, "unit settings stay unfiltered"
 
 
-def _cycle(session: object, settings: object, *arms: ContentArm, as_of: datetime = NOW):
+def _cycle(session: object, settings: object, *arms: ContentArm, as_of: datetime = NOW) -> CycleResult:
     request = CycleRequest(brand_id="longform_signal", as_of=as_of, slot_count=2, budget=2.0,
                            policy_version="p2-v1")
     market = MarketSnapshot(arms=arms, as_of=as_of, source="live", score_version="p1-v1")

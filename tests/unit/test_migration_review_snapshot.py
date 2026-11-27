@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -40,6 +41,7 @@ def test_manifest_security_digests_acl_and_owner_and_refuses_incomplete_catalog(
     assert manifest_security_contract([{**row, "table_acl": "{role2=r/owner}"}])[
         "table_acl_sha256"
     ] != actual["table_acl_sha256"]
+    bad: list[dict[str, Any]]
     for bad in (
         [], [row, row], [{**row, "owner_name": None}],
         [{**row, "schema_owner_name": ""}],
@@ -79,7 +81,7 @@ def test_manifest_storage_rejects_missing_or_malformed_catalog_evidence() -> Non
 
 
 def test_review_storage_requires_both_history_tables_or_neither() -> None:
-    def record(table: str) -> dict:
+    def record(table: str) -> dict[str, Any]:
         return {
             "table_name": table, "relation_kind": "r",
             "persistence": "p", "replica_identity": "d",
@@ -118,19 +120,19 @@ def test_manifest_index_catalog_and_constraints_capture_fail_closed() -> None:
     assert observed["publish_manifests_pkey"]["is_primary"] is True
 
     class Inspector:
-        def get_indexes(self, name: str, *, schema: str) -> list[dict]:
+        def get_indexes(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             assert name == "publish_manifests" and schema == "youtube"
             return [{"name": value} for value in sorted(
                 _EXPECTED_MANIFEST_INDEXES - {"publish_manifests_pkey"}
             )]
 
-        def get_check_constraints(self, name: str, *, schema: str) -> list[dict]:
+        def get_check_constraints(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
-        def get_foreign_keys(self, name: str, *, schema: str) -> list[dict]:
+        def get_foreign_keys(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
-        def get_unique_constraints(self, name: str, *, schema: str) -> list[dict]:
+        def get_unique_constraints(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
     contract = manifest_integrity_contract(
@@ -151,7 +153,7 @@ def test_manifest_index_catalog_and_constraints_capture_fail_closed() -> None:
             manifest_index_definitions(invalid)
 
     class MissingIndexInspector(Inspector):
-        def get_indexes(self, name: str, *, schema: str) -> list[dict]:
+        def get_indexes(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return super().get_indexes(name, schema=schema)[:-1]
 
     with pytest.raises(ValueError, match="index catalog"):
@@ -260,7 +262,8 @@ def test_review_security_contract_captures_owner_digest_and_rejects_bad_catalog(
     actual = review_security_contract(rows)
     assert actual is not None
     assert actual["release_reviews"] == actual["release_review_events"]
-    assert len(actual["release_reviews"]["owner_sha256"]) == 64
+    owner_sha256 = actual["release_reviews"]["owner_sha256"]
+    assert isinstance(owner_sha256, str) and len(owner_sha256) == 64
     assert "fixture-owner" not in str(actual)
     for bad in (
         rows[:1], [*rows, rows[0]],
@@ -275,7 +278,7 @@ def test_review_security_contract_captures_owner_digest_and_rejects_bad_catalog(
 
 
 def test_review_index_definitions_preserve_full_ddl_and_fail_closed() -> None:
-    row = {
+    row: dict[str, Any] = {
         "table_name": "release_review_events",
         "index_name": "ix_release_review_events_package",
         "is_valid": True, "is_ready": True, "is_live": True,
@@ -304,27 +307,27 @@ def test_review_schema_contract_captures_defaults_and_constraints() -> None:
             assert schema == "ops"
             return name in {"release_reviews", "release_review_events"}
 
-        def get_columns(self, name: str, *, schema: str) -> list[dict]:
+        def get_columns(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return [{"name": "id", "type": "TEXT", "nullable": False,
                      "default": "'pending'::text" if name == "release_reviews" else None}]
 
-        def get_pk_constraint(self, name: str, *, schema: str) -> dict:
+        def get_pk_constraint(self, name: str, *, schema: str) -> dict[str, Any]:
             return {"constrained_columns": ["id"]}
 
-        def get_indexes(self, name: str, *, schema: str) -> list[dict]:
+        def get_indexes(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
-        def get_check_constraints(self, name: str, *, schema: str) -> list[dict]:
+        def get_check_constraints(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return ([{"name": "status_check", "sqltext": "id <> ''"}]
                     if name == "release_reviews" else [])
 
-        def get_foreign_keys(self, name: str, *, schema: str) -> list[dict]:
+        def get_foreign_keys(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return ([{"name": "event_fk", "constrained_columns": ["id"],
                       "referred_schema": "ops", "referred_table": "release_reviews",
                       "referred_columns": ["id"]}]
                     if name == "release_review_events" else [])
 
-        def get_unique_constraints(self, name: str, *, schema: str) -> list[dict]:
+        def get_unique_constraints(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return ([{"name": "review_unique", "column_names": ["id"]}]
                     if name == "release_reviews" else [])
 
@@ -351,13 +354,13 @@ def test_review_schema_contract_rejects_index_catalog_disagreement() -> None:
         def has_table(self, name: str, *, schema: str) -> bool:
             return True
 
-        def get_columns(self, name: str, *, schema: str) -> list[dict]:
+        def get_columns(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
-        def get_pk_constraint(self, name: str, *, schema: str) -> dict:
+        def get_pk_constraint(self, name: str, *, schema: str) -> dict[str, Any]:
             return {"constrained_columns": ["id"]}
 
-        def get_indexes(self, name: str, *, schema: str) -> list[dict]:
+        def get_indexes(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return []
 
     indexes = review_index_definitions([{
@@ -375,7 +378,7 @@ def test_review_schema_contract_refuses_uninspectable_server_default() -> None:
         def has_table(self, name: str, *, schema: str) -> bool:
             return True
 
-        def get_columns(self, name: str, *, schema: str) -> list[dict]:
+        def get_columns(self, name: str, *, schema: str) -> list[dict[str, Any]]:
             return [{"name": "id", "type": "TEXT", "nullable": False, "default": 123}]
 
     with pytest.raises(ValueError, match="server default"):
@@ -386,13 +389,13 @@ def test_review_schema_contract_refuses_uninspectable_server_default() -> None:
 
 def test_review_snapshot_is_stable_across_row_order_column_order_and_tz() -> None:
     base = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
-    source = [
+    source: list[dict[str, object]] = [
         {"package_id": "b", "title": "밤", "status": "approved",
          "created_at": base, "reason": None},
         {"package_id": "a", "status": "pending", "title": "Day",
          "created_at": base, "reason": None},
     ]
-    reordered = [
+    reordered: list[dict[str, object]] = [
         {"reason": None, "created_at": base.astimezone(timezone(timedelta(hours=9))),
          "title": "Day", "status": "pending", "package_id": "a"},
         {"created_at": base, "package_id": "b", "reason": None,
@@ -422,7 +425,7 @@ def test_review_snapshot_detects_data_change_without_printing_rows() -> None:
     [{"package_id": ""}],
     [{"unrelated": "x"}],
 ])
-def test_review_snapshot_refuses_missing_or_repeated_ids(rows: list[dict]) -> None:
+def test_review_snapshot_refuses_missing_or_repeated_ids(rows: list[dict[str, Any]]) -> None:
     with pytest.raises(ValueError, match="missing or duplicate"):
         table_fingerprint(rows, id_column="package_id")
 

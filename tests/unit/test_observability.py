@@ -12,7 +12,9 @@ import io
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -48,7 +50,7 @@ def capture_logs(level: str = "DEBUG") -> io.StringIO:
     return buffer
 
 
-def log_lines(buffer: io.StringIO) -> list[dict[str, object]]:
+def log_lines(buffer: io.StringIO) -> list[dict[str, Any]]:
     return [json.loads(line) for line in buffer.getvalue().splitlines()]
 
 
@@ -98,14 +100,19 @@ async def test_correlation_survives_awaits_and_the_dependency_returns_it() -> No
 async def test_middleware_reads_the_header_and_echoes_it() -> None:
     seen: list[str | None] = []
 
-    async def app(scope: object, receive: object, send: object) -> None:  # type: ignore[type-arg]
+    async def app(
+        scope: dict[str, Any],
+        receive: Callable[[], Awaitable[dict[str, Any]]],
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
         seen.append(current_correlation_id())
-        await send(  # type: ignore[misc]
+        await send(
             {"type": "http.response.start", "status": 200, "headers": []}
         )
-        await send({"type": "http.response.body", "body": b"ok"})  # type: ignore[misc]
+        await send({"type": "http.response.body", "body": b"ok"})
 
-    transport = httpx.ASGITransport(app=CorrelationIdMiddleware(app))
+    # plm_platform types ASGI scope/messages as dict; httpx wants MutableMapping.
+    transport = httpx.ASGITransport(app=CorrelationIdMiddleware(app))  # type: ignore[arg-type]
     async with httpx.AsyncClient(transport=transport, base_url="http://plm.test") as client:
         response = await client.get("/", headers={CORRELATION_HEADER: "incoming-1"})
         minted = (await client.get("/")).headers[CORRELATION_HEADER.lower()]
@@ -148,7 +155,8 @@ def test_metrics_counter_and_histogram_are_recorded() -> None:
 @pytest.mark.asyncio
 
 async def test_metrics_app_serves_the_registry_over_http() -> None:
-    transport = httpx.ASGITransport(app=MetricsApp())
+    # plm_platform types ASGI scope/messages as dict; httpx wants MutableMapping.
+    transport = httpx.ASGITransport(app=MetricsApp())  # type: ignore[arg-type]
     async with httpx.AsyncClient(transport=transport, base_url="http://plm.test") as client:
         response = await client.get(METRICS_PATH)
         missing = await client.get("/not-metrics")

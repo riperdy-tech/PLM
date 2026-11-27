@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+from typing import NoReturn
 
 import httpx
 import pytest
@@ -159,7 +161,7 @@ def test_default_cli_is_offline_and_never_displays_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(readiness, "load_env_file", lambda _: dict(FULL))
-    monkeypatch.setattr(readiness.os, "environ", {})
+    monkeypatch.setattr(os, "environ", {})
     assert readiness.main([]) == 0
     printed = capsys.readouterr().out
     assert json.loads(printed)["network_probes"] == {
@@ -173,7 +175,7 @@ def test_bad_env_file_reports_only_safe_reason(
 ) -> None:
     from plm_platform.dotenv import EnvFileError
 
-    def invalid(_):
+    def invalid(_: object) -> NoReturn:
         raise EnvFileError("file contains private-supersecret")
 
     monkeypatch.setattr(readiness, "load_env_file", invalid)

@@ -15,9 +15,16 @@ from media_factory.storage.render_claims import (
 )
 from media_factory.storage.repositories import get_render_job, insert_render_job
 from plm_platform.cli import app
+from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from tests.support.media_db import create_media_engine, media_session
+
+
+def _job_status(session: Session, job_id: str) -> RenderJobStatus:
+    job = get_render_job(session, job_id)
+    assert job is not None
+    return job.job_status
 
 NOW = datetime(2026, 10, 28, tzinfo=UTC)
 SHA = "a" * 64
@@ -76,15 +83,15 @@ def test_render_history_is_bounded_scoped_and_read_only() -> None:
                 with pytest.raises(ValueError, match="limit"):
                     list_render_job_summaries(
                         session, media_package_id="package_target",
-                        limit=invalid,
+                        limit=invalid,  # type: ignore[arg-type]  # 1.5 must be refused
                     )
             with pytest.raises(ValueError, match="media_package_id"):
                 list_render_job_summaries(session, media_package_id="  ")
             session.rollback()
         with media_session(engine) as session:
-            assert get_render_job(session, first.id).job_status is RenderJobStatus.COMPLETED
-            assert get_render_job(session, retry.id).job_status is RenderJobStatus.QUEUED
-            assert get_render_job(session, unrelated.id).job_status is RenderJobStatus.QUEUED
+            assert _job_status(session, first.id) is RenderJobStatus.COMPLETED
+            assert _job_status(session, retry.id) is RenderJobStatus.QUEUED
+            assert _job_status(session, unrelated.id) is RenderJobStatus.QUEUED
     finally:
         engine.dispose()
 

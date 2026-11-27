@@ -1,6 +1,7 @@
 """Official YouTube source breakdown: traffic is not thumbnail CTR."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -8,6 +9,7 @@ import pytest
 from analytics.ingestion.youtube_client import (
     RealYouTubeAnalyticsClient,
     YouTubeAnalyticsError,
+    YouTubeTrafficSourcesReport,
 )
 
 _HEADERS = [
@@ -17,7 +19,9 @@ _HEADERS = [
 ]
 
 
-def _fetch(payload: dict, status: int = 200):
+def _fetch(
+    payload: dict[str, Any], status: int = 200,
+) -> tuple[YouTubeTrafficSourcesReport, list[httpx.Request]]:
     requests: list[httpx.Request] = []
     client = RealYouTubeAnalyticsClient(client_id="id", client_secret="s", refresh_token="r")
     client._access_token = "token"
@@ -67,7 +71,7 @@ def test_empty_source_report_is_unknown_not_zero() -> None:
     [["", 3, 1]],
     [["YT_SEARCH", 2]],
 ])
-def test_malformed_sources_not_silently_accepted(rows) -> None:
+def test_malformed_sources_not_silently_accepted(rows: list[list[Any]]) -> None:
     with pytest.raises(YouTubeAnalyticsError):
         _fetch({"columnHeaders": _HEADERS, "rows": rows})
 

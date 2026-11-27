@@ -76,8 +76,9 @@ P3_PACKAGES = {
 
 
 def _manifest(candidate_id: str, spec: str, **overrides: Any) -> dict[str, Any]:
-    return json.loads(json.dumps(release_manifest(
+    wire: dict[str, Any] = json.loads(json.dumps(release_manifest(
         candidate_id=candidate_id, track_spec_id=spec, **overrides).to_wire()))
+    return wire
 
 
 MANIFESTS = {

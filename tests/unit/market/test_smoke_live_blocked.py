@@ -12,6 +12,7 @@ the variables it needs missing explicitly; the repo `.env` carries no YouTube va
 from __future__ import annotations
 
 import httpx
+import pytest
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from plm_platform.config import load_settings
 from typer.testing import CliRunner
@@ -25,13 +26,17 @@ REQUIRED_ENV = {
 ALL_YOUTUBE_VARS = ("YOUTUBE_API_KEY", "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET")
 
 
-def test_the_live_smoke_is_blocked_with_a_reason_not_skipped(monkeypatch) -> None:
+def test_the_live_smoke_is_blocked_with_a_reason_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     for name, value in REQUIRED_ENV.items():
         monkeypatch.setenv(name, value)
     for name in ALL_YOUTUBE_VARS:
         monkeypatch.delenv(name, raising=False)
     calls: list[str] = []
-    monkeypatch.setattr(httpx, "Client", lambda **_: calls.append("client") or None)
+
+    def _record_client(**_: object) -> None:
+        calls.append("client")
+
+    monkeypatch.setattr(httpx, "Client", _record_client)
     result = runner.invoke(app, ["market", "smoke-live"])
     output = str(result.output)
     assert result.exit_code == BLOCKED_EXIT_CODE

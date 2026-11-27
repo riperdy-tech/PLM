@@ -21,8 +21,9 @@ POLICY = load_protected_artist_policy()
 def test_p4_and_p5_load_the_same_shipped_policy() -> None:
     """Proves: neither phase keeps its own list; both read plm_platform's loader, and the
     old hardcoded P5 list is gone."""
-    assert p4_prompts.load_protected_artist_policy is load_protected_artist_policy
-    assert p5_policy.load_protected_artist_policy is load_protected_artist_policy
+    # vars(): the loader is an internal import of each module, not part of its API.
+    assert vars(p4_prompts)["load_protected_artist_policy"] is load_protected_artist_policy
+    assert vars(p5_policy)["load_protected_artist_policy"] is load_protected_artist_policy
     assert not hasattr(p5_policy, "PROTECTED_ARTIST_NAMES")
 
 

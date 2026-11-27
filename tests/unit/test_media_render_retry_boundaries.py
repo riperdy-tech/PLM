@@ -71,7 +71,8 @@ def test_persisted_media_package_blocks_retry_even_when_prior_is_quarantined() -
                           when=NOW + timedelta(minutes=3)) is None
             session.commit()
         with media_session(engine) as session:
-            assert get_render_job(session, job.id).job_status is RenderJobStatus.QUARANTINED
+            stored_job = get_render_job(session, job.id)
+            assert stored_job is not None and stored_job.job_status is RenderJobStatus.QUARANTINED
             assert len(session.execute(sa.select(media_packages_table.c.id)).scalars().all()) == 1
     finally:
         engine.dispose()
@@ -113,7 +114,9 @@ def test_retry_respects_configured_max_attempts_and_original_execution_fence() -
                           when=NOW + timedelta(minutes=6)) is None
             session.commit()
         with media_session(engine) as session:
-            assert get_render_job(session, second.id).job_status is RenderJobStatus.QUARANTINED
-            assert get_render_job(session, third.id).job_status is RenderJobStatus.QUEUED
+            stored_second = get_render_job(session, second.id)
+            assert stored_second is not None and stored_second.job_status is RenderJobStatus.QUARANTINED
+            stored_third = get_render_job(session, third.id)
+            assert stored_third is not None and stored_third.job_status is RenderJobStatus.QUEUED
     finally:
         engine.dispose()

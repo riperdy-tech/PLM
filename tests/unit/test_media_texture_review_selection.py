@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import Self
+from typing import Any, Self
 
 import pytest
 from media_factory.audio.texture_label_evaluation import evaluate_labeled_pair_scores
+from media_factory.audio.texture_review_integrity import score_pair
 from media_factory.audio.texture_review_selection import select_review_pairs
 from media_factory.texture_sample_audit import MeasuredSample, SampleSource
 
@@ -78,7 +79,7 @@ def test_single_release_and_input_limits_fail_closed() -> None:
 def test_bounded_source_scores_are_nested() -> None:
     a = synth_track(seconds=7, bpm=108, tonic=3, minor=True)
     b = synth_track(seconds=7, bpm=132, tonic=9, minor=False)
-    fixed, shifted, combined = queue.score_pair(a, b)
+    fixed, shifted, combined = score_pair(a, b)  # what the queue script imports
     assert 0 <= fixed <= shifted <= combined <= 1
 
 
@@ -144,7 +145,9 @@ def test_main_uses_read_only_metadata_and_returns_unlabelled_evaluable_scores(
     assert calls.count("checksum_verified_fetch") == 8
     assert calls[:2] == ["read_only", "rollback"]
     assert "dispose" in calls
-    evaluated = evaluate_labeled_pair_scores(output["unlabelled_pair_score_report"], [])
+    evaluated: dict[str, Any] = evaluate_labeled_pair_scores(
+        output["unlabelled_pair_score_report"], [],
+    )
     assert evaluated["unadjudicated_pairs"] == 4
     assert evaluated["sample_confusion"]["best_rate_offset_score"][
         "sample_false_positive_fraction"

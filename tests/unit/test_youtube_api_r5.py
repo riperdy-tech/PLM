@@ -23,6 +23,7 @@ from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.execution import ExecutionSettings
 from plm_platform.testing.mock_outcomes import load_mock_outcome_model
+from sqlalchemy.orm import Session
 from youtube_publishing.analytics import MockYouTubeAnalytics
 from youtube_publishing.api.app import create_app
 from youtube_publishing.client.mock import MockYouTubeClient
@@ -50,7 +51,7 @@ def _app(*, client: Any = None, execution: ExecutionSettings | None = None,
          analytics: bool = True) -> TestClient:
     engine = create_youtube_engine(static_pool=True)
 
-    def session_factory():
+    def session_factory() -> Session:
         from sqlalchemy.orm import sessionmaker
 
         return sessionmaker(bind=engine)()
@@ -126,8 +127,12 @@ def test_a_real_publish_fetches_the_package_bytes_and_sees_a_grant_added_later(
     while the service runs (the dashboard's approval) gets past the authorization check
     (here the next gate, the unconfigured budget ledger, refuses instead)."""
     fetched: list[str] = []
-    monkeypatch.setattr("youtube_publishing.api.app.artifact_bytes",
-                        lambda uri, checksum: fetched.append(uri) or b"bytes")
+
+    def artifact_bytes(uri: str, checksum: str) -> bytes:
+        fetched.append(uri)
+        return b"bytes"
+
+    monkeypatch.setattr("youtube_publishing.api.app.artifact_bytes", artifact_bytes)
     grants = tmp_path / "write-authorizations.json"
     grants.write_text("[]", encoding="utf-8")
     monkeypatch.setenv("PLM_WRITE_AUTHORIZATIONS_FILE", str(grants))
@@ -205,7 +210,7 @@ def test_a_repeated_publish_of_a_published_package_needs_no_media_bytes(
     client = _app(client=switching)
     first = _publish(client)
     assert first.status_code == 200, first.text
-    switching.provider_mode = ProviderMode.REAL  # type: ignore[misc]  # the real client now
+    switching.provider_mode = ProviderMode.REAL  # the real client now
     replay = _publish(client)
     assert replay.status_code == 200, replay.text
     assert replay.json()["youtube_video_id"] == first.json()["youtube_video_id"]

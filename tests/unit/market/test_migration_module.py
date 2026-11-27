@@ -1,4 +1,5 @@
 import importlib.util
+from types import ModuleType
 
 from market_intelligence.storage.models import MARKET_TABLES
 
@@ -19,16 +20,18 @@ MIGRATION_0005 = (
 )
 
 
-def _load():
+def _load() -> ModuleType:
     spec = importlib.util.spec_from_file_location("market_0002", MIGRATION)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 
 
-def _load_0003():
+def _load_0003() -> ModuleType:
     spec = importlib.util.spec_from_file_location("market_0003", MIGRATION_0003)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -66,8 +69,9 @@ def test_revision_0003_upgrade_and_downgrade_are_callable() -> None:
     assert callable(module.upgrade) and callable(module.downgrade)
 
 
-def _load_0004():
+def _load_0004() -> ModuleType:
     spec = importlib.util.spec_from_file_location("market_0004", MIGRATION_0004)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -87,8 +91,9 @@ def test_revision_0004_upgrade_and_downgrade_are_callable() -> None:
     assert callable(module.upgrade) and callable(module.downgrade)
 
 
-def _load_0005():
+def _load_0005() -> ModuleType:
     spec = importlib.util.spec_from_file_location("market_0005", MIGRATION_0005)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -114,8 +119,9 @@ MIGRATION_0006 = (
 )
 
 
-def _load_0006():
+def _load_0006() -> ModuleType:
     spec = importlib.util.spec_from_file_location("market_0006", MIGRATION_0006)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

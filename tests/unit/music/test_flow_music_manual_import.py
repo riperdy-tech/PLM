@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from music_factory.api.events import (
     FLOW_MUSIC_HUMAN_CONTRIBUTION,
     build_candidate_ready_event,
@@ -146,5 +147,8 @@ def test_the_rights_texts_fit_the_rights_table(tmp_path: Path, make: Any) -> Non
     assert terms is not None
     for field in ("basis", "license_reference", "plan_or_tier", "account_identity_ref",
                   "terms_version"):
-        limit = rights_snapshots_table.c[field].type.length
+        column_type = rights_snapshots_table.c[field].type
+        assert isinstance(column_type, sa.String)
+        limit = column_type.length
+        assert limit is not None
         assert len(getattr(terms, field)) <= limit, (field, limit)

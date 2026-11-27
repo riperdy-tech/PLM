@@ -8,14 +8,19 @@ and never needs a ``.env`` file. (The against-the-stack green path lives in
 
 from __future__ import annotations
 
+import shutil
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from alembic import command as alembic_command
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from plm_platform import cli
 from plm_platform.cli import NOT_IMPLEMENTED_EXIT_CODE, PHASES_BY_GROUP, Check, app
+from plm_platform.config import SettingsError
 from sqlalchemy.engine import make_url
 from typer.testing import CliRunner
 
@@ -155,18 +160,18 @@ def test_doctor_warns_when_the_disk_with_the_stack_runs_low(
     """Renders and WAV masters live on this disk (review 2026-11-26, #55): a long render
     needs several GB, so doctor fails the row below the threshold."""
     gib = 1024 ** 3
-    monkeypatch.setattr(cli.shutil, "disk_usage",
+    monkeypatch.setattr(shutil, "disk_usage",
                         lambda _: SimpleNamespace(total=500 * gib, used=495 * gib, free=5 * gib))
     low = cli._disk_check(tmp_path)
     assert low.name == "disk" and not low.passed
     assert "5.0 GiB free" in low.detail and "below" in low.detail
-    monkeypatch.setattr(cli.shutil, "disk_usage",
+    monkeypatch.setattr(shutil, "disk_usage",
                         lambda _: SimpleNamespace(total=500 * gib, used=300 * gib, free=200 * gib))
     ok = cli._disk_check(tmp_path)
     assert ok.passed and "200.0 GiB free" in ok.detail
 
     def no_settings(**_: Any) -> None:
-        raise cli.SettingsError("not loaded in this test")
+        raise SettingsError("not loaded in this test")
 
     monkeypatch.setattr(cli, "load_settings", no_settings)  # no .env, no services
     monkeypatch.setattr(cli, "_readyz_checks", list)
@@ -270,7 +275,7 @@ def test_migrate_approved_backup_flags_run_the_rollout_alone(
     monkeypatch.setattr(
         cli, "_approved_rollout", lambda prepare, backup: calls.append((prepare, backup)),
     )
-    monkeypatch.setattr(cli.command, "upgrade", lambda *args: pytest.fail("plain upgrade ran"))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda *args: pytest.fail("plain upgrade ran"))
     assert runner.invoke(app, ["migrate", "--prepare-backup"]).exit_code == 0
     assert runner.invoke(app, ["migrate", "--approved-backup", "local_plm_x"]).exit_code == 0
     assert calls == [(True, None), (False, "local_plm_x")]
@@ -341,16 +346,16 @@ def test_migrate_preflight_prevents_unknown_branch_before_upgrade(
         connect=lambda: nullcontext(SimpleNamespace(execute=inspect_count)),
         dispose=lambda: disposed.append(True),
     )
-    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
-        cli.MigrationContext,
+        MigrationContext,
         "configure",
         lambda connection: SimpleNamespace(get_current_revision=lambda: database_revision),
     )
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, rev: upgrades.append(rev))
     result = runner.invoke(app, ["migrate"])
     assert disposed == [True]
     assert (result.exit_code == 0) is allowed
@@ -379,19 +384,19 @@ def test_migrate_refuses_installed_0039_on_shared_database_without_upgrade(
         )),
         dispose=lambda: closed.append(True),
     )
-    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
     monkeypatch.setattr(
         cli, "database_url", lambda settings: make_url(_DSN.format(port=5432, db="plm")),
     )
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
-        cli.MigrationContext, "configure",
+        MigrationContext, "configure",
         lambda connection: SimpleNamespace(
             get_current_revision=lambda: "0038_release_reviews"
         ),
     )
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, revision: upgrades.append(revision))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, revision: upgrades.append(revision))
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
     result = runner.invoke(app, ["migrate"])
     assert result.exit_code == 1
@@ -419,18 +424,18 @@ def _code_only_preflight(
         connect=lambda: nullcontext(SimpleNamespace(execute=execute)),
         dispose=lambda: None,
     )
-    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
     monkeypatch.setattr(
         cli, "database_url", lambda settings: make_url(_DSN.format(port=port, db=configured)),
     )
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
-        cli.MigrationContext, "configure",
+        MigrationContext, "configure",
         lambda connection: SimpleNamespace(get_current_revision=lambda: None),
     )
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, rev: upgrades.append(rev))
     return upgrades
 
 
@@ -492,15 +497,15 @@ def test_migrate_never_upgrades_an_unversioned_nonempty_or_unknown_database(
         connect=lambda: nullcontext(SimpleNamespace(execute=inspect_count)),
         dispose=lambda: disposed.append(True),
     )
-    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
-        cli.MigrationContext, "configure",
+        MigrationContext, "configure",
         lambda connection: SimpleNamespace(get_current_revision=lambda: None),
     )
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, rev: upgrades.append(rev))
     result = runner.invoke(app, ["migrate"])
     assert result.exit_code == 1
     assert "unversioned" in _output(result)
@@ -527,15 +532,15 @@ def test_migrate_refuses_failed_unversioned_catalog_read_before_alembic(
         connect=lambda: nullcontext(SimpleNamespace(execute=fail_read)),
         dispose=lambda: disposed.append(True),
     )
-    monkeypatch.setattr(cli.ScriptDirectory, "from_config", lambda config: script)
+    monkeypatch.setattr(ScriptDirectory, "from_config", lambda config: script)
     monkeypatch.setattr(cli, "load_settings", lambda **kwargs: object())
     monkeypatch.setattr(cli, "_engine", lambda settings, timeout: engine)
     monkeypatch.setattr(
-        cli.MigrationContext, "configure",
+        MigrationContext, "configure",
         lambda connection: SimpleNamespace(get_current_revision=lambda: None),
     )
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, rev: upgrades.append(rev))
     result = runner.invoke(app, ["migrate"])
     assert result.exit_code == 1
     assert "catalog inspection unavailable" in _output(result)
@@ -552,7 +557,7 @@ def test_migrate_refuses_unreachable_preflight_without_writing(
         lambda config: (_ for _ in ()).throw(RuntimeError("preflight failed")),
     )
     monkeypatch.setattr(cli, "_describe_for_cli", lambda exc: str(exc))
-    monkeypatch.setattr(cli.command, "upgrade", lambda config, rev: upgrades.append(rev))
+    monkeypatch.setattr(alembic_command, "upgrade", lambda config, rev: upgrades.append(rev))
     result = runner.invoke(app, ["migrate"])
     assert result.exit_code == 1
     assert "preflight failed" in _output(result)
@@ -567,7 +572,7 @@ def test_migrate_runs_the_alembic_chain_at_the_checkout_config(
     def fake_upgrade(config: Any, revision: str) -> None:
         calls.append((config.config_file_name, revision))
 
-    monkeypatch.setattr(cli.command, "upgrade", fake_upgrade)
+    monkeypatch.setattr(alembic_command, "upgrade", fake_upgrade)
     monkeypatch.setattr(cli, "_migration_preflight", lambda config: None)
     first = runner.invoke(app, ["migrate"])
     second = runner.invoke(app, ["migrate", "0001_baseline"])
@@ -583,7 +588,7 @@ def test_migrate_failure_is_reported_without_a_traceback(
     def fake_upgrade(config: Any, revision: str) -> None:
         raise RuntimeError("connection refused (simulated)")
 
-    monkeypatch.setattr(cli.command, "upgrade", fake_upgrade)
+    monkeypatch.setattr(alembic_command, "upgrade", fake_upgrade)
     monkeypatch.setattr(cli, "_migration_preflight", lambda config: None)
     result = runner.invoke(app, ["migrate"])
     output = _output(result)

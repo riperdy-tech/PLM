@@ -6,6 +6,7 @@ what a hermetic suite can pin is that every missing precondition returns the nam
 `blocked: …` reason and that the CLI turns it into `BLOCKED_EXIT_CODE`.
 """
 
+import pytest
 from autonomous_ar.acceptance.production_smoke import run_production_smoke
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from typer.testing import CliRunner
@@ -17,14 +18,14 @@ MINIMAL_ENV = {
 }
 
 
-def test_without_a_service_token_the_smoke_is_blocked_with_that_exact_reason(monkeypatch) -> None:
+def test_without_a_service_token_the_smoke_is_blocked_with_that_exact_reason(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     reason = run_production_smoke()
     assert reason == "blocked: pending P1 service token (PLM_SERVICE_TOKEN)"
 
 
-def test_with_a_token_but_a_dead_p1_the_reason_names_the_p1_failure(monkeypatch) -> None:
+def test_with_a_token_but_a_dead_p1_the_reason_names_the_p1_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("PLM_SERVICE_TOKEN", "t")
@@ -32,7 +33,7 @@ def test_with_a_token_but_a_dead_p1_the_reason_names_the_p1_failure(monkeypatch)
     assert reason is not None and reason.startswith("blocked: P1 unreachable")
 
 
-def test_cli_exits_three_with_the_reason_on_stderr(monkeypatch) -> None:
+def test_cli_exits_three_with_the_reason_on_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     result = CliRunner().invoke(app, ["ar", "smoke"])

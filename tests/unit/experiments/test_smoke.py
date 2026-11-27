@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from experiments.acceptance.smoke import run_smoke_test
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from sqlalchemy.orm import sessionmaker
@@ -22,7 +23,7 @@ MINIMAL_ENV = {
 }
 
 
-def test_smoke_blocked_without_service_token(monkeypatch) -> None:
+def test_smoke_blocked_without_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("PLM_SERVICE_TOKEN", raising=False)
@@ -31,7 +32,7 @@ def test_smoke_blocked_without_service_token(monkeypatch) -> None:
     assert reason == "blocked: pending experiments service token (PLM_SERVICE_TOKEN)"
 
 
-def test_cli_smoke_exits_code_three_when_blocked(monkeypatch) -> None:
+def test_cli_smoke_exits_code_three_when_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("PLM_SERVICE_TOKEN", raising=False)
@@ -41,7 +42,7 @@ def test_cli_smoke_exits_code_three_when_blocked(monkeypatch) -> None:
     assert "blocked: pending experiments service token" in result.output
 
 
-def test_smoke_blocked_when_database_unreachable(monkeypatch) -> None:
+def test_smoke_blocked_when_database_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("PLM_SERVICE_TOKEN", "valid-token")
@@ -55,7 +56,7 @@ def test_smoke_blocked_when_database_unreachable(monkeypatch) -> None:
         assert reason.startswith("blocked: database unreachable")
 
 
-def test_smoke_successful_execution(monkeypatch) -> None:
+def test_smoke_successful_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in MINIMAL_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("PLM_SERVICE_TOKEN", "valid-token")

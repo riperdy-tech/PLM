@@ -37,7 +37,7 @@ from media_factory.metadata.packaging import (
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
 from media_factory.visuals.worlds import WORLDS
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from tests.support.media_backend import InMemoryArtifactStore
 
@@ -100,10 +100,12 @@ def test_thumbnail_title_fits_readably_even_when_very_long(
         font, lines = _fit(draw, title, width, start, minimum=minimum)
         assert len(lines) <= 3
         assert lines
+        assert isinstance(font, ImageFont.FreeTypeFont)
         assert font.size >= minimum
         assert any(line.endswith("…") for line in lines)
         assert all(draw.textlength(line, font=font) <= width for line in lines)
         again = _fit(draw, title, width, start, minimum=minimum)
+        assert isinstance(again[0], ImageFont.FreeTypeFont)
         assert (font.size, lines) == (again[0].size, again[1])
 
 

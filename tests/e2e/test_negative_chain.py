@@ -29,12 +29,12 @@ from distribution.identifiers.allocator import allocate_isrc
 from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
 from media_factory.rendering.assembler import assemble_media_package
 from media_factory.visuals.planner import BrandProfile
-from plm_contracts import GateDisposition
 from plm_contracts.money import Money
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
+from quality_gate.domain.enums import GateDisposition
 from quality_gate.gate.manifest import build_release_manifest
 from sqlalchemy.orm import Session
 
@@ -165,20 +165,26 @@ def test_p8_duplicate_submission_is_strictly_idempotent(distribution_db: Session
         allocate_isrc=lambda key: allocate_isrc(distribution_db, key, now=now),
         now=now,
     )
-    identity = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
+    lineage, media_package_id = sample_lineage(), "mpkg_test_01"
 
     client = MockDistributorClient(clock=FixedClock(NOW))
     engine = DistributionEngine(client)
 
     # First submission succeeds
-    sub1 = engine.submit_release(distribution_db, pkg, artist=artist, now=NOW, **identity)
+    sub1 = engine.submit_release(
+        distribution_db, pkg, artist=artist, now=NOW,
+        lineage=lineage, media_package_id=media_package_id,
+    )
     assert sub1.is_success
     assert not sub1.is_duplicate
     first_release_id = sub1.release.release_id
     assert len(client.submitted_packages) == 1
 
     # Second submission with exact same package / fingerprint
-    sub2 = engine.submit_release(distribution_db, pkg, artist=artist, now=NOW, **identity)
+    sub2 = engine.submit_release(
+        distribution_db, pkg, artist=artist, now=NOW,
+        lineage=lineage, media_package_id=media_package_id,
+    )
     assert sub2.is_success
     assert sub2.is_duplicate
     assert sub2.release.release_id == first_release_id

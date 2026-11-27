@@ -16,7 +16,9 @@ from analytics.projection.candidate_performance import (
 )
 
 
-def _report(start: str, end: str, day: date):
+def _report(
+    start: str, end: str, day: date,
+) -> tuple[AuthenticatedReachReport, ReachReportVersion]:
     beginning = datetime.fromisoformat(start)
     ending = datetime.fromisoformat(end)
     created = datetime(2026, 11, 5, tzinfo=UTC)

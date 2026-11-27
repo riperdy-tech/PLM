@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
@@ -27,7 +28,7 @@ from experiments.validation.engine import promote_to_validated, validate_experim
 from fastapi.testclient import TestClient
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.config import load_settings
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from tests.support.experiments_db import create_experiments_engine
 
@@ -52,14 +53,14 @@ def _validated(adapted, genome, *, seed: int):  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-def session():
+def session() -> Iterator[Session]:
     engine = create_experiments_engine(static_pool=True)
     factory = sessionmaker(bind=engine)
     with factory() as sess:
         yield sess
 
 
-def test_ac_01_basic_materialization(session) -> None:
+def test_ac_01_basic_materialization(session: Session) -> None:
     """AC-01: Given a valid P2 directive, P3 creates one validated experiment and one content package."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -144,7 +145,7 @@ def test_ac_05_creative_freedom() -> None:
         assert trk.bounded_preferences.bpm > 0
 
 
-def test_ac_06_duplicate_prevention(session) -> None:
+def test_ac_06_duplicate_prevention(session: Session) -> None:
     """AC-06: Repeated identical requests are detected as duplicates unless marked as replication."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -156,7 +157,7 @@ def test_ac_06_duplicate_prevention(session) -> None:
     assert gid1 == gid2
 
 
-def test_ac_07_replication(session) -> None:
+def test_ac_07_replication(session: Session) -> None:
     """AC-07: A replication creates a new experiment with lineage to the original."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -178,7 +179,7 @@ def test_ac_07_replication(session) -> None:
     assert exp_rep.content_arm_id == exp_orig.content_arm_id
 
 
-def test_ac_08_schema_versioning(session) -> None:
+def test_ac_08_schema_versioning(session: Session) -> None:
     """AC-08: Historical experiments remain readable after a new genome version is introduced."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -212,7 +213,7 @@ def test_ac_09_invalid_constraint() -> None:
     assert any("contradiction" in err.lower() or "instrumental" in err.lower() for err in report.contradictions)
 
 
-def test_ac_10_idempotency(session) -> None:
+def test_ac_10_idempotency(session: Session) -> None:
     """AC-10: Retrying creation/materialization does not duplicate child objects."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -229,7 +230,7 @@ def test_ac_10_idempotency(session) -> None:
     assert len(pkg1.track_specs) == len(pkg2.track_specs)
 
 
-def test_ac_11_failure_recovery(session) -> None:
+def test_ac_11_failure_recovery(session: Session) -> None:
     """AC-11: A failed materialization can resume without recreating already committed objects."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)
@@ -312,7 +313,7 @@ def test_ac_12_p4_handoff() -> None:
     assert p4_package["playlist_spec"]["track_count_target"] == 9
 
 
-def test_ac_13_audit_trail(session) -> None:
+def test_ac_13_audit_trail(session: Session) -> None:
     """AC-13: Every experiment can be traced back to P2 and the source market arm."""
     adapted = adapt_directive(SAMPLE_WIRE_DIRECTIVE)
     genome = build_genome_from_directive(adapted)

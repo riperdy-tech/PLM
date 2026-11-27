@@ -15,7 +15,11 @@ from media_factory.domain.enums import RenderJobStatus
 from media_factory.domain.models import RenderJob
 from media_factory.errors import MediaInfrastructureError
 from media_factory.render_reconciliation import inspect_render_claim
-from media_factory.storage.render_claims import claim_queued_render_job, queue_render_job
+from media_factory.storage.render_claims import (
+    claim_queued_render_job,
+    queue_render_job,
+    render_claim_namespace,
+)
 from plm_platform.cli import app
 from plm_platform.storage import MEDIA_PREFIX, build_key
 from typer.testing import CliRunner
@@ -110,7 +114,8 @@ def test_claim_listing_has_global_limit_across_render_and_thumbnail_roots() -> N
         with pytest.raises(ValueError, match="limit"):
             store.list_claim_objects(
                 brand_id="brand_01", media_package_id="package_01",
-                claim_namespace=NAMESPACE, limit=invalid,
+                # deliberately not a valid int: the bound is the code under test
+                claim_namespace=NAMESPACE, limit=invalid,  # type: ignore[arg-type]
             )
     for bad in ("../brand_02", "brand_01/extra", " "):
         with pytest.raises(ValueError):
@@ -285,7 +290,7 @@ def test_complete_listing_is_recorded_as_inventory_evidence_but_truncated_is_not
         # SQLite drops the timezone; serve the aware row the way PostgreSQL does.
         monkeypatch.setattr(render_reconciliation, "get_render_job", lambda *_: job)
         monkeypatch.setattr(render_reconciliation, "get_media_package_by_id", lambda *_: None)
-        namespace = render_reconciliation.render_claim_namespace(
+        namespace = render_claim_namespace(
             job_id=job.id, worker_id="worker_alpha", input_manifest_hash=SHA, started_at=NOW)
         _add(fake, f"renders/brand_01/package_01/claims/{namespace}/master.mp4", b"a")
         _add(fake, f"thumbnails/brand_01/package_01/claims/{namespace}/a.png", b"b")

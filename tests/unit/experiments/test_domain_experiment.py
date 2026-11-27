@@ -120,7 +120,7 @@ def test_experiment_definition_and_immutability() -> None:
 
     # Immutability
     with pytest.raises((TypeError, ValidationError)):
-        exp.status = ExperimentStatus.COMPLETED  # type: ignore[misc]
+        exp.status = ExperimentStatus.COMPLETED
 
     # The measurement plan and budget ceiling are required facts, never defaulted.
     facts = design_facts("exp_01")

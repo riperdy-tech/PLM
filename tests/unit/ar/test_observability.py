@@ -3,6 +3,7 @@
 
 import logging
 
+import pytest
 from autonomous_ar.decisioning.cycle import CycleResult
 from autonomous_ar.domain.enums import AllocationCycleStatus
 from autonomous_ar.domain.policy import DEFAULT_POLICY
@@ -27,7 +28,8 @@ def test_counters_exist_and_increment() -> None:
     assert CONSTRAINT_REJECTIONS is not None and ARM_RETIREMENTS is not None
 
 
-def test_log_cycle_emits_one_structured_line_with_section_94_fields(caplog) -> None:
+def test_log_cycle_emits_one_structured_line_with_section_94_fields(
+        caplog: pytest.LogCaptureFixture) -> None:
     result = CycleResult(cycle_id="c-1", status=AllocationCycleStatus.COMPLETED,
                          directives=(), rejected=(), warnings=(), replay=False)
     with caplog.at_level(logging.INFO):
@@ -35,12 +37,13 @@ def test_log_cycle_emits_one_structured_line_with_section_94_fields(caplog) -> N
                   p1_snapshot_time=None, runtime_ms=12)
     record = next(record for record in caplog.records
                   if "allocation cycle" in record.getMessage())
-    assert record.cycle_id == "c-1"
-    assert record.brand_id == "longform_signal"
-    assert record.policy_version == "p2-v1"
-    assert record.runtime_ms == 12
-    assert record.selected_ids == []
-    assert record.allocation_type_by_arm == {}
+    fields = vars(record)  # the `extra=` fields the logger attached
+    assert fields["cycle_id"] == "c-1"
+    assert fields["brand_id"] == "longform_signal"
+    assert fields["policy_version"] == "p2-v1"
+    assert fields["runtime_ms"] == 12
+    assert fields["selected_ids"] == []
+    assert fields["allocation_type_by_arm"] == {}
 
 
 def test_alert_codes_fire_on_the_documented_conditions() -> None:
@@ -66,9 +69,10 @@ def test_all_selected_one_cluster_needs_the_cluster_coordinate() -> None:
     assert codes == ()
 
 
-def test_emit_alert_logs_at_warning_and_carries_the_code(caplog) -> None:
+def test_emit_alert_logs_at_warning_and_carries_the_code(
+        caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         emit_alert("STALE_P1_DATA", brand_id="longform_signal", detail="cycle c-1")
     record = next(record for record in caplog.records if record.levelno == logging.WARNING)
-    assert record.alert_code == "STALE_P1_DATA"
+    assert vars(record)["alert_code"] == "STALE_P1_DATA"
     assert "STALE_P1_DATA" in record.getMessage()

@@ -18,6 +18,7 @@ from music_factory.storage.models import (
     rights_snapshots_table,
 )
 from plm_contracts.seams.c3 import TrackSpecPayload
+from sqlalchemy.orm import Session
 
 from tests.support.fake_minio import FakeMinio
 from tests.support.music_db import create_music_engine, music_session
@@ -73,7 +74,7 @@ def _make_client(
     settings = load_music_factory_settings(platform=platform)
     db_engine = engine if engine is not None else create_music_engine(static_pool=True)
 
-    def session_factory():
+    def session_factory() -> Session:
         return music_session(db_engine)
 
     # The production MinIO store over an in-process stand-in for the MinIO client (R4).

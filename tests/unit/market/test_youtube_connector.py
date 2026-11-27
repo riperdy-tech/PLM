@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from random import Random
+from typing import Any
 
 import pytest
 from market_intelligence.collection.rate_limit import (
@@ -23,15 +24,18 @@ from market_intelligence.connectors.youtube import (
 from market_intelligence.domain.enums import ConnectorErrorClass
 from plm_platform.config import Secret
 
+from tests.support.http import MockHTTP
+
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
-def load(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def load(name: str) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    return data
 
 
-def connector(mock_http) -> YouTubeDataAPIConnector:
+def connector(mock_http: MockHTTP) -> YouTubeDataAPIConnector:
     return YouTubeDataAPIConnector(
         client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
         credentials=YouTubeCredentials(api_key=Secret("test-key")),
@@ -41,7 +45,7 @@ def connector(mock_http) -> YouTubeDataAPIConnector:
     )
 
 
-def test_search_sends_the_documented_request_and_returns_raw_objects(mock_http) -> None:
+def test_search_sends_the_documented_request_and_returns_raw_objects(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json(load("search_lofi_p1.json"))
     result = connector(mock_http).search_videos("lofi", max_results=2)
     assert [o.provider_object_id for o in result.objects] == ["vid00000001", "vid00000002"]
@@ -56,7 +60,7 @@ def test_search_sends_the_documented_request_and_returns_raw_objects(mock_http) 
     assert hits[1].channel_title == "StudyLoops"
 
 
-def test_search_sends_region_and_language_only_when_given(mock_http) -> None:
+def test_search_sends_region_and_language_only_when_given(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json(load("search_lofi_p1.json")).enqueue_json(load("search_lofi_p1.json"))
     active = connector(mock_http)
     biased = active.search_videos("coding music", region_code="US", relevance_language="en")
@@ -67,7 +71,7 @@ def test_search_sends_region_and_language_only_when_given(mock_http) -> None:
     assert biased.request_context_hash != plain.request_context_hash
 
 
-def test_pagination_follows_next_page_token_and_respects_max_pages(mock_http) -> None:
+def test_pagination_follows_next_page_token_and_respects_max_pages(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json(load("search_lofi_p1.json")).enqueue_json(load("search_lofi_p2.json"))
     pages = list(connector(mock_http).iter_search_videos("lofi", max_results=2, max_pages=2))
     assert len(pages) == 2
@@ -75,7 +79,7 @@ def test_pagination_follows_next_page_token_and_respects_max_pages(mock_http) ->
     assert sum(p.quota_units for p in pages) == 2 * SEARCH_QUOTA_UNITS
 
 
-def test_search_hits_absent_fields_stay_none_never_empty_strings(mock_http) -> None:
+def test_search_hits_absent_fields_stay_none_never_empty_strings(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json({
         "items": [{"id": {"kind": "youtube#video", "videoId": "vid00000001"},
                    "snippet": {}}],
@@ -89,7 +93,7 @@ def test_search_hits_absent_fields_stay_none_never_empty_strings(mock_http) -> N
     assert hit.channel_title is None
 
 
-def test_fetch_videos_refuses_more_ids_than_the_documented_batch_limit(mock_http) -> None:
+def test_fetch_videos_refuses_more_ids_than_the_documented_batch_limit(mock_http: MockHTTP) -> None:
     too_many = [f"vid{index:08d}" for index in range(51)]
     with pytest.raises(ConnectorError) as excinfo:
         connector(mock_http).fetch_videos(too_many)
@@ -97,7 +101,7 @@ def test_fetch_videos_refuses_more_ids_than_the_documented_batch_limit(mock_http
     assert mock_http.requests == ()  # refused before anything left the process
 
 
-def test_quota_exhaustion_stops_before_the_request_is_sent(mock_http) -> None:
+def test_quota_exhaustion_stops_before_the_request_is_sent(mock_http: MockHTTP) -> None:
     # The plan used limit_units=100, but its own budget semantics allow a call whose
     # cost equals the remaining budget, so a 100-unit budget affords one search.list.
     # Exhaustion needs a budget below the operation's cost.
@@ -120,7 +124,7 @@ def test_iso8601_durations_are_parsed_and_unparseable_values_are_none() -> None:
     assert parse_iso8601_duration("P1D") is None  # day-granularity is not a video duration
 
 
-def test_video_hydration_maps_counts_and_durations_without_inventing_missing_values(mock_http) -> None:
+def test_video_hydration_maps_counts_and_durations_without_inventing_missing_values(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json(load("videos_lofi_batch.json"))
     result = connector(mock_http).fetch_videos(["vid00000001", "vid00000002"])
     assert result.quota_units == LIST_QUOTA_UNITS
@@ -132,7 +136,7 @@ def test_video_hydration_maps_counts_and_durations_without_inventing_missing_val
     assert stats["vid00000002"].like_count == 210
 
 
-def test_channel_hydration_keeps_hidden_subscriber_counts_unknown(mock_http) -> None:
+def test_channel_hydration_keeps_hidden_subscriber_counts_unknown(mock_http: MockHTTP) -> None:
     mock_http.enqueue_json(load("channels_lofi_batch.json"))
     result = connector(mock_http).fetch_channels(["UCaaaaaaaaaaaaaaaaaaaaaa",
                                                   "UCbbbbbbbbbbbbbbbbbbbbbb"])
@@ -142,7 +146,7 @@ def test_channel_hydration_keeps_hidden_subscriber_counts_unknown(mock_http) -> 
     assert stats["UCaaaaaaaaaaaaaaaaaaaaaa"].country == "KR"
 
 
-def test_a_5xx_is_retried_then_succeeds(mock_http) -> None:
+def test_a_5xx_is_retried_then_succeeds(mock_http: MockHTTP) -> None:
     mock_http.enqueue_server_error(status=503).enqueue_json(load("videos_lofi_batch.json"))
     active = YouTubeDataAPIConnector(
         client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
@@ -154,7 +158,7 @@ def test_a_5xx_is_retried_then_succeeds(mock_http) -> None:
     assert len(mock_http.requests) == 2
 
 
-def test_every_billed_attempt_is_recorded_in_the_quota_ledger(mock_http) -> None:
+def test_every_billed_attempt_is_recorded_in_the_quota_ledger(mock_http: MockHTTP) -> None:
     mock_http.enqueue_server_error(status=503).enqueue_server_error(status=503)
     mock_http.enqueue_json(load("search_lofi_p1.json"))
     quota = QuotaBudget(limit_units=1000)
@@ -171,7 +175,7 @@ def test_every_billed_attempt_is_recorded_in_the_quota_ledger(mock_http) -> None
     assert active.quota_units_used == 3 * SEARCH_QUOTA_UNITS
 
 
-def test_a_call_that_never_succeeds_still_records_every_billed_attempt(mock_http) -> None:
+def test_a_call_that_never_succeeds_still_records_every_billed_attempt(mock_http: MockHTTP) -> None:
     mock_http.enqueue_server_error().enqueue_server_error().enqueue_server_error()
     quota = QuotaBudget(limit_units=1000)
     active = YouTubeDataAPIConnector(
@@ -187,7 +191,7 @@ def test_a_call_that_never_succeeds_still_records_every_billed_attempt(mock_http
     assert active.quota_units_used == 3 * SEARCH_QUOTA_UNITS
 
 
-def test_an_attempt_with_no_provider_response_is_refunded(mock_http) -> None:
+def test_an_attempt_with_no_provider_response_is_refunded(mock_http: MockHTTP) -> None:
     mock_http.enqueue_timeout()
     mock_http.enqueue_server_error(status=503)
     mock_http.enqueue_json(load("videos_lofi_batch.json"))
@@ -207,7 +211,7 @@ def test_an_attempt_with_no_provider_response_is_refunded(mock_http) -> None:
     assert active.quota_units_used == 2 * LIST_QUOTA_UNITS
 
 
-def test_a_429_honours_retry_after_and_is_not_retried_forever(mock_http) -> None:
+def test_a_429_honours_retry_after_and_is_not_retried_forever(mock_http: MockHTTP) -> None:
     mock_http.enqueue_rate_limit(retry_after="30").enqueue_json(load("channels_lofi_batch.json"))
     naps: list[float] = []
     active = YouTubeDataAPIConnector(
@@ -219,7 +223,7 @@ def test_a_429_honours_retry_after_and_is_not_retried_forever(mock_http) -> None
     assert naps == [30.0]
 
 
-def test_an_invalid_request_is_never_retried(mock_http) -> None:
+def test_an_invalid_request_is_never_retried(mock_http: MockHTTP) -> None:
     mock_http.enqueue_status(400, payload={"error": {"code": 400, "message": "bad"}})
     active = connector(mock_http)
     with pytest.raises(ConnectorError) as excinfo:
@@ -231,7 +235,7 @@ def test_an_invalid_request_is_never_retried(mock_http) -> None:
 @pytest.mark.parametrize(
     "reason", ["rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"]
 )
-def test_a_403_rate_limit_reason_is_retried_with_backoff(mock_http, reason: str) -> None:
+def test_a_403_rate_limit_reason_is_retried_with_backoff(mock_http: MockHTTP, reason: str) -> None:
     mock_http.enqueue_status(403, payload={"error": {"errors": [{"reason": reason}]}})
     mock_http.enqueue_json(load("videos_lofi_batch.json"))
     naps: list[float] = []
@@ -246,7 +250,7 @@ def test_a_403_rate_limit_reason_is_retried_with_backoff(mock_http, reason: str)
     assert naps and naps[0] > 0  # the retry waits out the backoff
 
 
-def test_a_403_rate_limit_honours_the_provider_retry_after(mock_http) -> None:
+def test_a_403_rate_limit_honours_the_provider_retry_after(mock_http: MockHTTP) -> None:
     mock_http.enqueue_status(
         403, payload={"error": {"errors": [{"reason": "rateLimitExceeded"}]}},
         headers={"Retry-After": "30"},
@@ -267,7 +271,7 @@ def test_a_403_rate_limit_honours_the_provider_retry_after(mock_http) -> None:
     {"error": {"errors": [{"reason": ""}]}},
 ])
 def test_a_403_without_a_rate_limit_reason_stays_a_permanent_auth_failure(
-    mock_http, payload: dict
+    mock_http: MockHTTP, payload: dict[str, Any]
 ) -> None:
     mock_http.enqueue_status(403, payload=payload)
     active = connector(mock_http)
@@ -278,7 +282,7 @@ def test_a_403_without_a_rate_limit_reason_stays_a_permanent_auth_failure(
     assert len(mock_http.requests) == 1
 
 
-def test_an_exhausted_provider_quota_is_permanent_not_retried(mock_http) -> None:
+def test_an_exhausted_provider_quota_is_permanent_not_retried(mock_http: MockHTTP) -> None:
     mock_http.enqueue_status(403, payload={"error": {"errors": [{"reason": "quotaExceeded"}]}})
     active = connector(mock_http)
     with pytest.raises(ConnectorError) as excinfo:
@@ -287,7 +291,7 @@ def test_an_exhausted_provider_quota_is_permanent_not_retried(mock_http) -> None
     assert len(mock_http.requests) == 1  # §27: reschedule, do not retry
 
 
-def test_a_malformed_body_is_a_parser_failure_and_a_missing_items_key_is_a_schema_change(mock_http) -> None:
+def test_a_malformed_body_is_a_parser_failure_and_a_missing_items_key_is_a_schema_change(mock_http: MockHTTP) -> None:
     mock_http.enqueue_malformed_json()
     with pytest.raises(ConnectorError) as excinfo:
         connector(mock_http).fetch_channels(["UCaaaaaaaaaaaaaaaaaaaaaa"])

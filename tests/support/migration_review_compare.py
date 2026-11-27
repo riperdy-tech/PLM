@@ -12,7 +12,7 @@ import sys
 from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from tests.support.migration_review_snapshot import _EXPECTED_MANIFEST_INDEXES
 from tests.support.migration_safety import destructive_migration_name_refusal
@@ -170,7 +170,7 @@ _REQUIRED_FIELDS = frozenset({
 })
 
 
-def _valid_digest(value: object) -> bool:
+def _valid_digest(value: object) -> TypeGuard[Mapping[str, Any]]:
     return (
         isinstance(value, Mapping)
         and type(value.get("count")) is int

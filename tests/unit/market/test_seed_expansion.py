@@ -6,6 +6,7 @@ from market_intelligence.collection.seeds import validate_candidate_seed
 from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
 from market_intelligence.normalization.canonical import text_fingerprint
 from market_intelligence.storage import repositories
+from sqlalchemy.orm import Session
 
 # `market_seed_evidence.raw_observation_id` is a Uuid column: it must round-trip a
 # real uuid string (the bind/result processors strip and re-hyphenate).
@@ -32,7 +33,7 @@ def test_validation_accepts_a_good_term_and_rejects_with_reasons() -> None:
     assert low.accepted is False and "confidence" in (low.reason or "")
 
 
-def test_expansion_persists_lineage_for_accepted_terms(market_session) -> None:
+def test_expansion_persists_lineage_for_accepted_terms(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -60,7 +61,7 @@ def test_expansion_persists_lineage_for_accepted_terms(market_session) -> None:
     ]
 
 
-def test_the_expansion_cap_is_enforced_with_a_reason(market_session) -> None:
+def test_the_expansion_cap_is_enforced_with_a_reason(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",

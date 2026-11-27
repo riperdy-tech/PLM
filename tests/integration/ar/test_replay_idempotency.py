@@ -11,6 +11,7 @@ keys rather than minting new ones.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -72,7 +73,7 @@ OBSERVATION = RewardObservation(
 
 
 @pytest.fixture(scope="module")
-def engine() -> sa.Engine:
+def engine() -> Iterator[sa.Engine]:
     try:
         resolved = build_engine()
         with resolved.connect() as connection:
@@ -122,7 +123,7 @@ def _write_leg(engine: sa.Engine) -> tuple[str, ...]:
             market_context={"source": "live", "as_of": NOW.isoformat()},
             selection_reason=("STRONG_POSTERIOR",), directive_version="p2-directive-v1",
             policy_version=POLICY.version, expires_at=NOW + timedelta(hours=168),
-            exploration_fraction=0.3, value_model="early-stage-proxy-v1", outcome_horizon="28d",
+            exploration_fraction=0.3, value_model="early-stage-proxy-v1", outcome_horizon=ObservationWindow.D28,
         )
         repositories.insert_directive(
             session, directive, brand_id=BRAND, status=DirectiveStatus.QUEUED, created_at=NOW

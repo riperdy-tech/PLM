@@ -93,7 +93,8 @@ def _passed_manifest(tmp: Path, candidate_id: str, *, seconds: int = 2,
         detectors=configured_detectors(),
     )
     assert result.release_manifest is not None, result.disposition
-    return json.loads(json.dumps(result.release_manifest.to_wire()))
+    wire: dict[str, Any] = json.loads(json.dumps(result.release_manifest.to_wire()))
+    return wire
 
 
 @pytest.fixture(scope="module")

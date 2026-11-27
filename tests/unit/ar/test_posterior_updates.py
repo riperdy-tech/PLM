@@ -13,6 +13,7 @@ from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
 from autonomous_ar.modeling.update import apply_pending_updates
 from autonomous_ar.storage import repositories
 from plm_contracts import ObservationWindow, Tri
+from sqlalchemy.orm import Session
 
 from tests.support.ar_db import ar_session, create_ar_engine
 from tests.support.seams import unmeasured_raw_metrics
@@ -25,7 +26,7 @@ COMPONENTS = {name: 50.0 for name in
                "cross_platform", "production_fit")}
 
 
-def _seed_arm_and_posterior(session, *, mean: float = 0.5, variance: float = 0.05) -> None:
+def _seed_arm_and_posterior(session: Session, *, mean: float = 0.5, variance: float = 0.05) -> None:
     repositories.upsert_arm_state(session, brand_id="longform_signal", arm_id="rnb-1", now=NOW)
     arm = ContentArm(arm_id="rnb-1", dimensions=ArmDimensions(genre="rnb"),
                      p1_score=60.0, p1_confidence=0.6, component_scores=dict(COMPONENTS),
@@ -110,13 +111,17 @@ def test_recency_decay_weights_older_observations_less() -> None:
         _seed_arm_and_posterior(session)
         store_result(session, _payload(observed_at=NOW), brand_id="longform_signal", now=NOW)
         apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
-        fresh_variance = repositories.load_posterior(session, "rnb-1").posterior_variance
+        fresh = repositories.load_posterior(session, "rnb-1")
+        assert fresh is not None
+        fresh_variance = fresh.posterior_variance
     with ar_session(old_engine) as session:
         _seed_arm_and_posterior(session)
         old = NOW - timedelta(days=45)  # one non-stationarity half-life
         store_result(session, _payload(observed_at=old), brand_id="longform_signal", now=NOW)
         apply_pending_updates(session, settings=SETTINGS, now=NOW, policy=DEFAULT_POLICY)
-        old_variance = repositories.load_posterior(session, "rnb-1").posterior_variance
+        stale = repositories.load_posterior(session, "rnb-1")
+        assert stale is not None
+        old_variance = stale.posterior_variance
     assert old_variance > fresh_variance, "§27: a 45-day-old observation moves the belief less"
 
 
@@ -129,6 +134,8 @@ def test_future_observations_and_unknown_arms_never_update() -> None:
         summary = apply_pending_updates(session, settings=SETTINGS, now=NOW,
                                         policy=DEFAULT_POLICY)
         assert summary.applied == 0 and summary.failed == 0
-        assert repositories.load_posterior(session, "rnb-1").update_version == 0, (
+        posterior = repositories.load_posterior(session, "rnb-1")
+        assert posterior is not None
+        assert posterior.update_version == 0, (
             "§23: an observation dated after `now` is not yet evidence"
         )

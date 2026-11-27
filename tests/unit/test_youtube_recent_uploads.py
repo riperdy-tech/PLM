@@ -1,6 +1,7 @@
 """Read-only discovery of the authenticated channel's latest uploaded videos."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -17,7 +18,7 @@ def _client() -> RealYouTubeClient:
 
 
 def _call(
-    channels: dict, playlist: dict, *, expected_channel: str | None = "UC_test",
+    channels: dict[str, Any], playlist: dict[str, Any], *, expected_channel: str | None = "UC_test",
     channel_status: int = 200, playlist_status: int = 200,
 ) -> tuple[list[dict[str, str]], list[httpx.Request]]:
     requests: list[httpx.Request] = []
@@ -73,7 +74,7 @@ def test_channel_mismatch_refused_before_opening_uploads_playlist() -> None:
     {}, {"items": []}, {"items": [{"id": "UC_test"}]},
     {"items": [{"id": "UC_test"}, {"id": "UC_other"}]},
 ])
-def test_missing_channel_or_upload_playlist_is_not_false_success(channels: dict) -> None:
+def test_missing_channel_or_upload_playlist_is_not_false_success(channels: dict[str, Any]) -> None:
     with pytest.raises(YouTubeClientError):
         _call(channels, PLAYLIST)
 
@@ -88,7 +89,7 @@ def test_empty_uploads_playlist_is_real_empty_not_a_fixed_fallback() -> None:
     {"snippet": {"title": " ", "resourceId": {"videoId": "xx"}}},
     {"snippet": {"title": "Title", "resourceId": {"videoId": "xx"}}},
 ])
-def test_malformed_playlist_item_is_rejected(item: dict) -> None:
+def test_malformed_playlist_item_is_rejected(item: dict[str, Any]) -> None:
     with pytest.raises(YouTubeClientError):
         _call(CHANNELS, {"items": [item]})
 

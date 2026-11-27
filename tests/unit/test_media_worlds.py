@@ -97,6 +97,7 @@ def test_thumbnail_a_and_the_background_differ_by_world() -> None:
         top = WORLDS[name].sky_top
         expected = tuple(int(top[i:i + 2], 16) for i in (1, 3, 5))
         pixel = image.getpixel((720, 90))
+        assert isinstance(pixel, tuple)
         assert all(abs(a - b) <= 3 for a, b in zip(pixel, expected, strict=True)), name
     world = WORLDS["night_ocean"]
     background = Image.open(io.BytesIO(render_background(

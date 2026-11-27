@@ -3,6 +3,7 @@
 
 from autonomous_ar.api.app import create_app
 from autonomous_ar.config import load_ar_settings
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from plm_platform.config import load_settings
 from sqlalchemy.orm import sessionmaker
@@ -17,7 +18,7 @@ ENV_WITH_TOKEN = {
 }
 
 
-def _app(*, with_token: bool) -> object:
+def _app(*, with_token: bool) -> FastAPI:
     engine = create_ar_engine()
     factory = sessionmaker(bind=engine)
     env = dict(ENV_WITH_TOKEN)

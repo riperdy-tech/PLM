@@ -10,6 +10,7 @@ import importlib.util
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -104,7 +105,7 @@ def test_migration_0031_matches_the_runtime_tables() -> None:
     downgrade removes them (drift guard on SQLite)."""
     spec = importlib.util.spec_from_file_location("qa_0031_detector_catalog", MIGRATION)
     assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
+    module: Any = importlib.util.module_from_spec(spec)  # a revision script: dynamic attributes
     spec.loader.exec_module(module)
     assert module.revision == "0031_qa_detector_catalog"
     assert module.down_revision == "0030_ops_pipeline_runs"

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import pytest
@@ -36,6 +36,7 @@ from market_intelligence.domain.enums import (
 from market_intelligence.domain.value_objects import TaxonomyProfile
 from market_intelligence.features.arm_features import compute_arm_features
 from market_intelligence.normalization.canonical import normalize_text, text_fingerprint
+from market_intelligence.normalization.youtube import NormalizedObservationDraft
 from market_intelligence.scoring.opportunity import persist_scores, score_all_arms
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import raw_observations
@@ -58,7 +59,7 @@ ARMS = (PRIMARY_ARM_ID, SECONDARY_ARM_ID, MID_ARM_ID)
 
 
 @pytest.fixture(scope="module")
-def engine() -> sa.Engine:
+def engine() -> Iterator[sa.Engine]:
     try:
         resolved = build_engine()
         with resolved.connect() as connection:
@@ -131,10 +132,14 @@ def _store_scenario(engine: sa.Engine, settings: MarketSettings) -> dict[str, li
                         ))
                 except sa.exc.IntegrityError:
                     pass  # a replay stores the identical raw row; the idempotent case
+                # the scenario's observation carries every draft field; build the draft the
+                # repository takes from it, re-keyed to the stored entity and raw row
+                draft = NormalizedObservationDraft(**{
+                    f.name: getattr(observation, f.name)
+                    for f in dataclasses.fields(NormalizedObservationDraft)
+                } | {"entity_id": entity_id, "source_id": source_id, "raw_observation_id": raw_id})
                 observation_id, _created = repositories.insert_normalized_observation(
-                    session, dataclasses.replace(observation, entity_id=entity_id,
-                                                 source_id=source_id,
-                                                 raw_observation_id=raw_id))
+                    session, draft)
                 assert observation_id
                 entity_ids[arm].append(entity_id)
         session.commit()

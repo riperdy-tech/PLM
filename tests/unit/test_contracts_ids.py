@@ -35,7 +35,7 @@ class TestBrandId:
 
     def test_brand_id_is_first_class_and_required(self) -> None:
         with pytest.raises(ValidationError):
-            _Arm(arm_id="arm_1")
+            _Arm(arm_id="arm_1")  # type: ignore[call-arg]  # brand_id omitted on purpose
 
     def test_brand_scoped_models_round_trip(self) -> None:
         arm = _Arm(brand_id="longform_signal", arm_id="arm_1")

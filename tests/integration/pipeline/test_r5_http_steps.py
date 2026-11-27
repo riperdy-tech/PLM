@@ -61,7 +61,6 @@ from autonomous_ar.storage.models import (
     ar_reward_observation,
 )
 from autonomous_ar.storage.repositories import upsert_arm_state
-from plm_contracts import GateDisposition
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
 from plm_platform.exceptions import ExceptionQueue
 from plm_platform.ledger import BudgetLedger
@@ -78,6 +77,7 @@ from plm_platform.pipeline.types import StepRequest, WriteCostsRequest
 from plm_platform.service_urls import LOOPBACK_HOST, service_urls
 from plm_platform.storage import MUSIC_PREFIX, build_client, put_content, to_uri
 from plm_platform.temporal import Phase
+from quality_gate.domain.enums import GateDisposition
 from quality_gate.gate.manifest import build_release_manifest
 from quality_gate.storage.repositories import insert_release_manifest
 from sqlalchemy.orm import Session, sessionmaker

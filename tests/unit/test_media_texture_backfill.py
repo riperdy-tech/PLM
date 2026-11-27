@@ -25,6 +25,7 @@ from media_factory.storage.repositories import (
     list_catalog_albums,
 )
 from media_factory.texture_backfill import backfill_package_texture, backfill_packages_texture
+from sqlalchemy.orm import Session
 
 from tests.support.media_audio import synth_track
 from tests.support.media_backend import InMemoryArtifactStore, synth_specs
@@ -35,9 +36,9 @@ NOW = datetime(2026, 10, 23, tzinfo=UTC)
 
 
 def _legacy(
-    session, store: InMemoryArtifactStore, *,
+    session: Session, store: InMemoryArtifactStore, *,
     corrupt_track: bool = False, suffix: str = "",
-):
+) -> MediaPackage:
     playlist = PlaylistSession.create(
         "release_legacy" + suffix, "exp_legacy" + suffix,
         "arm_legacy" + suffix, "brand_neon", 180, now=NOW,
@@ -136,7 +137,9 @@ def test_apply_is_idempotent_and_preserves_qa_and_c6_facts() -> None:
             session, store, pkg.media_package_id, apply=True, now=NOW,
         )
         assert again.status == "already_present" and not again.applied
-        assert get_media_package_by_id(session, pkg.media_package_id).render_report == after.render_report
+        stored = get_media_package_by_id(session, pkg.media_package_id)
+        assert stored is not None
+        assert stored.render_report == after.render_report
 
 
 def test_corrupt_source_bytes_hold_and_do_not_modify_legacy_report() -> None:
@@ -438,7 +441,9 @@ def test_batch_backfill_isolates_success_refusal_and_dry_run() -> None:
             first = _legacy(seed, store, suffix="_first")
             second = _legacy(seed, store, suffix="_second")
             seed.commit()
-        factory = lambda: media_session(engine)
+        def factory() -> Session:
+            return media_session(engine)
+
 
         inspected = backfill_packages_texture(
             factory, store, [first.media_package_id, "missing", second.media_package_id],
@@ -481,7 +486,9 @@ def test_batch_rejects_duplicates_and_unbounded_selection_before_writes() -> Non
     engine = create_media_engine(static_pool=True)
     store = InMemoryArtifactStore()
     try:
-        factory = lambda: media_session(engine)
+        def factory() -> Session:
+            return media_session(engine)
+
         with pytest.raises(ValueError, match="duplicate"):
             backfill_packages_texture(
                 factory, store, ["same", "same"], apply=True, now=NOW,

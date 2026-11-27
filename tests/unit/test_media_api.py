@@ -473,12 +473,17 @@ def test_actual_p6_http_failure_payload_is_refused_by_pipeline_transport(
     activity_name = step_activity_name(Step.ASSEMBLE)
     activities = build_activities(_steps(phases), Mock())
     assemble_activity = next(
-        fn for fn in activities if fn.__temporal_activity_definition.name == activity_name
+        fn for fn in activities
+        if getattr(fn, "__temporal_activity_definition").name == activity_name
     )
-    with pytest.raises(ApplicationError, match="video_audio_duration_mismatch") as raised:
-        asyncio.run(ActivityEnvironment().run(
+
+    async def run_activity() -> Any:
+        return await ActivityEnvironment().run(
             assemble_activity, pipeline_request(["c0", "c1", "c2"]),
-        ))
+        )
+
+    with pytest.raises(ApplicationError, match="video_audio_duration_mismatch") as raised:
+        asyncio.run(run_activity())
     assert raised.value.type == "ValidationFailure"
     assert raised.value.non_retryable is True
     assert raised.value.details[0]["attempt"] == 1
@@ -611,11 +616,13 @@ def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendere
     class RecordingStore(type(store)):  # type: ignore[misc]
         def fetch_verified(self, uri: str, sha256: str) -> bytes:
             events.append("fetch")
-            return super().fetch_verified(uri, sha256)
+            data: bytes = super().fetch_verified(uri, sha256)
+            return data
 
     recording = RecordingStore()
     recording.objects = store.objects
-    real_measure = assembler.measure_features
+    # the same function object the assembler imported from the features module
+    from media_factory.audio.features import measure_features as real_measure
 
     def measure(candidate_id: str, audio: bytes, policy: Any = None) -> Any:
         events.append("measure")

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TypedDict
 
 from distribution.artists.manager import get_or_create_artist
 from distribution.client.mock import MockDistributorClient
 from distribution.compiler.release_compiler import compile_canonical_release_package
 from distribution.domain.enums import ReleaseStatus
+from distribution.domain.models import ArtistProfile, CanonicalReleasePackage
 from distribution.engine import DistributionEngine
 from distribution.identifiers.allocator import allocate_isrc
+from plm_contracts.seams import ExperimentLineage
 from plm_platform.clock import FixedClock
+from sqlalchemy.orm import Session
 
 from tests.support.distribution_db import distribution_db_session
 from tests.support.seams import media_package, release_manifest, sample_lineage
@@ -18,7 +22,9 @@ from tests.support.seams import media_package, release_manifest, sample_lineage
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 
-def _create_sample_package(session, title: str = "Summer Rain", candidate: str = "cand_rain"):
+def _create_sample_package(
+    session: Session, title: str = "Summer Rain", candidate: str = "cand_rain"
+) -> tuple[CanonicalReleasePackage, ArtistProfile]:
     artist = get_or_create_artist(session, "Neon Dreamer", "brand_neon", now=NOW)
     pkg = compile_canonical_release_package(
         track_manifests=[release_manifest(candidate_id=candidate)],
@@ -37,7 +43,12 @@ def _create_sample_package(session, title: str = "Summer Rain", candidate: str =
     return pkg, artist
 
 
-IDENTITY = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
+class _Identity(TypedDict):
+    lineage: ExperimentLineage
+    media_package_id: str
+
+
+IDENTITY: _Identity = {"lineage": sample_lineage(), "media_package_id": "mpkg_test_01"}
 LATER = NOW + timedelta(hours=6)
 
 

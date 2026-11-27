@@ -42,7 +42,9 @@ class TestErrorShape:
 
     def test_extra_fields_are_refused(self) -> None:
         with pytest.raises(ValidationError):
-            ErrorShape(code="X", message="m", detail="free-form strings are not the contract")
+            ErrorShape(  # type: ignore[call-arg]  # the unknown field is the point
+                code="X", message="m", detail="free-form strings are not the contract",
+            )
 
 
 class TestEnvelope:
@@ -186,7 +188,7 @@ class TestPage:
 
     def test_cursor_is_required_even_when_null(self) -> None:
         with pytest.raises(ValidationError):
-            Page[float](items=[])
+            Page[float](items=[])  # type: ignore[call-arg]  # omitting the cursor is the point
         page = Page[float](items=[1.0, 2.0], next_cursor=None)
         assert page.next_cursor is None
         assert page.items == [1.0, 2.0]

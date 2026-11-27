@@ -25,6 +25,7 @@ from plm_contracts.seams.c7 import DistributionRecordPayload
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.testing.mock_outcomes import load_mock_outcome_model
+from sqlalchemy.orm import Session
 
 from tests.support.clearance import p5_holding
 from tests.support.distribution_db import create_distribution_engine
@@ -40,7 +41,7 @@ MODEL = load_mock_outcome_model(Path(__file__).resolve().parents[2] / "config" /
 def _client(*, statements: bool = True) -> TestClient:
     engine = create_distribution_engine(static_pool=True)
 
-    def session_factory():
+    def session_factory() -> Session:
         from sqlalchemy.orm import sessionmaker
 
         return sessionmaker(bind=engine)()

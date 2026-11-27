@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -15,8 +16,12 @@ from market_intelligence.domain.enums import (
 )
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import raw_observations
-from market_intelligence.storage.raw_store import store_raw_observation
+from market_intelligence.storage.raw_store import (
+    StoredRawObservation,
+    store_raw_observation,
+)
 from plm_platform.storage import ObjectAlreadyExistsError, StoredObject, sha256_digest
+from sqlalchemy.orm import Session
 
 # Exercises code that loads platform settings; the values are set explicitly.
 pytestmark = pytest.mark.usefixtures("platform_env")
@@ -24,7 +29,7 @@ pytestmark = pytest.mark.usefixtures("platform_env")
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
-def test_upsert_source_is_idempotent_on_the_provider_name(market_session) -> None:
+def test_upsert_source_is_idempotent_on_the_provider_name(market_session: Session) -> None:
     first = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API,
@@ -40,7 +45,7 @@ def test_upsert_source_is_idempotent_on_the_provider_name(market_session) -> Non
     assert first == second
 
 
-def test_collection_run_records_status_then_counters_and_costs(market_session) -> None:
+def test_collection_run_records_status_then_counters_and_costs(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -66,7 +71,7 @@ def test_collection_run_records_status_then_counters_and_costs(market_session) -
     assert run["finished_at"] is not None
 
 
-PAYLOAD = {"kind": "youtube#video", "id": "vid00000001",
+PAYLOAD: dict[str, Any] = {"kind": "youtube#video", "id": "vid00000001",
            "statistics": {"viewCount": "120000"}}
 CONTEXT_HASH = "a" * 64
 
@@ -78,8 +83,11 @@ class FakeObjectStore:
         self.keys: dict[str, bytes] = {}
         self.calls: list[str] = []
 
-    def __call__(self, prefix, resource_path, data, *, content_type="application/octet-stream",
-                 settings=None, client=None) -> StoredObject:
+    def __call__(
+        self, prefix: str, resource_path: str, data: bytes, *,
+        content_type: str = "application/octet-stream",
+        settings: object = None, client: object = None,
+    ) -> StoredObject:
         digest = sha256_digest(data)
         key = f"{prefix}{resource_path}/{digest}"
         self.calls.append(key)
@@ -89,7 +97,9 @@ class FakeObjectStore:
         return StoredObject(key=key, digest=digest, size=len(data))
 
 
-def _store(market_session, store, *, observed_at=FIXED_NOW):
+def _store(
+    market_session: Session, store: FakeObjectStore, *, observed_at: datetime = FIXED_NOW,
+) -> tuple[str, str, StoredRawObservation]:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -109,7 +119,7 @@ def _store(market_session, store, *, observed_at=FIXED_NOW):
     )
 
 
-def test_raw_observation_is_immutable_content_addressed_and_costed(market_session) -> None:
+def test_raw_observation_is_immutable_content_addressed_and_costed(market_session: Session) -> None:
     store = FakeObjectStore()
     _, run_id, stored = _store(market_session, store)
     assert stored.created is True
@@ -120,6 +130,7 @@ def test_raw_observation_is_immutable_content_addressed_and_costed(market_sessio
         b'{"id":"vid00000001","kind":"youtube#video","statistics":{"viewCount":"120000"}}'
     )
     run = repositories.load_run(market_session, run_id)
+    assert run is not None
     assert run["cost_storage_bytes"] == len(store.keys[store.calls[0]])
     row = market_session.execute(
         sa.text("SELECT payload_hash, request_context_hash, schema_version "
@@ -130,7 +141,7 @@ def test_raw_observation_is_immutable_content_addressed_and_costed(market_sessio
     assert row.payload_hash == stored.payload_hash
 
 
-def test_storing_the_same_observation_twice_is_idempotent(market_session) -> None:
+def test_storing_the_same_observation_twice_is_idempotent(market_session: Session) -> None:
     store = FakeObjectStore()
     _, _, first = _store(market_session, store)
     _, _, second = _store(market_session, store)
@@ -142,7 +153,7 @@ def test_storing_the_same_observation_twice_is_idempotent(market_session) -> Non
     assert rows == 1
 
 
-def test_a_later_collection_at_a_new_time_is_a_second_observation(market_session) -> None:
+def test_a_later_collection_at_a_new_time_is_a_second_observation(market_session: Session) -> None:
     store = FakeObjectStore()
     _, _, first = _store(market_session, store)
     _, _, second = _store(market_session, store,

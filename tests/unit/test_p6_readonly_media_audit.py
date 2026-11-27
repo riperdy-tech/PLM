@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from media_factory.rendering.toolchain import ProbeReport, StreamInfo
-from plm_platform.config import Env
+from plm_platform.config import Env, Settings
 
 from scripts.audit_p6_media_streams import (
     _download_verified,
@@ -93,7 +93,7 @@ def test_audit_download_is_checksum_verified_and_size_bounded(tmp_path: Path) ->
     data = b"not a real movie" * 4000
     sha = hashlib.sha256(data).hexdigest()
     uri = f"plm://local/media/test/{sha}"
-    settings = SimpleNamespace(minio_bucket="local")
+    settings = cast(Settings, SimpleNamespace(minio_bucket="local"))  # minimal stand-in
     obj = _Object(data)
     target = tmp_path / "only.mp4"
     assert _download_verified(

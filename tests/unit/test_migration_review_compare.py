@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,11 +21,11 @@ from tests.support.migration_review_compare import (
 from tests.support.migration_review_snapshot import _EXPECTED_MANIFEST_INDEXES, table_fingerprint
 
 
-def _fp(id_col: str, rows: list[dict]) -> dict[str, str | int]:
+def _fp(id_col: str, rows: list[dict[str, Any]]) -> dict[str, str | int]:
     return table_fingerprint(rows, id_column=id_col)
 
 
-def _security() -> dict:
+def _security() -> dict[str, Any]:
     return {
         table: {
             "owner_sha256": "a" * 64,
@@ -38,11 +39,11 @@ def _security() -> dict:
     }
 
 
-def _review_storage() -> dict:
+def _review_storage() -> dict[str, Any]:
     return {name: _manifest_storage() for name in ("release_reviews", "release_review_events")}
 
 
-def _access() -> dict:
+def _access() -> dict[str, Any]:
     return {
         "schema_acl_default": True,
         "schema_default_acl_entries": 0,
@@ -50,18 +51,18 @@ def _access() -> dict:
     }
 
 
-def _selection_schema() -> dict:
+def _selection_schema() -> dict[str, Any]:
     return {
         "type": "JSON", "nullable": True, "server_default": None,
         "has_computed": False, "has_identity": False,
     }
 
 
-def _manifest_schema() -> dict:
+def _manifest_schema() -> dict[str, Any]:
     return copy.deepcopy(_EXPECTED_MANIFEST_SCHEMA)
 
 
-def _manifest_integrity() -> dict:
+def _manifest_integrity() -> dict[str, Any]:
     return {
         "index_definitions": {
             name: {
@@ -76,7 +77,7 @@ def _manifest_integrity() -> dict:
     }
 
 
-def _manifest_security() -> dict:
+def _manifest_security() -> dict[str, Any]:
     return {
         "owner_sha256": "a" * 64,
         "schema_owner_sha256": "b" * 64,
@@ -91,7 +92,7 @@ def _manifest_security() -> dict:
     }
 
 
-def _manifest_storage() -> dict:
+def _manifest_storage() -> dict[str, Any]:
     return {
         "relation_kind": "r", "persistence": "p",
         "replica_identity": "d", "is_partition": False,
@@ -99,7 +100,7 @@ def _manifest_storage() -> dict:
     }
 
 
-def _cases(start: str) -> tuple[dict, dict, dict]:
+def _cases(start: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     reviews = _fp("package_id", [{"package_id": "p", "status": "approved"}])
     events = _fp("event_id", [{"event_id": "e", "package_id": "p"}])
     common = _fp("manifest_id", [
@@ -231,6 +232,7 @@ def test_review_storage_missing_evidence_is_rejected(start: str) -> None:
 
 def test_manifest_historical_reference_includes_all_29_pre_0038_columns() -> None:
     columns = _EXPECTED_MANIFEST_SCHEMA["columns"]
+    assert isinstance(columns, list)
     assert len(columns) == 29
     assert [col["name"] for col in columns] == sorted(col["name"] for col in columns)
     names = {col["name"] for col in columns}

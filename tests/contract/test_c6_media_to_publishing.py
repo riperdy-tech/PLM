@@ -87,7 +87,8 @@ def hop1() -> dict[str, Any]:
         toolchain=StandInToolchain(),
         clock=FixedClock(NOW),
     )
-    return json.loads(json.dumps(result.media_package.to_c6_payload()))
+    wire: dict[str, Any] = json.loads(json.dumps(result.media_package.to_c6_payload()))
+    return wire
 
 
 @pytest.fixture(scope="module")
@@ -102,7 +103,8 @@ def hop2(hop1: dict[str, Any]) -> dict[str, Any]:
             operating_mode=OperatingMode.DRY_RUN,
         )
     assert result.event is not None, result.error
-    return json.loads(json.dumps(result.event.to_wire()))
+    event: dict[str, Any] = json.loads(json.dumps(result.event.to_wire()))
+    return event
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:

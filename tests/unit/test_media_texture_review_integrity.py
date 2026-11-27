@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import pytest
 from media_factory.audio.texture_label_evaluation import EVALUATION, POLICY_VERSION
@@ -27,7 +28,7 @@ def _sources() -> tuple[SampleSource, ...]:
     )
 
 
-def _report() -> dict[str, object]:
+def _report() -> dict[str, Any]:
     cases = []
     scores = []
     for idx, (left, right) in enumerate(((_sources()[0], _sources()[2]),
@@ -66,7 +67,10 @@ def _report() -> dict[str, object]:
     }
 
 
-def _bind(report: object, sources: tuple[SampleSource, ...] | None = None) -> object:
+Bound = tuple[tuple[SampleSource, SampleSource, tuple[float, float, float]], ...]
+
+
+def _bind(report: object, sources: tuple[SampleSource, ...] | None = None) -> Bound:
     return bind_review_queue_sources(
         report, sources if sources is not None else _sources(),
         selected_package_ids=("p1", "p2"),
@@ -103,7 +107,8 @@ def test_exact_archived_queue_binds_without_authenticating_claimed_scores() -> N
     lambda r: r.update(source_metadata_transaction="not_read_only"),
     lambda r: r["review_queue"].append(dict(r["review_queue"][0])),
 ])
-def test_tampered_queue_or_score_does_not_bind(mutation: object) -> None:
+def test_tampered_queue_or_score_does_not_bind(
+        mutation: Callable[[dict[str, Any]], object]) -> None:
     report = deepcopy(_report())
     mutation(report)
     with pytest.raises((ValueError, TypeError)):
@@ -120,7 +125,7 @@ def test_changed_archive_source_metadata_refuses() -> None:
         _bind(_report(), moved)
 
 
-def _selection_fixture() -> tuple[dict[str, object], tuple[MeasuredSample, ...]]:
+def _selection_fixture() -> tuple[dict[str, Any], tuple[MeasuredSample, ...]]:
     names = _sources()
     measured = []
     for index, source in enumerate(names):

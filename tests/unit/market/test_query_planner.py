@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from market_intelligence.collection.query_planner import (
     QueryState,
@@ -13,8 +14,8 @@ NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()
 
 
-def _state(**overrides) -> QueryState:
-    base = {
+def _state(**overrides: Any) -> QueryState:
+    base: dict[str, Any] = {
         "query_id": "q1", "query_fingerprint": "f" * 8, "query_text": "lofi",
         "priority": 50, "seed_group": "bootstrap", "last_run_at": None,
         "next_run_at": None, "active": True,

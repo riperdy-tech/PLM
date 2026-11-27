@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from media_factory.audio.repetition_probe import POLICY_VERSION, probe_song_repetition
 
 from scripts import probe_song_repetition as cli

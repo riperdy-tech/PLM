@@ -477,7 +477,12 @@ def test_an_approval_waits_until_every_package_is_ready(tmp_path: Path) -> None:
 def test_text_and_thumbnail_changes_apply_now_and_keep_the_review(tmp_path: Path) -> None:
     studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
     edits: list[tuple[str, dict[str, Any]]] = []
-    studio.edit = lambda pid, changes: edits.append((pid, changes)) or {"media_package_id": pid}
+
+    def edit(pid: str, changes: dict[str, Any]) -> dict[str, Any]:
+        edits.append((pid, changes))
+        return {"media_package_id": pid}
+
+    studio.edit = edit
     studio.edit_text("c5", PKG, title="New title", description=None, tags=["a"],
                      note="shorter title")
     studio.choose_thumbnail("c5", PKG, "art_b")
@@ -496,7 +501,12 @@ def test_new_art_sends_the_package_back_to_the_thumbnail_step_with_the_note(
         tmp_path: Path) -> None:
     studio, actions = _studio(tmp_path, [APPROVAL], status="ready_for_publish")
     reopened: list[str] = []
-    studio.reopen = lambda pid: reopened.append(pid) or {"status": "awaiting_thumbnail_art"}
+
+    def reopen(pid: str) -> dict[str, Any]:
+        reopened.append(pid)
+        return {"status": "awaiting_thumbnail_art"}
+
+    studio.reopen = reopen
     studio.request_new_art("c5", PKG, "warmer light, bigger text")
     assert reopened == [PKG] and actions.calls == []
     assert studio.request_new_art("c5", PKG, "  ")["note"]["note"] == "new art (no note)"
@@ -602,7 +612,12 @@ def test_pictures_are_chosen_from_every_saved_image_and_the_video_is_made_again(
         (folder / "previous-2026-11-04" / f"{letter}.jpg").write_bytes(b"\xff\xd8\xff" + letter.encode())
     reopened: list[str] = []
     imported: list[dict[str, bytes]] = []
-    studio.reopen = lambda pid: reopened.append(pid) or {"status": "awaiting_thumbnail_art"}
+
+    def reopen(pid: str) -> dict[str, Any]:
+        reopened.append(pid)
+        return {"status": "awaiting_thumbnail_art"}
+
+    studio.reopen = reopen
 
     def importer(pid: str, art_folder: Path) -> dict[str, Any]:
         imported.append({f.stem: f.read_bytes() for f in art_folder.iterdir() if f.is_file()
@@ -654,7 +669,7 @@ def test_the_web_routes_reach_the_art_library_and_the_letter_upload(tmp_path: Pa
 
     studio, _ = _studio(tmp_path, [])
     live = LiveDashboard(ReadOnlyDatabase(None), PhaseApis({}, token=None), reviewers=None)
-    client = TestClient(create_live_app(live, studio.actions,  # type: ignore[arg-type]
+    client = TestClient(create_live_app(live, studio.actions,
                                         platform=load_settings(env=PLATFORM_ENV),
                                         studio=studio))
     auth = {SERVICE_TOKEN_HEADER: SEAM_TOKEN}
@@ -809,7 +824,12 @@ def test_the_review_serves_the_new_video_after_a_remake_and_refuses_a_stale_appr
     studio.package = lambda pid: {"status": "ready_for_publish",
                                   "video_master_uri": current["uri"],
                                   "video_checksum": current["checksum"]}
-    studio.media = lambda uri, checksum: fetched.append(uri) or uri.encode()
+
+    def media(uri: str, checksum: str) -> bytes:
+        fetched.append(uri)
+        return uri.encode()
+
+    studio.media = media
     studio.video_dir = tmp_path / "video-cache"
     old = studio.video_file(PKG)
     assert old.read_bytes() == b"plm://v/old"

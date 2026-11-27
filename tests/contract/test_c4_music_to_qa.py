@@ -160,7 +160,7 @@ def test_mock_audio_for_a_three_minute_spec_passes_the_real_duration_gate(
     # Nothing technical holds it. Release still waits on rights (R4): with no detector
     # sources configured, P5 quarantines on the detectors' holds only, never clears
     # (ADR-0034).
-    assert result.disposition == GateDisposition.QUARANTINED
+    assert result.disposition.value == GateDisposition.QUARANTINED.value
     assert result.quarantine_case is not None
     assert set(result.quarantine_case.reason_codes) <= P5_HOLD_REASON_CODES
     # Provenance is complete (ADR-0035); with no detectors configured, the holds are
@@ -186,7 +186,7 @@ def test_audio_outside_the_declared_range_is_rejected_by_the_real_gate(
         path.write_bytes(audio)
         result = run_candidate_evaluation(event=event, audio_path=path, clock=FixedClock(FIXED_NOW))
 
-    assert result.disposition == GateDisposition.REJECTED
+    assert result.disposition.value == GateDisposition.REJECTED.value
     assert [f.finding_code for f in result.evaluation.risk_findings if f.blocking] == [
         "DURATION_OUT_OF_RANGE"
     ]
@@ -217,7 +217,9 @@ def test_undeclared_rights_are_quarantined_never_cleared(
         path.write_bytes(audio)
         result = run_candidate_evaluation(event=event, audio_path=path, clock=FixedClock(FIXED_NOW))
     assert result.evaluation.rights_status == CommercialUseEligibility.UNKNOWN.value
-    assert result.disposition in (GateDisposition.QUARANTINED, GateDisposition.REJECTED)
+    assert result.disposition.value in (
+        GateDisposition.QUARANTINED.value, GateDisposition.REJECTED.value,
+    )
     assert result.release_manifest is None
 
 

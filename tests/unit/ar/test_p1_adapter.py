@@ -91,7 +91,9 @@ def test_every_page_of_p1_is_read_not_only_the_first() -> None:
 
 
 def test_a_cursor_that_loops_is_market_unavailable() -> None:
-    pages = {None: (["a"], "c1"), "c1": (["b"], "c1")}
+    pages: dict[str | None, tuple[list[str], str | None]] = {
+        None: (["a"], "c1"), "c1": (["b"], "c1"),
+    }
     client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
                       transport=_paged_transport(pages, []))
     with pytest.raises(MarketUnavailable, match="cursor"):

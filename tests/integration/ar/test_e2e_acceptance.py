@@ -10,6 +10,7 @@ update's `applied` count equals the number of results this run actually ingested
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
@@ -40,7 +41,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def engine() -> sa.Engine:
+def engine() -> Iterator[sa.Engine]:
     from plm_platform.db import build_engine
 
     try:

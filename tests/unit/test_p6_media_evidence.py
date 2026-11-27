@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -50,12 +51,13 @@ def test_mismatched_and_unknown_evidence_cannot_silently_pass() -> None:
     assert verify_evidence(document)
     for change in ("time", "verified", "hash", "scope", "approval", "counter"):
         tampered = deepcopy(document)
+        first_row = cast(list[dict[str, object]], tampered["rows"])[0]
         if change == "time":
-            tampered["rows"][0]["timeline_seconds"] = 12.0
+            first_row["timeline_seconds"] = 12.0
         elif change == "verified":
-            tampered["rows"][0]["sha256_content_verified"] = True
+            first_row["sha256_content_verified"] = True
         elif change == "hash":
-            tampered["rows"][0]["declared_video_sha256"] = "e" * 64
+            first_row["declared_video_sha256"] = "e" * 64
         elif change == "scope":
             tampered["scope"] = "published"
         elif change == "approval":

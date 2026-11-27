@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 from analytics.domain.enums import CostCategory, ObservationWindow, PaybackStatus
+from analytics.domain.models import UnitEconomics
 from analytics.economics.calculator import compute_unit_economics
 from analytics.economics.ledger import entity_economics
 from analytics.ingestion.cost import ingest_cost_entry
@@ -138,7 +139,7 @@ def _snapshot(session: Session, window: ObservationWindow, *, views: int, revenu
 
 
 def _video_economics(session: Session, window: ObservationWindow, fx: FxTable,
-                     currency: str = "USD", video_id: str = "vid_gate"):
+                     currency: str = "USD", video_id: str = "vid_gate") -> UnitEconomics:
     return entity_economics(
         entity_id=video_id, entity_type="video",
         video_metrics=get_video_metrics(session, video_id), track_metrics=[],
@@ -212,7 +213,7 @@ def _track_with_statement_and_cost(session: Session) -> None:
     session.flush()
 
 
-def _track_economics(session: Session, currency: str = "KRW"):
+def _track_economics(session: Session, currency: str = "KRW") -> UnitEconomics:
     return entity_economics(
         entity_id="trk_fx", entity_type="track", video_metrics=[],
         track_metrics=get_track_metrics(session, "trk_fx"),

@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 from analytics.domain.enums import ObservationWindow
+from analytics.domain.models import ExperimentOutcomeRecord
 from analytics.evaluation.feedback import (
     REWARD_CONTRIBUTION_SCALE,
     REWARD_VERSION,
@@ -42,7 +43,7 @@ def reward(net: str | int = 0, views: int = 0, watch: float = 0.0) -> float:
     return compute_normalized_reward(usd(net), views, watch, contribution_scale=SCALE)
 
 
-def _evaluate(session: Session, **overrides: object):
+def _evaluate(session: Session, **overrides: object) -> ExperimentOutcomeRecord:
     args: dict[str, object] = {
         "lineage": sample_lineage(),
         "unit_id": "vid_eval_01",

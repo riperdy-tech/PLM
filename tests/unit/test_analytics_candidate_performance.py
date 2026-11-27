@@ -78,10 +78,11 @@ def _ingest(client: TestClient, *, day: str, views: int | None,
 
 
 def _report(client: TestClient, *, window: str = "28d") -> httpx.Response:
-    return client.get(
+    response: httpx.Response = client.get(
         "/analytics/candidate-performance/att_test_01",
         params={"window": window}, headers=HEADERS,
     )
+    return response
 
 
 def test_assignment_joins_latest_single_window_snapshot_without_ctr_guess() -> None:
@@ -175,10 +176,11 @@ def _preview(client: TestClient, csv: str, **overrides: Any) -> httpx.Response:
         "start_date": "2026-09-10", "end_date": "2026-09-12",
         "window": "28d", **overrides,
     }
-    return client.post(
+    response: httpx.Response = client.post(
         "/analytics/candidate-performance/att_test_01/reach-preview",
         json=request, headers=HEADERS,
     )
+    return response
 
 
 def test_reach_preview_is_video_level_only_with_partial_coverage() -> None:

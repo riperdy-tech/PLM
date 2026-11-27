@@ -17,9 +17,10 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
-from market_intelligence.collection.collectors import hydrate_and_store
+from market_intelligence.collection.collectors import CollectionRunSummary, hydrate_and_store
 from market_intelligence.collection.rate_limit import (
     QuotaBudget,
     QuotaExceededError,
@@ -31,12 +32,14 @@ from market_intelligence.connectors.youtube import (
     YouTubeCredentials,
     YouTubeDataAPIConnector,
 )
+from market_intelligence.domain.entities import NormalizedObservation
 from market_intelligence.domain.enums import ConnectorType, ProviderName
 from market_intelligence.features.arm_features import compute_arm_features
 from market_intelligence.storage import repositories
 from plm_platform.config import Secret
 from plm_platform.storage import StoredObject, sha256_digest
 from plm_platform.testing.http import MockHTTP
+from sqlalchemy.orm import Session
 
 # Exercises code that loads platform settings; the values are set explicitly.
 pytestmark = pytest.mark.usefixtures("platform_env")
@@ -48,14 +51,15 @@ CHANNEL_A = "UCaaaaaaaaaaaaaaaaaaaaaa"  # 820,000 subscribers in the fixture
 CHANNEL_B = "UCbbbbbbbbbbbbbbbbbbbbbb"  # hiddenSubscriberCount: true
 
 
-def _fixture(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def _fixture(name: str) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads((FIXTURES / name).read_text(encoding="utf-8")))
 
 
 @pytest.fixture(autouse=True)
 def _memory_objects(monkeypatch: pytest.MonkeyPatch) -> None:
-    def put(prefix, resource_path, data, *, content_type="application/octet-stream",
-            settings=None, client=None) -> StoredObject:
+    def put(prefix: str, resource_path: str, data: bytes, *,
+            content_type: str = "application/octet-stream",
+            settings: object = None, client: object = None) -> StoredObject:
         digest = sha256_digest(data)
         return StoredObject(key=f"{prefix}{resource_path}/{digest}", digest=digest,
                             size=len(data))
@@ -63,7 +67,7 @@ def _memory_objects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("market_intelligence.storage.raw_store.put_content", put)
 
 
-def _source(session) -> str:
+def _source(session: Session) -> str:
     return repositories.upsert_source(
         session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -80,7 +84,8 @@ def _connector(mock: MockHTTP, *, units: int = 1_000) -> YouTubeDataAPIConnector
     )
 
 
-def _hydrate(session, mock: MockHTTP, video_ids: list[str], *, units: int = 1_000):
+def _hydrate(session: Session, mock: MockHTTP, video_ids: list[str], *,
+             units: int = 1_000) -> tuple[str, CollectionRunSummary]:
     source_id = _source(session)
     run_id = repositories.start_collection_run(
         session, source_id=source_id, query_id=None, software_version="p1-v1", started_at=NOW,
@@ -92,17 +97,18 @@ def _hydrate(session, mock: MockHTTP, video_ids: list[str], *, units: int = 1_00
     return source_id, summary
 
 
-def _aware(session, source_id: str):
+def _aware(session: Session, source_id: str) -> list[NormalizedObservation]:
     """SQLite hands timestamps back naive; Postgres returns them aware (UTC)."""
-    def utc(moment):
-        return moment if moment is None or moment.tzinfo else moment.replace(tzinfo=UTC)
+    def utc(moment: datetime) -> datetime:
+        return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
-    return [replace(o, observed_at=utc(o.observed_at), published_at=utc(o.published_at))
+    return [replace(o, observed_at=utc(o.observed_at),
+                    published_at=None if o.published_at is None else utc(o.published_at))
             for o in repositories.load_observations(session, source_id=source_id)]
 
 
 def test_hydration_fetches_the_batch_channels_once_and_stamps_subscribers(
-    market_session,
+    market_session: Session,
 ) -> None:
     mock = MockHTTP()
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))
@@ -124,7 +130,7 @@ def test_hydration_fetches_the_batch_channels_once_and_stamps_subscribers(
     assert summary.raw_count == 4  # two video payloads + two channel payloads
 
 
-def test_demand_is_known_once_channels_are_fetched(market_session) -> None:
+def test_demand_is_known_once_channels_are_fetched(market_session: Session) -> None:
     """The R2 finding end to end: demand needs subscribers, and now it has them."""
     mock = MockHTTP()
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))
@@ -139,7 +145,7 @@ def test_demand_is_known_once_channels_are_fetched(market_session) -> None:
 
 
 def test_a_failed_channel_fetch_leaves_subscribers_unknown_and_the_run_partial(
-    market_session,
+    market_session: Session,
 ) -> None:
     mock = MockHTTP()
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))
@@ -157,7 +163,7 @@ def test_a_failed_channel_fetch_leaves_subscribers_unknown_and_the_run_partial(
     assert features["arm"].demand.median_pull_per_day.is_unknown
 
 
-def test_channels_shared_by_several_videos_are_requested_once(market_session) -> None:
+def test_channels_shared_by_several_videos_are_requested_once(market_session: Session) -> None:
     videos = _fixture("videos_multi_batch.json")
     ids = [item["id"] for item in videos["items"]]
     mock = MockHTTP()
@@ -175,7 +181,7 @@ def test_channels_shared_by_several_videos_are_requested_once(market_session) ->
 
 
 def test_a_payload_for_a_channel_that_was_not_requested_is_not_attributed(
-    market_session,
+    market_session: Session,
 ) -> None:
     channels = _fixture("channels_lofi_batch.json")
     channels["items"][0]["id"] = "UCzzzzzzzzzzzzzzzzzzzzzz"  # not in the batch
@@ -190,7 +196,7 @@ def test_a_payload_for_a_channel_that_was_not_requested_is_not_attributed(
 
 
 def test_running_out_of_budget_at_the_channel_call_keeps_the_videos_and_reraises(
-    market_session,
+    market_session: Session,
 ) -> None:
     mock = MockHTTP()
     mock.enqueue_json(_fixture("videos_lofi_batch.json"))

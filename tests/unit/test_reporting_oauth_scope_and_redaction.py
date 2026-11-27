@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
 
 import httpx
@@ -80,7 +81,7 @@ def test_google_denial_reports_scope_status_without_sensitive_values(
             return "required_scope_not_reported"
 
     monkeypatch.setattr(readiness, "load_env_file", lambda _: {})
-    monkeypatch.setattr(readiness.os, "environ", {})
+    monkeypatch.setattr(os, "environ", {})
     monkeypatch.setattr(readiness, "RealYouTubeAnalyticsClient", TokenHolder)
     with patch(
         "httpx.Client",

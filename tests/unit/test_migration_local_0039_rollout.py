@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from tests.support import migration_local_0039_rollout as rollout
+from tests.support.migration_review_compare import MERGE, RELEASE
 
 
 @pytest.mark.parametrize(
@@ -54,8 +55,8 @@ def test_backup_validation_rejects_tampering_or_missing_backup(
     sha = rollout._sha256(archive)
     manifest: dict[str, Any] = {
         "identifier": identifier,
-        "started_revision": rollout.RELEASE,
-        "target_revision": rollout.MERGE,
+        "started_revision": RELEASE,
+        "target_revision": MERGE,
         "isolated_restore_passed": True,
         "local_db_applied": False,
         "backup_size": archive.stat().st_size,

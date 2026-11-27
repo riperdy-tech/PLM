@@ -26,7 +26,6 @@ from typing import Any
 
 import httpx
 import pytest
-from plm_contracts import GateDisposition
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings, load_settings
 from plm_platform.db import build_engine, session_factory
 from plm_platform.service_urls import LOOPBACK_HOST, service_url
@@ -40,6 +39,7 @@ from plm_platform.storage import (
     to_uri,
 )
 from plm_platform.temporal import Phase
+from quality_gate.domain.enums import GateDisposition
 from quality_gate.gate.manifest import build_release_manifest
 from quality_gate.storage.repositories import insert_release_manifest
 from sqlalchemy import text

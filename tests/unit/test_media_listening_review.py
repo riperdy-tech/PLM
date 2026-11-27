@@ -5,6 +5,9 @@ import copy
 import csv
 import io
 import json
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from media_factory.audio.contrast_probe import POLICY_VERSION
@@ -13,8 +16,13 @@ from media_factory.audio.listening_review import REVIEW_COLUMNS, validate_listen
 from scripts import validate_album_listening_reviews
 
 
+def _validate(report: object, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The validator's JSON-shaped result, typed for indexing in assertions."""
+    return cast(dict[str, Any], validate_listening_reviews(report, rows))
+
+
 @pytest.fixture
-def report() -> dict:
+def report() -> dict[str, Any]:
     return {
         "policy_version": POLICY_VERSION,
         "evaluation": "diagnostic_only_no_threshold_no_clearance",
@@ -49,8 +57,8 @@ def _row(reviewer: str, labels: tuple[str, str, str, str] = (
     }
 
 
-def test_no_reviews_is_not_concordance(report: dict) -> None:
-    result = validate_listening_reviews(report, [])
+def test_no_reviews_is_not_concordance(report: dict[str, Any]) -> None:
+    result = _validate(report, [])
     assert result["reviewed_pair_count"] == 0
     assert result["complete_consensus_pair_count"] == 0
     assert result["pairs"][0]["axis_status"]["rhythm"] == "insufficient_reviewers"
@@ -60,15 +68,15 @@ def test_no_reviews_is_not_concordance(report: dict) -> None:
     assert result["calibrated"] is False
 
 
-def test_one_review_does_not_count_as_agreement(report: dict) -> None:
-    result = validate_listening_reviews(report, [_row("r1")])
+def test_one_review_does_not_count_as_agreement(report: dict[str, Any]) -> None:
+    result = _validate(report, [_row("r1")])
     assert result["reviewed_pair_count"] == 1
     assert result["complete_consensus_pair_count"] == 0
 
 
-def test_independent_matching_labels_count_only_as_consensus(report: dict) -> None:
+def test_independent_matching_labels_count_only_as_consensus(report: dict[str, Any]) -> None:
     report["provided_checksum_verified"] = ["A", "B"]
-    result = validate_listening_reviews(report, [_row("r1"), _row("r2")])
+    result = _validate(report, [_row("r1"), _row("r2")])
     pair = result["pairs"][0]
     assert pair["review_complete"] is True
     assert pair["caller_digest_match_declared"] is True
@@ -80,8 +88,8 @@ def test_independent_matching_labels_count_only_as_consensus(report: dict) -> No
     assert "fictional private observations" not in json.dumps(result)
 
 
-def test_quality_empty_and_one_review_have_null_agreement(report: dict) -> None:
-    empty = validate_listening_reviews(report, [])["data_quality"]
+def test_quality_empty_and_one_review_have_null_agreement(report: dict[str, Any]) -> None:
+    empty = _validate(report, [])["data_quality"]
     assert empty["no_review_pair_count"] == 1
     assert empty["one_review_pair_count"] == 0
     assert empty["two_plus_review_pair_count"] == 0
@@ -97,15 +105,15 @@ def test_quality_empty_and_one_review_have_null_agreement(report: dict) -> None:
         and axis["decisive_agreement_fraction"] is None
         for axis in empty["axis_quality"].values()
     )
-    one = validate_listening_reviews(report, [_row("anon1")])["data_quality"]
+    one = _validate(report, [_row("anon1")])["data_quality"]
     assert one["no_review_pair_count"] == 0
     assert one["one_review_pair_count"] == 1
     assert one["two_plus_review_pair_count"] == 0
     assert one["axis_quality"]["rhythm"]["decisive_agreement_fraction"] is None
 
 
-def test_quality_separates_unanimity_disagreement_and_uncertain(report: dict) -> None:
-    result = validate_listening_reviews(report, [
+def test_quality_separates_unanimity_disagreement_and_uncertain(report: dict[str, Any]) -> None:
+    result = _validate(report, [
         _row("r1"), _row("r2", ("different", "uncertain", "different", "different")),
         _row("r3", ("similar", "similar", "different", "different")),
     ])
@@ -123,7 +131,7 @@ def test_quality_separates_unanimity_disagreement_and_uncertain(report: dict) ->
     assert result["calibrated"] is False
 
 
-def test_quality_uses_audio_pairs_not_number_of_review_rows(report: dict) -> None:
+def test_quality_uses_audio_pairs_not_number_of_review_rows(report: dict[str, Any]) -> None:
     report["coverage"]["C"] = {"sha256": "c" * 64, "unknown": {}}
     report["pairs"].extend([
         {
@@ -147,7 +155,7 @@ def test_quality_uses_audio_pairs_not_number_of_review_rows(report: dict) -> Non
     second = {**first, "reviewer_id": "r2"}
     third = {**first, "reviewer_id": "r3"}
     first_pair = [_row("r1"), _row("r2")]
-    result = validate_listening_reviews(report, first_pair + [first, second, third])
+    result = _validate(report, first_pair + [first, second, third])
     quality = result["data_quality"]
     assert result["pair_count"] == 3
     assert quality["two_plus_review_pair_count"] == 2
@@ -170,7 +178,7 @@ def test_quality_uses_audio_pairs_not_number_of_review_rows(report: dict) -> Non
 
 
 def test_reused_audio_checksum_does_not_inflate_distinct_source_agreement(
-    report: dict,
+    report: dict[str, Any],
 ) -> None:
     # A and B are the identical file under two aliases. C has different bytes.
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
@@ -203,7 +211,7 @@ def test_reused_audio_checksum_does_not_inflate_distinct_source_agreement(
         row("A", "C", "r1", "similar"),
         row("A", "C", "r2", "different"),
     ]
-    result = validate_listening_reviews(report, reviews)
+    result = _validate(report, reviews)
     quality = result["data_quality"]
     assert quality["unique_source_sha256_count"] == 2
     assert quality["sha256_reused_by_multiple_aliases_count"] == 1
@@ -228,8 +236,8 @@ def test_reused_audio_checksum_does_not_inflate_distinct_source_agreement(
     assert result["calibrated"] is False
 
 
-def test_reviewer_concentration_and_repeated_byte_pair_assignments(report: dict) -> None:
-    empty = validate_listening_reviews(report, [])["data_quality"]
+def test_reviewer_concentration_and_repeated_byte_pair_assignments(report: dict[str, Any]) -> None:
+    empty = _validate(report, [])["data_quality"]
     assert empty["unique_reviewer_pseudonym_count"] == 0
     assert empty["max_reviewed_pairs_per_reviewer"] == 0
     assert empty["repeated_sha256_comparison_reviewer_count"] == 0
@@ -263,7 +271,7 @@ def test_reviewer_concentration_and_repeated_byte_pair_assignments(report: dict)
         rated("A", "C", "r1"), rated("B", "C", "r1"),
         rated("B", "C", "r3"),
     ]
-    result = validate_listening_reviews(report, rows)
+    result = _validate(report, rows)
     quality = result["data_quality"]
     assert quality["unique_reviewer_pseudonym_count"] == 3
     assert quality["max_reviewed_pairs_per_reviewer"] == 3
@@ -276,8 +284,8 @@ def test_reviewer_concentration_and_repeated_byte_pair_assignments(report: dict)
     assert "r3" not in json.dumps(result)
 
 
-def test_reviewer_overlap_counts_shared_source_comparisons(report: dict) -> None:
-    empty = validate_listening_reviews(report, [])["data_quality"]["reviewer_overlap"]
+def test_reviewer_overlap_counts_shared_source_comparisons(report: dict[str, Any]) -> None:
+    empty = _validate(report, [])["data_quality"]["reviewer_overlap"]
     assert empty["reviewer_pairs_with_shared_source_comparisons_count"] == 0
     assert empty["axis_co_ratings"]["rhythm"]["descriptive_agreement_fraction"] is None
     report["coverage"]["C"] = {"sha256": "c" * 64, "unknown": {}}
@@ -303,7 +311,7 @@ def test_reviewer_overlap_counts_shared_source_comparisons(report: dict) -> None
         rated("A", "B", "r1"), rated("A", "B", "r2"), rated("A", "B", "r3"),
         rated("A", "C", "r1"), rated("A", "C", "r2"),
     ]
-    result = validate_listening_reviews(report, rows)
+    result = _validate(report, rows)
     overlap = result["data_quality"]["reviewer_overlap"]
     assert overlap["different_sha256_comparisons_with_two_plus_reviewers_count"] == 2
     assert overlap["reviewer_pairs_with_shared_source_comparisons_count"] == 3
@@ -315,7 +323,7 @@ def test_reviewer_overlap_counts_shared_source_comparisons(report: dict) -> None
     assert result["calibrated"] is False
 
 
-def test_reviewer_overlap_excludes_alias_repeats_and_marks_conflicts(report: dict) -> None:
+def test_reviewer_overlap_excludes_alias_repeats_and_marks_conflicts(report: dict[str, Any]) -> None:
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
     report["coverage"]["C"] = {"sha256": "c" * 64, "unknown": {}}
     report["pairs"][0]["metrics"] = dict.fromkeys((
@@ -342,7 +350,7 @@ def test_reviewer_overlap_excludes_alias_repeats_and_marks_conflicts(report: dic
         rated("A", "C", "r2", "similar"), rated("B", "C", "r2", "similar"),
         rated("A", "B", "r1", "similar"), rated("A", "B", "r2", "similar"),
     ]
-    result = validate_listening_reviews(report, rows)
+    result = _validate(report, rows)
     overlap = result["data_quality"]["reviewer_overlap"]
     assert overlap["different_sha256_comparisons_with_two_plus_reviewers_count"] == 1
     assert overlap["reviewer_pairs_with_shared_source_comparisons_count"] == 1
@@ -356,13 +364,13 @@ def test_reviewer_overlap_excludes_alias_repeats_and_marks_conflicts(report: dic
 
 
 def test_operator_source_references_are_presence_only_and_not_verified(
-    report: dict,
+    report: dict[str, Any],
 ) -> None:
-    empty = validate_listening_reviews(report, [])["data_quality"]["operator_source_reference"]
+    empty = _validate(report, [])["data_quality"]["operator_source_reference"]
     assert all(value == 0 for value in empty.values())
     with_reference = {**_row("reviewer1"), "same_recording_source": "private-case-007"}
     blank = {**_row("reviewer2"), "same_recording_source": "  \t "}
-    result = validate_listening_reviews(report, [with_reference, blank])
+    result = _validate(report, [with_reference, blank])
     quality = result["data_quality"]["operator_source_reference"]
     assert quality == {
         "nonempty_reference_review_row_count": 1,
@@ -380,7 +388,7 @@ def test_operator_source_references_are_presence_only_and_not_verified(
 
 
 def test_operator_source_reference_alias_variation_does_not_count_new_sources(
-    report: dict,
+    report: dict[str, Any],
 ) -> None:
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
     report["coverage"]["C"] = {"sha256": "c" * 64, "unknown": {}}
@@ -403,7 +411,7 @@ def test_operator_source_reference_alias_variation_does_not_count_new_sources(
             "same_recording_source": reference,
         }
 
-    result = validate_listening_reviews(report, [
+    result = _validate(report, [
         rated("A", "C", "r1", "private-source-proof"),
         rated("B", "C", "r1", "  "),
         rated("A", "C", "r2", "private-origin-note"),
@@ -428,7 +436,7 @@ def test_operator_source_reference_alias_variation_does_not_count_new_sources(
 
 
 def test_only_same_sha256_reviews_keep_distinct_source_agreement_unknown(
-    report: dict,
+    report: dict[str, Any],
 ) -> None:
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
     report["pairs"][0]["metrics"] = dict.fromkeys((
@@ -438,7 +446,7 @@ def test_only_same_sha256_reviews_keep_distinct_source_agreement_unknown(
         {**_row("r1"), "right_sha256": "a" * 64},
         {**_row("r2"), "right_sha256": "a" * 64},
     ]
-    result = validate_listening_reviews(report, rows)
+    result = _validate(report, rows)
     quality = result["data_quality"]
     assert quality["exact_same_sha256_pair_count"] == 1
     assert quality["different_sha256_pair_count"] == 0
@@ -453,21 +461,21 @@ def test_only_same_sha256_reviews_keep_distinct_source_agreement_unknown(
     assert result["rights_verified"] is False
 
 
-def test_same_sha256_aliases_reject_conflicting_unknown_reasons(report: dict) -> None:
+def test_same_sha256_aliases_reject_conflicting_unknown_reasons(report: dict[str, Any]) -> None:
     report["coverage"]["B"]["sha256"] = "a" * 64
     # A and B claim the same bytes but B claims energy is unavailable.
     with pytest.raises(ValueError, match="report_same_source_unknown_conflict"):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
-def test_same_sha256_aliases_reject_nonself_similarity(report: dict) -> None:
+def test_same_sha256_aliases_reject_nonself_similarity(report: dict[str, Any]) -> None:
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
     report["pairs"][0]["metrics"]["energy_arc_proxy"] = 1.0
     with pytest.raises(ValueError, match="report_identical_source_similarity_conflict"):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
-def test_same_sha256_aliases_may_share_an_unknown_metric(report: dict) -> None:
+def test_same_sha256_aliases_may_share_an_unknown_metric(report: dict[str, Any]) -> None:
     report["coverage"]["B"] = {
         "sha256": "a" * 64, "unknown": {"energy_arc_proxy": "no_measured_energy"},
     }
@@ -477,12 +485,12 @@ def test_same_sha256_aliases_may_share_an_unknown_metric(report: dict) -> None:
         "pitch_class_motion_proxy": 1.0,
         "energy_arc_proxy": None,
     }
-    result = validate_listening_reviews(report, [])
+    result = _validate(report, [])
     assert result["pairs"][0]["exact_same_sha256"] is True
     assert result["pairs"][0]["metric_available"]["energy_arc_proxy"] is False
 
 
-def test_repeated_source_byte_pairs_reject_different_scores(report: dict) -> None:
+def test_repeated_source_byte_pairs_reject_different_scores(report: dict[str, Any]) -> None:
     report["coverage"]["B"] = {"sha256": "a" * 64, "unknown": {}}
     report["coverage"]["C"] = {"sha256": "c" * 64, "unknown": {}}
     report["pairs"][0]["metrics"] = dict.fromkeys((
@@ -495,14 +503,14 @@ def test_repeated_source_byte_pairs_reject_different_scores(report: dict) -> Non
                 "rhythm_onset_proxy", "pitch_class_motion_proxy", "energy_arc_proxy",
             ), 0.8),
         })
-    assert validate_listening_reviews(report, [])["pair_count"] == 3
+    assert _validate(report, [])["pair_count"] == 3
     report["pairs"][2]["metrics"]["rhythm_onset_proxy"] = 0.9
     with pytest.raises(ValueError, match="report_source_alias_metric_conflict"):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
-def test_disagreement_and_uncertainty_preserved(report: dict) -> None:
-    output = validate_listening_reviews(report, [
+def test_disagreement_and_uncertainty_preserved(report: dict[str, Any]) -> None:
+    output = _validate(report, [
         _row("r1"),
         _row("r2", ("different", "uncertain", "different", "different")),
     ])
@@ -526,45 +534,45 @@ def test_disagreement_and_uncertainty_preserved(report: dict) -> None:
     ({"notes": "a" * 501}, "review_notes_invalid"),
 ])
 def test_bad_review_row_rejected(
-    report: dict, mutation: dict[str, str], message: str,
+    report: dict[str, Any], mutation: dict[str, str], message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        validate_listening_reviews(report, [{**_row("r1"), **mutation}])
+        _validate(report, [{**_row("r1"), **mutation}])
 
 
-def test_duplicate_reviewer_even_on_reversed_pair_rejected(report: dict) -> None:
+def test_duplicate_reviewer_even_on_reversed_pair_rejected(report: dict[str, Any]) -> None:
     reverse = {
         **_row("r1"), "left_id": "B", "right_id": "A",
         "left_sha256": "b" * 64, "right_sha256": "a" * 64,
     }
     with pytest.raises(ValueError, match="duplicate_reviewer"):
-        validate_listening_reviews(report, [_row("r1"), reverse])
+        _validate(report, [_row("r1"), reverse])
 
 
 @pytest.mark.parametrize("bad", [float("nan"), 4.0, -1.0, True, "0.8"])
-def test_bad_report_metrics_refused(report: dict, bad: object) -> None:
+def test_bad_report_metrics_refused(report: dict[str, Any], bad: object) -> None:
     report["pairs"][0]["metrics"]["rhythm_onset_proxy"] = bad
     with pytest.raises(ValueError, match="report_invalid_metric"):
-        validate_listening_reviews(report, [_row("r1")])
+        _validate(report, [_row("r1")])
 
 
-def test_incomplete_report_and_version_refused(report: dict) -> None:
+def test_incomplete_report_and_version_refused(report: dict[str, Any]) -> None:
     other = copy.deepcopy(report)
     other["pairs"] = []
     with pytest.raises(ValueError, match="report_incomplete_pairs"):
-        validate_listening_reviews(other, [])
+        _validate(other, [])
     other = copy.deepcopy(report)
     other["policy_version"] = "p6-offline-contrast-v2"
     with pytest.raises(ValueError, match="report_policy_version_mismatch"):
-        validate_listening_reviews(other, [])
+        _validate(other, [])
 
 
-def test_bad_headers_and_duplicate_rows_refused(report: dict) -> None:
+def test_bad_headers_and_duplicate_rows_refused(report: dict[str, Any]) -> None:
     row = _row("r1")
     with pytest.raises(ValueError, match="review_columns_invalid"):
-        validate_listening_reviews(report, [{**row, "extra": ""}])
+        _validate(report, [{**row, "extra": ""}])
     with pytest.raises(ValueError, match="duplicate_reviewer"):
-        validate_listening_reviews(report, [row, row])
+        _validate(report, [row, row])
 
 
 @pytest.mark.parametrize(("metric", "source", "value", "reason"), [
@@ -574,7 +582,7 @@ def test_bad_headers_and_duplicate_rows_refused(report: dict) -> None:
      "report_metric_coverage_conflict"),
 ])
 def test_report_metric_coverage_cannot_disagree(
-    report: dict, metric: str, source: str, value: object, reason: str,
+    report: dict[str, Any], metric: str, source: str, value: object, reason: str,
 ) -> None:
     if metric == "energy_arc_proxy":
         report["coverage"][source]["unknown"] = value
@@ -583,7 +591,7 @@ def test_report_metric_coverage_cannot_disagree(
     else:
         report["coverage"][source]["unknown"] = value
     with pytest.raises(ValueError, match=reason):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
 @pytest.mark.parametrize("unknown", [
@@ -591,29 +599,29 @@ def test_report_metric_coverage_cannot_disagree(
     {"rhythm_onset_proxy": 3},
 ])
 def test_report_unknown_metadata_requires_valid_reasons(
-    report: dict, unknown: object,
+    report: dict[str, Any], unknown: object,
 ) -> None:
     report["coverage"]["A"]["unknown"] = unknown
     with pytest.raises(ValueError, match="report_invalid_unknown"):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
-def test_invalid_alias_control_character_rejected(report: dict) -> None:
+def test_invalid_alias_control_character_rejected(report: dict[str, Any]) -> None:
     report["coverage"]["A\nsecret"] = report["coverage"].pop("A")
     with pytest.raises(ValueError, match="report_invalid_coverage"):
-        validate_listening_reviews(report, [])
+        _validate(report, [])
 
 
-def test_nonstring_review_label_and_nonmapping_row_rejected(report: dict) -> None:
+def test_nonstring_review_label_and_nonmapping_row_rejected(report: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="review_label_invalid"):
-        validate_listening_reviews(report, [{**_row("r1"), "melody_label": ["similar"]}])
+        _validate(report, [{**_row("r1"), "melody_label": ["similar"]}])
     with pytest.raises(ValueError, match="review_columns_invalid"):
-        validate_listening_reviews(report, [None])
+        _validate(report, [None])  # type: ignore[list-item]  # a non-mapping row must be refused
 
 
 @pytest.mark.parametrize("json_problem", ["duplicate_key", "nan_constant"])
 def test_cli_rejects_ambiguous_json_without_leaking_inputs(
-    report: dict, tmp_path, capsys, json_problem: str,
+    report: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str], json_problem: str,
 ) -> None:
     source, reviews = tmp_path / "report.json", tmp_path / "reviews.csv"
     if json_problem == "duplicate_key":
@@ -636,7 +644,7 @@ def test_cli_rejects_ambiguous_json_without_leaking_inputs(
 
 
 def test_cli_rejects_unterminated_quoted_csv(
-    report: dict, tmp_path, capsys,
+    report: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     source, reviews = tmp_path / "report.json", tmp_path / "reviews.csv"
     source.write_text(json.dumps(report), encoding="utf-8")
@@ -653,7 +661,7 @@ def test_cli_rejects_unterminated_quoted_csv(
 
 
 def test_cli_validates_without_echoing_reviewer_data(
-    report: dict, tmp_path, capsys,
+    report: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     report_path = tmp_path / "report.json"
     rows_path = tmp_path / "reviews.csv"
@@ -677,7 +685,7 @@ def test_cli_validates_without_echoing_reviewer_data(
 
 
 def test_cli_refuses_invalid_report_without_leaking_input(
-    report: dict, tmp_path, capsys,
+    report: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     json_path, csv_path = tmp_path / "bad.json", tmp_path / "reviews.csv"
     json_path.write_text("{malicious payload token}", encoding="utf-8")

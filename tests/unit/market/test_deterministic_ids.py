@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -38,15 +39,17 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtub
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
-def _fixture(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def _fixture(name: str) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    return data
 
 
 class RecordingObjectStore:
     """Minimal ``put_object`` double: content-addressed, like the real store."""
 
-    def __call__(self, prefix, resource_path, data, *, content_type="application/octet-stream",
-                 settings=None, client=None) -> StoredObject:
+    def __call__(self, prefix: str, resource_path: str, data: bytes, *,
+                 content_type: str = "application/octet-stream",
+                 settings: object = None, client: object = None) -> StoredObject:
         digest = sha256_digest(data)
         return StoredObject(
             key=f"{prefix}{resource_path}/{digest}", digest=digest, size=len(data)

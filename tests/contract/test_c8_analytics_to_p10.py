@@ -45,7 +45,10 @@ def view() -> dict[str, Any]:
             published_at=NOW - timedelta(days=7), attribution_confidence=0.98,
             quality_status=None, observed_at=NOW,
         )
-    return json.loads(json.dumps(build_p10_feature_view(outcome, **UNMEASURED).to_wire()))
+    wire: dict[str, Any] = json.loads(
+        json.dumps(build_p10_feature_view(outcome, **UNMEASURED).to_wire())
+    )
+    return wire
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:

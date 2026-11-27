@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 from plm_contracts import ExecutionPolicy, ProviderMode
@@ -9,6 +10,7 @@ from plm_platform.clock import FixedClock
 from plm_platform.execution import GuardDecision, WriteDecision
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.enums import OperatingMode, PublishState
+from youtube_publishing.domain.models import PublishManifest
 from youtube_publishing.engine import YouTubePublishingEngine
 from youtube_publishing.storage.repositories import insert_publish_manifest
 from youtube_publishing.verification import verify_remote_video
@@ -20,7 +22,7 @@ from tests.unit.test_youtube_engine import _sample_manifest
 NOW = datetime(2026, 10, 23, 12, tzinfo=UTC)
 
 
-def _manifest():
+def _manifest() -> PublishManifest:
     return _sample_manifest().model_copy(update={
         "video_duration_seconds": 1800.0,
         "description": "0:00 Intro\n10:00 Middle\n20:00 Ending",
@@ -28,7 +30,7 @@ def _manifest():
 
 
 def _resource(*, desc: str | None = None, processing: str = "succeeded",
-              duration: str = "PT30M") -> dict:
+              duration: str = "PT30M") -> dict[str, Any]:
     m = _manifest()
     return {
         "id": "video_test",
@@ -93,7 +95,7 @@ class FakeRealAdapter(MockYouTubeClient):
         self.processing = "processing"
         self.override_description: str | None = None
 
-    def get_video(self, video_id: str) -> dict | None:
+    def get_video(self, video_id: str) -> dict[str, Any] | None:
         resource = super().get_video(video_id)
         if resource is None:
             return None

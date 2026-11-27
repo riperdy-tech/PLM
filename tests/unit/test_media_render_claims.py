@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from media_factory.domain.enums import RenderJobStatus
@@ -27,7 +28,7 @@ VIDEO = "f" * 64
 
 def test_claim_namespace_is_recomputable_and_bound_to_execution_identity() -> None:
     """A different worker or start cannot write into another run's prefix."""
-    identity = {"job_id": "job-fixed", "worker_id": "worker-01",
+    identity: dict[str, Any] = {"job_id": "job-fixed", "worker_id": "worker-01",
                 "input_manifest_hash": SHA, "started_at": NOW}
     first = render_claim_namespace(**identity)
     same_in_another_zone = render_claim_namespace(
@@ -146,7 +147,7 @@ def test_render_claim_and_finish_require_original_worker_and_input() -> None:
             assert not claim_queued_render_job(
                 session, job_id=job.id, worker_id="second",
                 input_manifest_hash=SHA, started_at=NOW)
-            params = {
+            params: dict[str, Any] = {
                 "job_id": job.id,
                 "input_manifest_hash": SHA,
                 "started_at": NOW,

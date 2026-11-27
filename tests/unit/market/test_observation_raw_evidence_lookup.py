@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from market_intelligence.storage.models import observations
+from sqlalchemy.orm import Session
 
 from tests.support.c1_api import open_c1_client
 
@@ -14,7 +15,7 @@ SECOND_ID = "00000000-0000-0000-0000-000000000022"
 UNKNOWN_ID = "00000000-0000-0000-0000-000000000088"
 
 
-def _seed_observations(session, *, ambiguous: bool = False) -> None:
+def _seed_observations(session: Session, *, ambiguous: bool = False) -> None:
     seed = [
         {
             "id": FIRST_ID,

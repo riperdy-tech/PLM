@@ -11,6 +11,7 @@ from distribution.engine import DistributionEngine
 from fastapi.testclient import TestClient
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
+from sqlalchemy.orm import Session
 
 from tests.support.clearance import p5_holding
 from tests.support.distribution_db import create_distribution_engine
@@ -34,7 +35,7 @@ MINIMAL_ENV = {
 def client() -> TestClient:
     engine = create_distribution_engine(static_pool=True)
 
-    def session_factory():
+    def session_factory() -> Session:
         from sqlalchemy.orm import sessionmaker
 
         return sessionmaker(bind=engine)()
@@ -132,7 +133,7 @@ def test_reports_api_roundtrip(client: TestClient) -> None:
     assert res_get.json()["report_id"] == rep_id
 
 
-def test_release_submission_refuses_an_uncleared_track(client) -> None:
+def test_release_submission_refuses_an_uncleared_track(client: TestClient) -> None:
     headers = {SERVICE_TOKEN_HEADER: "test-dist-token"}
     payload = {
         "track_manifests": [
@@ -151,7 +152,7 @@ def test_release_submission_refuses_an_uncleared_track(client) -> None:
     assert res.json()["detail"]["code"] == "release_not_cleared"
 
 
-def test_a_request_claiming_clearance_p5_never_gave_is_refused(client) -> None:
+def test_a_request_claiming_clearance_p5_never_gave_is_refused(client: TestClient) -> None:
     """Proves: the manifest on the request is a claim. It says PASSED, P5 says
     QUARANTINED, and nothing is submitted (alternate path into P8 is closed)."""
     headers = {SERVICE_TOKEN_HEADER: "test-dist-token"}

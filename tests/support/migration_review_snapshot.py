@@ -32,7 +32,7 @@ def _json_safe(value: object) -> object:
 
 
 def table_fingerprint(
-    rows: Iterable[Mapping[str, Any]], *, id_column: str,
+    rows: Iterable[Mapping[Any, Any]], *, id_column: str,
     max_rows: int = 10000,
 ) -> dict[str, str | int]:
     """Digest all columns per row in stable PK order; reject partial/duplicate input."""
@@ -133,7 +133,7 @@ _EXPECTED_MANIFEST_INDEXES = frozenset({
 
 
 def manifest_index_definitions(
-    rows: Iterable[Mapping[str, Any]],
+    rows: Iterable[Mapping[Any, Any]],
 ) -> dict[str, dict[str, str | bool]]:
     """Fail closed on missing, extra, invalid or duplicated manifest index DDL."""
     result: dict[str, dict[str, str | bool]] = {}
@@ -196,7 +196,7 @@ def manifest_integrity_contract(
     }
 
 
-def manifest_security_contract(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+def manifest_security_contract(rows: Iterable[Mapping[Any, Any]]) -> dict[str, Any]:
     """Attest existing manifest ownership, privileges and execution controls.
 
     ACL and owner strings are hashed before returning evidence. Counts alone
@@ -244,7 +244,7 @@ def manifest_security_contract(rows: Iterable[Mapping[str, Any]]) -> dict[str, A
 
 
 def manifest_storage_contract(
-    rows: Iterable[Mapping[str, Any]], *, expected_table: str = "publish_manifests",
+    rows: Iterable[Mapping[Any, Any]], *, expected_table: str = "publish_manifests",
 ) -> dict[str, Any]:
     """Capture relation durability and rewrite semantics independently of row hashes."""
     records = list(rows)
@@ -270,7 +270,7 @@ def manifest_storage_contract(
 
 
 def review_storage_contract(
-    rows: Iterable[Mapping[str, Any]], *, has_reviews: bool,
+    rows: Iterable[Mapping[Any, Any]], *, has_reviews: bool,
 ) -> dict[str, dict[str, Any]] | None:
     """Require catalog evidence for both approval-history tables, or neither."""
     found = list(rows)
@@ -292,7 +292,7 @@ def review_storage_contract(
 
 
 def review_index_definitions(
-    rows: Iterable[Mapping[str, Any]],
+    rows: Iterable[Mapping[Any, Any]],
 ) -> dict[str, dict[str, str]]:
     """Preserve full PostgreSQL non-PK index DDL; reject missing catalog facts."""
     result: dict[str, dict[str, str]] = {
@@ -317,7 +317,7 @@ def review_index_definitions(
 
 
 def review_security_contract(
-    rows: Iterable[Mapping[str, Any]],
+    rows: Iterable[Mapping[Any, Any]],
 ) -> dict[str, dict[str, str | bool | int]] | None:
     """Read table-level security facts without exposing raw PostgreSQL role names."""
     tables = {"release_reviews", "release_review_events"}
@@ -351,7 +351,7 @@ def review_security_contract(
 
 
 def review_access_contract(
-    rows: Iterable[Mapping[str, Any]], *, has_reviews: bool,
+    rows: Iterable[Mapping[Any, Any]], *, has_reviews: bool,
 ) -> dict[str, bool | int] | None:
     """Collect schema/column ACL facts for the historical review-table pair."""
     found = list(rows)
@@ -551,7 +551,7 @@ def read_only_review_snapshot(*, settings: Any = None) -> dict[str, Any]:
                     """)).mappings(),
                     has_reviews=has_reviews,
                 )
-                access_rows = (
+                access_rows: Iterable[Mapping[Any, Any]] = (
                     connection.execute(sa.text("""
                         SELECT n.nspname AS schema_name,
                                (n.nspacl IS NULL) AS schema_acl_default,

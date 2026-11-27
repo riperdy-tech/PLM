@@ -7,9 +7,11 @@ import json
 import threading
 from http.server import HTTPServer
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, urlencode
 
 import pytest
+from media_factory.artifacts import ArtifactStore, MinioArtifactStore
 from media_factory.audio.texture_label_evaluation import EVALUATION, POLICY_VERSION
 from media_factory.audio.texture_listening_review import (
     export_review_csv,
@@ -103,7 +105,8 @@ def test_original_audio_fetched_only_for_requested_source(
         def put(self, *args: object, **kwargs: object) -> None:
             raise AssertionError("never write")
 
-    store = ReadOnlyStore()
+    # a read-only fake: only fetch_verified is implemented, any write fails the test
+    store = cast(ArtifactStore, ReadOnlyStore())
     assert verified_review_audio((pair,), store, index=0, side="a") == objects["sample://a"]
     assert calls == ["sample://a"]
     with pytest.raises(ValueError):
@@ -188,7 +191,7 @@ def test_smoke_only_checks_verified_sources_then_stops_loopback(
                 raise ValueError("invalid_checksum")
             return data
 
-    handler = make_handler((pair,), Store(), session_token="private")
+    handler = make_handler((pair,), cast(MinioArtifactStore, Store()), session_token="private")
     with HTTPServer(("127.0.0.1", 0), handler) as server:
         result = smoke_listening_session(server, token="private", pair_count=1)
         assert result["status"] == "local_audio_smoke_passed"
@@ -214,7 +217,7 @@ def test_loopback_routes_stream_audio_and_export_only_explicit_csv(
         def put(self, *args: object, **kwargs: object) -> None:
             raise AssertionError("audio writes forbidden")
 
-    handler = make_handler((pair,), Store(), session_token="private")
+    handler = make_handler((pair,), cast(MinioArtifactStore, Store()), session_token="private")
     with HTTPServer(("127.0.0.1", 0), handler) as server:
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()

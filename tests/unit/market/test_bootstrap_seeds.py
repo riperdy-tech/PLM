@@ -1,9 +1,12 @@
+from typing import Any
+
 from market_intelligence.collection.seeds import (
     install_bootstrap_seeds,
     load_bootstrap_seeds,
 )
 from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
 from market_intelligence.storage import repositories
+from sqlalchemy.orm import Session
 
 SPECIALISED = {
     "music_genre", "music_mood", "use_case", "playlist_pattern",
@@ -39,7 +42,7 @@ def test_every_seed_carries_a_query_type_and_priority() -> None:
         assert spec.locale and spec.language and spec.country_code
 
 
-def test_install_is_idempotent_and_counts_only_new_queries(market_session) -> None:
+def test_install_is_idempotent_and_counts_only_new_queries(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -54,13 +57,13 @@ def test_install_is_idempotent_and_counts_only_new_queries(market_session) -> No
     assert len(repositories.load_queries(market_session, source_id=source_id, active_only=False)) == first
 
 
-def test_install_retires_bootstrap_seeds_the_pack_no_longer_lists(market_session) -> None:
+def test_install_retires_bootstrap_seeds_the_pack_no_longer_lists(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
         configuration_version="p1-sources-v1",
     )
-    common = {"source_id": source_id, "locale": "en", "country_code": "US",
+    common: dict[str, Any] = {"source_id": source_id, "locale": "en", "country_code": "US",
               "language": "english", "priority": 80, "query_version": "p1-queries-v1"}
     # an old-concept bootstrap seed, a Stage B seed, and a pack seed a past pack retired
     repositories.upsert_query(market_session, query_text="lofi",

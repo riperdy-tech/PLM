@@ -6,6 +6,7 @@ turned a provider-schema problem into a plausible-looking observation instant.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from market_intelligence.connectors.base import ConnectorError
@@ -14,24 +15,27 @@ from market_intelligence.connectors.spotify import (
     SpotifyCredentials,
 )
 from market_intelligence.domain.enums import ConnectorErrorClass
+from plm_platform.testing.http import MockHTTP
 
 
-def connector(mock_http) -> SpotifyConnector:
+def connector(mock_http: MockHTTP) -> SpotifyConnector:
     return SpotifyConnector(
         client=mock_http.client(base_url="https://api.spotify.com/v1"),
         credentials=SpotifyCredentials(access_token="test-token"),
     )
 
 
-def _track(release_date) -> dict:
-    track = {"id": "track-1", "name": "A", "artists": [], "duration_ms": 1000}
+def _track(release_date: str | None) -> dict[str, Any]:
+    track: dict[str, Any] = {"id": "track-1", "name": "A", "artists": [], "duration_ms": 1000}
     if release_date is not None:
         track["album"] = {"release_date": release_date}
     return track
 
 
 @pytest.mark.parametrize("release_date", [None, "", "not-a-date", "2026-13-40"])
-def test_unparseable_release_dates_are_refused_not_faked_as_1970(mock_http, release_date) -> None:
+def test_unparseable_release_dates_are_refused_not_faked_as_1970(
+    mock_http: MockHTTP, release_date: str | None,
+) -> None:
     mock_http.enqueue_json(_track(release_date))
     with pytest.raises(ConnectorError) as failure:
         connector(mock_http).fetch_tracks(["track-1"])
@@ -44,7 +48,7 @@ def test_unparseable_release_dates_are_refused_not_faked_as_1970(mock_http, rele
                           ("2026-03", datetime(2026, 3, 1, tzinfo=UTC)),
                           ("2026", datetime(2026, 1, 1, tzinfo=UTC))])
 def test_parseable_release_dates_still_become_the_observation_instant(
-    mock_http, release_date, expected,
+    mock_http: MockHTTP, release_date: str, expected: datetime,
 ) -> None:
     mock_http.enqueue_json(_track(release_date))
     result = connector(mock_http).fetch_tracks(["track-1"])

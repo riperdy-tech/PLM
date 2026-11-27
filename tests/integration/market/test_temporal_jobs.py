@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import pytest
 from market_intelligence.jobs import REGISTRATIONS
@@ -58,9 +60,9 @@ def test_the_daily_workflow_executes_end_to_end_against_the_live_server() -> Non
     queue = "ph1.market.p1test"
     calls: list[str] = []
 
-    def _stub(name: str):
+    def _stub(name: str) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
         @activity.defn(name=name)
-        async def stub(payload: dict) -> dict:
+        async def stub(payload: dict[str, Any]) -> dict[str, Any]:
             calls.append(name)
             return {"stub": True}
 
@@ -73,7 +75,7 @@ def test_the_daily_workflow_executes_end_to_end_against_the_live_server() -> Non
         )
     ]
 
-    async def scenario() -> dict:
+    async def scenario() -> dict[str, Any]:
         try:
             client = await asyncio.wait_for(connect_client(), timeout=5)
         except Exception as exc:  # noqa: BLE001 - skip with a remedy (repo convention)

@@ -150,19 +150,19 @@ class TestSerialisationRoundTrip:
 class TestPayloadValidationRefusesCollapse:
     def test_raw_number_is_refused(self) -> None:
         with pytest.raises(ValidationError):
-            _Cost(metric=0)
+            _Cost(metric=0)  # type: ignore[arg-type]  # raw number must be refused
 
     def test_zero_smuggled_alongside_unknown_is_refused(self) -> None:
         with pytest.raises(ValidationError):
-            _Cost(metric={"state": "unknown", "value": 0})
+            _Cost(metric={"state": "unknown", "value": 0})  # type: ignore[arg-type]  # raw payload
 
     def test_known_without_a_value_is_refused(self) -> None:
         with pytest.raises(ValidationError):
-            _Cost(metric={"state": "known"})
+            _Cost(metric={"state": "known"})  # type: ignore[arg-type]  # raw payload
 
     def test_unknown_payload_without_value_is_accepted(self) -> None:
-        assert _Cost(metric={"state": "unknown"}).metric.is_unknown
-        assert _Cost(metric={"state": "not_ready"}).metric.is_not_ready
+        assert _Cost.model_validate({"metric": {"state": "unknown"}}).metric.is_unknown
+        assert _Cost.model_validate({"metric": {"state": "not_ready"}}).metric.is_not_ready
 
 
 class TestABooleanNeverArrivesAsANumber:
@@ -175,16 +175,16 @@ class TestABooleanNeverArrivesAsANumber:
 
     def test_a_known_payload_cannot_smuggle_a_boolean_as_an_int(self) -> None:
         with pytest.raises(ValidationError):
-            _Observation(count={"state": "known", "value": True})
+            _Observation(count={"state": "known", "value": True})  # type: ignore[arg-type]  # raw payload
 
     def test_a_known_payload_cannot_smuggle_a_boolean_as_a_float(self) -> None:
         with pytest.raises(ValidationError):
-            _Cost(metric={"state": "known", "value": True})
+            _Cost(metric={"state": "known", "value": True})  # type: ignore[arg-type]  # raw payload
 
     def test_a_boolean_tri_instance_is_not_laundered_through_an_int_field(self) -> None:
         with pytest.raises(ValidationError):
             _Observation(count=Tri.known(True))
 
     def test_a_boolean_is_still_a_valid_known_value_when_the_type_is_bool(self) -> None:
-        assert _Flag(flag={"state": "known", "value": True}).flag.unwrap() is True
+        assert _Flag.model_validate({"flag": {"state": "known", "value": True}}).flag.unwrap() is True
         assert _Flag(flag=Tri.known(False)).flag.unwrap() is False

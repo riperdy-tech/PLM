@@ -51,7 +51,7 @@ from distribution.engine import DistributionEngine
 from distribution.submission import ReleaseMetadata, submit_release_from_seams
 
 # P3
-from experiments.domain.enums import VocalMode
+from experiments.domain.enums import ExperimentStatus, ExperimentType, VocalMode
 from experiments.domain.experiment import Experiment, Hypothesis, Treatment
 from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
 from experiments.ingestion.p2_adapter import adapt_directive
@@ -197,8 +197,8 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         quantity=1,
         brief=DirectiveBrief(
             genre="lofi",
-            mood=["nostalgic"],
-            use_case=["focus"],
+            mood=("nostalgic",),
+            use_case=("focus",),
             language="instrumental",
             vocal_mode="instrumental",
             duration_bucket="2_to_3_min",
@@ -208,7 +208,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         uncertainty=0.05,
         budget_limit=150.0,
         market_context={"p1_score": 0.86},
-        selection_reason=["high_market_fit", "strong_demand"],
+        selection_reason=("high_market_fit", "strong_demand"),
         directive_version="v1",
         policy_version="p2-policy-v1",
         expires_at=now + timedelta(days=7),
@@ -255,8 +255,8 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         experiment_id="exp_lofi_001",
         content_arm_id="arm_synth_lofi_01",
         production_directive_id=directive.directive_id,
-        experiment_type="single_factor",
-        status="validated",
+        experiment_type=ExperimentType.SINGLE_FACTOR,
+        status=ExperimentStatus.VALIDATED,
         hypothesis=Hypothesis(statement="Warm tape lofi elevates focus watch time", target_metric="watch_time"),
         treatments=(treatment,),
         base_genome_fingerprint="fp_lofi_tape",
@@ -322,7 +322,7 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
         manifests.append(gate.release_manifest)
     manifest = manifests[0]
     assert (manifest.candidate_id, manifest.canonical_artifact_id) == (candidate_id, artifact_id)
-    assert manifest.disposition == GateDisposition.PASSED_WITH_WARNINGS
+    assert manifest.disposition.value == GateDisposition.PASSED_WITH_WARNINGS.value
     assert manifest.p5_manifest_id.startswith("rel_man_")
 
     # =========================================================================

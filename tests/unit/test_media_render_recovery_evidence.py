@@ -39,6 +39,12 @@ from tests.support.media_backend import (
 from tests.support.media_db import create_media_engine, media_session
 from tests.support.render_evidence import attest_inventory, attest_termination
 
+
+def _job_status(session: Session, job_id: str) -> RenderJobStatus:
+    job = get_render_job(session, job_id)
+    assert job is not None
+    return job.job_status
+
 NOW = datetime(2026, 10, 29, 9, tzinfo=UTC)
 SHA = "a" * 64
 
@@ -176,7 +182,7 @@ def test_evidence_obeys_the_outer_transaction() -> None:
                 quarantined_at=NOW, expected_worker_id="owner", expected_started_at=NOW)
             session.rollback()
         with media_session(engine) as session:
-            assert get_render_job(session, job.id).job_status is RenderJobStatus.RUNNING
+            assert _job_status(session, job.id) is RenderJobStatus.RUNNING
             assert session.execute(
                 sa.select(sa.func.count()).select_from(render_recovery_evidence_table)
             ).scalar_one() == 0

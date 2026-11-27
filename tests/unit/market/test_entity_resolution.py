@@ -19,6 +19,7 @@ from market_intelligence.normalization.youtube import (
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import entity_identities, observations
 from plm_contracts import Tri, TriState
+from sqlalchemy.orm import Session
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 LATER = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
@@ -40,7 +41,7 @@ SEARCH_PAYLOAD = {"kind": "youtube#searchResult",
 
 
 @pytest.fixture
-def source_id(market_session) -> str:
+def source_id(market_session: Session) -> str:
     return repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -49,7 +50,7 @@ def source_id(market_session) -> str:
 
 
 def test_the_same_provider_video_resolves_to_one_entity_across_collections(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     first = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
@@ -65,11 +66,12 @@ def test_the_same_provider_video_resolves_to_one_entity_across_collections(
     )
     assert first == second
     entity = repositories.load_entity(market_session, first)
+    assert entity is not None
     assert entity["last_seen_at"] is not None
 
 
 def test_a_backfill_cannot_regress_the_entity_name_or_last_seen(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
@@ -78,6 +80,7 @@ def test_a_backfill_cannot_regress_the_entity_name_or_last_seen(
         canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=LATER,
     )
     before = repositories.load_entity(market_session, entity_id)
+    assert before is not None
 
     def _identity_last_seen() -> object:
         return market_session.execute(
@@ -95,6 +98,7 @@ def test_a_backfill_cannot_regress_the_entity_name_or_last_seen(
     )
     assert same == entity_id
     after = repositories.load_entity(market_session, entity_id)
+    assert after is not None
     assert after["canonical_name"] == "2AM Seoul (remastered)"
     assert after["normalized_name"] == "2am seoul remastered"
     assert after["last_seen_at"] == before["last_seen_at"]  # monotonic, not regressed
@@ -107,11 +111,12 @@ def test_a_backfill_cannot_regress_the_entity_name_or_last_seen(
         canonical_url="https://www.youtube.com/watch?v=vid00000001", observed_at=NEWEST,
     )
     final = repositories.load_entity(market_session, entity_id)
+    assert final is not None
     assert final["canonical_name"] == "2AM Seoul (2M remaster)"
 
 
 def test_rerunning_the_same_query_on_a_later_date_adds_a_second_observation(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
@@ -138,7 +143,7 @@ def test_rerunning_the_same_query_on_a_later_date_adds_a_second_observation(
 
 
 def test_inserting_the_same_observation_point_twice_is_idempotent(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
@@ -160,7 +165,7 @@ def test_inserting_the_same_observation_point_twice_is_idempotent(
 
 
 def test_hydration_enriches_the_discovery_sighting_instead_of_being_dropped(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     """Discovery stores text only; hydration carries the metrics for the same
     (entity, source, instant). The idempotent insert used to discard the richer
@@ -206,7 +211,7 @@ def test_hydration_enriches_the_discovery_sighting_instead_of_being_dropped(
 
 
 def test_an_observation_records_the_normalization_version_that_derived_it(
-    market_session, source_id
+    market_session: Session, source_id: str
 ) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
@@ -226,16 +231,17 @@ def test_an_observation_records_the_normalization_version_that_derived_it(
         market_session, second.observation, normalization_version="p1-norm-v9")
 
     def _version(observation_id: str) -> str:
-        return market_session.execute(
+        version: str = market_session.execute(
             sa.select(observations.c.normalization_version)
             .where(observations.c.id == observation_id)
         ).scalar_one()
+        return version
 
     assert _version(first_id) == "p1-norm-v1"  # the phase's default transformation
     assert _version(second_id) == "p1-norm-v9"  # callers may stamp their own
 
 
-def test_not_ready_metrics_survive_the_database_round_trip(market_session, source_id) -> None:
+def test_not_ready_metrics_survive_the_database_round_trip(market_session: Session, source_id: str) -> None:
     entity_id = repositories.resolve_entity(
         market_session, entity_type=EntityType.VIDEO, source_id=source_id,
         provider_object_type=ProviderObjectType.VIDEO, provider_object_id="vid00000001",
@@ -249,6 +255,7 @@ def test_not_ready_metrics_survive_the_database_round_trip(market_session, sourc
                                    raw_observation_id=RAW_ONE, observed_at=FIXED_NOW)
     # the payload has viewCount; likes/comments are absent (unknown); subscriber_count
     # is expected later — a window that has not completed is not_ready, never unknown
+    assert draft.observation is not None
     pending = replace(draft.observation, likes=Tri.not_ready())
     observation_id, _ = repositories.insert_normalized_observation(market_session, pending)
     loaded = repositories.load_observations(market_session, entity_id=entity_id)
@@ -261,7 +268,7 @@ def test_not_ready_metrics_survive_the_database_round_trip(market_session, sourc
     ).scalar_one())
 
 
-def test_quarantine_records_are_written_not_dropped(market_session, source_id) -> None:
+def test_quarantine_records_are_written_not_dropped(market_session: Session, source_id: str) -> None:
     record_id = repositories.quarantine_record(market_session, QuarantinedRecord(
         reason_code="negative_count", detail="views=-5", payload_uri="plm://bucket/key",
     ))

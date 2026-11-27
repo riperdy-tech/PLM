@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import uuid
+from collections.abc import Awaitable
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -336,8 +337,11 @@ async def test_hard_stop_refuses_a_generic_approve_and_proceeds_only_on_external
         evidence = {name: f"ref-{name}" for name in case.required_evidence}
 
         for actor, role in (("admin", "admin"), ("counsel", "rights_counsel")):
-            refused = await signal_and_wait(handle, lambda a=actor, r=role: handle.signal(
-                PipelineWorkflow.resume, ResumeSignal(actor=a, role=r, evidence=evidence)))
+            def send_resume(a: str = actor, r: str = role) -> Awaitable[None]:
+                return handle.signal(
+                    PipelineWorkflow.resume, ResumeSignal(actor=a, role=r, evidence=evidence))
+
+            refused = await signal_and_wait(handle, send_resume)
             assert refused.state == "HELD"
             assert refused.last_error_code == "hard_stop_not_overridable"
         refused = await signal_and_wait(handle, lambda: handle.signal(

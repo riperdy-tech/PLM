@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from plm_platform.pipeline.http import HttpPhaseSteps
 from plm_platform.pipeline.mock import MockPhaseSteps, default_scripts
 from plm_platform.pipeline.states import PipelineState, Step
 from plm_platform.pipeline.types import StepRequest, StepResult
@@ -42,7 +43,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 class _FailedAssemblySteps(MockPhaseSteps):
     """Script only pre-P6 phases; use actual HttpPhaseSteps for assemble."""
 
-    def __init__(self, http_steps: Any) -> None:
+    def __init__(self, http_steps: HttpPhaseSteps) -> None:
         scripts = default_scripts()
         scripts[Step.POLICY_CHECK].outputs["package_ids"] = ["pkg_1"]
         scripts[Step.GENERATE].outputs["candidate_ids"] = ["c0", "c1", "c2"]

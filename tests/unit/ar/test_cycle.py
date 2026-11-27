@@ -37,6 +37,7 @@ from autonomous_ar.policy.constraints import (
 from autonomous_ar.storage import repositories
 from autonomous_ar.storage.models import ar_allocation_cycle
 from plm_contracts import AllocationType, ChannelActivationState
+from sqlalchemy.orm import Session
 
 from tests.support.ar_db import ar_session, create_ar_engine
 
@@ -71,7 +72,7 @@ def _request(**overrides: object) -> CycleRequest:
     return CycleRequest(**base)  # type: ignore[arg-type]
 
 
-def _seed_policy(session: object) -> None:
+def _seed_policy(session: Session) -> None:
     repositories.insert_policy(session, DEFAULT_POLICY, brand_id="longform_signal", created_at=NOW)
 
 

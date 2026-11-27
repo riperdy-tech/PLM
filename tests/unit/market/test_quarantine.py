@@ -6,6 +6,7 @@ the assertions pin the gates implemented in `normalization/youtube.py`.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import sqlalchemy as sa
 from market_intelligence.connectors.base import FetchedObject
@@ -16,27 +17,29 @@ from market_intelligence.domain.enums import (
 )
 from market_intelligence.normalization.youtube import (
     QUARANTINE_REASON_CODES,
+    NormalizationOutcome,
     normalize_video_object,
 )
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import quarantined_records
 from plm_contracts import TriState
+from sqlalchemy.orm import Session
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 RAW = "00000000-0000-4000-8000-000000000001"
 
 
-def _fetched(video_id: str, *, statistics: dict | None = None,
+def _fetched(video_id: str, *, statistics: dict[str, Any] | None = None,
              published_at: str = "2026-08-01T10:00:00Z") -> FetchedObject:
     snippet = {"title": "2AM Seoul", "publishedAt": published_at}
-    payload: dict = {"id": video_id, "snippet": snippet}
+    payload: dict[str, Any] = {"id": video_id, "snippet": snippet}
     if statistics is not None:
         payload["statistics"] = statistics
     return FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
                          provider_object_id=video_id, observed_at=FIXED_NOW, payload=payload)
 
 
-def _normalize(fetched: FetchedObject):
+def _normalize(fetched: FetchedObject) -> NormalizationOutcome:
     return normalize_video_object(fetched, entity_id="entity-1", source_id="source-1",
                                   raw_observation_id=RAW, observed_at=FIXED_NOW)
 
@@ -52,6 +55,7 @@ def test_malformed_provider_id_is_quarantined() -> None:
 def test_negative_view_count_is_quarantined_with_a_reason_code() -> None:
     outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "-5"}))
     assert outcome.observation is None
+    assert outcome.quarantine is not None
     assert outcome.quarantine.reason_code == "negative_count"
     assert outcome.quarantine.reason_code in QUARANTINE_REASON_CODES
 
@@ -60,15 +64,18 @@ def test_impossible_timestamp_order_is_quarantined() -> None:
     outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "1"},
                                   published_at="2027-01-01T00:00:00Z"))
     assert outcome.observation is None
+    assert outcome.quarantine is not None
     assert outcome.quarantine.reason_code == "impossible_timestamp_order"
 
 
 def test_unobserved_metric_is_not_a_measured_zero() -> None:
     unobserved = _normalize(_fetched("vid00000001"))
+    assert unobserved.observation is not None
     assert unobserved.observation.views.state is TriState.UNKNOWN
     assert unobserved.observation.views.is_zero is False
 
     measured_zero = _normalize(_fetched("vid00000001", statistics={"viewCount": "0"}))
+    assert measured_zero.observation is not None
     assert measured_zero.observation.views.state is TriState.KNOWN
     assert measured_zero.observation.views.is_zero is True
     assert measured_zero.observation.views.unwrap() == 0
@@ -76,11 +83,12 @@ def test_unobserved_metric_is_not_a_measured_zero() -> None:
 
 def test_a_quarantined_record_keeps_the_evidence_that_caused_it() -> None:
     outcome = _normalize(_fetched("vid00000001", statistics={"viewCount": "-5"}))
+    assert outcome.quarantine is not None
     assert outcome.quarantine.raw_observation_id == RAW
     assert outcome.quarantine.source_id == "source-1"
 
 
-def test_the_quarantine_row_traces_back_to_the_raw_observation(market_session) -> None:
+def test_the_quarantine_row_traces_back_to_the_raw_observation(market_session: Session) -> None:
     source_id = repositories.upsert_source(
         market_session, provider_name=ProviderName.YOUTUBE_DATA_API,
         connector_type=ConnectorType.DATA_API, base_identifier="x",
@@ -91,7 +99,8 @@ def test_the_quarantine_row_traces_back_to_the_raw_observation(market_session) -
         entity_id="00000000-0000-4000-8000-000000000002", source_id=source_id,
         raw_observation_id=RAW, observed_at=FIXED_NOW,
     )
-    record_id = repositories.quarantine_record(market_session, outcome.quarantine)
+    assert outcome.quarantine is not None
+    record_id =repositories.quarantine_record(market_session, outcome.quarantine)
     row = market_session.execute(
         sa.select(quarantined_records).where(quarantined_records.c.id == record_id)
     ).mappings().one()

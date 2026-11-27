@@ -4,10 +4,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+from pathlib import Path
+from typing import Any, Self
 
 import numpy as np
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from media_factory.audio.contrast_probe import (
     POLICY_VERSION,
     ContrastFeatures,
@@ -31,7 +33,7 @@ def samples() -> dict[str, bytes]:
 
 
 def test_same_delivered_audio_is_similar_but_not_cleared(samples: dict[str, bytes]) -> None:
-    report = probe_album_contrast({"one": samples["base"], "two": samples["same"]})
+    report: dict[str, Any] = probe_album_contrast({"one": samples["base"], "two": samples["same"]})
     assert report["policy_version"] == POLICY_VERSION
     assert report["evaluation"] == "diagnostic_only_no_threshold_no_clearance"
     pair = report["pairs"][0]
@@ -44,7 +46,7 @@ def test_same_delivered_audio_is_similar_but_not_cleared(samples: dict[str, byte
 
 def test_gain_change_keeps_proxy_scores_high(samples: dict[str, bytes]) -> None:
     louder = synth_track(seconds=4, bpm=120, tonic=0, amplitude=0.4)
-    report = probe_album_contrast({"loud": louder, "quiet": samples["base"]})
+    report: dict[str, Any] = probe_album_contrast({"loud": louder, "quiet": samples["base"]})
     scores = report["pairs"][0]["metrics"]
     assert all(value is not None and value > 0.99 for value in scores.values())
 
@@ -52,7 +54,7 @@ def test_gain_change_keeps_proxy_scores_high(samples: dict[str, bytes]) -> None:
 def test_longer_multiblock_audio_and_alternate_sample_rate() -> None:
     left = synth_track(seconds=12.1, bpm=110, tonic=0, rate=48000)
     right = synth_track(seconds=12.1, bpm=110, tonic=0, rate=48000, amplitude=0.4)
-    report = probe_album_contrast({"left": left, "right": right})
+    report: dict[str, Any] = probe_album_contrast({"left": left, "right": right})
     scores = report["pairs"][0]["metrics"]
     assert all(score is not None and score > 0.99 for score in scores.values())
     assert all(not row["unknown"] for row in report["coverage"].values())
@@ -60,7 +62,7 @@ def test_longer_multiblock_audio_and_alternate_sample_rate() -> None:
 
 def test_one_second_clip_never_produces_nonfinite_similarity() -> None:
     short = synth_track(seconds=1.01, bpm=120, tonic=0)
-    report = probe_album_contrast({"left": short, "right": short})
+    report: dict[str, Any] = probe_album_contrast({"left": short, "right": short})
     scores = report["pairs"][0]["metrics"]
     assert scores["pitch_class_motion_proxy"] is None
     assert "pitch_class_motion_proxy" in report["coverage"]["left"]["unknown"]
@@ -79,13 +81,13 @@ def test_overlong_audio_header_refused_before_decoding(monkeypatch: pytest.Monke
         channels = 2
         frames = 44100 * 901
 
-        def __enter__(self):
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *_args):
+        def __exit__(self, *_args: object) -> None:
             return None
 
-        def read(self, **_kwargs):
+        def read(self, **_kwargs: object) -> None:
             pytest.fail("unsupported duration must be refused without PCM decoding")
 
     monkeypatch.setattr(
@@ -114,7 +116,7 @@ def test_invalid_precomputed_vectors_become_unknown_not_high_similarity(
         vectors={**baseline.vectors, "rhythm_onset_proxy": replacement},
         unknown={},
     )
-    report = probe_album_features({"left": invalid, "right": baseline})
+    report: dict[str, Any] = probe_album_features({"left": invalid, "right": baseline})
     pair = report["pairs"][0]["metrics"]
     assert pair["rhythm_onset_proxy"] is None
     assert report["coverage"]["left"]["unknown"]["rhythm_onset_proxy"] == reason
@@ -143,13 +145,13 @@ def test_out_of_range_float_audio_fails_unknown() -> None:
 
 
 def test_different_tonal_content_reduces_pitch_proxy(samples: dict[str, bytes]) -> None:
-    report = probe_album_contrast({"a": samples["base"], "b": samples["tonic"]})
+    report: dict[str, Any] = probe_album_contrast({"a": samples["base"], "b": samples["tonic"]})
     pitch = report["pairs"][0]["metrics"]["pitch_class_motion_proxy"]
     assert pitch is not None and pitch < 0.99
 
 
 def test_different_beat_pattern_reduces_onset_proxy(samples: dict[str, bytes]) -> None:
-    report = probe_album_contrast({"a": samples["base"], "b": samples["rhythm"]})
+    report: dict[str, Any] = probe_album_contrast({"a": samples["base"], "b": samples["rhythm"]})
     rhythm = report["pairs"][0]["metrics"]["rhythm_onset_proxy"]
     assert rhythm is not None and rhythm < 0.99
 
@@ -157,7 +159,7 @@ def test_different_beat_pattern_reduces_onset_proxy(samples: dict[str, bytes]) -
 def test_short_and_silent_audio_remain_unknown_not_zero(samples: dict[str, bytes]) -> None:
     wav = io.BytesIO()
     sf.write(wav, np.zeros(44100 * 2), 44100, format="WAV")
-    report = probe_album_contrast({"short": b"not a wav", "silence": wav.getvalue()})
+    report: dict[str, Any] = probe_album_contrast({"short": b"not a wav", "silence": wav.getvalue()})
     for item in report["pairs"]:
         assert all(score is None for score in item["metrics"].values())
     assert set(report["coverage"]["short"]["unknown"]) == {
@@ -173,7 +175,7 @@ def test_out_of_bounds_album_is_rejected(files: dict[str, bytes]) -> None:
 
 
 def test_cli_requires_matching_sha256_and_never_writes_input(
-    tmp_path, capsys, samples: dict[str, bytes],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], samples: dict[str, bytes],
 ) -> None:
     a, b = tmp_path / "a.wav", tmp_path / "b.wav"
     a.write_bytes(samples["base"])
@@ -192,7 +194,9 @@ def test_cli_requires_matching_sha256_and_never_writes_input(
     assert b.read_bytes() == samples["tonic"]
 
 
-def test_cli_rejects_duplicate_ids(tmp_path, samples: dict[str, bytes], capsys) -> None:
+def test_cli_rejects_duplicate_ids(
+    tmp_path: Path, samples: dict[str, bytes], capsys: pytest.CaptureFixture[str],
+) -> None:
     path = tmp_path / "audio.wav"
     path.write_bytes(samples["base"])
     assert probe_album_audio_contrast.main([

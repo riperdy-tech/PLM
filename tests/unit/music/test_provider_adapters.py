@@ -67,6 +67,7 @@ def test_unconfigured_external_adapters_fail_cleanly() -> None:
     assert res.status == AttemptStatus.FAILED
     assert res.provider_job_id == ""
     assert res.confirmed_unsubmitted is True
+    assert res.error_message is not None
     assert "missing" in res.error_message.lower() or "not configured" in res.error_message.lower()
 
 

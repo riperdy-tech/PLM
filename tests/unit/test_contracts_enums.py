@@ -6,6 +6,8 @@ must show up as a failing test before any service code sees it.
 
 from __future__ import annotations
 
+from enum import Enum
+
 import pytest
 from plm_contracts import (
     AllocationType,
@@ -27,7 +29,7 @@ from plm_contracts import (
 from pydantic import ValidationError
 
 
-def _values(enum_type: type) -> set[str]:
+def _values(enum_type: type[Enum]) -> set[str]:
     return {member.value for member in enum_type}
 
 

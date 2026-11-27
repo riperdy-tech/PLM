@@ -8,6 +8,7 @@ import httpx
 import pytest
 from analytics.ingestion.youtube_client import YouTubeAnalyticsError
 from analytics.ingestion.youtube_reporting import AuthenticatedReachDownloader
+from fastapi.testclient import TestClient
 
 from tests.unit.test_analytics_candidate_performance import HEADERS, _api, _ingest
 
@@ -60,8 +61,8 @@ def _google(*, body: bytes = CSV, catalog: list[dict[str, Any]] | None = None,
     )
 
 
-def _preview(client, **overrides: Any) -> httpx.Response:
-    return client.post(
+def _preview(client: TestClient, **overrides: Any) -> httpx.Response:
+    response: httpx.Response = client.post(
         "/analytics/candidate-performance/att_test_01/authenticated-reach-preview",
         json={
             "job_id": "job_1", "report_id": "old", "ctr_unit": "ratio",
@@ -70,6 +71,7 @@ def _preview(client, **overrides: Any) -> httpx.Response:
         },
         headers=HEADERS,
     )
+    return response
 
 
 def test_google_provenance_is_video_level_without_candidate_ctr() -> None:

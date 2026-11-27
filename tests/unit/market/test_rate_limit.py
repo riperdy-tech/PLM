@@ -50,13 +50,15 @@ def test_a_released_request_gives_its_count_back() -> None:
 def test_rate_limiter_computes_its_wait_from_the_injected_clock() -> None:
     now = {"t": 0.0}
     naps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        naps.append(seconds)
+        now["t"] = now["t"] + seconds
+
     limiter = RateLimiter(
         requests_per_second=2.0,
         clock=lambda: now["t"],
-        sleep=lambda seconds: (
-            naps.append(seconds),
-            now.__setitem__("t", now["t"] + seconds),
-        ),
+        sleep=sleep,
     )
     assert limiter.wait_time() == 0.0
     limiter.acquire()

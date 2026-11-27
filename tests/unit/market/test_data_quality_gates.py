@@ -20,7 +20,7 @@ NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 VIDEO_ID = "vid00000001"  # exactly 11 characters
 
 
-def _fetched(**statistics) -> FetchedObject:
+def _fetched(**statistics: object) -> FetchedObject:
     payload = {
         "kind": "youtube#video", "id": VIDEO_ID,
         "snippet": {"publishedAt": "2026-08-01T10:00:00Z", "channelId": "UC" + "a" * 22,

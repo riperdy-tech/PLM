@@ -1,5 +1,6 @@
 """Unit tests for durable generation engine (§4.4, §65, §111, R6)."""
 from datetime import UTC, datetime
+from typing import Any
 
 from music_factory.domain.enums import (
     AttemptStatus,
@@ -87,7 +88,9 @@ def test_partial_candidate_supply_never_claims_plan_completed() -> None:
         assert first.status is PlanStatus.FAILED
         assert len(first.candidates) == 1
         assert "candidate_target_not_met: 1/2" in first.errors
-        assert get_generation_plan(session, plan.plan_id).status is PlanStatus.FAILED
+        stored = get_generation_plan(session, plan.plan_id)
+        assert stored is not None
+        assert stored.status is PlanStatus.FAILED
 
         replay = engine.execute_plan(
             session, plan=plan, variants=variants, spec=spec, provider_adapter=provider,
@@ -195,12 +198,12 @@ def test_variant_request_metadata_matches_compiled_prompt() -> None:
     class CapturingAdapter:
         def __init__(self) -> None:
             self.backend = get_provider_adapter("mock")
-            self.requests = []
+            self.requests: list[GenerationRequest] = []
 
-        def __getattr__(self, name: str):
+        def __getattr__(self, name: str) -> Any:
             return getattr(self.backend, name)
 
-        def generate(self, request):
+        def generate(self, request: GenerationRequest) -> GenerationResponse:
             self.requests.append(request)
             return self.backend.generate(request)
 
@@ -213,7 +216,7 @@ def test_variant_request_metadata_matches_compiled_prompt() -> None:
     with music_db_session() as session:
         result = engine.execute_plan(
             session, plan=plan, variants=variants, spec=spec,
-            provider_adapter=adapter,  # type: ignore[arg-type]
+            provider_adapter=adapter,
         )
         assert result.status is PlanStatus.COMPLETED
     assert [request.bpm for request in adapter.requests] == [84, 84]

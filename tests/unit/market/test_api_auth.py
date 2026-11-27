@@ -3,7 +3,7 @@
 
 from market_intelligence.api.app import create_app
 from market_intelligence.config import load_market_settings
-from plm_platform.config import load_settings
+from plm_platform.config import Settings, load_settings
 
 from tests.support.c1_api import SyncASGIClient
 
@@ -16,7 +16,7 @@ BASE_ENV = {
 TOKEN_HEADER = "X-PLM-Service-Token"
 
 
-def _client(platform_settings) -> SyncASGIClient:
+def _client(platform_settings: Settings) -> SyncASGIClient:
     app = create_app(session_factory=None,
                      settings=load_market_settings(platform=platform_settings))
     return SyncASGIClient(app, base_url="http://testserver", headers={})

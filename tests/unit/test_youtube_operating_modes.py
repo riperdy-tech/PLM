@@ -7,12 +7,13 @@ an operator makes it public. Only ``autonomous`` follows the profile and the sch
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from plm_platform.clock import FixedClock
 from youtube_publishing.client.mock import MockYouTubeClient
 from youtube_publishing.domain.enums import OperatingMode, PrivacyStatus, PublishState
-from youtube_publishing.engine import YouTubePublishingEngine
+from youtube_publishing.engine import PublishingEngineResult, YouTubePublishingEngine
 from youtube_publishing.storage.repositories import insert_publish_manifest
 
 from tests.support.clearance import p5_clearing_test_track
@@ -21,7 +22,7 @@ from tests.unit.test_youtube_engine import T0, _sample_manifest
 
 
 def _publish(mode: OperatingMode, privacy: PrivacyStatus, *, scheduled: bool = False) -> tuple[
-        dict, object]:
+        dict[str, Any], PublishingEngineResult]:
     manifest = _sample_manifest(publish_at=T0 + timedelta(days=1) if scheduled else None)
     manifest = manifest.model_copy(update={"privacy_status": privacy})
     client = MockYouTubeClient()
@@ -40,6 +41,7 @@ def test_private_only_always_uploads_private_and_unscheduled(privacy: PrivacySta
     assert status["privacyStatus"] == "private"
     assert "publishAt" not in status
     assert result.attempt.state is PublishState.VERIFIED
+    assert result.publication_record is not None
     assert result.publication_record.privacy_status is PrivacyStatus.PRIVATE
 
 
@@ -50,6 +52,7 @@ def test_staged_never_uploads_public(privacy: PrivacyStatus, sent: str) -> None:
     status, result = _publish(OperatingMode.STAGED, privacy, scheduled=True)
     assert status["privacyStatus"] == sent
     assert "publishAt" not in status
+    assert result.publication_record is not None
     assert result.publication_record.privacy_status.value == sent
 
 

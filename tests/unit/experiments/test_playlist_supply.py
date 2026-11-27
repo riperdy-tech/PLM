@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 from experiments.api.app import create_app
 from experiments.config import load_experiments_settings
+from experiments.domain.errors import GenomeBuildError
 from experiments.domain.genome import DurationRange
 from experiments.genome.engine import (
     TEMPLATES_PATH,
-    GenomeBuildError,
     TemplateLibrary,
     TemplateLibraryError,
     brief_playlist_duration,

@@ -63,7 +63,7 @@ def _clients() -> tuple[MagicMock, MagicMock]:
     return data, analytics
 
 
-def _fake_downloaded(rows):
+def _fake_downloaded(rows: object) -> SimpleNamespace:
     return SimpleNamespace(
         job_id="job_1", report_id="report_2", report_type="channel_reach_basic_a1",
         create_time=NOW, start_time=NOW, end_time=NOW,
@@ -72,12 +72,12 @@ def _fake_downloaded(rows):
 
 
 def test_cli_authenticated_report_reaches_diagnostic_without_external_write(
-    monkeypatch: pytest.MonkeyPatch, caplog,
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
     data, analytics = _clients()
     data.is_configured = True
     analytics.is_configured = True
-    seen = []
+    seen: list[dict[str, object]] = []
     rows = parse_reach_csv(
         "date,channel_id,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr\n"
         "2026-10-21,UC_test,vid_recent,50,0.05\n",
@@ -85,10 +85,10 @@ def test_cli_authenticated_report_reaches_diagnostic_without_external_write(
     )
 
     class FakeDownloader:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: object) -> None:
             assert callable(kwargs["access_token"])
 
-        def fetch(self, **kwargs):
+        def fetch(self, **kwargs: object) -> SimpleNamespace:
             seen.append(kwargs)
             return _fake_downloaded(rows)
 
@@ -96,7 +96,7 @@ def test_cli_authenticated_report_reaches_diagnostic_without_external_write(
     monkeypatch.setattr(poll_live_analytics, "RealYouTubeAnalyticsClient", lambda: analytics)
     monkeypatch.setattr(poll_live_analytics, "AuthenticatedReachDownloader", FakeDownloader)
 
-    def fake_poll(*args, **kwargs):
+    def fake_poll(*args: object, **kwargs: object) -> tuple[int, int]:
         assert kwargs["channel_id"] == "UC_test"
         assert kwargs["reach_rows"] == rows
         return 1, 0
@@ -150,7 +150,9 @@ def test_cli_report_selection_arguments_fail_before_io(arguments: list[str]) -> 
     assert exc.value.code == 2
 
 
-def test_recent_uploads_have_publish_aware_windows_and_measured_retention(caplog) -> None:
+def test_recent_uploads_have_publish_aware_windows_and_measured_retention(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     data, analytics = _clients()
     with caplog.at_level(logging.INFO):
         inspected, errors = poll_recent_uploads(
@@ -174,7 +176,7 @@ def test_recent_uploads_have_publish_aware_windows_and_measured_retention(caplog
     assert "72.0% observed / 55.0% observed / 43.0% observed" in caplog.text
 
 
-def test_missing_analytics_rows_are_explicitly_unknown(caplog) -> None:
+def test_missing_analytics_rows_are_explicitly_unknown(caplog: pytest.LogCaptureFixture) -> None:
     data, analytics = _clients()
     data.list_recent_uploads.return_value = data.list_recent_uploads.return_value[:1]
     analytics.fetch_video_metrics.return_value = SimpleNamespace(
@@ -191,7 +193,9 @@ def test_missing_analytics_rows_are_explicitly_unknown(caplog) -> None:
     assert "Retention curve unavailable" in caplog.text
 
 
-def test_one_video_error_does_not_hide_other_video_success(caplog) -> None:
+def test_one_video_error_does_not_hide_other_video_success(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     data, analytics = _clients()
     analytics.fetch_video_metrics.side_effect = [
         YouTubeAnalyticsError("permission denied"),
@@ -209,7 +213,9 @@ def test_one_video_error_does_not_hide_other_video_success(caplog) -> None:
     analytics.fetch_video_retention.assert_not_called()
 
 
-def test_official_reach_report_preserves_partial_coverage_and_weighted_ctr(caplog) -> None:
+def test_official_reach_report_preserves_partial_coverage_and_weighted_ctr(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     data, analytics = _clients()
     data.list_recent_uploads.return_value = data.list_recent_uploads.return_value[:1]
     rows = parse_reach_csv(
@@ -237,7 +243,9 @@ def test_reach_requires_authenticated_channel_match_before_network() -> None:
     data.list_recent_uploads.assert_not_called()
 
 
-def test_source_unavailable_is_counted_independently_of_retention(caplog) -> None:
+def test_source_unavailable_is_counted_independently_of_retention(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     data, analytics = _clients()
     data.list_recent_uploads.return_value = data.list_recent_uploads.return_value[:1]
     analytics.fetch_video_traffic_sources.side_effect = YouTubeAnalyticsError("traffic source unauthorized")
@@ -264,7 +272,9 @@ def test_upload_too_new_is_not_measured_or_assumed_zero() -> None:
     analytics.fetch_video_metrics.assert_not_called()
 
 
-def test_missing_album_chapters_is_flagged_even_if_metrics_exist(caplog) -> None:
+def test_missing_album_chapters_is_flagged_even_if_metrics_exist(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     data, analytics = _clients()
     data.list_recent_uploads.return_value = data.list_recent_uploads.return_value[:1]
     data.get_video.side_effect = lambda video_id: {

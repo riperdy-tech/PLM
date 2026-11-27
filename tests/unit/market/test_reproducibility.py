@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from market_intelligence.config import load_market_settings
+from market_intelligence.config import MarketSettings, load_market_settings
 from market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
 from market_intelligence.features.arm_features import compute_arm_features
 from market_intelligence.scoring.opportunity import score_all_arms
@@ -42,7 +42,7 @@ def _serialised(score: OpportunityScore) -> dict[str, Any]:
 
 
 def _scores(observations_by_arm: Mapping[str, tuple[NormalizedObservation, ...]],
-            as_of: datetime, settings=SETTINGS) -> dict[str, dict[str, Any]]:
+            as_of: datetime, settings: MarketSettings = SETTINGS) -> dict[str, dict[str, Any]]:
     features = compute_arm_features(observations_by_arm, as_of=as_of, settings=settings)
     return {arm: _serialised(score)
             for arm, score in score_all_arms(features, as_of=as_of, settings=settings).items()}

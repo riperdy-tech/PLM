@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -34,6 +36,7 @@ from market_intelligence.reports.exports import render_markdown, store_report
 from market_intelligence.reports.market_snapshot import build_snapshot
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import queries
+from minio import Minio
 from plm_platform.config import Secret, load_settings
 from plm_platform.db import build_engine
 from plm_platform.storage import build_client, ensure_bucket, from_uri, get_verified
@@ -55,15 +58,16 @@ ACCEPTANCE_TOKEN = "acceptance-token"
 # A test that replays the same fixed instants accumulates quota charges on the same
 # run rows; the ceiling is exercised by its own unit tests, so the acceptance run
 # lifts it rather than failing on its own history.
-ACCEPTANCE_BUDGETS = {"quota_units_per_run": 100_000, "quota_units_per_day": 1_000_000}
+ACCEPTANCE_BUDGETS: dict[str, Any] = {"quota_units_per_run": 100_000, "quota_units_per_day": 1_000_000}
 
 
-def _fixture(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def _fixture(name: str) -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    return payload
 
 
 @pytest.fixture(scope="module")
-def stack() -> tuple[sa.Engine, object]:
+def stack() -> Iterator[tuple[sa.Engine, Minio]]:
     try:
         engine = build_engine()
         with engine.connect() as connection:
@@ -115,7 +119,7 @@ def _make_queries_due(engine: sa.Engine, *, now: datetime,
 
 
 def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
-    stack: tuple[sa.Engine, object], caplog: pytest.LogCaptureFixture
+    stack: tuple[sa.Engine, Minio], caplog: pytest.LogCaptureFixture
 ) -> None:
     engine, storage_client = stack
     factory = sessionmaker(bind=engine)
@@ -145,7 +149,7 @@ def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
     run_lines = [record for record in caplog.records
                  if record.getMessage() == "market run summary"]
     assert run_lines, "the run must log its structured summary line"
-    assert run_lines[-1].api_quota_units == costs["api_quota_units"]
+    assert run_lines[-1].__dict__["api_quota_units"] == costs["api_quota_units"]
 
     with factory() as session:
         # Only this run's rows: the table is shared with other tests (the §35 scenario
@@ -207,7 +211,7 @@ def test_full_mock_cycle_produces_ranked_evidence_backed_arms(
     assert get_verified(stored.key, client=storage_client)
 
 
-def test_a_rate_limited_run_is_partial_and_resumable(stack: tuple[sa.Engine, object]) -> None:
+def test_a_rate_limited_run_is_partial_and_resumable(stack: tuple[sa.Engine, Minio]) -> None:
     """AC-12/§23/§27: the run records the failure class and reschedules, never blinds on."""
     engine, _ = stack
     factory = sessionmaker(bind=engine)

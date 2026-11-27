@@ -15,7 +15,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from plm_contracts.seams.c3 import DurationRangeSeconds
-from quality_gate.audio import decode as decode_module
 from quality_gate.audio.policy import load_audio_qa_policy, parse_audio_qa_policy
 from quality_gate.domain.enums import CheckStatus
 from quality_gate.evaluators.musical import evaluate_musical_qualities
@@ -165,7 +164,7 @@ def test_non_wav_without_a_decoder_is_blocked_not_passed(
 ) -> None:
     """Proves that when FFmpeg is absent a non-WAV input is a blocking
     DECODER_UNAVAILABLE, never a skipped check."""
-    monkeypatch.setattr(decode_module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr("quality_gate.audio.decode.shutil.which", lambda _name: None)
     path = tmp_path / "track.mp3"
     path.write_bytes(b"ID3\x04\x00\x00\x00\x00\x00\x00" + bytes(range(256)) * 8)
     res = _evaluate(path)

@@ -12,7 +12,9 @@ from datetime import UTC, datetime
 from market_intelligence.config import load_market_settings
 from market_intelligence.reports.exports import render_machine, render_markdown
 from market_intelligence.reports.market_snapshot import build_snapshot
+from sqlalchemy.orm import Session
 
+from tests.support.c1_api import SyncASGIClient
 from tests.support.golden import assert_golden, golden_path
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
@@ -25,7 +27,9 @@ TEN_SECTIONS = {
 }
 
 
-def test_the_ten_spec_sections_exist_and_are_labelled(c1_api_client, market_session) -> None:
+def test_the_ten_spec_sections_exist_and_are_labelled(
+    c1_api_client: SyncASGIClient, market_session: Session,
+) -> None:
     snapshot = build_snapshot(market_session, as_of=AS_OF, settings=load_market_settings())
     assert set(snapshot.sections) == TEN_SECTIONS
     assert set(snapshot.evidence_classes) == TEN_SECTIONS
@@ -33,7 +37,7 @@ def test_the_ten_spec_sections_exist_and_are_labelled(c1_api_client, market_sess
                                                        "ASSUMED"}
 
 
-def test_the_machine_readable_form_carries_the_same_ten_sections(market_session) -> None:
+def test_the_machine_readable_form_carries_the_same_ten_sections(market_session: Session) -> None:
     snapshot = build_snapshot(market_session, as_of=AS_OF, settings=load_market_settings())
     payload = json.loads(render_machine(snapshot))
     assert set(payload["sections"]) == TEN_SECTIONS
@@ -42,7 +46,7 @@ def test_the_machine_readable_form_carries_the_same_ten_sections(market_session)
                                            snapshot.evidence_classes.items()}
 
 
-def test_an_empty_section_says_so_rather_than_printing_a_zero(market_session) -> None:
+def test_an_empty_section_says_so_rather_than_printing_a_zero(market_session: Session) -> None:
     snapshot = build_snapshot(market_session, as_of=AS_OF, settings=load_market_settings())
     rendered = render_markdown(snapshot)
     # `top_opportunity_arms` has no rows in an empty database: the report must say the
@@ -52,7 +56,7 @@ def test_an_empty_section_says_so_rather_than_printing_a_zero(market_session) ->
     assert "0" not in section.replace("(DERIVED)", "")
 
 
-def test_the_rendered_report_is_stable(market_session) -> None:
+def test_the_rendered_report_is_stable(market_session: Session) -> None:
     snapshot = build_snapshot(market_session, as_of=AS_OF, settings=load_market_settings())
     rendered = render_markdown(snapshot)
     assert rendered.startswith("# Market Snapshot — 2026-09-20")

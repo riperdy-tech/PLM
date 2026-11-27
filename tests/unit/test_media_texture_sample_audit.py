@@ -63,7 +63,8 @@ def test_sample_comparison_counts_only_cross_release_pairs() -> None:
     assert result["max_similarity"] == pytest.approx(1)
     assert result["at_or_above_near_copy_threshold"] == 2
     assert result["exact_sha256_reuse_pairs"] == 0
-    assert len(result["top_pairs"]) == 4
+    top_pairs = result["top_pairs"]
+    assert isinstance(top_pairs, list) and len(top_pairs) == 4
     assert result["scope"] == "read_only_selected_track_samples_not_full_album_or_rights_clearance"
 
 

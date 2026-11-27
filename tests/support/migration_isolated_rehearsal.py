@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -55,7 +55,7 @@ def _run(args: list[str], *, stdin: Any = None, stdout: Any = None) -> bytes:
 
 
 def _inspect(container: str) -> dict[str, Any]:
-    items = json.loads(_run(["docker", "inspect", container]))
+    items: list[dict[str, Any]] = json.loads(_run(["docker", "inspect", container]))
     if len(items) != 1:
         raise RuntimeError("container inspection unavailable")
     return items[0]
@@ -253,7 +253,7 @@ def _revision(settings: Settings) -> str:
             name = conn.execute(text("SELECT current_database()")).scalar_one()
             if name != database_url(settings).database:
                 raise RuntimeError("connected database changed unexpectedly")
-            revisions = conn.execute(text(
+            revisions: Sequence[str] = conn.execute(text(
                 "SELECT version_num FROM public.alembic_version"
             )).scalars().all()
             if len(revisions) != 1:
@@ -284,9 +284,12 @@ def _upgrade(
 
 def _snapshot(settings: Settings, revision: str) -> dict[str, Any]:
     value = read_only_review_snapshot(settings=settings)
+    database = database_url(settings).database
+    if database is None:
+        raise RuntimeError("isolated branch database name is unavailable")
     result = preflight_clone_snapshot(
-        value, configured_database=database_url(settings).database,
-        intended_database=database_url(settings).database,
+        value, configured_database=database,
+        intended_database=database,
         starting_revision=revision,
     )
     if not result["passed"]:

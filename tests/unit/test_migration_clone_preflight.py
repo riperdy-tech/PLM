@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -146,7 +147,7 @@ def test_cli_pins_configured_settings_for_read_only_snapshot(
     )
     observed: list[object] = []
 
-    def snapshot(*, settings: object) -> dict:
+    def snapshot(*, settings: object) -> dict[str, Any]:
         observed.append(settings)
         value, _, _ = _cases(RELEASE)
         value["database"] = CLONE

@@ -10,6 +10,7 @@ payload served by the fixture app. A rename on either side fails here by name.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -68,6 +69,7 @@ def test_consumer_schema_matches_the_registry_field_lists() -> None:
     assert set(OpportunityPayload.model_fields) == set(REGISTRY_FIELDS)
     assert set(TaxonomyPayload.model_fields) == set(REGISTRY_TAXONOMY_FIELDS)
     components_model = OpportunityPayload.model_fields["components"].annotation
+    assert components_model is not None
     assert set(components_model.model_fields) == set(REGISTRY_COMPONENT_FIELDS)
     assert set(EvidencePayload.model_fields) == set(REGISTRY_EVIDENCE_FIELDS)
 
@@ -124,11 +126,11 @@ def _real_page() -> dict[str, object]:
 )
 def test_p2_refuses_a_page_missing_a_fact(field: str) -> None:
     page = json.loads(json.dumps(_real_page()))
-    parent: object = page
+    parent: Any = page  # decoded JSON: lists and dicts of unknown shape
     *parents, leaf = field.split(".")
     for part in parents:
-        parent = parent[int(part)] if isinstance(parent, list) else parent[part]  # type: ignore[index]
-    del parent[leaf]  # type: ignore[union-attr, arg-type]
+        parent = parent[int(part)] if isinstance(parent, list) else parent[part]
+    del parent[leaf]
     with pytest.raises(MarketUnavailable):
         _client_for(page).fetch_opportunities(limit=1)
 

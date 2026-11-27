@@ -72,7 +72,14 @@ class World:
         self.routes: dict[tuple[str, str], Callable[[httpx.Request], Any]] = {}
 
     def on(self, method: str, path: str, answer: Any) -> None:
-        self.routes[(method, path)] = answer if callable(answer) else (lambda r, a=answer: a)
+        if callable(answer):
+            self.routes[(method, path)] = answer
+            return
+
+        def fixed(_request: httpx.Request) -> Any:
+            return answer
+
+        self.routes[(method, path)] = fixed
 
     def handler(self, phase: Phase) -> Handler:
         def handle(request: httpx.Request) -> httpx.Response:
@@ -201,6 +208,7 @@ def test_upload_waits_for_youtube_processing_without_uploading_again(
     assert len(stuck.sent("POST", "/youtube/publish")) > 3
 
 
+assert CONFIG.publish is not None
 STRICT = dataclasses.replace(CONFIG, publish=dataclasses.replace(
     CONFIG.publish, allow_simulated=False))
 
@@ -209,8 +217,9 @@ def test_a_simulated_publication_holds_unless_the_configuration_allows_it() -> N
     """A mock provider's ``simulate`` is not a publication: the run would go PUBLISHED
     and P2 would learn from a video nobody can see. It holds as SIMULATED_PUBLICATION
     (default), or passes only where the configuration opts in (tests, demo stacks)."""
-    assert parse_pipeline_config({"publish": {
-        "channel_id": "UC_x", "operating_mode": "private_only"}}).publish.allow_simulated         is False
+    parsed = parse_pipeline_config({"publish": {
+        "channel_id": "UC_x", "operating_mode": "private_only"}}).publish
+    assert parsed is not None and parsed.allow_simulated is False
     world = _upload_world({"attempt_id": "att-1", "manifest_id": "man-1", "state": "verified",
                            "youtube_video_id": "yt1", "publication_event": EVENT,
                            "external_writes": RECEIPTS})

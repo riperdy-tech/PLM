@@ -3,6 +3,7 @@ from market_intelligence.domain.enums import TaxonomyDimension as D
 from market_intelligence.domain.value_objects import TaxonomyProfile, fingerprint
 from market_intelligence.taxonomy.arms import arm_id_for, generate_candidate_arms
 from market_intelligence.taxonomy.validators import ClassificationDraft
+from sqlalchemy.orm import Session
 
 RNB = TaxonomyProfile(genre="rnb", use_case="late_night_drive", language="english",
                       vocal_mode="vocal", duration_bucket="45_75m")
@@ -38,7 +39,7 @@ def test_arms_come_from_co_occurring_attributes_with_support() -> None:
 
 
 def test_v2_measured_duration_arm_cannot_rewrite_same_shaped_v1_arm(
-    market_session,
+    market_session: Session,
 ) -> None:
     from market_intelligence.storage import repositories
 
@@ -75,7 +76,7 @@ def test_v2_measured_duration_arm_cannot_rewrite_same_shaped_v1_arm(
 
 
 def test_versioned_arm_slug_collision_refuses_misattributed_score_evidence(
-    market_session,
+    market_session: Session,
 ) -> None:
     import pytest
     from market_intelligence.storage import repositories
@@ -135,7 +136,7 @@ def test_generation_is_deterministic_and_refuses_a_zero_support() -> None:
 
 
 def test_v3_opt_in_identity_is_stable_across_batch_growth_and_slug_collisions(
-    market_session,
+    market_session: Session,
 ) -> None:
     import hashlib
 

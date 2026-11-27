@@ -5,8 +5,10 @@ from __future__ import annotations
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
@@ -38,7 +40,7 @@ ENV_WITH_TOKEN = {
 
 
 @pytest.fixture
-def qa_engine():
+def qa_engine() -> sa.Engine:
     engine = create_qa_engine(static_pool=True)
     register_controlled_references(engine, now=datetime(2026, 9, 1, tzinfo=UTC))
     return engine
@@ -50,7 +52,7 @@ def store() -> FakeMinio:
 
 
 @pytest.fixture
-def qa_client(qa_engine, store):
+def qa_client(qa_engine: sa.Engine, store: FakeMinio) -> TestClient:
     platform = load_settings(env=ENV_WITH_TOKEN)
     settings = load_quality_gate_settings(
         platform=platform,
@@ -61,12 +63,13 @@ def qa_client(qa_engine, store):
     app = create_app(
         session_factory=lambda: qa_session(qa_engine),
         settings=settings,
+        # FakeMinio is a duck-typed in-memory stand-in for the Minio client
         artifact_fetcher=MinioArtifactFetcher(platform, client=store),  # type: ignore[arg-type]
     )
     return TestClient(app)
 
 
-def _stored_event(store: FakeMinio, wav_path: Path, **fields: object) -> dict:
+def _stored_event(store: FakeMinio, wav_path: Path, **fields: object) -> dict[str, Any]:
     """The C4 wire for ``fields`` with the WAV stored in ``store`` under its URI."""
     platform = load_settings(env=ENV_WITH_TOKEN)
     return CandidateReadyPayload.build(
@@ -81,13 +84,13 @@ def _make_temp_wav(duration: float = 1.0) -> Path:
     return write_wav(path, synthetic_music(seed=17, seconds=duration))
 
 
-def test_qa_health_is_public(qa_client) -> None:
+def test_qa_health_is_public(qa_client: TestClient) -> None:
     res = qa_client.get("/qa/health")
     assert res.status_code == 200
     assert res.json() == {"status": "ok", "service": "quality_gate"}
 
 
-def test_qa_endpoints_require_service_token(qa_client) -> None:
+def test_qa_endpoints_require_service_token(qa_client: TestClient) -> None:
     res = qa_client.get("/qa/quarantine")
     assert res.status_code == 401
     assert res.json()["detail"]["code"] == "invalid_service_token"
@@ -98,7 +101,7 @@ def test_qa_endpoints_require_service_token(qa_client) -> None:
     assert res_bad.json()["detail"]["code"] == "invalid_service_token"
 
 
-def test_evaluate_and_get_manifest_flow(qa_client, qa_engine, store) -> None:
+def test_evaluate_and_get_manifest_flow(qa_client: TestClient, qa_engine: sa.Engine, store: FakeMinio) -> None:
     wav_path = _make_temp_wav(duration=1.5)
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
@@ -142,7 +145,7 @@ def test_evaluate_and_get_manifest_flow(qa_client, qa_engine, store) -> None:
             wav_path.unlink()
 
 
-def test_quarantine_and_resolve_flow(qa_client, qa_engine, store) -> None:
+def test_quarantine_and_resolve_flow(qa_client: TestClient, qa_engine: sa.Engine, store: FakeMinio) -> None:
     wav_path = _make_temp_wav(duration=1.5)
     try:
         headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
@@ -212,7 +215,7 @@ def test_quarantine_and_resolve_flow(qa_client, qa_engine, store) -> None:
             wav_path.unlink()
 
 
-def test_evaluation_refuses_an_incomplete_candidate_event(qa_client, qa_engine) -> None:
+def test_evaluation_refuses_an_incomplete_candidate_event(qa_client: TestClient, qa_engine: sa.Engine) -> None:
     headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
     event = candidate_event().to_wire()
     del event["lineage"]
@@ -227,12 +230,13 @@ def test_evaluation_refuses_an_incomplete_candidate_event(qa_client, qa_engine) 
 
 
 def test_a_concurrent_duplicate_evaluation_replays_the_stored_one(
-        qa_client, qa_engine, store, monkeypatch: pytest.MonkeyPatch) -> None:
+        qa_client: TestClient, qa_engine: sa.Engine, store: FakeMinio, monkeypatch: pytest.MonkeyPatch) -> None:
     """R5: a caller's retry while the first request was still evaluating passed the
     replay check, evaluated again and failed on the evaluation's key with a 500, which
     ended the pipeline run. Proves: when the same evaluation was committed meanwhile, the
     second request answers with the stored evaluation (same id, same disposition)."""
     from quality_gate.api import routes
+    from quality_gate.storage import repositories
 
     wav_path = _make_temp_wav(duration=1.5)
     headers = {SERVICE_TOKEN_HEADER: _TEST_TOKEN}
@@ -245,7 +249,7 @@ def test_a_concurrent_duplicate_evaluation_replays_the_stored_one(
         first = qa_client.post("/qa/evaluations", json=body, headers=headers)
         assert first.status_code == 201, first.text
 
-        real = routes.get_candidate_evaluation
+        real = repositories.get_candidate_evaluation  # what routes imported
         calls = {"n": 0}
 
         def not_yet_visible(session, evaluation_id):  # type: ignore[no-untyped-def]

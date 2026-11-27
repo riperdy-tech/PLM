@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from market_intelligence.domain.enums import TaxonomyDimension as D
 from market_intelligence.taxonomy.classifier import (
@@ -9,6 +11,7 @@ from market_intelligence.taxonomy.validators import (
     classification_input_fingerprint,
     measured_duration_bucket,
 )
+from sqlalchemy.orm import Session
 
 EXAMPLE = ClassificationInput(
     title="2AM Seoul — Rainy Night R&B Mix",
@@ -61,9 +64,9 @@ def test_title_duration_is_not_an_identity_fact_without_measurement() -> None:
     assert measured.dimensions[D.GENRE] == draft.dimensions[D.GENRE]
 
 
-def test_duration_bucket_is_part_of_versioned_cache_identity(market_session) -> None:
+def test_duration_bucket_is_part_of_versioned_cache_identity(market_session: Session) -> None:
     classifier = RuleBasedClassifier()
-    base = {"title": "45_75m R&B Night Drive", "description": "music"}
+    base: dict[str, Any] = {"title": "45_75m R&B Night Drive", "description": "music"}
     short = ClassificationInput(**base, video_duration_seconds=125.0)
     long = ClassificationInput(**base, video_duration_seconds=3600.0)
     unknown = ClassificationInput(**base)
@@ -124,7 +127,9 @@ def test_the_classifier_output_round_trips_through_validation() -> None:
     from market_intelligence.taxonomy.validators import validate_classification
 
     draft = RuleBasedClassifier().classify(EXAMPLE)
-    raw = {dimension.value: list(values) for dimension, values in draft.dimensions.items()}
+    raw: dict[str, object] = {
+        dimension.value: list(values) for dimension, values in draft.dimensions.items()
+    }
     raw["title_archetypes"] = []
     raw["confidence"] = draft.confidence
     raw["unmapped_terms"] = list(draft.unmapped_terms)
@@ -132,7 +137,7 @@ def test_the_classifier_output_round_trips_through_validation() -> None:
     assert again.dimensions == draft.dimensions
 
 
-def test_classification_is_cached_by_content_fingerprint_and_taxonomy_version(market_session) -> None:
+def test_classification_is_cached_by_content_fingerprint_and_taxonomy_version(market_session: Session) -> None:
     first_id, first_created = classify_observation(
         market_session, entity_id=None, observation_id=None, text=EXAMPLE,
         classifier=RuleBasedClassifier(), taxonomy_version="p1-taxonomy-v1",
@@ -149,7 +154,7 @@ def test_classification_is_cached_by_content_fingerprint_and_taxonomy_version(ma
     assert first_id == second_id != third_id  # §29: a new taxonomy version is a new row
 
 
-def _classify(title: str, description: str = "") -> dict:
+def _classify(title: str, description: str = "") -> dict[D, tuple[str, ...]]:
     return dict(RuleBasedClassifier().classify(
         ClassificationInput(title=title, description=description)
     ).dimensions)

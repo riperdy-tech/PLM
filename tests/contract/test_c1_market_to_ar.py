@@ -20,6 +20,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from tests.support.c1_api import SyncASGIClient
 from tests.support.contract import SeamRegistry, assert_seam_payload
 
 REGISTRY_ENTRY = "C1 · PHASE-P1 → PHASE-P2"
@@ -124,7 +125,9 @@ def test_declared_fields_match_the_consumer_schema() -> None:
     assert set(EvidenceSchema.model_fields) == set(REGISTRY_EVIDENCE_FIELDS)
 
 
-def test_producer_payload_validates_against_the_consumer_schema(c1_api_client) -> None:
+def test_producer_payload_validates_against_the_consumer_schema(
+    c1_api_client: SyncASGIClient,
+) -> None:
     response = c1_api_client.get("/market/v1/opportunities", params={"limit": 1})
     assert response.status_code == 200, response.text
     body = response.json()
@@ -135,7 +138,9 @@ def test_producer_payload_validates_against_the_consumer_schema(c1_api_client) -
     )
 
 
-def test_freshness_is_derivable_from_as_of_and_never_a_field(c1_api_client) -> None:
+def test_freshness_is_derivable_from_as_of_and_never_a_field(
+    c1_api_client: SyncASGIClient,
+) -> None:
     payload = c1_api_client.get("/market/v1/opportunities", params={"limit": 1}).json()["items"][0]
     assert "freshness" not in payload and "freshness_seconds" not in payload
     assert datetime.fromisoformat(payload["as_of"]).tzinfo is not None, (

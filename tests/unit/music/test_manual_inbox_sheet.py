@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from music_factory.domain.models import GenerationRequest
 from music_factory.providers import suno_manual
 from music_factory.providers.flow_music_manual import FlowMusicManualAdapter

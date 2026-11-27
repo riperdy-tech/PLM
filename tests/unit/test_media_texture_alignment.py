@@ -5,7 +5,7 @@ import io
 
 import numpy as np
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from media_factory.audio.texture_alignment import (
     OFFSETS_SECONDS,
     PLAYBACK_RATES,

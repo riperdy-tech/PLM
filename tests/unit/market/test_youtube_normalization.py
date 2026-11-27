@@ -1,6 +1,7 @@
 # tests/unit/market/test_youtube_normalization.py
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from market_intelligence.connectors.base import FetchedObject
 from market_intelligence.domain.enums import ProviderObjectType
@@ -13,7 +14,7 @@ from plm_contracts import Tri, TriState
 from tests.support.golden import assert_golden, golden_path
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
-VIDEO_PAYLOAD = {
+VIDEO_PAYLOAD: dict[str, Any] = {
     "kind": "youtube#video", "id": "vid00000001",
     "snippet": {"publishedAt": "2026-08-01T10:00:00Z", "channelId": "UC" + "a" * 22,
                 "title": "2AM Seoul — Rainy Night R&B Mix",
@@ -29,7 +30,7 @@ CHANNEL_PAYLOAD = {
 }
 
 
-def _video():
+def _video() -> FetchedObject:
     return FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
                          provider_object_id="vid00000001", observed_at=FIXED_NOW,
                          payload=VIDEO_PAYLOAD)
@@ -42,6 +43,7 @@ def test_video_payload_maps_to_metric_values_and_a_retained_title() -> None:
     )
     assert outcome.quarantine is None
     draft = outcome.observation
+    assert draft is not None
     assert draft.views.unwrap() == 120000
     assert draft.comments.unwrap() == 410
     assert draft.video_duration_seconds.unwrap() == 3720.0
@@ -59,6 +61,7 @@ def test_hidden_subscriber_count_stays_unknown() -> None:
         observed_at=FIXED_NOW,
     )
     draft = outcome.observation
+    assert draft is not None
     assert draft.subscriber_count.state is TriState.UNKNOWN
     assert draft.channel_video_count.unwrap() == 88
     assert draft.country_signal is None
@@ -69,6 +72,7 @@ def test_golden_normalized_video_pins_the_whole_mapping() -> None:
         _video(), entity_id="entity-1", source_id="source-1",
         raw_observation_id="raw-1", observed_at=FIXED_NOW,
     )
+    assert outcome.observation is not None
     payload = {name: getattr(outcome.observation, name).to_json_value()
                if hasattr(getattr(outcome.observation, name), "to_json_value")
                else getattr(outcome.observation, name).isoformat()

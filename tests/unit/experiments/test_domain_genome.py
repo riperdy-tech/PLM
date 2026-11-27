@@ -77,7 +77,7 @@ def test_genome_instantiation_and_immutability() -> None:
     assert genome.vocal_mode == VocalMode.VOCAL
 
     with pytest.raises((TypeError, ValidationError)):
-        genome.genre = "jazz"  # type: ignore[misc]
+        genome.genre = "jazz"
 
 
 def test_bpm_range_validation() -> None:

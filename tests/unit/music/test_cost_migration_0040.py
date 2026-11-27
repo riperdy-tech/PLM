@@ -5,6 +5,7 @@ import importlib.util
 import io
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 REVISION = ROOT / "migrations/versions/music/music_0040_unpriced_costs.py"
 
 
-def _revision():
+def _revision() -> Any:  # a loaded migration module
     spec = importlib.util.spec_from_file_location("music_0040_unpriced_test", REVISION)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

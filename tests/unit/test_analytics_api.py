@@ -15,6 +15,7 @@ from analytics.config import AnalyticsSettings
 from fastapi.testclient import TestClient
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
+from sqlalchemy.orm import Session
 
 from tests.support.analytics_db import create_analytics_engine
 from tests.support.decisions import log_allocation_decision
@@ -40,7 +41,7 @@ def _client(reporting_currency: str | None = None) -> TestClient:
     log_allocation_decision(engine, directive_id=lineage_fields()["production_directive_id"],
                             arm_id="arm_api_01", decided_at=NOW)
 
-    def session_factory():
+    def session_factory() -> Session:
         from sqlalchemy.orm import sessionmaker
 
         return sessionmaker(bind=engine)()

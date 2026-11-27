@@ -90,6 +90,12 @@ class RealModeClient(MockYouTubeClient):
         return item
 
 
+def _entry_status(ledger: BudgetLedger, capability: str, key: str) -> EntryStatus:
+    entry = ledger.entry(capability, key)
+    assert entry is not None
+    return entry.status
+
+
 def _ledger() -> BudgetLedger:
     ledger = BudgetLedger(ops_session_factory(create_ops_engine()), currency="USD")
     start = datetime(2026, 9, 1, tzinfo=UTC)
@@ -133,7 +139,7 @@ def test_a_failed_chunk_resumes_from_what_youtube_holds_and_uploads_once() -> No
         first = _publish(_engine(client, ledger), session, manifest)
         assert first.attempt.state is PublishState.FAILED_RETRYABLE
         upload_key = YouTubePublishingEngine.write_key(manifest, CAPABILITY_UPLOAD)
-        assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.RESERVED
+        assert _entry_status(ledger, CAPABILITY_UPLOAD, upload_key) is EntryStatus.RESERVED
 
         retry_engine = _engine(client, ledger)
         second = _publish(retry_engine, session, manifest)
@@ -141,7 +147,7 @@ def test_a_failed_chunk_resumes_from_what_youtube_holds_and_uploads_once() -> No
     assert second.is_success and second.publication_record is not None
     assert retry_engine.decisions[0].reason == RESUMED_RESERVATION_REASON
     assert len(client.sessions) == 1 and len(client.videos) == 1  # one upload, resumed
-    assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.COMMITTED
+    assert _entry_status(ledger, CAPABILITY_UPLOAD, upload_key) is EntryStatus.COMMITTED
 
 
 def test_a_lost_playlist_response_finds_the_item_and_skips_done_writes() -> None:
@@ -166,7 +172,7 @@ def test_a_lost_playlist_response_finds_the_item_and_skips_done_writes() -> None
     assert receipts[CAPABILITY_THUMBNAIL]["reason"] == "performed_earlier"
     for capability in CAPABILITIES:
         key = YouTubePublishingEngine.write_key(manifest, capability)
-        assert ledger.entry(capability, key).status is EntryStatus.COMMITTED
+        assert _entry_status(ledger, capability, key) is EntryStatus.COMMITTED
 
 
 def test_a_committed_write_is_never_resumed() -> None:
@@ -203,14 +209,14 @@ def test_an_upload_that_never_started_releases_its_reservation(error: Exception)
         insert_publish_manifest(session, manifest)
         first = _publish(_engine(client, ledger), session, manifest)
         assert first.attempt.state is PublishState.FAILED_RETRYABLE
-        assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.RELEASED
+        assert _entry_status(ledger, CAPABILITY_UPLOAD, upload_key) is EntryStatus.RELEASED
 
         retry_engine = _engine(client, ledger)
         second = _publish(retry_engine, session, manifest)
 
     assert second.is_success
     assert retry_engine.decisions[0].reason == "authorized"
-    assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.COMMITTED
+    assert _entry_status(ledger, CAPABILITY_UPLOAD, upload_key) is EntryStatus.COMMITTED
 
 
 def test_a_resume_after_the_upload_needs_no_media_and_clears_the_old_error() -> None:
@@ -239,12 +245,12 @@ def test_a_refused_thumbnail_is_released_and_an_unknown_one_stays_held() -> None
         insert_publish_manifest(session, manifest)
         client.thumbnail_error = YouTubeClientError("HTTP 400 (simulated)", refused=True)
         _publish(_engine(client, ledger), session, manifest)
-        assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.RELEASED
+        assert _entry_status(ledger, CAPABILITY_THUMBNAIL, thumb_key) is EntryStatus.RELEASED
 
         client.thumbnail_error = YouTubeTransientError("HTTP 503 (simulated)")
         _publish(_engine(client, ledger), session, manifest)
-        assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.RESERVED
+        assert _entry_status(ledger, CAPABILITY_THUMBNAIL, thumb_key) is EntryStatus.RESERVED
 
         final = _publish(_engine(client, ledger), session, manifest)
     assert final.is_success
-    assert ledger.entry(CAPABILITY_THUMBNAIL, thumb_key).status is EntryStatus.COMMITTED
+    assert _entry_status(ledger, CAPABILITY_THUMBNAIL, thumb_key) is EntryStatus.COMMITTED

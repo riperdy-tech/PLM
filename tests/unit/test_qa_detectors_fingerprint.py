@@ -70,7 +70,7 @@ def test_offset_clip_matches_its_source_and_recovers_the_offset() -> None:
 
 def test_resampled_copy_still_matches() -> None:
     """Proves: the same recording delivered at 48 kHz matches its 44.1 kHz reference."""
-    from scipy.signal import resample_poly
+    from scipy.signal import resample_poly  # type: ignore[import-untyped]
 
     reference = synthetic_music(6, seconds=8.0)
     at_48k = resample_poly(reference, 160, 147, axis=0)

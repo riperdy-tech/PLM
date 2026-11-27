@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from market_intelligence.config import load_market_settings
 from market_intelligence.connectors.base import FetchedObject
-from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
 from market_intelligence.domain.enums import ProviderObjectType, ScoringComponent
 from market_intelligence.domain.value_objects import ScoreComponents
 from market_intelligence.features.arm_features import compute_arm_features
@@ -14,6 +14,7 @@ from market_intelligence.scoring.calibration import default_weights
 from market_intelligence.scoring.opportunity import score_arm
 from market_intelligence.storage import repositories
 from plm_contracts import Tri
+from sqlalchemy.orm import Session
 
 
 def test_confidence_is_the_weighted_breakdown_of_its_own_inputs() -> None:
@@ -39,7 +40,7 @@ def test_out_of_range_components_are_refused() -> None:
         ConfidenceBreakdown(1.5, 0.0, 0.0, 0.0, 0.0)
 
 
-def test_quarantined_record_never_becomes_an_observation(market_session) -> None:
+def test_quarantined_record_never_becomes_an_observation(market_session: Session) -> None:
     """Review Focus 5: a quarantined record cannot reach features or scores."""
     outcome = normalize_video_object(
         FetchedObject(provider_object_type=ProviderObjectType.VIDEO,
@@ -90,7 +91,7 @@ def test_confidence_is_independent_of_the_score_for_real() -> None:
                                     settings=SETTINGS)
     fifty = ScoreComponents.from_mapping({name.value: 50.0 for name in ScoringComponent})
 
-    def scored(arm: str, components: ScoreComponents):
+    def scored(arm: str, components: ScoreComponents) -> OpportunityScore:
         return score_arm(features[arm], components, as_of=AS_OF, weights=default_weights(),
                          score_version=SETTINGS.score_version,
                          feature_version=SETTINGS.feature_version,

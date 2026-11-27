@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import wave
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -46,6 +47,10 @@ def _summary(album: Path, clips: list[str], *, duration: float = 2.0) -> None:
     )
 
 
+def _albums(paths: list[Path]) -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], audit_local_albums(paths)["albums"])
+
+
 def test_manifest_inventory_and_cross_album_byte_reuse(tmp_path: Path) -> None:
     first, second = tmp_path / "album-a", tmp_path / "album-b"
     first.mkdir()
@@ -56,7 +61,7 @@ def test_manifest_inventory_and_cross_album_byte_reuse(tmp_path: Path) -> None:
     _wav(first, 2, IDS[1], alternate=True)
     _wav(second, 1, IDS[2], alternate=True)
 
-    report = audit_local_albums([first, second])
+    report: dict[str, Any] = audit_local_albums([first, second])
     a, b = report["albums"]
     assert a["manifest_status"] == "present"
     assert a["matched_wav_count"] == 2
@@ -85,7 +90,7 @@ def test_manifest_missing_files_duration_variance_and_unlisted_wav(tmp_path: Pat
     _summary(album, list(IDS[:2]), duration=8.0)
     _wav(album, 1, IDS[0])
     _wav(album, 7, IDS[2])
-    report = audit_local_albums([album])["albums"][0]
+    report = _albums([album])[0]
     assert report["matched_wav_count"] == 1
     assert report["missing_source_track_indices"] == [2]
     assert report["duration_mismatch_track_indices"] == [1]
@@ -101,7 +106,7 @@ def test_displaced_clip_prefix_filenames_are_not_called_absent_audio(
     _summary(album, list(IDS[:2]))
     _wav(album, 1, IDS[0])
     _wav(album, 7, IDS[1])
-    result = audit_local_albums([album])["albums"][0]
+    result = _albums([album])[0]
     assert result["matched_wav_count"] == 1
     assert result["missing_source_track_indices"] == [2]
     assert result["clip_prefix_absent_track_indices"] == []
@@ -125,7 +130,7 @@ def test_displaced_clip_prefix_duration_and_ambiguity_remain_visible(
     (album / "publication_summary.json").write_text(
         json.dumps(summary), encoding="utf-8",
     )
-    result = audit_local_albums([album])["albums"][0]
+    result = _albums([album])[0]
     assert result["clip_prefix_absent_track_indices"] == [1]
     assert result["displaced_clip_prefix_matches"] == [
         {"manifest_index": 2, "local_file_index": 8}
@@ -133,7 +138,7 @@ def test_displaced_clip_prefix_duration_and_ambiguity_remain_visible(
     assert result["displaced_clip_prefix_duration_mismatch_indices"] == [2]
 
     _wav(album, 9, IDS[1], alternate=True)
-    ambiguous = audit_local_albums([album])["albums"][0]
+    ambiguous = _albums([album])[0]
     assert ambiguous["displaced_clip_prefix_matches"] == []
     assert ambiguous["ambiguous_clip_prefix_track_indices"] == [2]
 
@@ -145,7 +150,7 @@ def test_same_clip_prefix_in_multiple_manifest_rows_is_ambiguous(
     album.mkdir()
     _summary(album, [IDS[0], IDS[0]])
     _wav(album, 7, IDS[0])
-    result = audit_local_albums([album])["albums"][0]
+    result = _albums([album])[0]
     assert result["displaced_clip_prefix_matches"] == []
     assert result["ambiguous_clip_prefix_track_indices"] == [1, 2]
 
@@ -154,17 +159,19 @@ def test_missing_or_invalid_manifest_is_unknown_not_clean(tmp_path: Path) -> Non
     album = tmp_path / "unmanifested"
     album.mkdir()
     _wav(album, 1, IDS[0])
-    missing = audit_local_albums([album])["albums"][0]
+    missing = _albums([album])[0]
     assert missing["manifest_status"] == "missing"
     assert missing["matched_wav_count"] == 0
     assert missing["unlisted_wav_count"] == 1
     (album / "publication_summary.json").write_text("{broken-secret", encoding="utf-8")
-    invalid = audit_local_albums([album])["albums"][0]
+    invalid = _albums([album])[0]
     assert invalid["manifest_status"] == "invalid"
     assert "broken-secret" not in json.dumps(invalid)
 
 
-def test_local_audit_cli_emits_only_aggregates(tmp_path: Path, capsys) -> None:
+def test_local_audit_cli_emits_only_aggregates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     album = tmp_path / "not-private-path"
     album.mkdir()
     _summary(album, [IDS[0]])

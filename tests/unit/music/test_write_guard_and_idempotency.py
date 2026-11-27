@@ -658,7 +658,7 @@ def test_paid_success_without_audio_cannot_be_rebilled_after_restart(
     {"money_basis": "legacy_unverified", "actual_cost": 0.5},
 ])
 def test_failed_attempt_with_charge_evidence_and_no_job_id_blocks_paid_replay(
-    charge_evidence: dict[str, object],
+    charge_evidence: dict[str, Any],
 ) -> None:
     """An empty provider ID cannot erase a recorded charge or legacy uncertainty."""
     provider = CountingRealProvider()
@@ -1001,7 +1001,9 @@ def test_engine_refuses_stale_plan_budget_and_variant_before_real_write() -> Non
                 provider_adapter=provider,
             )
 
-        assert get_generation_plan(session, plan.plan_id).status is PlanStatus.PLANNED
+        stored_plan = get_generation_plan(session, plan.plan_id)
+        assert stored_plan is not None
+        assert stored_plan.status is PlanStatus.PLANNED
         assert list_generation_attempts(session, plan.plan_id) == []
     assert provider.calls == 0 and budget.reserved == []
 

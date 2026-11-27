@@ -13,12 +13,16 @@ from market_intelligence.connectors.youtube import (
 )
 from plm_platform.config import Secret
 
+from tests.support.http import MockHTTP
+
 SENTINEL = "yt-secret-sentinel-0123456789"
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
-def test_the_credential_never_reaches_a_log_line_repr_or_payload(mock_http, caplog) -> None:
+def test_the_credential_never_reaches_a_log_line_repr_or_payload(
+    mock_http: MockHTTP, caplog: pytest.LogCaptureFixture,
+) -> None:
     payload = json.loads((FIXTURES / "videos_lofi_batch.json").read_text(encoding="utf-8"))
     mock_http.enqueue_json(payload)
     credentials = YouTubeCredentials(api_key=Secret(SENTINEL))
@@ -34,7 +38,7 @@ def test_the_credential_never_reaches_a_log_line_repr_or_payload(mock_http, capl
     assert SENTINEL not in str(parse_video_stats(result))
 
 
-def test_a_connector_without_credentials_fails_closed(mock_http) -> None:
+def test_a_connector_without_credentials_fails_closed(mock_http: MockHTTP) -> None:
     active = YouTubeDataAPIConnector(
         client=mock_http.client(base_url="https://www.googleapis.com/youtube/v3"),
         credentials=YouTubeCredentials(),

@@ -21,7 +21,7 @@ from autonomous_ar.decisioning.cycle import (
 )
 from autonomous_ar.domain.arm import ArmDimensions, ContentArm
 from autonomous_ar.domain.policy import DEFAULT_POLICY
-from autonomous_ar.domain.posterior import PriorParameters
+from autonomous_ar.domain.posterior import PosteriorState, PriorParameters
 from autonomous_ar.ingestion.result_adapter import store_result
 from autonomous_ar.modeling.evidence import (
     CHANNEL_BASELINE,
@@ -36,6 +36,7 @@ from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
 from autonomous_ar.modeling.update import apply_pending_updates
 from autonomous_ar.policy.lifecycle import evaluate_retirements
 from autonomous_ar.storage import repositories
+from sqlalchemy.orm import Session
 
 from tests.support.ar_db import ar_session, create_ar_engine
 from tests.support.seams import unmeasured_raw_metrics
@@ -53,6 +54,12 @@ def _arm(arm_id: str, *, score: float = 60.0, confidence: float = 0.6) -> Conten
                       p1_score=score, p1_confidence=confidence,
                       component_scores=dict(COMPONENTS), observation_count=3, source_count=1,
                       as_of=NOW, score_version="p1-v1", freshness_seconds=0.0)
+
+
+def _stored_posterior(session: Session, arm_id: str) -> PosteriorState:
+    state = repositories.load_posterior(session, arm_id)
+    assert state is not None
+    return state
 
 
 def test_ranks_are_mid_ranks_and_ties_share_them() -> None:
@@ -119,11 +126,11 @@ def test_clustered_rewards_separate_arms_on_the_channels_own_scale() -> None:
         assert scale.observation_variance < SETTINGS.observation_variance
         model = NormalNormalRewardModel(observation_variance=scale.observation_variance)
         posteriors = {arm_id: posterior_as_of(
-            session, repositories.load_posterior(session, arm_id), model=model,
+            session, _stored_posterior(session, arm_id), model=model,
             policy=DEFAULT_POLICY, as_of=NOW, scale=scale)
             for arm_id in ("strong", "weak")}
         raw = {arm_id: posterior_as_of(
-            session, repositories.load_posterior(session, arm_id),
+            session, _stored_posterior(session, arm_id),
             model=NormalNormalRewardModel(), policy=DEFAULT_POLICY, as_of=NOW)
             for arm_id in ("strong", "weak")}
         ranked_gap = posteriors["strong"].posterior_mean - posteriors["weak"].posterior_mean

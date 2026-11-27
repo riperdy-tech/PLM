@@ -166,7 +166,9 @@ def test_retry_intent_obeys_outer_transaction_rollback() -> None:
             session.rollback()
         with media_session(engine) as session:
             assert get_render_job(session, draft.id) is None
-            assert get_render_job(session, prior.id).job_status is RenderJobStatus.QUARANTINED
+            stored = get_render_job(session, prior.id)
+            assert stored is not None
+            assert stored.job_status is RenderJobStatus.QUARANTINED
             assert _retry(session, prior) is not None
             session.commit()
     finally:

@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from quality_gate.detectors import (
     InMemoryFingerprintSource,
     InMemoryLyricCorpus,

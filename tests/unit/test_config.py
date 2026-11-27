@@ -185,12 +185,12 @@ class TestSecret:
     def test_a_secret_cannot_be_concatenated_into_a_string(self) -> None:
         secret = Secret(POSTGRES_SENTINEL)
         with pytest.raises(TypeError):
-            _ = "token=" + secret
+            _ = "token=" + secret  # type: ignore[operator]  # the refusal under test
         # str.join refuses a Secret outright; an f-string would silently redact instead
         # of raising, so the join path is pinned separately.
         parts = ["token=", secret]
         with pytest.raises(TypeError):
-            _ = "".join(parts)
+            _ = "".join(parts)  # type: ignore[arg-type]  # the refusal under test
 
     def test_equality_compares_secret_values(self) -> None:
         assert Secret("a") == Secret("a")

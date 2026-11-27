@@ -102,7 +102,7 @@ class _Analytics:
                                subscribers_lost=0)
 
 
-def _app(resource: dict[str, Any] | None, analytics: _Analytics) -> TestClient:
+def _app(resource: dict[str, Any] | None, analytics: object) -> TestClient:
     engine = create_youtube_engine(static_pool=True)
     factory = sessionmaker(bind=engine)
     with factory() as session:

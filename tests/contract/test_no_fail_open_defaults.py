@@ -56,7 +56,7 @@ def test_no_invented_identity_placeholders() -> None:
         for path in _runtime_files()
         if _rel(path) not in ALLOWED
         for node in _string_constants(ast.parse(path.read_text(encoding="utf-8")))
-        if PLACEHOLDER.match(node.value)
+        if PLACEHOLDER.match(str(node.value))
     ]
     assert offenders == [], "an identifier must come from the seam, never be invented"
 

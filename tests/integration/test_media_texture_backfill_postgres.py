@@ -176,6 +176,7 @@ def test_source_writes_blocked_until_backfill_transaction_commits(
             with pg_engine.begin() as conn:
                 conn.exec_driver_sql("SET LOCAL lock_timeout = '300ms'")
                 try:
+                    stmt: sa.Executable
                     if operation == "track_update":
                         stmt = (
                             playlist_tracks_table.update()
@@ -206,12 +207,12 @@ def test_source_writes_blocked_until_backfill_transaction_commits(
         session.commit()
 
     with pg_engine.begin() as conn:
-        result = conn.execute(
+        updated = conn.execute(
             playlist_tracks_table.update()
             .where(playlist_tracks_table.c.song_id == song)
             .values(audio_uri="media://after-commit")
         )
-        assert result.rowcount == 1
+        assert updated.rowcount == 1
     with Session(pg_engine) as session:
         saved = get_media_package_by_id(session, package_id)
         assert saved is not None and "evidence" in saved.render_report["album_texture"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
@@ -14,7 +15,7 @@ from autonomous_ar.storage.models import AR_METADATA
 MIGRATION_PATH = Path("migrations/versions/ar/ar_0008_initial_tables.py")
 
 
-def _load_migration() -> object:
+def _load_migration() -> ModuleType:
     spec = importlib.util.spec_from_file_location("ar_0008_initial_tables", MIGRATION_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -34,8 +35,8 @@ def test_upgrade_creates_exactly_the_model_tables_and_downgrade_removes_them() -
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS ar")
         module.op = Operations(MigrationContext.configure(connection))  # type: ignore[attr-defined]
-        module.upgrade()  # type: ignore[attr-defined]
+        module.upgrade()
         created = set(sa.inspect(connection).get_table_names(schema="ar"))
         assert created == {table.name for table in AR_METADATA.tables.values()}
-        module.downgrade()  # type: ignore[attr-defined]
+        module.downgrade()
         assert set(sa.inspect(connection).get_table_names(schema="ar")) == set()

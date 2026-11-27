@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -41,12 +42,12 @@ def _voice(seconds: float = 30.0) -> np.ndarray:
     t = np.arange(int(RATE * seconds)) / RATE
     f0 = 220 * 2 ** ((40 / 1200) * np.sin(2 * np.pi * 5.5 * t) + 0.2 * np.sin(2 * np.pi * 0.3 * t))
     phase = 2 * np.pi * np.cumsum(f0) / RATE
-    return 0.3 * sum(np.sin(k * phase) / k for k in range(1, 8))
+    return np.asarray(0.3 * sum(np.sin(k * phase) / k for k in range(1, 8)))
 
 
 def _pad(seconds: float = 30.0) -> np.ndarray:
     t = np.arange(int(RATE * seconds)) / RATE
-    return 0.2 * sum(np.sin(2 * np.pi * f * t) for f in (220.0, 277.2, 329.6))
+    return np.asarray(0.2 * sum(np.sin(2 * np.pi * f * t) for f in (220.0, 277.2, 329.6)))
 
 
 def _melody() -> np.ndarray:
@@ -163,7 +164,12 @@ def test_one_evaluation_decodes_its_wav_once(tmp_path: Path,
     monkeypatch.setattr(qa_decode, "_decode_audio", counting)
     reads: list[object] = []
     real_read = sf.read
-    monkeypatch.setattr(sf, "read", lambda *a, **k: reads.append(a) or real_read(*a, **k))
+
+    def counting_read(*a: Any, **k: Any) -> Any:
+        reads.append(a)
+        return real_read(*a, **k)
+
+    monkeypatch.setattr(sf, "read", counting_read)
     run_candidate_evaluation(
         event=candidate_event(
             candidate_id="cand_once", artifact_id="art_once", track_spec_id="spec_once",

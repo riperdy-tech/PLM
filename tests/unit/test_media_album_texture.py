@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 from media_factory.audio.features import measure_features
 from media_factory.errors import MediaAssemblyError
 from media_factory.playlist.diversity import check_album_texture

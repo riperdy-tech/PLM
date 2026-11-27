@@ -20,7 +20,8 @@ from tests.support.seams import lineage_fields, publication_fields
 
 
 def test_publish_state_includes_processing_timeout_mandated_by_r9() -> None:
-    assert PublishState.PROCESSING_TIMEOUT == "processing_timeout"
+    # str-enum equals its wire token
+    assert PublishState.PROCESSING_TIMEOUT == "processing_timeout"  # type: ignore[comparison-overlap]
     assert PublishState.PROCESSING_TIMEOUT.value in [s.value for s in PublishState]
 
 

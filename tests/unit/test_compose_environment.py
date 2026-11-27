@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 from plm_platform.config import PROVIDER_SECRET_VARS, REQUIRED_VARS, SERVICE_TOKEN_VAR
 from plm_platform.dotenv import DISABLED_VAR, load_env_file
 

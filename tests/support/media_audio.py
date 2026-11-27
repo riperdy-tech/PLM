@@ -10,7 +10,7 @@ from __future__ import annotations
 import io
 
 import numpy as np
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 
 __all__ = ["synth_track"]
 

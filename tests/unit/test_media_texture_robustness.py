@@ -5,8 +5,8 @@ import io
 
 import numpy as np
 import pytest
-import soundfile as sf
-from media_factory.audio.features import TrackFeatures
+import soundfile as sf  # type: ignore[import-untyped]
+from media_factory.audio.features import TrackFeatures, measure_features
 
 import scripts.diagnose_p6_texture_robustness as robustness
 from scripts.diagnose_p6_texture_robustness import (
@@ -45,7 +45,7 @@ def test_baseline_feature_is_measured_only_once(
     tonal_clip: bytes, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called: list[str] = []
-    underlying = robustness.measure_features
+    underlying = measure_features  # the function the script imported
 
     def counted(candidate_id: str, audio: bytes) -> TrackFeatures:
         called.append(candidate_id)

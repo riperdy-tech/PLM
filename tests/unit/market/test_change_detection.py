@@ -12,9 +12,9 @@ from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 from market_intelligence.config import load_market_settings
-from market_intelligence.domain.entities import EvidenceSummary, OpportunityScore
+from market_intelligence.domain.entities import OpportunityScore
 from market_intelligence.domain.enums import ChangeEventType, ScoringComponent
-from market_intelligence.domain.value_objects import ScoreComponents
+from market_intelligence.domain.value_objects import EvidenceSummary, ScoreComponents
 from market_intelligence.reports.market_snapshot import (
     MarketSnapshot,
     build_snapshot,
@@ -24,6 +24,7 @@ from market_intelligence.reports.market_snapshot import (
 )
 from market_intelligence.storage import repositories
 from market_intelligence.storage.models import change_events
+from sqlalchemy.orm import Session
 
 from tests.support.c1_api import ARM_ID, seed_market
 
@@ -70,14 +71,14 @@ def test_a_growth_move_beyond_the_threshold_is_its_own_event() -> None:
     assert [draft.event_type for draft in drafts] == [ChangeEventType.GROWTH_COMPONENT_CHANGE]
 
 
-def test_an_unknown_growth_reading_never_becomes_a_change(market_session) -> None:
+def test_an_unknown_growth_reading_never_becomes_a_change(market_session: Session) -> None:
     """Unknown is not zero: an arm with no growth reading cannot "move"."""
     previous = _snapshot(score=40.0, growth=None)
     current = _snapshot(score=40.0, growth=99.0, as_of=AS_OF + timedelta(days=1))
     assert detect_changes(previous, current, settings=SETTINGS) == []
 
 
-def test_persist_snapshot_round_trips_and_stores_exactly_the_shown_events(market_session) -> None:
+def test_persist_snapshot_round_trips_and_stores_exactly_the_shown_events(market_session: Session) -> None:
     seed_market(market_session)
     first = build_snapshot(market_session, as_of=AS_OF, settings=SETTINGS)
     assert first.changes == ()

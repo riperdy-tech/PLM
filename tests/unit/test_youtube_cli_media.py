@@ -17,7 +17,12 @@ URI = f"plm://plm-media/media/renders/b/m/video_master.mp4/{DIGEST}"
 def test_artifact_bytes_fetches_the_key_the_uri_pins(monkeypatch: pytest.MonkeyPatch) -> None:
     fetched: list[str] = []
     monkeypatch.setattr(cli, "from_uri", lambda uri: uri.removeprefix("plm://plm-media/"))
-    monkeypatch.setattr(cli, "get_verified", lambda key: fetched.append(key) or b"video")
+
+    def get_verified(key: str) -> bytes:
+        fetched.append(key)
+        return b"video"
+
+    monkeypatch.setattr(cli, "get_verified", get_verified)
     assert cli.artifact_bytes(URI, DIGEST) == b"video"
     assert fetched == [f"media/renders/b/m/video_master.mp4/{DIGEST}"]
 

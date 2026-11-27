@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from media_factory.audio.texture_label_evaluation import (
@@ -47,7 +49,7 @@ def _row(first: str, second: str, reviewer: str, label: str) -> dict[str, str]:
 
 
 def test_missing_human_reviews_never_become_true_negatives() -> None:
-    output = evaluate_labeled_pair_scores(_report(), [])
+    output: dict[str, Any] = evaluate_labeled_pair_scores(_report(), [])
     assert output["source_pair_count"] == 2
     assert output["adjudicated_different_music_pairs"] == 0
     assert output["unadjudicated_pairs"] == 2
@@ -65,7 +67,7 @@ def test_two_reviewers_same_label_count_once_not_twice() -> None:
         _row(C, D, "listener_1", "different_music"),
         _row(D, C, "listener_2", "different_music"),
     ]
-    output = evaluate_labeled_pair_scores(_report(), rows)
+    output: dict[str, Any] = evaluate_labeled_pair_scores(_report(), rows)
     assert output["adjudicated_same_recording_pairs"] == 1
     assert output["adjudicated_different_music_pairs"] == 1
     assert output["distinct_reviewer_pseudonyms_count"] == 2
@@ -135,7 +137,7 @@ def test_same_reviewer_cannot_vote_twice_by_reversing_pair() -> None:
         lambda r: r.update(pairs=[]),
     ],
 )
-def test_bad_or_inconsistent_score_reports_fail_closed(mutate: object) -> None:
+def test_bad_or_inconsistent_score_reports_fail_closed(mutate: Callable[[dict[str, Any]], object]) -> None:
     report = deepcopy(_report())
     mutate(report)
     with pytest.raises(ValueError):

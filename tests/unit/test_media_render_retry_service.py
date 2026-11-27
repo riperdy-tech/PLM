@@ -19,6 +19,7 @@ from media_factory.storage.models import render_jobs_table, render_recovery_evid
 from media_factory.storage.render_claims import queue_reconciled_render_retry
 from media_factory.storage.repositories import get_render_job
 from plm_platform.clock import FixedClock
+from sqlalchemy.orm import Session
 
 from tests.support.media_backend import (
     InMemoryArtifactStore,
@@ -63,7 +64,9 @@ def test_prepared_retry_uses_second_attempt_and_refuses_changed_inputs() -> None
         "visual_profile": "neon_waveform", "playlist_concept": "Deep Focus",
         "render_profile": "preview_360p_v1",
     })
-    factory = lambda: media_session(engine)
+    def factory() -> Session:
+        return media_session(engine)
+
     try:
         with factory() as session:
             with pytest.raises(MediaInfrastructureError, match="render_timeout"):

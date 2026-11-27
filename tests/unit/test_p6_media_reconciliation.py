@@ -54,7 +54,8 @@ def _reason(report: dict[str, Any], db: list[dict[str, Any]]) -> str:
     assert result["db_or_media_modified"] is False
     assert result["snapshot_self_checksum_valid"] is True
     assert result["total"] == 1
-    return result["outcomes"][0]["status"]
+    status: str = result["outcomes"][0]["status"]
+    return status
 
 
 def test_matching_snapshot_still_does_not_remove_p7_legacy_hold() -> None:

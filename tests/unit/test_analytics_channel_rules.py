@@ -83,7 +83,8 @@ class _Downloader:
     """Two daily reports plus a superseded revision of the first day."""
 
     def __init__(self, reports: dict[str, tuple[ReachRow, ...]], statuses: dict[str, str]) -> None:
-        self.reports, self.statuses, self.fetched = reports, statuses, []
+        self.reports, self.statuses = reports, statuses
+        self.fetched: list[str] = []
 
     def list_reach_reports(self, *, job_id: str) -> list[_Version]:
         return [_Version(rid, status) for rid, status in self.statuses.items()]

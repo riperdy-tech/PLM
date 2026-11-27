@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
-import soundfile as sf
+import soundfile as sf  # type: ignore[import-untyped]
 
 from scripts.probe_local_album_master import main, probe_album_master
 
@@ -49,7 +50,7 @@ def _album(root: Path, *, second_is_wrong: bool = False) -> None:
 def test_real_pcm_window_alignment_and_changed_source(tmp_path: Path) -> None:
     album = tmp_path / "album"
     _album(album, second_is_wrong=True)
-    result = probe_album_master(album)
+    result: dict[str, Any] = probe_album_master(album)
     assert result["evaluation"] == (
         "read_only_local_master_pcm_correlation_not_rights_or_publication"
     )
@@ -73,7 +74,7 @@ def test_master_probe_uses_displaced_filename_prefix(tmp_path: Path) -> None:
     _album(album)
     track = album / "tracks" / f"track_02_{CLIPS[1][:8]}.wav"
     track.rename(album / "tracks" / f"track_07_{CLIPS[1][:8]}.wav")
-    result = probe_album_master(album)
+    result: dict[str, Any] = probe_album_master(album)
     assert result["measured_track_count"] == 2
     assert result["measurements"][1]["local_filename_index"] == 7
     assert result["measurements"][1]["windows"][0]["correlation"] > 0.99
@@ -85,7 +86,7 @@ def test_ambiguous_prefix_and_missing_master_fail_closed(tmp_path: Path) -> None
     source = album / "tracks" / f"track_01_{CLIPS[0][:8]}.wav"
     duplicate = album / "tracks" / f"track_07_{CLIPS[0][:8]}.wav"
     duplicate.write_bytes(source.read_bytes())
-    report = probe_album_master(album)
+    report: dict[str, Any] = probe_album_master(album)
     assert report["measurements"][0]["status"] == "source_prefix_ambiguous"
     assert report["measurements"][0]["windows"] == []
     (album / "album_master_continuous.wav").unlink()

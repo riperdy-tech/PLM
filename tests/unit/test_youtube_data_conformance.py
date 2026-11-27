@@ -9,6 +9,8 @@ all is the engine's ``ExternalWriteGuard`` decision, tested elsewhere.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
 from youtube_publishing.client.base import (
@@ -33,7 +35,7 @@ def _client(mock: MockHTTP) -> RealYouTubeClient:
                              http_client=mock.client())
 
 
-def _chunk(client: RealYouTubeClient, start: int) -> dict | None:
+def _chunk(client: RealYouTubeClient, start: int) -> dict[str, Any] | None:
     return client.upload_video_chunk(session_uri=SESSION, chunk=b"v" * 500,
                                      start_byte=start, total_bytes=1000)
 
@@ -177,8 +179,6 @@ def test_a_4xx_answer_marks_the_write_as_refused(mock_http: MockHTTP, error: str
 def test_one_connection_pool_serves_every_chunk(mock_http: MockHTTP,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
     """A new ``httpx.Client`` per chunk cost ~800 TLS handshakes per video (review P2)."""
-    from youtube_publishing.client import real
-
     built: list[object] = []
     original = httpx.Client
 
@@ -187,7 +187,7 @@ def test_one_connection_pool_serves_every_chunk(mock_http: MockHTTP,
         built.append(client)
         return client
 
-    monkeypatch.setattr(real.httpx, "Client", counting)
+    monkeypatch.setattr(httpx, "Client", counting)  # the module real.py uses
     enqueue(mock_http, P, "oauth_token", "session_created", "chunk_308_all_received",
             "upload_complete")
     client = RealYouTubeClient(client_id="cid", client_secret="secret", refresh_token="r")

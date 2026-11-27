@@ -175,7 +175,7 @@ def live() -> Iterator[Live]:
 def _view(client: TestClient, name: str) -> dict[str, Any]:
     response = client.get(f"/api/views/{name}")
     assert response.status_code == 200, response.text
-    body = response.json()
+    body: dict[str, Any] = response.json()
     assert body["data_source"] == LIVE_DATA_SOURCE
     assert response.headers[DATA_SOURCE_HEADER] == LIVE_DATA_SOURCE
     return body

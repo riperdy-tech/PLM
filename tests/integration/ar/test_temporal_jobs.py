@@ -87,7 +87,8 @@ def test_allocation_workflow_runs_on_ph2_ar(
                  "policy_version": "p2-v1"},
                 id=f"ar-test-{uuid.uuid4().hex[:8]}", task_queue=TaskQueue.AR.value)
             try:
-                return await handle.result()
+                result: dict[str, object] = await handle.result()
+                return result
             except Exception as exc:  # noqa: BLE001 - a named failure still proves wiring
                 return {"error": exc.__class__.__name__}
 

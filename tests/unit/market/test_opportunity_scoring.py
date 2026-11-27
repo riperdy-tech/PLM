@@ -18,12 +18,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from market_intelligence.config import load_market_settings
-from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
 from market_intelligence.domain.enums import ScoringComponent
 from market_intelligence.domain.value_objects import ScoreComponents, TaxonomyProfile
-from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.features.arm_features import ArmFeatures, compute_arm_features
 from market_intelligence.normalization.youtube import NormalizedObservationDraft
-from market_intelligence.scoring.calibration import default_weights
+from market_intelligence.scoring.calibration import ScoreWeights, default_weights
 from market_intelligence.scoring.opportunity import (
     ArmComponentScores,
     compute_component_scores,
@@ -34,13 +34,14 @@ from market_intelligence.scoring.opportunity import (
 from market_intelligence.storage import repositories
 from market_intelligence.taxonomy.arms import ArmDraft
 from plm_contracts import Tri
+from sqlalchemy.orm import Session
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()
 
 
-def _features(market_session, *, views: int, subscribers: int, fingerprint: str,
-              arm_ids=None):
+def _features(market_session: Session, *, views: int, subscribers: int, fingerprint: str,
+              arm_ids: dict[str, str] | None = None) -> dict[str, ArmFeatures]:
     observations = [
         NormalizedObservation(
             entity_id=f"{fingerprint}-e1", source_id="s1", raw_observation_id="r1",
@@ -64,8 +65,10 @@ def _features(market_session, *, views: int, subscribers: int, fingerprint: str,
                                 arm_ids=arm_ids)
 
 
-def _score_with(features, components, *, weights=None, score_version=None,
-                feature_version=None, normalization_version=None):
+def _score_with(features: ArmFeatures, components: ArmComponentScores | ScoreComponents, *,
+                weights: ScoreWeights | None = None, score_version: str | None = None,
+                feature_version: str | None = None,
+                normalization_version: str | None = None) -> OpportunityScore:
     return score_arm(
         features, components, as_of=AS_OF, weights=weights or default_weights(),
         score_version=score_version or SETTINGS.score_version,
@@ -74,7 +77,7 @@ def _score_with(features, components, *, weights=None, score_version=None,
     )
 
 
-def test_component_scores_are_bounded_and_rank_the_population(market_session) -> None:
+def test_component_scores_are_bounded_and_rank_the_population(market_session: Session) -> None:
     big_slow = _features(market_session, views=600_000, subscribers=10_000_000, fingerprint="a")
     small_fast = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
     features = {**big_slow, **small_fast}
@@ -94,7 +97,7 @@ def test_component_scores_are_bounded_and_rank_the_population(market_session) ->
     assert float(components["a"].demand.unwrap()) == pytest.approx(0.0)
 
 
-def test_demand_is_pull_not_how_often_the_seeds_sighted_the_arm(market_session) -> None:
+def test_demand_is_pull_not_how_often_the_seeds_sighted_the_arm(market_session: Session) -> None:
     """Review #42: demand added views/day/subscriber (about 1e-4 to 1) to a raw count of
     sightings, so it ranked how much the seed queries covered an arm. Sighting an arm's
     videos more often must not move its demand rank."""
@@ -115,7 +118,7 @@ def test_demand_is_pull_not_how_often_the_seeds_sighted_the_arm(market_session) 
     assert SETTINGS.score_version == "p1-v2", "a formula change is a score-version change"
 
 
-def test_scoring_is_deterministic_and_confidence_is_independent(market_session) -> None:
+def test_scoring_is_deterministic_and_confidence_is_independent(market_session: Session) -> None:
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
     components = compute_component_scores(features, settings=SETTINGS)
     first = score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
@@ -128,7 +131,7 @@ def test_scoring_is_deterministic_and_confidence_is_independent(market_session) 
     assert score.score_version == "p1-v2"
 
 
-def test_confidence_does_not_imply_a_high_score(market_session) -> None:
+def test_confidence_does_not_imply_a_high_score(market_session: Session) -> None:
     """Review fix 4: the old version asserted bounds that construction guarantees.
 
     A dense arm (24 sightings, confidence ≈ 0.74) fed modest components scores
@@ -152,7 +155,7 @@ def test_confidence_does_not_imply_a_high_score(market_session) -> None:
     assert compute_component_scores({}, settings=SETTINGS) == {}
 
 
-def test_scores_persist_with_their_versions_and_read_back(market_session) -> None:
+def test_scores_persist_with_their_versions_and_read_back(market_session: Session) -> None:
     # The plan built the features without `arm_ids`, so every score carried the missing
     # arm-table id and `latest_scores`' join to `market_arms` found nothing. The plan's
     # own `compute_arm_features(..., arm_ids=...)` parameter is the designed path.
@@ -175,7 +178,7 @@ def test_scores_persist_with_their_versions_and_read_back(market_session) -> Non
     )
 
 
-def test_the_stored_versions_are_the_versions_of_the_computation(market_session) -> None:
+def test_the_stored_versions_are_the_versions_of_the_computation(market_session: Session) -> None:
     """Review fix 2: versions must travel on the score object.
 
     They used to reach the row only through independent `persist_scores` arguments, so
@@ -205,7 +208,7 @@ def test_the_stored_versions_are_the_versions_of_the_computation(market_session)
     assert row["normalization_version"] == "p1-norm-v9"
 
 
-def test_a_persisted_score_reconstructs_from_its_recorded_inputs(market_session) -> None:
+def test_a_persisted_score_reconstructs_from_its_recorded_inputs(market_session: Session) -> None:
     """Review fix 2: a stored score must be recomputable from what it recorded.
 
     §30/AC-08: same observation set + versions ⇒ same score. The evidence used to cap
@@ -229,15 +232,14 @@ def test_a_persisted_score_reconstructs_from_its_recorded_inputs(market_session)
     observations = repositories.observations_for_entities(market_session, entity_ids)
     by_raw_id = {observation.raw_observation_id: observation for observation in observations}
 
-    grouped = {}
+    grouped: dict[str, tuple[NormalizedObservation, ...]] = {}
     for token in tokens:
         row = repositories.scores_for_arm(market_session, token)[0]
         recorded = list(row["evidence_json"]["observation_ids"])
         assert len(recorded) == (7 if token == "slow_mega" else 5)
         grouped[token] = tuple(
             replace(by_raw_id[raw_id], observed_at=_as_utc(by_raw_id[raw_id].observed_at),
-                    published_at=(None if by_raw_id[raw_id].published_at is None
-                                  else _as_utc(by_raw_id[raw_id].published_at)))
+                    published_at=_as_utc_or_none(by_raw_id[raw_id].published_at))
             for raw_id in recorded
         )
 
@@ -251,7 +253,7 @@ def test_a_persisted_score_reconstructs_from_its_recorded_inputs(market_session)
         assert recomputed[token].normalization_version == row["normalization_version"]
 
 
-def test_arm_identity_survives_a_recompute(market_session) -> None:
+def test_arm_identity_survives_a_recompute(market_session: Session) -> None:
     profile = TaxonomyProfile(genre="rnb", use_case="late_night_drive")
     first, _ = repositories.upsert_arm(
         market_session, ArmDraft(arm_id="rnb_late_night_drive", fingerprint="f1",
@@ -266,7 +268,7 @@ def test_arm_identity_survives_a_recompute(market_session) -> None:
     assert (again, created) == (first, False)  # Review Focus 4: identity is minted once
 
 
-def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_session) -> None:
+def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_session: Session) -> None:
     """Arm ids are deterministic, so a second run against one database meets the same
     slug and must be idempotent — the same rule observations, quarantine rows and
     scores follow — not raise `UniqueViolation` on `market_arms.arm_id`. A replay of
@@ -310,7 +312,7 @@ def test_arm_persistence_absorbs_a_slug_collision_instead_of_raising(market_sess
 # --------------------------------------------------------------------------------------
 
 def test_an_arm_with_no_observed_signal_gets_no_score_rather_than_a_low_one(
-    market_session,
+    market_session: Session,
 ) -> None:
     """Insufficiency is represented as absence of a score, not as a fabricated number."""
     rich = _features(market_session, views=45_000, subscribers=20_000, fingerprint="rich")
@@ -341,7 +343,7 @@ def _all_unknown_components() -> ArmComponentScores:
     )
 
 
-def test_production_fit_alone_cannot_carry_a_score(market_session) -> None:
+def test_production_fit_alone_cannot_carry_a_score(market_session: Session) -> None:
     """Review fix 1: the module docstring says configuration "cannot carry a score by
     itself", but a measured `production_fit` used to satisfy the old
     `total_weight > 0` guard and produced an 80.0 score from no market evidence."""
@@ -355,7 +357,7 @@ def test_production_fit_alone_cannot_carry_a_score(market_session) -> None:
         _score_with(features["b"], components)
 
 
-def test_production_fit_still_contributes_when_evidence_exists(market_session) -> None:
+def test_production_fit_still_contributes_when_evidence_exists(market_session: Session) -> None:
     """The ruling keeps production_fit's weight once a real evidence component is in."""
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
     components = ArmComponentScores(
@@ -367,7 +369,7 @@ def test_production_fit_still_contributes_when_evidence_exists(market_session) -
     assert score.market_opportunity_score == pytest.approx((50 * 0.25 + 80 * 0.05) / 0.30)
 
 
-def _store_channel(session, token: str, *, subscribers: int, published_days_ago: int,
+def _store_channel(session: Session, token: str, *, subscribers: int, published_days_ago: int,
                    views: tuple[int, ...]) -> None:
     """Store one channel's real observation series through the production write path."""
     _store_channel_points(session, token, subscribers=subscribers,
@@ -375,7 +377,7 @@ def _store_channel(session, token: str, *, subscribers: int, published_days_ago:
                           points=tuple(zip((55, 40, 25, 15, 5), views)))
 
 
-def _store_channel_points(session, token: str, *, subscribers: int, published_days_ago: int,
+def _store_channel_points(session: Session, token: str, *, subscribers: int, published_days_ago: int,
                           points: tuple[tuple[int, int], ...]) -> None:
     """As `_store_channel`, but each sighting names its own (days_ago, views)."""
     entity_id = repositories.deterministic_id("entity", token)
@@ -403,7 +405,11 @@ def _as_utc(moment: datetime) -> datetime:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
-def _scores_from_stored(session) -> dict:
+def _as_utc_or_none(moment: datetime | None) -> datetime | None:
+    return None if moment is None else _as_utc(moment)
+
+
+def _scores_from_stored(session: Session) -> dict[str, OpportunityScore]:
     tokens = ("slow_mega", "fast_small")
     entity_ids = [repositories.deterministic_id("entity", token) for token in tokens]
     observations = [
@@ -421,7 +427,7 @@ def _scores_from_stored(session) -> dict:
     return score_all_arms(features, as_of=AS_OF, settings=SETTINGS)
 
 
-def _canonical(scores: dict) -> str:
+def _canonical(scores: dict[str, OpportunityScore]) -> str:
     return json.dumps(
         {
             arm: {
@@ -446,7 +452,7 @@ def _canonical(scores: dict) -> str:
     )
 
 
-def test_replaying_the_same_stored_inputs_produces_identical_scores(market_session) -> None:
+def test_replaying_the_same_stored_inputs_produces_identical_scores(market_session: Session) -> None:
     """AC-08/§30: same stored observations + same versions ⇒ identical output."""
     _store_channel(market_session, "slow_mega", subscribers=10_000_000,
                    published_days_ago=1200,
@@ -461,7 +467,7 @@ def test_replaying_the_same_stored_inputs_produces_identical_scores(market_sessi
     assert first["fast_small"].score_version == "p1-v2"
     assert '"score_version": "p1-v2"' in _canonical(first)  # the version travels with the run
 
-def test_bounds_hold_for_a_grid_of_component_inputs(market_session) -> None:
+def test_bounds_hold_for_a_grid_of_component_inputs(market_session: Session) -> None:
     """Property (§34): score ∈ [0,100] for any component grid.
 
     Review fix 4: the grid used to re-check `0 <= confidence <= 1` twenty-five
@@ -525,6 +531,7 @@ def test_a_mega_channel_with_slow_growth_does_not_automatically_outrank_growers(
     # §17.3: no secondary source → the component is unknown, never a zero; the
     # measured components still produce a score instead of the arm dropping out.
     for score in scores.values():
+        assert isinstance(score.components, ArmComponentScores)
         assert score.components.cross_platform.is_unknown
         assert 0.0 < score.market_opportunity_score <= 100.0
 
@@ -573,7 +580,7 @@ def test_demand_component_ranks_pull_not_raw_audience_size() -> None:
 # Controller ruling (review fix 7): coverage is visible, and thin bases are not ranked.
 # --------------------------------------------------------------------------------------
 
-def _registered_arm(session, fingerprint: str, arm_id: str) -> None:
+def _registered_arm(session: Session, fingerprint: str, arm_id: str) -> None:
     repositories.upsert_arm(
         session,
         ArmDraft(arm_id=arm_id, fingerprint=fingerprint, profile=TaxonomyProfile(),
@@ -582,7 +589,7 @@ def _registered_arm(session, fingerprint: str, arm_id: str) -> None:
     )
 
 
-def test_basis_weight_records_the_measured_coverage_and_is_persisted(market_session) -> None:
+def test_basis_weight_records_the_measured_coverage_and_is_persisted(market_session: Session) -> None:
     """The basis is the sum of the weights that were actually measured (§17.3/§35)."""
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b",
                          arm_ids={"b": "rnb_late_night_drive"})
@@ -603,7 +610,7 @@ def test_basis_weight_records_the_measured_coverage_and_is_persisted(market_sess
     assert full.basis_weight == pytest.approx(0.25 + 0.15 + 0.15 + 0.05)
 
 
-def test_an_under_covered_arm_is_flagged_and_not_ranked(market_session) -> None:
+def test_an_under_covered_arm_is_flagged_and_not_ranked(market_session: Session) -> None:
     """Ruling: persist basis_weight, require a configurable minimum coverage for an arm
     to be *ranked*, and return under-covered arms flagged instead of silently mixing
     them into the ranking. A one-component arm with a higher number must not outrank a
@@ -643,7 +650,7 @@ def test_an_under_covered_arm_is_flagged_and_not_ranked(market_session) -> None:
     assert {row["arm_id"] for row in rows} == {"wide_arm", "thin_arm"}
 
 
-def test_fully_covered_arms_keep_their_normal_score_ranking(market_session) -> None:
+def test_fully_covered_arms_keep_their_normal_score_ranking(market_session: Session) -> None:
     high = _features(market_session, views=45_000, subscribers=20_000, fingerprint="high",
                      arm_ids={"high": "high_arm"})
     low = _features(market_session, views=9_000, subscribers=5_000, fingerprint="low",
@@ -680,7 +687,7 @@ def test_fully_covered_arms_keep_their_normal_score_ranking(market_session) -> N
 # Review fix 8: deterministic reads, idempotent score inserts.
 # --------------------------------------------------------------------------------------
 
-def test_a_replayed_score_insert_is_idempotent(market_session) -> None:
+def test_a_replayed_score_insert_is_idempotent(market_session: Session) -> None:
     """A replayed run must not raise and must not duplicate the score row —
     observations and quarantine rows already behave this way; scores now match."""
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b",
@@ -698,7 +705,7 @@ def test_a_replayed_score_insert_is_idempotent(market_session) -> None:
     )
 
 
-def test_observation_reads_have_a_deterministic_total_order(market_session) -> None:
+def test_observation_reads_have_a_deterministic_total_order(market_session: Session) -> None:
     """Ties on `observed_at` used to come back in whatever order the engine chose,
     so last-bit floating-point sums and evidence-id ordering could differ between
     runs. The reads now order by (observed_at, id) — a total order."""

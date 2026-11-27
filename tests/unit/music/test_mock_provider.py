@@ -108,24 +108,24 @@ def test_mock_recordings_of_different_seeds_are_different_recordings_to_p5() -> 
     internal catalog and a mock run could never clear supply. Distinct seeds must not
     match each other; the same seed must (it is the same recording)."""
     import numpy as np
-    import soundfile as sf
+    import soundfile as sf  # type: ignore[import-untyped]
     from quality_gate.detectors import (
         ReferenceFingerprint,
         fingerprint_samples,
         load_detector_policy,
     )
-    from quality_gate.detectors.fingerprint import match_fingerprint
+    from quality_gate.detectors.fingerprint import AudioFingerprint, match_fingerprint
 
     params = load_detector_policy().audio_fingerprint
 
-    def fingerprint(seed: int):  # type: ignore[no-untyped-def]
+    def fingerprint(seed: int) -> AudioFingerprint:
         samples, rate = sf.read(io.BytesIO(synthesize_mock_wav(duration_seconds=30.0,
                                                                seed=seed)))
         return fingerprint_samples(np.asarray(samples), rate, params)
 
     prints = {seed: fingerprint(seed) for seed in (1, 2, 3, 101)}
 
-    def outcome(candidate, *others):  # type: ignore[no-untyped-def]
+    def outcome(candidate: AudioFingerprint, *others: AudioFingerprint) -> str:
         refs = [ReferenceFingerprint(ref_id=f"r{n}", fingerprint=f, candidate_id=f"c{n}",
                                      label=f"c{n}") for n, f in enumerate(others)]
         return match_fingerprint(candidate, refs, params, source="internal_catalog",

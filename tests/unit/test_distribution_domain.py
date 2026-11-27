@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from distribution.domain.enums import (
@@ -80,12 +81,12 @@ def test_models_immutability() -> None:
     )
     with pytest.raises(ValidationError):
         # Frozen models cannot be mutated
-        artist.canonical_name = "New Name"  # type: ignore[misc]
+        artist.canonical_name = "New Name"
 
 
 def test_distribution_record_payload_strictness() -> None:
     # R9 identity fields must be present and extra fields forbidden
-    valid_data = {
+    valid_data: dict[str, Any] = {
         "release_id": "rel_001",
         "artist_id": "art_001",
         "release_version": 1,

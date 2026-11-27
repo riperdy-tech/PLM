@@ -5,11 +5,12 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
-import soundfile as sf
-from scipy import signal
+import soundfile as sf  # type: ignore[import-untyped]
+from scipy import signal  # type: ignore[import-untyped]
 
 from scripts.probe_local_mp4_audio import main, probe_local_mp4_audio
 
@@ -66,7 +67,7 @@ def test_decoded_aac_matches_local_master_even_after_codec_conversion(
 ) -> None:
     album = tmp_path / "album"
     _album(album)
-    result = probe_local_mp4_audio(album)
+    result: dict[str, Any] = probe_local_mp4_audio(album)
     assert result["evaluation"] == "local_mp4_decoded_audio_pcm_spot_check_only"
     assert result["manifest_track_count"] == 2
     assert result["measured_track_count"] == 2
@@ -93,7 +94,7 @@ def test_different_aac_track_is_descriptive_not_false_verified(
 ) -> None:
     album = tmp_path / "album"
     _album(album, unrelated_video=True)
-    result = probe_local_mp4_audio(album)
+    result: dict[str, Any] = probe_local_mp4_audio(album)
     assert result["measured_track_count"] == 2
     assert all(
         w["correlation"] < 0.20
@@ -113,7 +114,7 @@ def test_manifest_outside_audio_stream_returns_unknown(
     data = json.loads(summary.read_text(encoding="utf-8"))
     data["tracks"][1]["start_seconds"] = 39.0
     summary.write_text(json.dumps(data), encoding="utf-8")
-    result = probe_local_mp4_audio(album)
+    result: dict[str, Any] = probe_local_mp4_audio(album)
     assert result["measured_track_count"] == 1
     assert result["measurements"][1]["status"] == "audio_window_unavailable"
     assert all(
@@ -135,9 +136,9 @@ def test_cli_omits_local_file_paths(tmp_path: Path, capsys: pytest.CaptureFixtur
 def test_actual_video_packets_outlast_aac_and_are_counted(tmp_path: Path) -> None:
     album = tmp_path / "album"
     _album(album, video_tail_seconds=4.0)
-    report = probe_local_mp4_audio(album)
+    report: dict[str, Any] = probe_local_mp4_audio(album)
     assert report["measured_track_count"] == 2
-    tail = report["packet_tail"]
+    tail: dict[str, Any] = report["packet_tail"]
     assert tail["status"] == "video_packets_continue_after_audio"
     assert 3.5 < tail["packet_end_gap_seconds"] < 4.5
     assert tail["video_packets_starting_after_audio_end_count"] >= 7

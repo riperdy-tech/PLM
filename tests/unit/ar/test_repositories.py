@@ -25,6 +25,7 @@ from autonomous_ar.storage import repositories
 from autonomous_ar.storage.ids import deterministic_id
 from autonomous_ar.storage.models import AR_TABLES
 from plm_contracts import AllocationType, ObservationWindow, Tri
+from sqlalchemy.orm import Session
 
 from tests.support.ar_db import ar_session, create_ar_engine
 
@@ -39,7 +40,9 @@ def test_policy_rows_are_immutable_once_created() -> None:
         policy_id = repositories.insert_policy(
             session, PolicyConfig(name="default"), brand_id="longform_signal", created_at=NOW
         )
-        assert repositories.load_policy(session, "p2-v1").exploit_fraction == 0.70
+        loaded = repositories.load_policy(session, "p2-v1")
+        assert loaded is not None
+        assert loaded.exploit_fraction == 0.70
         # same version, different content: refused (§92 — never mutate a used policy)
         with pytest.raises(repositories.PolicyImmutableError, match="p2-v1"):
             repositories.insert_policy(
@@ -123,7 +126,7 @@ def _directive(*, directive_id: str, decision_id: str, arm_id: str) -> Productio
         market_context={"source": "live", "as_of": NOW.isoformat()},
         selection_reason=("STRONG_POSTERIOR",), directive_version="p2-directive-v1",
         policy_version="p2-v1", expires_at=NOW + timedelta(hours=168), exploration_fraction=0.3,
-        value_model="early-stage-proxy-v1", outcome_horizon="28d",
+        value_model="early-stage-proxy-v1", outcome_horizon=ObservationWindow.D28,
     )
 
 
@@ -280,7 +283,7 @@ def test_absent_zero_and_not_ready_stay_distinguishable_in_storage() -> None:
 
 # --- ADR-0024 #3: SHADOW directives are auditable but not actionable ----------------
 
-def _seed_cycle_with_directive(session, *, key: str, activation_state: str,
+def _seed_cycle_with_directive(session: Session, *, key: str, activation_state: str,
                                arm_id: str) -> tuple[str, str]:
     cycle_id = deterministic_id("cycle", BRAND, key)
     assert repositories.insert_cycle(

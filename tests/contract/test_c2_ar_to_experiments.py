@@ -111,7 +111,8 @@ def producer_directive() -> ProductionDirective:
 
 
 def _wire() -> dict[str, Any]:
-    return json.loads(json.dumps(producer_directive().to_wire()))
+    wire: dict[str, Any] = json.loads(json.dumps(producer_directive().to_wire()))
+    return wire
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:

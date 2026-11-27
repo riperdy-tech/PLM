@@ -25,7 +25,7 @@ AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
 
 def _observation(observed_days_ago: float, views: int, *, published_days_ago: float = 40.0,
-                 entity_id: str | None = None):
+                 entity_id: str | None = None) -> NormalizedObservation:
     # The plan pinned `published_at` to one absolute instant, which made the
     # 45-day-ago sighting *precede* its own publication (age < 0 → epsilon clamp →
     # absurd velocity). Each sighting now sees a video of the same age.

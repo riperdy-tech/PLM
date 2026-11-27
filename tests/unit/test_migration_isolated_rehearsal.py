@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from alembic import command
 
 from tests.support import migration_isolated_rehearsal as rehearsal
 from tests.support.migration_review_compare import MERGE, RELEASE
@@ -94,7 +95,7 @@ def test_alembic_never_runs_with_shared_target(
         lambda _settings: SimpleNamespace(database="plm"),
     )
     monkeypatch.setattr(
-        rehearsal.command, "upgrade",
+        command, "upgrade",
         lambda *args: pytest.fail("Alembic executed against shared target"),
     )
     with pytest.raises(RuntimeError, match="unsafe Alembic target"):

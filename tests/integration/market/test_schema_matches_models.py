@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 import sqlalchemy as sa
 from market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
@@ -11,7 +13,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def engine():
+def engine() -> Iterator[sa.Engine]:
     active = build_engine()
     try:
         with active.connect() as connection:
@@ -22,7 +24,7 @@ def engine():
     active.dispose()
 
 
-def test_tables_and_columns_match_the_models(engine) -> None:
+def test_tables_and_columns_match_the_models(engine: sa.Engine) -> None:
     inspector = sa.inspect(engine)
     live_tables = set(inspector.get_table_names(schema="market"))
     assert set(MARKET_TABLES) <= live_tables, (

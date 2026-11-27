@@ -6,6 +6,7 @@ from market_intelligence.connectors.browser import BrowserConnector
 from market_intelligence.connectors.trends import PublicTrendsConnector, parse_trend_points
 from market_intelligence.domain.enums import ConnectorErrorClass
 from market_intelligence.features.cross_platform import cross_platform_signal
+from plm_platform.testing.http import MockHTTP
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
@@ -15,7 +16,7 @@ def test_no_secondary_source_means_unknown_not_zero() -> None:
     assert signal.is_unknown  # §17.3: reduce confidence, never assign zero demand
 
 
-def test_trend_points_parse_from_the_configured_feed(mock_http) -> None:
+def test_trend_points_parse_from_the_configured_feed(mock_http: MockHTTP) -> None:
     import json
     from pathlib import Path
 

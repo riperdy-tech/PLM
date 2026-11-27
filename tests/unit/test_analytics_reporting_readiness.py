@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 from tests.unit.test_analytics_authenticated_reporting import OLD, _google
 from tests.unit.test_analytics_candidate_performance import HEADERS, _api
 
 
-def _ready(**overrides: Any):
+def _ready(**overrides: Any) -> tuple[httpx.Response, list[str]]:
     calls: list[str] = []
     client = _api(reporting_downloader=_google(
         calls=calls,

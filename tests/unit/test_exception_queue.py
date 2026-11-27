@@ -475,7 +475,7 @@ def test_migration_creates_exactly_the_queue_tables_and_downgrade_removes_them()
     and columns (drift guard, SQLite). Postgres-only DDL (the trigger) is not run here."""
     spec = importlib.util.spec_from_file_location("plm_0028_ops_exception_queue", MIGRATION)
     assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
+    module: Any = importlib.util.module_from_spec(spec)  # a migration script, loaded by path
     spec.loader.exec_module(module)
     assert module.revision == "0028_ops_exception_queue"
     assert module.down_revision == "0027_ops_cost_ledger"

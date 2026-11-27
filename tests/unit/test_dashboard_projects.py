@@ -174,7 +174,7 @@ def test_a_stop_is_retried_only_by_a_role_the_owner_holds(tmp_path: Path) -> Non
         def roles_of(self, actor: str) -> frozenset[str]:
             return frozenset({"platform_owner"})
 
-    actions.reviewers = Reviewers()  # type: ignore[attr-defined]
+    actions.reviewers = Reviewers()
     asyncio.run(studio.retry_hold("c-f"))
     (call,) = actions.calls
     assert call[2]["role"] == "platform_owner" and "P6 refused" in call[2]["platform_fix_ref"]
@@ -219,7 +219,7 @@ def test_the_picture_import_runs_on_its_own_with_a_time_estimate(tmp_path: Path)
     studio, actions = _project_studio(tmp_path, [ART_HOLD])
 
     async def run() -> dict[str, Any]:
-        started = await studio.import_thumbnails(PKG)
+        started: dict[str, Any] = await studio.import_thumbnails(PKG)
         assert studio.project(2)["working"]["kind"] == "import"
         await asyncio.gather(*studio._tasks)
         return started

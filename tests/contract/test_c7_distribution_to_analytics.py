@@ -69,7 +69,8 @@ def leg1() -> dict[str, Any]:
             now=NOW,
         )
     assert result.payload is not None
-    return json.loads(json.dumps(result.payload.to_wire()))
+    wire: dict[str, Any] = json.loads(json.dumps(result.payload.to_wire()))
+    return wire
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +89,8 @@ def leg2() -> dict[str, Any]:
             estimated_revenue=Money.of("12.50", "USD"),
             now=NOW, enqueued_at=NOW,
         )
-    return json.loads(json.dumps(payload.to_wire()))
+    wire: dict[str, Any] = json.loads(json.dumps(payload.to_wire()))
+    return wire
 
 
 def test_registry_entry_exists(contract_registry: SeamRegistry) -> None:
