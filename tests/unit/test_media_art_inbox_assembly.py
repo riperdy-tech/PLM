@@ -15,6 +15,7 @@ from media_factory.domain.models import MediaPackage
 from media_factory.errors import MediaAssemblyError
 from media_factory.service import assemble_and_persist
 from media_factory.storage.repositories import get_media_package_by_id, get_render_job
+from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
 
@@ -58,6 +59,30 @@ def _assemble(factory: Callable[[], Session], inbox: Path | None,
             worker_id_factory=lambda: "w1", thumbnail_art_inbox=inbox)
         session.commit()
     return pkg, store
+
+
+def test_an_inbox_package_draws_no_thumbnails_and_offers_its_background(
+        factory: Callable[[], Session], tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """The owner's art replaces P6's thumbnails, so drawing three with Pillow was wasted.
+    C6 needs one thumbnail: the stored video background stands in until the import."""
+    def no_drawing(**_: Any) -> Any:
+        raise AssertionError("P6 drew thumbnails for a package waiting for the owner's art")
+
+    monkeypatch.setattr("media_factory.rendering.assembler.generate_thumbnails", no_drawing)
+    pkg, _ = _assemble(factory, tmp_path)
+    background = pkg.render_report["video_pipeline"]["background"]
+    assert [(t["id"], t["uri"], t["checksum"]) for t in pkg.thumbnails] == [
+        ("placeholder", background["uri"], background["checksum"])]
+    MediaPackagePayload.model_validate(pkg.to_c6_payload())  # still a valid C6 wire
+
+
+def test_a_package_without_the_inbox_still_gets_drawn_thumbnails(
+        factory: Callable[[], Session]) -> None:
+    pkg, _ = _assemble(factory, None)
+    from media_factory.artwork.generator import THUMBNAIL_VARIANTS
+
+    assert [t["id"] for t in pkg.thumbnails] == list(THUMBNAIL_VARIANTS)
 
 
 def test_a_replay_with_another_visual_world_is_refused(

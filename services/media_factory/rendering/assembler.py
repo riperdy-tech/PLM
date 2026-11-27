@@ -68,8 +68,11 @@ from .profiles import RenderProfile, render_profile
 from .renderer import MediaRenderer, RenderExecutionResult
 from .toolchain import MediaToolchain
 
-__all__ = ["PACKAGING_VERSION", "AssemblyPipelineResult", "PackageAlreadyAssembled",
-           "assemble_media_package"]
+__all__ = ["PACKAGING_VERSION", "PLACEHOLDER_THUMBNAIL", "AssemblyPipelineResult",
+           "PackageAlreadyAssembled", "assemble_media_package"]
+
+PLACEHOLDER_THUMBNAIL = "placeholder"
+"""The one thumbnail of a package waiting for the owner's art: its video background."""
 
 PACKAGING_VERSION = "pack-v7"
 """How a package is presented: thumbnails, video background and mastering. Part of the
@@ -144,6 +147,7 @@ def assemble_media_package(
     render_attempt: int = 1,
     session_compilation: bool = False,
     subgenre: str | None = None,
+    drawn_thumbnails: bool = True,
     clock: Clock,
 ) -> AssemblyPipelineResult:
     """Assemble, render and package P5's cleared tracks (R7, R9, ADR-0028, R4).
@@ -155,7 +159,9 @@ def assemble_media_package(
     :class:`PackageAlreadyAssembled` is raised before anything is rendered.
     ``session_compilation`` re-assembles released tracks of several experiments into one
     long session video under its own lineage (ADR-0044 revision). ``subgenre`` (P3's
-    sub-style) names the genre the titles carry.
+    sub-style) names the genre the titles carry. Without ``drawn_thumbnails`` (the
+    owner's art inbox: the owner's images replace P6's at import) nothing is drawn: the
+    stored video background is the package's one placeholder thumbnail, as C6 needs one.
     """
     profile = (render_profile_name if isinstance(render_profile_name, RenderProfile)
                else render_profile(render_profile_name))
@@ -317,16 +323,26 @@ def assemble_media_package(
     packaged_at = clock.now()
 
     # 7. Thumbnails.
-    thumbnail_variants = generate_thumbnails(
-        media_package_id_str=package_id,
-        brand_profile=brand_profile,
-        playlist_concept=playlist_concept,
-        store=store,
-        claim_namespace=claim_namespace,
-        visual_world=visual_profile,
-        headline=headline,
-        now=packaged_at,
-    )
+    if drawn_thumbnails:
+        thumbnail_variants = generate_thumbnails(
+            media_package_id_str=package_id,
+            brand_profile=brand_profile,
+            playlist_concept=playlist_concept,
+            store=store,
+            claim_namespace=claim_namespace,
+            visual_world=visual_profile,
+            headline=headline,
+            now=packaged_at,
+        )
+    else:
+        background = render_res.visual_assets[0]
+        thumbnail_variants = [ThumbnailVariant.create(
+            media_package_id_str=package_id, variant_key=PLACEHOLDER_THUMBNAIL,
+            source_assets=[f"visual_asset:{background.id}"], uri=background.uri,
+            checksum=background.checksum, text_payload=headline,
+            width=background.width, height=background.height,
+            layout_version="video_background", now=packaged_at,
+        )]
 
     # 8. Short-form source descriptors (clip extraction itself is not rendered yet).
     short_source_assets = [
