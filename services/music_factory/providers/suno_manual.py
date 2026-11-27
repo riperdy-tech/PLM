@@ -163,6 +163,10 @@ _STYLE_PHRASES = {
     "mix balance": "mix: {}",
     "vocal character": "{} vocals",
     "lyric density": "{} lyric density",
+    # a track's own character (P3 v9): its phrases read as written
+    "energy shape": "{}",
+    "texture": "{}",
+    "scene": "{}",
 }
 
 
