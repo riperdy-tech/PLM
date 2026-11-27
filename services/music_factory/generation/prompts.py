@@ -76,6 +76,58 @@ def compute_prompt_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
+_CHARACTER_ORDER: tuple[str, ...] = (
+    "mood", "energy shape", "foreground lead", "texture", "scene", "instrument palette",
+    "production approach", "groove", "melodic character", "harmonic motion",
+    "arrangement progression", "hook character", "section structure", "harmonic key", "bpm",
+    "energy", "genre", "for", "vocals", "vocal character", "mix balance",
+)
+"""The descriptor order of a track with its own character (P3 v9, owner 2026-11-27):
+Suno weights the opening words most, so the song's mood, energy shape, lead and texture
+come first and the genre, purpose and "no vocals" (the same on every song) later."""
+
+
+def _open_with_character(
+    descriptors: list[str], direction: dict[str, Any], genre: str
+) -> list[str]:
+    """``descriptors`` reordered by :data:`_CHARACTER_ORDER`, with the track's energy
+    shape, texture and scene added, the lead named once (not again in the palette) and
+    the genre as words with its sub-style. A descriptor not listed keeps its place at the
+    end (a variant's instruction)."""
+    lead = direction.get("lead_instrument")
+    subgenre = direction.get("subgenre")
+    style = genre.replace("_", " ").lower()
+    if isinstance(subgenre, str) and subgenre:
+        sub = subgenre.removesuffix("_focus").replace("_", " ")
+        style = f"{sub} {style}"
+    slots: dict[str, str] = {
+        label: f"{label}: {direction[key]}"
+        for label, key in (("energy shape", "energy_shape"), ("texture", "texture"),
+                           ("scene", "scene"))
+        if isinstance(direction.get(key), str) and direction[key].strip()
+    }
+    rest: list[str] = []
+    for text in descriptors:
+        label, sep, value = text.partition(": ")
+        if text.endswith(" BPM"):
+            slots["bpm"] = text
+        elif text.endswith(" track") and " " not in text[:-6]:
+            slots["genre"] = style
+        elif text.startswith("for "):
+            slots["for"] = text
+        elif text == "instrumental, no vocals" or (not sep and text.endswith(" vocal")):
+            slots["vocals"] = text
+        elif sep and label == "instrument palette":
+            others = [item for item in value.split(", ") if item != lead]
+            if others:
+                slots[label] = f"{label}: {', '.join(others)}"
+        elif sep and label in _CHARACTER_ORDER:
+            slots[label] = text
+        else:
+            rest.append(text)
+    return [slots[label] for label in _CHARACTER_ORDER if label in slots] + rest
+
+
 def build_generation_prompt(
     track_spec: AdaptedTrackSpec,
     *,
@@ -171,6 +223,10 @@ def build_generation_prompt(
 
     if "extra_instruction" in delta:
         descriptors.append(delta["extra_instruction"])
+    if isinstance(latitude, dict) and isinstance(latitude.get("track_arrangement"), dict):
+        direction = latitude["track_arrangement"]
+        if isinstance(direction.get("energy_shape"), str):  # P3 v9: the song's character
+            descriptors = _open_with_character(descriptors, direction, genre)
 
     full_prompt = ". ".join(descriptors) + "."
 

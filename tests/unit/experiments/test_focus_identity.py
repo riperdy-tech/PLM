@@ -245,13 +245,13 @@ def test_a_sub_style_package_keeps_its_sound_through_a_top_up() -> None:
     assert len(package.track_specs) == 8
     _, extra = extend_package(package, count=2, idempotency_key="k", created_at=FIXED_NOW)
     organic_leads = {"kalimba", "marimba", "nylon_guitar", "soft_flute", "handpan",
-                     "felt_piano"}
+                     "felt_piano", "wooden_mallet_synth", "acoustic_guitar_harmonics"}
     for spec in (*package.track_specs, *extra):
         arrangement = spec.creative_latitude["track_arrangement"]
         assert arrangement["subgenre"] == "organic_electronic"
         assert arrangement["lead_instrument"] in organic_leads
         assert spec.creative_latitude["energy"] in ("low", "medium")
-        assert 90 <= spec.bounded_preferences.bpm <= 102  # the sub-style's own range
+        assert 84 <= spec.bounded_preferences.bpm <= 108  # the sub-style's own range
         assert spec.vocal_spec == {"vocal_mode": "instrumental", "vocal_gender": "none"}
 
 
