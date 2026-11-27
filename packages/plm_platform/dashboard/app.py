@@ -30,7 +30,7 @@ from typing import Any, Final
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from plm_contracts import ErrorShape
 from pydantic import BaseModel, Field
@@ -475,9 +475,11 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
         return result
 
     @app.get("/api/studio/packages/{package_id}/video")
-    async def studio_video(package_id: str, request: Request) -> Response:
-        data = await asyncio.to_thread(guarded, lambda: studio.video(package_id))
-        return _range(request, data, "video/mp4")
+    async def studio_video(package_id: str) -> Response:
+        # A file per checksum, served by FileResponse with its own range support
+        # (review 2026-11-26 #21).
+        path = await asyncio.to_thread(guarded, lambda: studio.video_file(package_id))
+        return FileResponse(path, media_type="video/mp4")
 
     @app.get("/api/studio/packages/{package_id}/thumbnails/{variant}")
     async def studio_thumbnail(package_id: str, variant: str) -> Response:

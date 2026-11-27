@@ -340,9 +340,9 @@ class Studio:
     video_stats: Callable[[list[str]], dict[str, dict[str, int]]] | None = None
     """YouTube's public counters per video id (read-only); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
-    _video_cache: dict[tuple[str, str], bytes] = field(default_factory=dict)
-    """One video in memory, keyed by its own (uri, checksum): a remake re-renders the
-    same package with a new video, which must never be served from the old entry."""
+    video_dir: Path | None = None
+    """Where the review's video is kept as a file, one per checksum (``None``: a
+    ``plm-studio-video`` folder in the system temp folder)."""
     _video_lock: Any = field(default_factory=threading.Lock)
     _grants_lock: Any = field(default_factory=threading.Lock)
     _remakes: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -856,17 +856,31 @@ class Studio:
                 "notes": [n for n in self.notes() if n.get("case_id") == case["case_id"]
                           or (workflow_id and n.get("workflow_id") == workflow_id)]}
 
-    def video(self, package_id: str) -> bytes:
-        """The package's current video (after a remake, the new one, never the old)."""
+    def video_file(self, package_id: str) -> Path:
+        """The package's current video as a file (after a remake, the new one, never the
+        old): named by its checksum, written once from :attr:`media` (which verifies the
+        bytes against the checksum) under a lock, so concurrent range requests share one
+        download and the file is served from disk (review 2026-11-26 #21)."""
+        import tempfile
+
         pkg = self.package(package_id)
-        key = (str(pkg["video_master_uri"]), str(pkg["video_checksum"]))
+        uri, checksum = str(pkg["video_master_uri"]), str(pkg["video_checksum"])
+        if re.fullmatch(r"[0-9A-Za-z]{8,128}", checksum) is None:
+            raise _refuse(409, "checksum_invalid", f"{package_id} has no usable video checksum")
+        folder = self.video_dir or Path(tempfile.gettempdir()) / "plm-studio-video"
+        target = folder / f"{checksum}.mp4"
         with self._video_lock:
-            data = self._video_cache.get(key)
-            if data is None:
-                data = self.media(*key)
-                self._video_cache.clear()  # one video in memory at a time
-                self._video_cache[key] = data
-            return data
+            if target.is_file():
+                return target
+            folder.mkdir(parents=True, exist_ok=True)
+            _write_atomic(target, self.media(uri, checksum))
+            for old in folder.glob("*.mp4"):  # one video on disk at a time
+                if old != target:
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass  # still being served (Windows); removed on a later download
+            return target
 
     def thumbnail(self, package_id: str, variant: str) -> bytes:
         pkg = self.package(package_id)

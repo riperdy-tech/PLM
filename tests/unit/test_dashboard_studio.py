@@ -261,6 +261,50 @@ def _grants(tmp_path: Path) -> dict[str, dict[str, Any]]:
     return {g["capability"]: g for g in entries}
 
 
+def test_the_video_is_downloaded_once_and_served_from_a_file_by_range(tmp_path: Path) -> None:
+    """Review 2026-11-26 #21: the whole video sat in RAM, each range request copied it
+    and the cache dict was not thread-safe. One verified temp file per checksum, one
+    download under a lock, served by FileResponse (ranges included)."""
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+    from plm_platform.config import load_settings
+    from plm_platform.dashboard.app import create_live_app
+    from plm_platform.dashboard.live import LiveDashboard
+    from plm_platform.dashboard.sources import PhaseApis, ReadOnlyDatabase
+
+    from tests.support.c1_api import PLATFORM_ENV
+
+    studio, _ = _studio(tmp_path, [])
+    studio.video_dir = tmp_path / "video-cache"
+    data = bytes(range(256)) * 4
+    downloads: list[str] = []
+
+    def media(uri: str, checksum: str) -> bytes:
+        downloads.append(uri)
+        time.sleep(0.05)
+        return data
+
+    studio.package = lambda pid: {"video_master_uri": "plm://v/1", "video_checksum": "c" * 64}
+    studio.media = media
+    threads = [threading.Thread(target=studio.video_file, args=(PKG,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert downloads == ["plm://v/1"]
+
+    live = LiveDashboard(ReadOnlyDatabase(None), PhaseApis({}, token=None), reviewers=None)
+    client = TestClient(create_live_app(live, studio.actions,  # type: ignore[arg-type]
+                                        platform=load_settings(env=PLATFORM_ENV),
+                                        studio=studio))
+    part = client.get(f"/api/studio/packages/{PKG}/video", headers={"Range": "bytes=10-19"})
+    assert part.status_code == 206 and part.content == data[10:20]
+    assert part.headers["content-type"] == "video/mp4"
+    assert client.get(f"/api/studio/packages/{PKG}/video").content == data
+
+
 def test_a_refused_approval_grants_nothing(tmp_path: Path) -> None:
     """Review 2026-11-26 #18: the grants were written before the resume and stayed live
     when the resume was refused. The case is decided first; a refusal grants nothing."""
@@ -673,10 +717,13 @@ def test_the_review_serves_the_new_video_after_a_remake_and_refuses_a_stale_appr
                                   "video_master_uri": current["uri"],
                                   "video_checksum": current["checksum"]}
     studio.media = lambda uri, checksum: fetched.append(uri) or uri.encode()
-    assert studio.video(PKG) == b"plm://v/old"
-    assert studio.video(PKG) == b"plm://v/old" and fetched == ["plm://v/old"]  # cached
+    studio.video_dir = tmp_path / "video-cache"
+    old = studio.video_file(PKG)
+    assert old.read_bytes() == b"plm://v/old"
+    assert studio.video_file(PKG) == old and fetched == ["plm://v/old"]  # cached
     current.update(uri="plm://v/new", checksum="b" * 64)  # the remake finished
-    assert studio.video(PKG) == b"plm://v/new"
+    assert studio.video_file(PKG).read_bytes() == b"plm://v/new"
+    assert not old.exists()  # one video kept at a time
 
     with pytest.raises(ActionRefused, match="video_changed"):
         asyncio.run(studio.approve("c3", {PKG: "a" * 64}))
