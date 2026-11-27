@@ -51,6 +51,12 @@ stage, record it in `docs/STATUS.md` with the stage that owns it.
 - **Runtime code never imports from `tests/`.** `tests/unit/test_runtime_imports.py`
   enforces this.
 - **Secrets** live only in the environment or `.env`, never in code, fixtures or logs.
+- **The live stack belongs to the main checkout.** Compose project `plm` (the owner's
+  running services) is started only from `C:\Users\riper\Downloads\PLM`. From a git
+  worktree never run `docker compose up/down/build/restart` without setting a different
+  `COMPOSE_PROJECT_NAME` (and a different `PLM_POSTGRES_HOST_PORT`, as the ports are
+  shared): the default project name would recreate the live containers with unmerged
+  code and kill a render. `make.ps1`, the Makefile and the Studio launcher refuse it.
 
 ## 4. Keeping status honest
 

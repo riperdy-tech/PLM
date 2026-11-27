@@ -12,7 +12,24 @@ Other targets: `down`, `logs`, `test`, `lint`, `fmt`, `typecheck`, `doctor`,
 `migrate`. First time: `python -m venv .venv`, install with
 `.\.venv\Scripts\python.exe -m pip install -c constraints.txt -e ".[dev]"`
 (the versions CI verifies), then copy
-`.env.example` to `.env`. POSIX hosts can run `make <target>` instead.
+`.env.example` to `.env` and set a random `PLM_SERVICE_TOKEN` (the `change-me`
+placeholder is refused outside CI). POSIX hosts can run `make <target>` instead.
+
+The owner's day-to-day launcher is `PLM_Studio.vbs` in the main checkout: it starts
+whatever is not running and opens the Studio (the live dashboard) at
+http://127.0.0.1:8000/.
+
+The live stack is compose project `plm`, run from the main checkout
+(`C:\Users\riper\Downloads\PLM`) only. In a git worktree, set `COMPOSE_PROJECT_NAME` to
+another name before any `docker compose` command; `make.ps1 up/down`, the Makefile and
+the launcher refuse otherwise.
+
+Migrations: `plm migrate` upgrades only a disposable database. The owner's local `plm`
+database is upgraded with a retained, restore-verified backup:
+`plm migrate --prepare-backup`, then `plm migrate --approved-backup <id>` with the
+application containers stopped.
+
+Runbooks: `docs/runbooks/` (backup and restore, stuck run, OAuth rotation, full disk).
 
 ## Status
 
@@ -55,4 +72,5 @@ provider or an approved R-stage gate.
 ## Where things live
 
 Tests in `tests/`, the single alembic chain in `migrations/`, specs and plans in
-`docs/`. The dashboard (`plm dashboard`) currently serves demo data only.
+`docs/`. The dashboard (`plm dashboard serve`, the Studio) reads the live database and
+phase APIs; `plm dashboard serve --demo` serves the fixed demo sample instead.

@@ -4,10 +4,13 @@
 commit messages and the dashboard record intent or progress; this file records verified
 capability. Update it in the same change that alters a capability.
 
-- Last verified: 2026-10-15, branch `review/r5-full-chain` (R5 of the remediation plan;
-  R4, R3, R2, R1 and R0 on their own `review/*` branches). That is the date of the last
-  **gate** record. Later entries (to 2026-10-29) are uncommitted work on local branch
-  `review/r6-live-adapters` at `4a35ce2`; none of them is a re-verified gate.
+- Header updated 2026-11-27. Last **gate** record: 2026-10-15, branch
+  `review/r5-full-chain` (R5 of the remediation plan; R4, R3, R2, R1 and R0 on their own
+  `review/*` branches). Later entries (to 2026-11-27) are committed on branch
+  `review/r6-live-adapters`; none of them is a re-verified gate.
+- Latest full review (findings and fix status):
+  [`reviews/2026-11-26-full-repo-review.md`](reviews/2026-11-26-full-repo-review.md).
+  Runbooks: [`runbooks/`](runbooks/).
 - Unified view of all remaining work across P0–P9, R0–R6 and A/B:
   [`reviews/2026-10-29-unified-remaining-work-roadmap.md`](reviews/2026-10-29-unified-remaining-work-roadmap.md).
 - Evidence: the review in

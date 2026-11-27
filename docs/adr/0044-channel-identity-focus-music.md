@@ -109,6 +109,11 @@ The internal brand id `neon_seoul` is renamed `longform_signal` (display name
 "Longform Signal"), in code and in the dev DB's identifier columns. Historical JSON
 snapshots and storage URIs keep the old id.
 
+Amended 2026-11-27: "Longform Signal" was only a placeholder. The channel's display name
+is **Deep Current FM**, the owner's choice of 2026-11-06
+(`services/media_factory/brands/registry.py`).
+The internal id stays `longform_signal`; it is an identifier, not a name shown to anyone.
+
 ## Consequences
 
 - The held live run `b0eb2a4f-4850-5977-9beb-e609e4e11063` (19 vocal R&B
