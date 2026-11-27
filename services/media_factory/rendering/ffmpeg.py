@@ -15,12 +15,8 @@ command string. The steps:
   cross the true-peak ceiling, or the range is unmeasured), a third pass applies the
   linear gain with a peak limiter at the ceiling instead; the report's ``applied`` says
   which (``linear`` or ``linear_gain_limiter``).
-* **Video master.** A procedural visualiser: ``showwaves`` (``cline`` mode, square-root
-  scale) drawn from the audio master in the brand's accent colour and overlaid on the
-  brand background image, encoded with ``libx264`` (profile preset and CRF, ``yuv420p``)
-  plus ``aac`` audio into MP4 with ``+faststart``. Metadata is stripped and bit-exact
-  flags are set so the bytes do not carry encoder timestamps.
-* **Still video.** The owner's thumbnail art scaled to cover the frame (once a second, then
+* **Still video** (the only video master; no waveform or motion, owner 2026-11-04). The
+  brand background, later the owner's thumbnail art, scaled to cover the frame (once a second, then
   repeated to the frame rate), centre-cropped and held still (``-tune stillimage``) for exactly the audio master's length, converted to
   TV-range BT.709 (a JPEG decodes as full-range ``yuvj420p`` otherwise), same codecs.
 * **Probe.** ``ffprobe -show_format -show_streams`` as JSON.
@@ -53,7 +49,6 @@ from .toolchain import (
     MediaToolError,
     ProbeReport,
     StreamInfo,
-    VisualizerSpec,
 )
 
 __all__ = ["TOOLCHAIN_UNAVAILABLE", "FFmpegToolchain"]
@@ -61,7 +56,6 @@ __all__ = ["TOOLCHAIN_UNAVAILABLE", "FFmpegToolchain"]
 TOOLCHAIN_UNAVAILABLE: Final[str] = "render_toolchain_unavailable"
 _STDERR_TAIL: Final[int] = 2000
 _TIMEOUT_PER_PROGRAMME_SECOND: Final[float] = 2.5
-_HEX_COLOUR: Final = re.compile(r"\A#[0-9A-Fa-f]{6}\Z")
 _INTEGRATED: Final = re.compile(r"Integrated loudness:\s*\n\s*I:\s*(\S+)\s*LUFS")
 _TRUE_PEAK: Final = re.compile(r"True peak:\s*\n\s*Peak:\s*(\S+)\s*dBFS")
 
@@ -202,7 +196,7 @@ class FFmpegToolchain:
         # cross the true-peak ceiling. Apply that linear gain anyway and let a peak
         # limiter hold the ceiling (the encoder's overshoot is covered by the profile's
         # true-peak tolerance), so the music keeps its own dynamics.
-        gain_db = profile.loudness_target_lufs - float(values["input_i"])
+        gain_db = profile.loudness_target_lufs - float(str(values["input_i"]))
         ceiling = 10 ** (profile.true_peak_dbtp / 20)
         self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", "-y", *inputs,
@@ -231,35 +225,6 @@ class FFmpegToolchain:
         return parsed
 
     # -- video master ----------------------------------------------------------------------
-
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        if _HEX_COLOUR.match(visual.wave_color) is None:
-            raise MediaToolError("render_failed", f"not a #RRGGBB colour: {visual.wave_color!r}")
-        wave_height = max(2, int(profile.height * profile.waveform_height_ratio) // 2 * 2)
-        colour = "0x" + visual.wave_color[1:]
-        programme = self.probe(audio_master).duration_seconds
-        graph = (
-            f"[1:a]showwaves=s={profile.width}x{wave_height}:mode=cline:rate={profile.fps}:"
-            f"colors={colour}:scale=sqrt,format=rgba[w];"
-            f"[0:v]scale={profile.width}:{profile.height},setsar=1[bg];"
-            f"[bg][w]overlay=0:(H-h)/2:shortest=1,format={profile.pixel_format}[v]"
-        )
-        self._run(self._ffmpeg, [
-            "-hide_banner", "-nostats", "-nostdin", "-y",
-            "-loop", "1", "-framerate", str(profile.fps), "-i", str(visual.background_png),
-            "-i", str(audio_master),
-            "-filter_complex", graph, "-map", "[v]", "-map", "1:a",
-            "-c:v", "libx264", "-preset", profile.x264_preset, "-crf", str(profile.x264_crf),
-            "-pix_fmt", profile.pixel_format, "-r", str(profile.fps),
-            "-c:a", "aac", "-b:a", profile.audio_bitrate, "-ar", str(profile.sample_rate),
-            "-ac", str(profile.channels), "-shortest", "-movflags", "+faststart",
-            # No ``-flags:a +bitexact``: it makes FFmpeg's native AAC encoder overshoot
-            # the limited master by about 2 dB true peak (measured 2026-11-04: -1.9 dBTP
-            # WAV -> +0.1 encoded, -1.1 without it). The encode stays deterministic.
-            "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
-            "-f", profile.container, str(out),
-        ], step="video encode", programme_seconds=programme)
 
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:

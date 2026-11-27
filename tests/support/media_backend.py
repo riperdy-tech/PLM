@@ -41,7 +41,6 @@ from media_factory.rendering.toolchain import (
     LoudnessMeasurement,
     ProbeReport,
     StreamInfo,
-    VisualizerSpec,
 )
 from media_factory.visuals.planner import BrandProfile
 from plm_contracts.seams.c5 import ReleaseManifestPayload
@@ -81,7 +80,16 @@ class InMemoryArtifactStore:
         """Store a track source as P4 would (under ``music/``)."""
         return self._put("music/", resource_path, data)
 
+    def put_file(self, resource_path: str, path: Path, *, content_type: str) -> StoredArtifact:
+        return self._put("media/", resource_path, path.read_bytes())
+
+    def fetch_verified_to(self, uri: str, sha256: str, dest: Path) -> None:
+        dest.write_bytes(self._verified(uri, sha256))
+
     def fetch_verified(self, uri: str, sha256: str) -> bytes:
+        return self._verified(uri, sha256)
+
+    def _verified(self, uri: str, sha256: str) -> bytes:
         if not uri.startswith(_SCHEME):
             raise MediaAssemblyError(SOURCE_URI_INVALID, f"not an in-memory URI: {uri!r}")
         key = uri[len(_SCHEME):]
@@ -142,12 +150,6 @@ class StandInToolchain:
         self._durations["audio"] = duration
         self._profile = profile
         return {"filter": "stand-in"}
-
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        self.calls.append("video")
-        out.write_bytes(b"STAND-IN VIDEO MASTER " + hashlib.sha256(
-            audio_master.read_bytes() + visual.background_png.read_bytes()).hexdigest().encode())
 
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:

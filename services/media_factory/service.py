@@ -192,9 +192,6 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             render_attempt=recovery_attempt,
             session_compilation=request.session_compilation,
             subgenre=request.subgenre,
-            # With the art inbox the owner's art replaces the video at import: render a
-            # still placeholder (minutes), not the waveform (longer than the program).
-            still_placeholder=thumbnail_art_inbox is not None,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:

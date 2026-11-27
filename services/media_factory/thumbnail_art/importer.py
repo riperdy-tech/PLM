@@ -11,6 +11,7 @@ the owner's art (the picked one first, else A, the style P2 chose), carries the 
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -140,9 +141,10 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
     with tempfile.TemporaryDirectory(prefix="plm-still-") as workdir:
         work = Path(workdir)
         audio = work / "audio_master.wav"
-        audio.write_bytes(store.fetch_verified(pkg.audio_master_uri, pkg.audio_checksum))
+        # Streamed to the file: the master of a two-hour programme is about 2 GB.
+        store.fetch_verified_to(pkg.audio_master_uri, pkg.audio_checksum, audio)
         image = work / f"art{art.suffix.lower()}"
-        image.write_bytes(art.read_bytes())
+        shutil.copyfile(art, image)
         out = work / f"video_master.{profile.container}"
         try:
             toolchain.render_still_video(audio, image, profile, out)
@@ -156,9 +158,9 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
                             size_bytes=out.stat().st_size)
         if not qa.passed:
             raise MediaAssemblyError("thumbnail_art_video_failed", "; ".join(qa.reasons))
-        stored = store.put(
+        stored = store.put_file(
             f"renders/{pkg.brand_id}/{pkg.media_package_id}/owner_art/"
-            f"video_master.{profile.container}", out.read_bytes(), content_type="video/mp4")
+            f"video_master.{profile.container}", out, content_type="video/mp4")
     duration = probe.duration_seconds if probe.duration_seconds is not None else timeline
     report["video_pipeline"] = {
         "still_image": {"variant_key": variant_key, "source": art.name,

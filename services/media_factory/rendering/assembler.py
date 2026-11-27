@@ -10,7 +10,7 @@ refusing with a reason code rather than guessing:
 4. selection and order by beam search, landing inside the declared playlist range
    (:mod:`..playlist.sequencer`);
 5. chapters compiled from the final timeline and validated against YouTube's rules;
-6. the render: audio master, procedural video master, both stored, then post-render
+6. the render: audio master, still video master, both stored, then post-render
    QA via ffprobe and a loudness meter (:mod:`.renderer`);
 7. thumbnails A/B/C drawn and stored (:mod:`..artwork.generator`);
 8. the package, ``ready_for_publish`` only when the render passed QA, else ``failed``
@@ -143,7 +143,6 @@ def assemble_media_package(
     before_render: Callable[[str, str, str], str] | None = None,
     render_attempt: int = 1,
     session_compilation: bool = False,
-    still_placeholder: bool = False,
     subgenre: str | None = None,
     clock: Clock,
 ) -> AssemblyPipelineResult:
@@ -286,8 +285,7 @@ def assemble_media_package(
     headline = meta_res.hooks[0]
     presentation = f"{playlist_concept}|{headline}"
     by_candidate = {m.candidate_id: m for m in track_manifests}
-    renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile,
-                             still_placeholder=still_placeholder)
+    renderer = MediaRenderer(toolchain=toolchain, store=store, profile=profile)
     claim_namespace: str | None = None
     if before_render is not None:
         # Commit the durable job and its single-worker claim before FFmpeg or

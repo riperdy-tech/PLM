@@ -13,7 +13,7 @@ from media_factory.api.schemas import AssemblePackageRequest
 from media_factory.domain.enums import RenderJobStatus
 from media_factory.errors import MediaAssemblyError, MediaInfrastructureError
 from media_factory.rendering.profiles import RENDER_PROFILES
-from media_factory.rendering.toolchain import MediaToolError, VisualizerSpec
+from media_factory.rendering.toolchain import MediaToolError
 from media_factory.service import assemble_and_persist
 from media_factory.storage.models import render_jobs_table, render_recovery_evidence_table
 from media_factory.storage.render_claims import queue_reconciled_render_retry
@@ -38,13 +38,13 @@ class OneCrashToolchain(StandInToolchain):
         super().__init__()
         self.fail_once = True
 
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: object, out: Path) -> None:
+    def render_still_video(self, audio_master: Path, image: Path,
+                           profile: object, out: Path) -> None:
         if self.fail_once:
             self.fail_once = False
             self.calls.append("video_crashed")
             raise MediaToolError("render_timeout", "simulated worker exit")
-        super().render_video_master(audio_master, visual, profile, out)  # type: ignore[arg-type]
+        super().render_still_video(audio_master, image, profile, out)  # type: ignore[arg-type]
 
 
 def test_prepared_retry_uses_second_attempt_and_refuses_changed_inputs() -> None:
@@ -120,7 +120,7 @@ def test_prepared_retry_uses_second_attempt_and_refuses_changed_inputs() -> None
                     worker_id_factory=lambda: "new-worker", recovery_job_id=prepared.id,
                 )
             session.rollback()
-            assert "video" not in toolchain.calls
+            assert "still" not in toolchain.calls
         with factory() as session:
             package = assemble_and_persist(
                 session, backend, request, clock=FixedClock(NOW + timedelta(minutes=10)),
@@ -136,6 +136,6 @@ def test_prepared_retry_uses_second_attempt_and_refuses_changed_inputs() -> None
             assert old is not None and old.job_status is RenderJobStatus.QUARANTINED
             assert new is not None and new.job_status is RenderJobStatus.COMPLETED
             assert new.worker_id == "new-worker"
-        assert toolchain.calls.count("video") == 1
+        assert toolchain.calls.count("still") == 1
     finally:
         engine.dispose()

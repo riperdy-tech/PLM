@@ -9,6 +9,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from media_factory.api.schemas import AssemblePackageRequest

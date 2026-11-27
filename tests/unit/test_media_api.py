@@ -325,7 +325,7 @@ def test_stream_duration_failure_survives_authenticated_p6_http_and_replay(
     retry = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
     assert retry.status_code == 200
     assert retry.json()["blocking_reason_codes"] == pkg["blocking_reason_codes"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
     # Feed P7 the real persisted C6 hop-1 payload, not a hand-built failed
     # package. A blocked P6 render must never reach the publishing adapter.
@@ -412,7 +412,7 @@ def test_invalid_measurements_persist_as_p6_http_failure_and_block_p7(
     replay = client.post("/media/packages/assemble", json=request, headers=HEADERS)
     assert replay.status_code == 200
     assert strict_json(replay.text)["media_package_id"] == package["media_package_id"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
     c6 = client.get(f"/media/packages/{package['media_package_id']}/c6", headers=HEADERS)
     assert c6.status_code == 200
@@ -571,9 +571,9 @@ def test_a_retry_while_the_render_runs_waits_and_replays_instead_of_rendering_ag
     import time
 
     class SlowToolchain(StandInToolchain):
-        def render_video_master(self, *args: Any, **kwargs: Any) -> None:
+        def render_still_video(self, *args: Any, **kwargs: Any) -> None:
             time.sleep(0.5)
-            super().render_video_master(*args, **kwargs)
+            super().render_still_video(*args, **kwargs)
 
     store, manifests = cleared
     toolchain = SlowToolchain()
@@ -593,7 +593,7 @@ def test_a_retry_while_the_render_runs_waits_and_replays_instead_of_rendering_ag
         thread.join(timeout=30)
     assert [a.status_code for a in answers] == [200, 200], [a.text for a in answers]
     assert answers[0].json()["media_package_id"] == answers[1].json()["media_package_id"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
 
 def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendered(
