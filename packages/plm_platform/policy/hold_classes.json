@@ -16,7 +16,7 @@
     "v10 (R6): new SIMULATED_PUBLICATION when P7 or P8 answers with a write a mock provider only simulated and the pipeline configuration does not set publish.allow_simulated. Before v10 the run went PUBLISHED on 2026-11-04 (run c1f32e48) with a mock video id, and would have measured and learned from a video that does not exist.",
     "v11 (R6): new THUMBNAIL_ART_AWAITED when P6 renders a package while PLM_THUMBNAIL_ART_INBOX is set and waits for the owner's thumbnail art. Before v11 P6 offered only its own drawn thumbnails, and on 2026-11-04 one went live on video jTZCpyc5Qyw (made unlisted the same day).",
     "v12 (R6): new PUBLISH_APPROVAL_AWAITED: before every upload the run waits for the owner to watch the finished package and approve it (owner decision 2026-11-05). Before v12 a package that passed QA went straight to the upload step.",
-    "v13 (review 2026-11-26 #51): new VOCAL_PRESENCE_SUSPECTED when P5 estimates sung vocals in an instrumental track (a forgotten Instrumental switch)."
+    "v13 (review 2026-11-26 #51, #47): new VOCAL_PRESENCE_SUSPECTED when P5 estimates sung vocals in an instrumental track (a forgotten Instrumental switch); new MEASUREMENT_UNAVAILABLE when P5 still cannot measure a candidate's audio after its re-evaluations (#47)."
   ],
   "unmapped": {
     "hold_class": "HARD_STOP",
@@ -188,6 +188,16 @@
       "category": "budget_ceiling",
       "source": "docs/reviews/2026-10-13-system-review-and-remediation-plan.md:184-186 (cost ledger and ceiling: fail closed when the ceiling is exhausted); docs/adr/0033-platform-ops-schema.md (one program ceiling in ops); raised by plm_platform.pipeline.workflow when a phase's external-write guard (P4 music.generate, P7 youtube.upload, P8 distribution.submit) refuses a write for a budget reason (R5: the guard is the single reservation)",
       "description": "A phase's write guard could not fund a paid write (generation, upload, distribution submission): ceiling exhausted, no covering ceiling, no rate for an unpriced write, a currency without an FX rate, or no ledger configured. The write is never made. Reviewable, not a hard stop: the ceiling is PLM's own operator control, not an external dispute, KYC, account-security or payment-method event, and it is cleared by an operator act inside PLM. The budget owner resumes only with the reference of the ceiling or rate-card change that funds the write and the approval behind it; the workflow then retries the step and the guard reserves again against the new headroom, so a resume never bypasses the ledger."
+    },
+    "MEASUREMENT_UNAVAILABLE": {
+      "hold_class": "REVIEWABLE_QUARANTINE",
+      "severity": "MEDIUM",
+      "override_permitted": true,
+      "required_evidence": ["listening_review_ref", "measurement_failure_ref"],
+      "reviewer_role": "quality_reviewer",
+      "category": "technical_quality",
+      "source": "docs/reviews/2026-11-26-full-repo-review.md #47 (transient measurement UNKNOWNs became permanent rejections); emitted by services/quality_gate/gate/engine.py on the last re-evaluation (services/quality_gate/api/routes.py MAX_RE_EVALUATIONS)",
+      "description": "P5 could not measure the audio (a read or decode failure, loudness unmeasurable) on every evaluation. Not a verdict on the song: a quality reviewer clears it with a recorded listening review and the reference of the measurement failure, or replaces the song."
     },
     "VOCAL_PRESENCE_SUSPECTED": {
       "hold_class": "REVIEWABLE_QUARANTINE",

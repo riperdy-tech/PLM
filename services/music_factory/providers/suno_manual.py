@@ -429,6 +429,13 @@ class SunoManualAdapter:
 
     def _stem(self, inbox: Path, request: GenerationRequest,
               record: dict[str, Any]) -> str:
+        """The variant's name, with ``-r<n>`` for the n-th song made in place of a
+        rejected one (``-r2`` replaces the first)."""
+        base = self._base_stem(inbox, request, record)
+        return base if not request.replacement else f"{base}-r{request.replacement + 1}"
+
+    def _base_stem(self, inbox: Path, request: GenerationRequest,
+                   record: dict[str, Any]) -> str:
         """The recorded name, else an old prompt-hash name in use, else track + variant."""
         code = request.variant_code
         entry = record["songs"].get(code) if code else None
@@ -546,16 +553,21 @@ class SunoManualAdapter:
                 instrumental = request.vocal_mode == "instrumental"
                 code = request.variant_code
                 entry = record["songs"].get(code) if code else None
+                base = self._base_stem(inbox, request, record)
                 if not isinstance(entry, dict):
                     # The text the owner is first asked for is kept as written.
-                    entry = {"stem": stem, "prompt": request.prompt,
+                    entry = {"stem": base, "prompt": request.prompt,
                              "lines": self._prompt_lines(request)}
                     if code:
                         record["songs"][code] = entry
+                previous = (base if request.replacement <= 1
+                            else f"{base}-r{request.replacement}")
                 low, high = request.duration_min_seconds, request.duration_max_seconds
                 lines += [
                     f"--- Song {n} ---",
                     f"Save as: {stem}.wav",
+                    *([f"Replaces: {previous}.wav (rejected; make a new song)"]
+                      if request.replacement else []),
                     *([] if instrumental else [
                         f"Lyrics:  save the lyrics as sung in {stem}.lyrics.txt",
                     ]),

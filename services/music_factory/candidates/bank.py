@@ -36,6 +36,7 @@ __all__ = [
     "list_candidates_by_track",
     "mark_candidate_exported_to_p5",
     "reject_candidate",
+    "replace_candidate",
 ]
 
 
@@ -150,6 +151,29 @@ def reject_candidate(
         )
 
     update_candidate_status(session, candidate_id, CandidateStatus.REJECTED, now=now)
+    updated = get_candidate(session, candidate_id)
+    assert updated is not None
+    return updated
+
+
+def replace_candidate(
+    session: Session,
+    candidate_id: str,
+    *,
+    now: datetime,
+) -> GeneratedCandidate:
+    """Mark an owner-made song replaced (P5 rejected it; review 2026-11-26 #47).
+
+    The candidate becomes REJECTED whatever its status, exported to P5 included (the
+    gate's own record of it is kept). The next execute of its plan by an import adapter
+    asks for a new file for the same variant (``<track>-<variant>-r2.wav``) and imports
+    it as a new candidate; a paid provider's plan is never re-bought this way.
+    Idempotent."""
+    cand = get_candidate(session, candidate_id)
+    if cand is None:
+        raise CandidateNotFoundError(f"Candidate not found: {candidate_id!r}")
+    if cand.status is not CandidateStatus.REJECTED:
+        update_candidate_status(session, candidate_id, CandidateStatus.REJECTED, now=now)
     updated = get_candidate(session, candidate_id)
     assert updated is not None
     return updated

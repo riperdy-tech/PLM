@@ -5,7 +5,9 @@ GateDecision, QuarantineCase, and downstream ReleaseManifest.
 
 Disposition (fail closed):
 
-* any blocking finding: ``REJECTED``;
+* any blocking finding: ``REJECTED`` (with ``unknown_is_hold``, blocking findings that
+  are all ``UNKNOWN``, measurements that could not be made, quarantine instead as
+  ``MEASUREMENT_UNAVAILABLE``: the API's last re-evaluation of a candidate);
 * otherwise any hold from the rights, provenance, policy or detector checks (the codes
   in :data:`~quality_gate.detectors.reason_codes.P5_HOLD_REASON_CODES`), or commercial
   use not declared eligible: ``QUARANTINED``, with one hold per reason code raised into
@@ -28,7 +30,7 @@ from plm_platform.clock import Clock
 from ..audio.decode import shared_decodes
 from ..detectors.fingerprint import AudioFingerprint
 from ..detectors.outcome import DetectorResult
-from ..detectors.reason_codes import P5_HOLD_REASON_CODES
+from ..detectors.reason_codes import MEASUREMENT_UNAVAILABLE, P5_HOLD_REASON_CODES
 from ..detectors.suite import RightsDetectors, detect_audio, detect_lyrics
 from ..domain.enums import (
     CheckSeverity,
@@ -93,6 +95,7 @@ def run_candidate_evaluation(
     detectors: RightsDetectors | None = None,
     evaluation_policy_version: str = "p5-v1",
     trigger: str = "candidate_ready",
+    unknown_is_hold: bool = False,
 ) -> GateEngineResult:
     """Evaluate one candidate described by its Seam C4 event (ADR-0027, ADR-0034).
 
@@ -113,7 +116,8 @@ def run_candidate_evaluation(
     """
     with shared_decodes():
         return _evaluate(event=event, audio_path=audio_path, clock=clock, detectors=detectors,
-                         evaluation_policy_version=evaluation_policy_version, trigger=trigger)
+                         evaluation_policy_version=evaluation_policy_version, trigger=trigger,
+                         unknown_is_hold=unknown_is_hold)
 
 
 def _evaluate(
@@ -124,6 +128,7 @@ def _evaluate(
     detectors: RightsDetectors | None,
     evaluation_policy_version: str,
     trigger: str,
+    unknown_is_hold: bool,
 ) -> GateEngineResult:
     now = clock.now()
     candidate_id = event.candidate_id
@@ -292,7 +297,12 @@ def _evaluate(
     quarantine_case: QuarantineCase | None = None
     release_manifest: ReleaseManifest | None = None
 
-    if blocking_findings:
+    # Measurements that still could not be made are held for a reviewer, not rejected.
+    unmeasured = (unknown_is_hold and bool(blocking_findings)
+                  and all(f.status == "UNKNOWN" for f in blocking_findings))
+    if unmeasured:
+        hold_codes.add(MEASUREMENT_UNAVAILABLE)
+    if blocking_findings and not unmeasured:
         disposition = GateDisposition.REJECTED
     elif hold_codes or rights_res.requires_quarantine:
         disposition = GateDisposition.QUARANTINED

@@ -42,6 +42,7 @@ __all__ = [
     "DecodedAudio",
     "decode_audio",
     "shared_decodes",
+    "shared_decodes_active",
     "sniff_container",
 ]
 
@@ -205,6 +206,11 @@ def shared_decodes() -> Iterator[None]:
         yield
     finally:
         _SHARED.reset(token)
+
+
+def shared_decodes_active() -> bool:
+    """Whether this code runs inside :func:`shared_decodes`."""
+    return _SHARED.get() is not None
 
 
 def decode_audio(

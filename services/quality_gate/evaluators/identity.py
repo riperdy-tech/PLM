@@ -220,7 +220,8 @@ def evaluate_identity_audio(
     feature_policy = dataclasses.replace(
         DEFAULT_FEATURE_POLICY, bpm_min=50.0, bpm_max=200.0,
         bpm_prior_center=(profile.bpm_min + profile.bpm_max) / 2)
-    features = measure_features(evaluation_id, path.read_bytes(), feature_policy)
+    features = measure_features(evaluation_id, b"", feature_policy,
+                                pcm=(decoded.samples, rate))
     bpm, confidence = features.bpm, features.bpm_confidence
     judged = bpm is not None and confidence is not None and confidence >= profile.min_confidence
     accepted: float | None = None

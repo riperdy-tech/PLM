@@ -315,10 +315,14 @@ def test_autonomous_music_engine_end_to_end_loop_closure(
                                         clock=FixedClock(now),
                                         detectors=configured_detectors())
         assert gate.release_manifest is not None, gate.decision
+        # The mock tiles one 8 s loop end to end, which P5 rightly warns about (review
+        # 2026-11-26 #51); that warning, and only it, is expected.
+        assert [f.finding_code for f in gate.evaluation.risk_findings
+                if not f.blocking] == ["STUCK_LOOP_SUSPECTED"]
         manifests.append(gate.release_manifest)
     manifest = manifests[0]
     assert (manifest.candidate_id, manifest.canonical_artifact_id) == (candidate_id, artifact_id)
-    assert manifest.disposition == GateDisposition.PASSED
+    assert manifest.disposition == GateDisposition.PASSED_WITH_WARNINGS
     assert manifest.p5_manifest_id.startswith("rel_man_")
 
     # =========================================================================
