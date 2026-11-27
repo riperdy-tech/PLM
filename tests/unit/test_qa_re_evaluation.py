@@ -16,10 +16,10 @@ from quality_gate.gate.quarantine import quarantine_holds, sweep_orphan_quaranti
 from quality_gate.storage.repositories import get_quarantine_case
 
 from tests.support.qa_db import qa_session
+from tests.support.rights_detectors import synthetic_music, write_wav
 from tests.support.seams import lineage_fields, rights_fields
 from tests.unit.test_qa_api import (  # noqa: F401 - pytest fixtures
     _TEST_TOKEN,
-    _make_temp_wav,
     _stored_event,
     qa_client,
     qa_engine,
@@ -39,11 +39,10 @@ def _body(store, wav: Path, name: str, **fields: object) -> dict:  # type: ignor
 
 
 @pytest.fixture
-def wav():  # type: ignore[no-untyped-def]
-    path = _make_temp_wav(duration=1.5)
-    yield path
-    if path.is_file():
-        path.unlink()
+def wav(tmp_path: Path) -> Path:
+    # This test's own folder: test_qa_api's shared temp-dir WAV is written and deleted
+    # by other tests (and by other test runs on the same machine).
+    return write_wav(tmp_path / "song.wav", synthetic_music(seed=17, seconds=1.5))
 
 
 def test_an_unmeasured_file_is_evaluated_again_at_once(
