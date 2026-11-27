@@ -146,10 +146,6 @@ class _Failure:
     retries_exhausted: bool = False
 
     @property
-    def no_effect(self) -> bool:
-        return self.details.get("no_effect") is True
-
-    @property
     def code(self) -> str | None:
         code = self.details.get("code")
         return code if isinstance(code, str) else None
@@ -366,10 +362,10 @@ class PipelineWorkflow:
                                       {"evaluate_outcome": evaluated.result.outputs})
         if dispatched is None:
             return self._outcome()
-        if dispatched.result.outputs.get("delivery_status") != "DELIVERED":
-            return await self._fail_fact(
-                Step.DISPATCH_REWARD, dispatched, "reward_not_delivered",
-                "the reward counts as posted only once its outbox event is DELIVERED")
+        # Review 2026-11-26: dispatch_reward returns only once every reward is DELIVERED
+        # (anything else is StepNotReady or a refusal), and learn checks it again, so the
+        # "reward_not_delivered" branch here could never run. Removing a branch no
+        # history can have taken changes no replay.
         await self._move(PipelineState.LEARNING, step=Step.DISPATCH_REWARD, done=dispatched)
 
         learned = await self._step(Step.LEARN, {"dispatch_reward": dispatched.result.outputs,
