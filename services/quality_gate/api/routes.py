@@ -26,7 +26,7 @@ from ..domain.models import (
     QuarantineCase,
     RiskFinding,
 )
-from ..gate.engine import run_candidate_evaluation
+from ..gate.engine import GateEngineResult, run_candidate_evaluation
 from ..gate.persistence import persist_gate_result
 from ..gate.quarantine import (
     OverrideNotPossibleError,
@@ -87,11 +87,18 @@ _FETCH_REFUSAL_STATUS = {
 MAX_RE_EVALUATIONS = 3
 """How often one candidate is evaluated again: after a rejection made only of
 measurements that could not be made (``UNKNOWN``, a transient read or decode failure),
-or after its quarantine case was resolved ``RE_EVALUATE``."""
+or after its quarantine case was resolved ``RE_EVALUATE``. The last evaluation holds
+such a candidate as ``MEASUREMENT_UNAVAILABLE`` (reviewable) instead of rejecting it."""
 
 
 def _blocking_codes(findings: list[RiskFinding]) -> list[str]:
     return sorted({f.finding_code for f in findings if f.blocking})
+
+
+def _unmeasured_rejection(result: GateEngineResult) -> bool:
+    blocking = [f for f in result.evaluation.risk_findings if f.blocking]
+    return (result.disposition is GateDisposition.REJECTED and bool(blocking)
+            and all(f.status == "UNKNOWN" for f in blocking))
 
 
 def re_evaluation_trigger(trigger: str, attempt: int) -> str:
@@ -244,6 +251,7 @@ def build_router(
         # evaluation is to be made again (then under the next re-evaluation trigger).
         trigger = req.trigger
         stored = None
+        attempt = 0
         for attempt in range(MAX_RE_EVALUATIONS + 1):
             trigger = re_evaluation_trigger(req.trigger, attempt)
             stored = get_candidate_evaluation(session, derive_evaluation_id(
@@ -284,48 +292,57 @@ def build_router(
                     message=exc.error.message,
                 ).model_dump(),
             ) from exc
-        with staged_audio(audio, event.artifact_sha256) as audio_path:
-            detector_policy = load_detector_policy()
-            result = run_candidate_evaluation(
-                event=event,
-                audio_path=audio_path,
-                clock=clock,
-                # The registered catalog, reference recordings and lyric corpus in the qa
-                # schema; an empty or unreachable source is UNKNOWN and quarantines.
-                detectors=RightsDetectors(
-                    internal_catalog=SqlInternalCatalog(session),
-                    reference_audio=SqlReferenceAudioSet(
-                        session, detector_policy.audio_fingerprint
+        # A rejection made only of measurements that could not be made is evaluated
+        # again at once (it is kept on record), up to MAX_RE_EVALUATIONS times; the last
+        # time it is held as MEASUREMENT_UNAVAILABLE, never rejected for good.
+        while True:
+            with staged_audio(audio, event.artifact_sha256) as audio_path:
+                detector_policy = load_detector_policy()
+                result = run_candidate_evaluation(
+                    event=event,
+                    audio_path=audio_path,
+                    clock=clock,
+                    # The registered catalog, reference recordings and lyric corpus in the qa
+                    # schema; an empty or unreachable source is UNKNOWN and quarantines.
+                    detectors=RightsDetectors(
+                        internal_catalog=SqlInternalCatalog(session),
+                        reference_audio=SqlReferenceAudioSet(
+                            session, detector_policy.audio_fingerprint
+                        ),
+                        lyric_corpus=SqlLyricCorpus(session, detector_policy.lyric_similarity),
+                        policy=detector_policy,
                     ),
-                    lyric_corpus=SqlLyricCorpus(session, detector_policy.lyric_similarity),
-                    policy=detector_policy,
-                ),
-                evaluation_policy_version=req.evaluation_policy_version,
-                trigger=trigger,
-            )
+                    evaluation_policy_version=req.evaluation_policy_version,
+                    trigger=trigger,
+                    unknown_is_hold=attempt == MAX_RE_EVALUATIONS,
+                )
 
-        # Persist aggregate to database. A concurrent request for the same evaluation id
-        # (a caller's retry while this one ran) may have committed first: its stored
-        # evaluation is the fact and is replayed, never a 500 (R5).
-        try:
-            persist_gate_result(session, result)
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-            winner = get_candidate_evaluation(session, result.evaluation.id)
-            if winner is None:
-                raise
-            if winner.artifact_id != event.artifact_id:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=ErrorShape(
-                        code="evaluation_conflict",
-                        field_paths=["candidate_event.artifact_id"],
-                        message=(f"evaluation {winner.id} judged artifact "
-                                 f"{winner.artifact_id}, not {event.artifact_id}"),
-                    ).model_dump(),
-                ) from None
-            return _stored_response(session, winner)
+            # Persist aggregate to database. A concurrent request for the same evaluation id
+            # (a caller's retry while this one ran) may have committed first: its stored
+            # evaluation is the fact and is replayed, never a 500 (R5).
+            try:
+                persist_gate_result(session, result)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                winner = get_candidate_evaluation(session, result.evaluation.id)
+                if winner is None:
+                    raise
+                if winner.artifact_id != event.artifact_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=ErrorShape(
+                            code="evaluation_conflict",
+                            field_paths=["candidate_event.artifact_id"],
+                            message=(f"evaluation {winner.id} judged artifact "
+                                     f"{winner.artifact_id}, not {event.artifact_id}"),
+                        ).model_dump(),
+                    ) from None
+                return _stored_response(session, winner)
+            if attempt == MAX_RE_EVALUATIONS or not _unmeasured_rejection(result):
+                break
+            attempt += 1
+            trigger = re_evaluation_trigger(req.trigger, attempt)
 
         return EvaluationResponse(
             evaluation_id=result.evaluation.id,

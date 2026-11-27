@@ -46,27 +46,33 @@ def wav():  # type: ignore[no-untyped-def]
         path.unlink()
 
 
-def test_an_unmeasured_file_is_rejected_with_its_code_then_evaluated_again(
+def test_an_unmeasured_file_is_evaluated_again_at_once(
     qa_client, store, wav, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
 ) -> None:
     from quality_gate.evaluators import musical
 
     body = _body(store, wav, "flaky")
-    monkeypatch.setattr(musical, "decode_audio", lambda *a, **k: DecodeFailure(
-        DECODE_FAILED, "disk hiccup", "wav", "test"))
-    first = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
-    assert first["disposition"] == "REJECTED"
+    real, calls = musical.decode_audio, []
+
+    def flaky(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        if len(calls) == 1:
+            return DecodeFailure(DECODE_FAILED, "disk hiccup", "wav", "test")
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(musical, "decode_audio", flaky)
+    answer = qa_client.post("/qa/evaluations", json=body, headers=HEADERS)
+    assert answer.status_code == 201
+    assert answer.json()["disposition"] == "PASSED"
+    assert answer.json()["blocking_finding_codes"] == []
+    from quality_gate.domain.ids import evaluation_id
+
+    first = qa_client.get("/qa/evaluations/" + evaluation_id(
+        "cand_flaky", "p5-v1", "candidate_ready"), headers=HEADERS).json()
+    assert first["disposition"] == "REJECTED"  # kept on record, with its reason
     assert first["blocking_finding_codes"] == ["MUSICAL_ANALYSIS_UNAVAILABLE"]
-    monkeypatch.undo()
-    second = qa_client.post("/qa/evaluations", json=body, headers=HEADERS)
-    assert second.status_code == 201
-    assert second.json()["evaluation_id"] != first["evaluation_id"]
-    assert second.json()["disposition"] == "PASSED"
-    assert second.json()["blocking_finding_codes"] == []
-    third = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
-    assert third["evaluation_id"] == second.json()["evaluation_id"]  # replayed
-    stored = qa_client.get(f"/qa/evaluations/{first['evaluation_id']}", headers=HEADERS)
-    assert stored.json()["blocking_finding_codes"] == ["MUSICAL_ANALYSIS_UNAVAILABLE"]
+    again = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
+    assert again["evaluation_id"] == answer.json()["evaluation_id"]  # replayed
 
 
 def test_a_measured_rejection_is_replayed_not_evaluated_again(
@@ -123,3 +129,22 @@ def test_cases_whose_holds_were_closed_elsewhere_are_swept(
             ResolutionCode.RE_EVALUATE
         assert get_quarantine_case(session, still_open["quarantine_case_id"]).resolution is None
         assert sweep_orphan_quarantine_cases(session, queue, auditor_id="x", now=NOW) == []
+
+
+def test_a_measurement_that_stays_unknown_ends_as_a_reviewable_hold(
+    qa_client, store, wav, monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    from quality_gate.evaluators import musical
+
+    body = _body(store, wav, "stuck_unknown")
+    monkeypatch.setattr(musical, "decode_audio", lambda *a, **k: DecodeFailure(
+        DECODE_FAILED, "disk hiccup", "wav", "test"))
+    last = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
+    assert last["disposition"] == "QUARANTINED"
+    assert last["quarantine_reason_codes"] == ["MEASUREMENT_UNAVAILABLE"]
+    again = qa_client.post("/qa/evaluations", json=body, headers=HEADERS).json()
+    assert again["evaluation_id"] == last["evaluation_id"]  # then replayed
+    (case,) = [c for c in qa_client.get("/qa/quarantine", headers=HEADERS).json()
+               if c["case_id"] == last["quarantine_case_id"]]
+    assert [(h["reason_code"], h["hold_class"]) for h in case["holds"]] == [
+        ("MEASUREMENT_UNAVAILABLE", "REVIEWABLE_QUARANTINE")]

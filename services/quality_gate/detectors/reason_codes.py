@@ -21,6 +21,7 @@ __all__ = [
     "INTERNAL_CATALOG_AUDIO_MATCH",
     "LYRIC_SIMILARITY_HIGH",
     "LYRIC_SIMILARITY_UNKNOWN",
+    "MEASUREMENT_UNAVAILABLE",
     "P5_HOLD_REASON_CODES",
     "P29_CATEGORY_CODES",
     "PROTECTED_ARTIST_REFERENCE_DETECTED",
@@ -50,6 +51,8 @@ PROTECTED_ARTIST_REFERENCE_DETECTED: Final = "PROTECTED_ARTIST_REFERENCE_DETECTE
 AI_POLICY_CONFLICT: Final = "AI_POLICY_CONFLICT"
 # Sung vocals suspected in an instrumental (evaluators/identity.py)
 VOCAL_PRESENCE_SUSPECTED: Final = "VOCAL_PRESENCE_SUSPECTED"
+# Audio measurements that could not be made, after every re-evaluation (gate/engine.py)
+MEASUREMENT_UNAVAILABLE: Final = "MEASUREMENT_UNAVAILABLE"
 
 P5_HOLD_REASON_CODES: Final[frozenset[str]] = frozenset(
     {
@@ -67,6 +70,7 @@ P5_HOLD_REASON_CODES: Final[frozenset[str]] = frozenset(
         PROTECTED_ARTIST_REFERENCE_DETECTED,
         AI_POLICY_CONFLICT,
         VOCAL_PRESENCE_SUSPECTED,
+        MEASUREMENT_UNAVAILABLE,
     }
 )
 """Codes a P5 check emits as a hold: the candidate is quarantined with this reason."""
