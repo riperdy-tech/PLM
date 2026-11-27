@@ -9,7 +9,12 @@ command string. The steps:
   hard cut, ``anullsrc`` + ``concat`` for a silence gap). The mix is normalised with
   two-pass ``loudnorm`` to the profile's integrated loudness, true peak and loudness
   range (pass 1 measures, pass 2 applies the measured values in linear mode), then
-  resampled back to the profile's rate and written as 24-bit PCM WAV.
+  resampled back to the profile's rate and written as 24-bit PCM WAV. Each source is
+  padded to its timeline length before the trim, so a source a few ms short cannot
+  shorten the mix. When ``loudnorm`` falls back to dynamic gain (the linear gain would
+  cross the true-peak ceiling, or the range is unmeasured), a third pass applies the
+  linear gain with a peak limiter at the ceiling instead; the report's ``applied`` says
+  which (``linear`` or ``linear_gain_limiter``).
 * **Video master.** A procedural visualiser: ``showwaves`` (``cline`` mode, square-root
   scale) drawn from the audio master in the brand's accent colour and overlaid on the
   brand background image, encoded with ``libx264`` (profile preset and CRF, ``yuv420p``)
@@ -140,6 +145,9 @@ class FFmpegToolchain:
             parts.append(
                 f"[{i}:a]aresample={profile.sample_rate},"
                 f"aformat=sample_fmts=fltp:channel_layouts={layout},"
+                # Padded, then trimmed, to exactly its timeline length: a source a few ms
+                # shorter than its manifest must not shorten the mix (QA would fail it).
+                f"apad=whole_dur={segment.duration_seconds:.6f},"
                 f"atrim=end={segment.duration_seconds:.6f},asetpts=PTS-STARTPTS[s{i}]")
         current = "s0"
         d = spec.transition_seconds
@@ -174,6 +182,9 @@ class FFmpegToolchain:
         if any(_number(str(v)) is None for v in values.values()):
             raise MediaToolError("loudness_unmeasurable",
                                  f"loudnorm could not measure the mix: {values}")
+        output = ["-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(profile.sample_rate),
+                  "-ac", str(profile.channels), "-map_metadata", "-1", "-fflags", "+bitexact",
+                  "-flags:a", "+bitexact", str(out)]
         second = self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", "-y", *inputs,
             "-filter_complex",
@@ -181,12 +192,29 @@ class FFmpegToolchain:
              f"measured_TP={values['input_tp']}:measured_LRA={values['input_lra']}:"
              f"measured_thresh={values['input_thresh']}:offset={values['target_offset']}:"
              f"linear=true:print_format=json,aresample={profile.sample_rate}[out]"),
-            "-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(profile.sample_rate),
-            "-ac", str(profile.channels), "-map_metadata", "-1", "-fflags", "+bitexact",
-            "-flags:a", "+bitexact", str(out),
+            *output,
         ], step="loudnorm pass 2", programme_seconds=programme)
         applied = self._loudnorm_json(second.stderr)
-        return {"filter": "loudnorm", "target": target, "pass1": measured, "pass2": applied}
+        if applied.get("normalization_type") == "linear":
+            return {"filter": "loudnorm", "target": target, "pass1": measured,
+                    "pass2": applied, "applied": "linear"}
+        # loudnorm silently switches to dynamic (pumping) gain when the linear gain would
+        # cross the true-peak ceiling. Apply that linear gain anyway and let a peak
+        # limiter hold the ceiling (the encoder's overshoot is covered by the profile's
+        # true-peak tolerance), so the music keeps its own dynamics.
+        gain_db = profile.loudness_target_lufs - float(values["input_i"])
+        ceiling = 10 ** (profile.true_peak_dbtp / 20)
+        self._run(self._ffmpeg, [
+            "-hide_banner", "-nostats", "-nostdin", "-y", *inputs,
+            "-filter_complex",
+            (f"{graph};[mix]volume={gain_db:.3f}dB,"
+             f"aresample=192000,alimiter=limit={ceiling:.6f}:attack=1:release=20:level=false,"
+             f"aresample={profile.sample_rate}[out]"),
+            *output,
+        ], step="linear gain and limiter", programme_seconds=programme)
+        return {"filter": "loudnorm", "target": target, "pass1": measured, "pass2": applied,
+                "applied": "linear_gain_limiter", "gain_db": round(gain_db, 3),
+                "limiter_ceiling_dbtp": profile.true_peak_dbtp}
 
     @staticmethod
     def _loudnorm_json(stderr: str) -> dict[str, Any]:
