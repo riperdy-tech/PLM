@@ -388,7 +388,14 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     candidates.append(candidate_id)
                     by_package.setdefault(str(package_id), []).append(candidate_id)
         if awaiting:
-            raise awaiting[0]
+            # Review 2026-11-26 #45: one hold for every plan waiting for the owner's songs,
+            # naming each plan and what it awaits (it named only the first plan's).
+            first = awaiting[0]
+            first.body["plan_ids"] = [str(r.body["plan_id"]) for r in awaiting
+                                      if r.body.get("plan_id")]
+            first.body["awaiting"] = [item for r in awaiting
+                                      for item in (r.body.get("awaiting") or [])]
+            raise first
         for n, plan_id in enumerate(plans):
             provider_ids[f"plan.{n}"] = plan_id
         for n, candidate_id in enumerate(candidates):
@@ -644,6 +651,9 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     f"blocked it ({', '.join(map(str, codes)) or 'no reason codes'})")
             packages.append({"media_package_id": media_package_id, "p3_package_id": package_id,
                              "candidate_ids": members,
+                             # Review 2026-11-26 #30: cleared songs the sequence left out
+                             # (paid, hand-made) stay visible in the run's result.
+                             "not_selected": list(assembled.get("not_selected") or []),
                              "video_checksum": require(assembled, "video_checksum",
                                                        "P6 package")})
         if short:

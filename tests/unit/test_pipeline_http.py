@@ -552,3 +552,32 @@ def test_generate_asks_p4_for_the_song_tool_the_owner_chose_at_start() -> None:
             inputs["music_provider"] = chosen
         asyncio.run(steps.generate(_request(Step.GENERATE, inputs)))
     assert sent == ["suno_manual", None]
+
+
+def test_the_song_hold_names_every_plans_waiting_songs() -> None:
+    """Review 2026-11-26 #45: with several plans waiting for the owner's songs, the hold
+    carries all of them (plan ids and what each awaits), not only the first plan's."""
+    def p3(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"track_specs": [{"track_spec_id": "ts-1"},
+                                                         {"track_spec_id": "ts-2"}]})
+
+    def p4(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/music/plans":
+            spec = json.loads(request.content)["track_spec_id"]
+            return httpx.Response(200, json={"plan_id": f"plan-{spec}"})
+        plan = request.url.path.split("/")[3]
+        return httpx.Response(409, json={"detail": {
+            "code": "external_write_awaiting_input", "field_paths": ["music.import"],
+            "message": "music.import not performed: manual_audio_awaited",
+            "reason": "manual_audio_awaited", "plan_id": plan,
+            "awaiting": [{"file": f"{plan}-v1.wav", "problem": "missing"}]}})
+
+    steps = HttpPhaseSteps({Phase.EXPERIMENTS: _client(Phase.EXPERIMENTS, p3),
+                            Phase.MUSIC: _client(Phase.MUSIC, p4)})
+    with pytest.raises(ExternalWriteRefused) as raised:
+        asyncio.run(steps.generate(_request(Step.GENERATE, {
+            "policy_check": {"package_ids": ["pkg-1"]}})))
+    details = raised.value.details
+    assert details["plan_ids"] == ["plan-ts-1", "plan-ts-2"]
+    assert [a["file"] for a in details["awaiting"]] == ["plan-ts-1-v1.wav",
+                                                        "plan-ts-2-v1.wav"]

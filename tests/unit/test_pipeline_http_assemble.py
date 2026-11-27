@@ -263,3 +263,13 @@ def test_p3s_thumbnail_style_reaches_p6_and_a_package_awaiting_art_holds_the_run
     assert held.value.details["capability"] == "thumbnail.art"
     assert held.value.details["media_package_ids"] == ["mpkg_aaaaaaaa"]
     assert "mpkg_aaaaaaaa" in held.value.message
+
+
+def test_songs_the_sequence_left_out_are_kept_in_the_result() -> None:
+    """Review 2026-11-26 #30: P6's ``not_selected`` (cleared songs left out of the video)
+    stays in the run's result instead of vanishing."""
+    phases = _Phases({"c0": (200, {"media_package_id": "m_c0", "status": "ready_for_publish",
+                                   "video_checksum": "a" * 64, "blocking_reason_codes": [],
+                                   "not_selected": ["c2"]})})
+    result = asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
+    assert result.outputs["packages"][0]["not_selected"] == ["c2"]

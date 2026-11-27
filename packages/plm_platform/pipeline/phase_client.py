@@ -165,6 +165,10 @@ class ExternalWriteRefused(PhaseRequestRefused):
         }
         if self.hold_reason_code == BUDGET_HOLD_REASON:
             details["ledger_reason"] = self.guard_reason
+        if self.hold_reason_code == MANUAL_AUDIO_HOLD_REASON:
+            for field in ("plan_ids", "awaiting"):
+                if isinstance(self.body.get(field), list):
+                    details[field] = self.body[field]
         if self.hold_reason_code == THUMBNAIL_ART_HOLD_REASON:
             package_ids = self.body.get("media_package_ids")
             if (isinstance(package_ids, list) and package_ids
