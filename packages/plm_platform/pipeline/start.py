@@ -20,6 +20,7 @@ import httpx
 from temporalio.client import Client
 
 from ..config import SERVICE_TOKEN_HEADER
+from ..outbox import IDEMPOTENCY_KEY_HEADER
 from .client import pipeline_workflow_id, start_pipeline
 from .types import PipelineOptions
 
@@ -62,13 +63,18 @@ async def start_new_run(
     subgenre: str | None = None,
     avoid_subgenres: tuple[str, ...] = (),
     duration_bucket: str | None = None,
+    request_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> StartedRun:
     """Run one AUTONOMOUS P2 cycle for ``brand_id`` at ``now`` and start the pipeline for
     the directive it queued. ``subgenre`` is the owner's choice of sub-style (P2 picks
     the arm among that sub-style's); ``avoid_subgenres`` are the latest videos'
-    sub-styles, which P2 skips when it picks. Raises :class:`RunNotStarted` when P2 selects
-    nothing."""
+    sub-styles, which P2 skips when it picks. ``request_id`` is the caller's id of this
+    one Start (the same for a double click or a retried request); it goes to P2 as the
+    cycle's ``Idempotency-Key`` (review 2026-11-26 #14). Raises :class:`RunNotStarted`
+    when P2 selects nothing."""
+    if request_id is not None and not request_id.strip():
+        raise ValueError("a start's request id must be a non-empty string")
     headers: Mapping[str, str] = {SERVICE_TOKEN_HEADER: token}
     async with httpx.AsyncClient(base_url=ar_url, headers=dict(headers), timeout=60.0,
                                  transport=transport) as p2:
@@ -82,7 +88,9 @@ async def start_new_run(
             body["avoid_subgenres"] = list(avoid_subgenres)
         if duration_bucket is not None:
             body["duration_bucket"] = duration_bucket
-        cycle = _json(await p2.post("/ar/cycles", json=body), "POST /ar/cycles")
+        cycle_headers = {} if request_id is None else {IDEMPOTENCY_KEY_HEADER: request_id}
+        cycle = _json(await p2.post("/ar/cycles", json=body, headers=cycle_headers),
+                      "POST /ar/cycles")
         cycle_id = str(cycle["cycle_id"])
         if int(cycle.get("selected_count") or 0) < 1:
             raise RunNotStarted("nothing_selected", f"cycle {cycle_id} selected no arm "
