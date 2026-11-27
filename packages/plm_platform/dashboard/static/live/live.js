@@ -610,7 +610,13 @@ function startCard(s) {
   const keepLength = lengthSelect ? lengthSelect.value : '90';
   styleSelect = h('select', { 'data-keep': '1' },
     h('option', { value: '' }, 'Let P2 pick (avoids the last 2 videos\' styles)'),
-    (styles.available || []).map((id) => h('option', { value: id }, styleName(styles, id))));
+    (styles.available || []).map((id) => {
+      // P2 relaxes the cooldown for a style that is only cooling down (review #37).
+      const until = (styles.cooling || {})[id];
+      const note = id in (styles.cooling || {})
+        ? ` (cooling down${until ? ` until ${new Date(until).toLocaleDateString()}` : ''})` : '';
+      return h('option', { value: id }, `${styleName(styles, id)}${note}`);
+    }));
   styleSelect.value = (styles.available || []).includes(keepStyle) ? keepStyle : '';
   lengthSelect = h('input', { type: 'number', min: minMinutes, max: maxMinutes, step: 1,
     value: keepLength, 'data-keep': '1', style: 'width: 5em' });

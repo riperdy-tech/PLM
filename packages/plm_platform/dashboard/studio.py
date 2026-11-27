@@ -1520,6 +1520,10 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
     if platform is not None and platform.service_token is not None:
         token = platform.service_token.get_secret_value()
 
+        start_times: dict[str, Any] = {}
+        """Review 2026-11-26 #14: a repeated Start (same request id) asks P2 at the first
+        click's instant, so P2 replays that cycle instead of refusing a changed as_of."""
+
         async def start(music_provider: str, subgenre: str | None,
                         avoid: tuple[str, ...], length: str,
                         request_id: str | None = None) -> dict[str, Any]:
@@ -1538,7 +1542,9 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
             try:
                 started = await start_new_run(
                     await connect_client(platform), ar_url=urls[Phase.AR], token=token,
-                    brand_id=brand, policy_version=policy, now=(clock or SystemClock()).now(),
+                    brand_id=brand, policy_version=policy,
+                    now=(start_times.setdefault(request_id, (clock or SystemClock()).now())
+                         if request_id else (clock or SystemClock()).now()),
                     options=PipelineOptions(music_provider=music_provider),
                     subgenre=subgenre, avoid_subgenres=avoid, duration_bucket=length,
                     request_id=request_id)
@@ -1580,8 +1586,20 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
                 "where g.genre = 'focus_electronic' and g.subgenre is not null "
                 "and e.created_at <= now() "
                 "order by e.created_at desc limit 5")).all()
+        # Review 2026-11-26 #37: P2 says which sub-styles are only cooling down, so the
+        # Start menu can say so instead of a pick that P2 then relaxes or refuses.
+        cooling: dict[str, str | None] = {}
+        try:
+            answer = apis.get_json(Phase.AR, "/ar/subgenres", params={
+                "brand_id": brand, "as_of": (clock or SystemClock()).now().isoformat()})
+            for entry in answer if isinstance(answer, list) else []:
+                if isinstance(entry, dict) and entry.get("cooling") and entry.get("subgenre"):
+                    cooling[str(entry["subgenre"])] = entry.get("cooling_until")
+        except Exception:  # noqa: BLE001 - the menu still works without the marks
+            cooling = {}
         return {"available": [s for s in available if s and s != "none"],
-                "recent": [{"subgenre": r[0], "at": r[1].isoformat()} for r in recent]}
+                "recent": [{"subgenre": r[0], "at": r[1].isoformat()} for r in recent],
+                "cooling": cooling}
 
     return Studio(paths=StudioPaths.from_env(dotenv_path=dotenv_path), actions=actions,
                   open_holds=open_holds, package=package, media=media, runs=runs,
