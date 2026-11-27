@@ -105,6 +105,21 @@ def fingerprint_set_ref(entries: Sequence[ReferenceFingerprint]) -> str:
 
 
 def _read_audio(path: str | Path) -> tuple[npt.NDArray[np.float64], int]:
+    # Inside one evaluation a WAV is decoded once for every check: libsndfile's float64
+    # samples, exactly what the read below gives.
+    from ..audio.decode import DecodedAudio, decode_audio, shared_decodes_active, sniff_container
+
+    if shared_decodes_active():
+        try:
+            with Path(path).open("rb") as handle:
+                is_wav = sniff_container(handle.read(12)) == "wav"
+        except OSError:
+            is_wav = False
+        if is_wav:
+            decoded = decode_audio(Path(path), timeout_seconds=60.0)
+            if isinstance(decoded, DecodedAudio):
+                return decoded.samples, decoded.sample_rate
+            raise AudioUnreadableError(f"{decoded.reason_code}: {decoded.detail}")
     try:
         data, sample_rate = sf.read(str(path), dtype="float64", always_2d=True)
     except Exception as exc:  # soundfile raises several types; all mean "unreadable"

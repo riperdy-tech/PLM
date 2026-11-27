@@ -268,11 +268,17 @@ def _texture_signature(analysis: FloatArray, rate: float) -> tuple[float, ...] |
 
 
 def measure_features(candidate_id: str, audio: bytes,
-                     policy: FeatureExtractionPolicy = DEFAULT_FEATURE_POLICY) -> TrackFeatures:
-    """Measure one track's features from its verified bytes; unknowns are explicit."""
+                     policy: FeatureExtractionPolicy = DEFAULT_FEATURE_POLICY, *,
+                     pcm: tuple[FloatArray, int] | None = None) -> TrackFeatures:
+    """Measure one track's features from its verified bytes; unknowns are explicit.
+
+    ``pcm`` is the same audio already decoded (``(frames, channels)`` float64 samples and
+    the rate, as libsndfile reads ``audio``): P5 passes it so the file is not decoded
+    again; ``audio`` is then not read."""
     unknown: dict[str, str] = {"vocal_density": "no_vocal_detector"}
     try:
-        samples, rate = sf.read(io.BytesIO(audio), dtype="float64", always_2d=True)
+        samples, rate = (pcm if pcm is not None
+                         else sf.read(io.BytesIO(audio), dtype="float64", always_2d=True))
     except (RuntimeError, ValueError, TypeError, sf.LibsndfileError) as exc:
         reason = f"undecodable:{type(exc).__name__}"
         return TrackFeatures(

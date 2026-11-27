@@ -139,3 +139,37 @@ def test_inside_shared_decodes_a_file_is_decoded_once(tmp_path: Path,
         assert decode.decode_audio(path, timeout_seconds=5) is first
     decode.decode_audio(path, timeout_seconds=5)
     assert len(calls) == 2  # once inside the block, once outside it
+
+
+def test_one_evaluation_decodes_its_wav_once(tmp_path: Path,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """Technical, musical, identity, fingerprint and P6's feature extractor share one
+    decode of the candidate's WAV."""
+    from plm_platform.clock import FixedClock
+    from quality_gate.audio import decode as qa_decode
+    from quality_gate.gate.engine import run_candidate_evaluation
+
+    from tests.support.rights_detectors import configured_detectors, synthetic_music, write_wav
+    from tests.support.seams import candidate_event, lineage_fields, rights_fields
+
+    path = write_wav(tmp_path / "m.wav", synthetic_music(seed=4, seconds=3.0))
+    calls: list[Path] = []
+    real = qa_decode._decode_audio
+
+    def counting(p: Path, **kwargs: object) -> object:
+        calls.append(p)
+        return real(p, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(qa_decode, "_decode_audio", counting)
+    reads: list[object] = []
+    real_read = sf.read
+    monkeypatch.setattr(sf, "read", lambda *a, **k: reads.append(a) or real_read(*a, **k))
+    run_candidate_evaluation(
+        event=candidate_event(
+            candidate_id="cand_once", artifact_id="art_once", track_spec_id="spec_once",
+            vocal_mode="instrumental", genre_tags=["focus_electronic"],
+            lineage=lineage_fields(experiment_id="exp_once", content_arm_id="arm_once"),
+            rights=rights_fields()),
+        audio_path=path, clock=FixedClock(NOW), detectors=configured_detectors())
+    assert len(calls) == 1
+    assert len(reads) == 1  # the one libsndfile read behind that decode
