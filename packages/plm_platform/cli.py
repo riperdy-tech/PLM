@@ -605,6 +605,13 @@ def _not_implemented(phase: str) -> NoReturn:
     raise typer.Exit(code=NOT_IMPLEMENTED_EXIT_CODE)
 
 
+def _announce_execution() -> None:
+    """Print the effective provider modes and policies at API boot (to the container log)."""
+    from .execution import effective_execution_summary
+
+    typer.echo(f"plm: {effective_execution_summary()}", err=True)
+
+
 market_app = typer.Typer(help="P1 market intelligence: evidence collection and scoring.")
 ar_app = typer.Typer(help="P2 autonomous AR: allocation cycles and posteriors.")
 experiments_app = typer.Typer(help="P3 experiment framework: assignment and evaluation.")
@@ -653,6 +660,7 @@ def serve(host: str = "127.0.0.1", port: int = 8081) -> None:
     """Serve the `/market/v1` API (P1)."""
     from market_intelligence.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -719,6 +727,7 @@ def ar_serve(host: str = "127.0.0.1", port: int = 8082) -> None:
     """Serve the `/ar` API (P2). (`ar_serve` because the market group owns `serve`.)"""
     from autonomous_ar.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -794,6 +803,7 @@ def experiments_serve(host: str = "127.0.0.1", port: int = 8083) -> None:
     """Serve the `/experiments` API (P3)."""
     from experiments.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -836,6 +846,7 @@ def music_serve(host: str = "127.0.0.1", port: int = 8004) -> None:
     """Serve the `/music` API (P4)."""
     from music_factory.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -910,6 +921,7 @@ def qa_serve(host: str = "127.0.0.1", port: int = 8005) -> None:
     """Serve the `/qa` API (P5)."""
     from quality_gate.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1080,6 +1092,7 @@ def media_serve(host: str = "127.0.0.1", port: int = 8006) -> None:
     """Serve the `/media` API (P6)."""
     from media_factory.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1154,6 +1167,7 @@ def youtube_serve(host: str = "127.0.0.1", port: int = 8007) -> None:
     """Serve the `/youtube` API (P7)."""
     from youtube_publishing.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1209,6 +1223,7 @@ def distribution_serve(host: str = "127.0.0.1", port: int = 8008) -> None:
     """Serve the `/distribution` API (P8)."""
     from distribution.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 
@@ -1278,6 +1293,7 @@ def analytics_serve(host: str = "127.0.0.1", port: int = 8009) -> None:
     """Serve the `/analytics` API (P9)."""
     from analytics.cli import serve as serve_impl
 
+    _announce_execution()
     serve_impl(host=host, port=port)
 
 

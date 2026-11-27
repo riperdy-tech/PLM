@@ -27,6 +27,14 @@ function Stop-IfFailed([int]$Code) {
     }
 }
 
+# The live stack (compose project plm) belongs to the main checkout: from a git worktree
+# (.git is a file there) a compose target needs its own COMPOSE_PROJECT_NAME.
+if ($Target -in @('up', 'down') -and (Test-Path -LiteralPath (Join-Path $RepoRoot '.git') -PathType Leaf) `
+        -and (-not $env:COMPOSE_PROJECT_NAME -or $env:COMPOSE_PROJECT_NAME -eq 'plm')) {
+    Write-Host "make.ps1 '$Target' refused: this is a git worktree; set COMPOSE_PROJECT_NAME (not plm) so the live stack is untouched" -ForegroundColor Red
+    exit 1
+}
+
 switch ($Target) {
     'up'        { & docker compose up -d; Stop-IfFailed $LASTEXITCODE }
     'down'      { & docker compose down; Stop-IfFailed $LASTEXITCODE }

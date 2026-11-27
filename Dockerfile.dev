@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# Pinned by digest; to upgrade: docker pull python:3.12-slim, then take the new RepoDigest.
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -27,10 +28,11 @@ RUN apt-get update \
 WORKDIR /app
 
 # Editable install; the compose worker bind-mounts the repo over /app at runtime.
-COPY pyproject.toml README.md ./
+# The same pinned dependency set as CI and the host venv (constraints.txt).
+COPY pyproject.toml README.md constraints.txt ./
 COPY packages/ packages/
 COPY services/ services/
-RUN pip install -e ".[dev]"
+RUN pip install -c constraints.txt -e ".[dev]"
 
 # W0.7 replaces this with the real worker entry point (python -m plm_platform.worker).
 CMD ["sleep", "infinity"]
