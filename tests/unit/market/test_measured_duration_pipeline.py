@@ -116,6 +116,7 @@ def test_only_a_new_observation_makes_a_rescored_arm_fresh_again(
 
     def newest_as_of() -> datetime:
         value = repositories.latest_scores(market_session, limit=1)[0]["as_of"]
+        assert isinstance(value, datetime)
         return value if value.tzinfo else value.replace(tzinfo=UTC)
 
     assert newest_as_of() == day0
