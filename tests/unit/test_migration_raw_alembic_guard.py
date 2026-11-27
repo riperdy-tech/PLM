@@ -124,3 +124,26 @@ def test_raw_alembic_preserves_disposable_rehearsal_compatibility(
     monkeypatch.setattr(alembic_context, "run_migrations", lambda: seen.append("migrate"))
     runpy.run_path(str(ENV_PY))
     assert seen == ["rollback", "configure", "migrate", "close", "dispose"]
+
+
+@pytest.mark.parametrize("step", [
+    ("0042_media_render_evidence", "0042_media_render_evidence"),  # not the head
+    ("not_a_revision", "0043_youtube_localizations"),
+    "0043_youtube_localizations",
+])
+def test_approved_local_connection_refuses_a_step_other_than_start_to_head(
+    monkeypatch: pytest.MonkeyPatch, step: object,
+) -> None:
+    from sqlalchemy.engine import Connection
+
+    _configure_env(monkeypatch, "plm", port=5432)
+    alembic_context.config.attributes["plm_approved_local_connection"] = (
+        object.__new__(Connection)
+    )
+    alembic_context.config.attributes["plm_approved_local_step"] = step
+    monkeypatch.setattr(
+        alembic_context, "configure",
+        lambda **kwargs: pytest.fail("configured an unproven approved connection"),
+    )
+    with pytest.raises(RuntimeError, match="approved local migration connection"):
+        runpy.run_path(str(ENV_PY))

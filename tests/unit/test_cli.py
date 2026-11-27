@@ -233,7 +233,28 @@ def test_actual_checkout_head_is_a_declared_code_only_head() -> None:
     root = Path(__file__).resolve().parents[2]
     heads = ScriptDirectory.from_config(Config(str(root / "alembic.ini"))).get_heads()
     assert len(heads) == 1
-    assert heads[0] in cli._CODE_ONLY_HEADS
+    assert cli._is_code_only_head(heads[0])
+    # A later revision is held without editing the CLI; an unparsable head is held too.
+    assert cli._is_code_only_head("0099_future_revision")
+    assert cli._is_code_only_head("abc_unnumbered")
+    assert not cli._is_code_only_head("0038_youtube_candidate_selection")
+
+
+def test_migrate_approved_backup_flags_run_the_rollout_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[bool, str | None]] = []
+    monkeypatch.setattr(
+        cli, "_approved_rollout", lambda prepare, backup: calls.append((prepare, backup)),
+    )
+    monkeypatch.setattr(cli.command, "upgrade", lambda *args: pytest.fail("plain upgrade ran"))
+    assert runner.invoke(app, ["migrate", "--prepare-backup"]).exit_code == 0
+    assert runner.invoke(app, ["migrate", "--approved-backup", "local_plm_x"]).exit_code == 0
+    assert calls == [(True, None), (False, "local_plm_x")]
+    both = runner.invoke(app, ["migrate", "--prepare-backup", "--approved-backup", "x"])
+    with_revision = runner.invoke(app, ["migrate", "0001_baseline", "--approved-backup", "x"])
+    assert both.exit_code == 2 and with_revision.exit_code == 2
+    assert len(calls) == 2
 
 
 def test_migration_check_distinguishes_known_pending_and_current_revisions() -> None:
