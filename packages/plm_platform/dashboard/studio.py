@@ -44,6 +44,14 @@ from typing import Any, Final
 from ..clock import Clock, SystemClock
 from ..dotenv import load_env_file
 from .actions import ActionRefused, ExceptionActions
+from .director import (
+    RECENT_VIDEOS,
+    Brief,
+    Director,
+    director_from_env,
+    recorded_prompts,
+    waiting_songs,
+)
 from .projects import FINISHED, explain_hold, number_runs, plain_log, state_label
 
 __all__ = ["APPROVAL_GRANT_HOURS", "OWNER", "Studio", "StudioPaths", "build_studio"]
@@ -312,6 +320,16 @@ STYLE_MEMORY: Final[int] = 2
 """How many of the latest videos' sub-styles "let P2 pick" avoids (P2's SUBGENRE_MEMORY)."""
 
 
+def _songs_record(sheet: Path) -> dict[str, Any]:
+    """P4's ``<track>.songs.json`` beside a prompt sheet (``{}`` when unreadable)."""
+    try:
+        loaded = json.loads(sheet.with_name(
+            sheet.name.replace(".prompts.txt", ".songs.json")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _sounds_like(pkg: Mapping[str, Any]) -> list[dict[str, Any]]:
     """P6's sound-variance warning (``render_report.album_texture.sound_variance``): the
     recent videos this one sounds like, for the owner's review."""
@@ -358,6 +376,8 @@ class Studio:
     video_stats: Callable[[list[str]], dict[str, dict[str, int]]] | None = None
     """YouTube's public counters per video id (read-only); ``None``: not shown."""
     clock: Clock = field(default_factory=SystemClock)
+    director: Director | None = None
+    """Claude's song prompts and Start suggestion (:mod:`.director`); ``None``: none."""
     video_dir: Path | None = None
     """Where the review's video is kept as a file, one per checksum (``None``: a
     ``plm-studio-video`` folder in the system temp folder)."""
@@ -434,8 +454,44 @@ class Studio:
                 "remakes": self.remakes()}
 
     def style_choices(self) -> dict[str, Any]:
-        """The Start button's sub-style picker: what can be chosen, and what the last
-        videos used (owner 2026-11-09: videos must not sound alike one to the next)."""
+        """The Start button's sub-style picker: what can be chosen, what the last videos
+        used (owner 2026-11-09: videos must not sound alike one to the next) and Claude's
+        suggestion (owner 2026-11-27: Claude advises, the owner chooses)."""
+        found = self._style_lookup()
+        suggestion = self._style_suggestion(found)
+        return found if suggestion is None else {**found, "suggestion": suggestion}
+
+    def _style_suggestion(self, found: Mapping[str, Any]) -> dict[str, Any] | None:
+        available = [str(s) for s in found.get("available") or []]
+        if self.director is None or not available:
+            return None
+        fingerprint = json.dumps([available, found.get("recent") or [],
+                                  sorted(found.get("cooling") or {})], default=str)
+        return self.director.suggestion(available, fingerprint,
+                                        lambda: self._suggestion_context(found))
+
+    def _suggestion_context(self, found: Mapping[str, Any]) -> dict[str, Any]:
+        """What Claude reads for the suggestion (in the background, never on a request)."""
+        cooling = found.get("cooling") or {}
+        available = [{"id": s, "label": STYLE_LABELS.get(s, s),
+                      **({"cooling_down": True} if s in cooling else {})}
+                     for s in found.get("available") or []]
+        if self.store is None:
+            return {"available": available, "videos": [
+                {"style": STYLE_LABELS.get(str(r.get("subgenre")), r.get("subgenre")),
+                 "started": r.get("at")} for r in found.get("recent") or []]}
+        dirs = [inbox for _, inbox in self.paths.music_inboxes()]
+        runs = [r for r in self.store.runs() if r.get("experiment_id")][-6:][::-1]
+        stats = self._stats([r["youtube"]["video_id"] for r in runs if r.get("youtube")])
+        return {"available": available, "videos": [
+            {"style": STYLE_LABELS.get(str(r.get("style")), r.get("style")),
+             "title": r.get("title"), "state": r.get("state"),
+             "started": _iso(r.get("created_at")),
+             "youtube": stats.get((r.get("youtube") or {}).get("video_id") or ""),
+             "prompts": recorded_prompts(dirs, self.store.track_ids(str(r["experiment_id"])),
+                                         limit=3)} for r in runs]}
+
+    def _style_lookup(self) -> dict[str, Any]:
         if self.styles is None:
             return {"available": [], "recent": [], "labels": STYLE_LABELS}
         import time
@@ -549,6 +605,9 @@ class Studio:
             text = sheet.read_text(encoding="utf-8")
             blocks = text.split("--- Song ")
             header, songs = blocks[0].strip(), []
+            record = _songs_record(sheet)  # who wrote the texts (the director, P4)
+            entries = {str(e["stem"]): e for e in (record.get("songs") or {}).values()
+                       if isinstance(e, dict) and e.get("stem")}
             for block in blocks[1:]:
                 match = _SAVE_AS.search(block)
                 if match is None:
@@ -557,7 +616,10 @@ class Studio:
                 wav = sheet.parent / f"{stem}.wav"
                 expected = _EXPECTED.search(block)
                 info, fields = song_fields(block.split("\n", 1)[1] if "\n" in block else "")
+                entry = entries.get(stem) or entries.get(re.sub(r"-r\d+\Z", "", stem)) or {}
                 songs.append({"stem": stem, "text": f"--- Song {block}".strip(),
+                              "written_by": entry.get("written_by"),
+                              "director_refused": entry.get("director_refused"),
                               "info": info, "fields": fields,
                               "saved": wav.is_file(),
                               "seconds": wav_seconds(wav) if wav.is_file() else None,
@@ -566,8 +628,55 @@ class Studio:
                               "lyrics_saved": (sheet.parent / f"{stem}.lyrics.txt").is_file()})
             if songs and (include_done or not all(s["saved"] for s in songs)):
                 sheets.append({"sheet": sheet.name, "source": source, "inbox": str(inbox),
-                               "header": header, "songs": songs})
+                               "header": header, "songs": songs,
+                               "director": ({"written_by": record["written_by"],
+                                             **(record.get("director") or {})}
+                                            if record.get("written_by") else None)})
         return sheets
+
+    # -- the director (Claude's song prompts) -----------------------------------------------
+
+    @staticmethod
+    def _director_key(run: Mapping[str, Any], hold: Mapping[str, Any]) -> str:
+        return f"{run['workflow_id']}:{hold.get('case_id')}"
+
+    def _direct(self, run: Mapping[str, Any], hold: Mapping[str, Any] | None) -> None:
+        """Start Claude's one request for a run that waits for its songs (in the
+        background; nothing waits on it)."""
+        if (self.director is None or self.store is None or hold is None
+                or hold.get("reason_code") != SONGS_REASON or not run.get("experiment_id")):
+            return
+        self.director.write_prompts(self._director_key(run, hold), lambda: self._brief(run))
+
+    def _brief(self, run: Mapping[str, Any]) -> Brief | None:
+        """The video's direction, its songs still to be made (never one already written
+        or saved) and the last videos' prompts."""
+        inboxes = self.paths.music_inboxes()
+        dirs = [inbox for _, inbox in inboxes]
+        songs = waiting_songs(dirs, self.store.track_ids(str(run["experiment_id"])))
+        if not songs:
+            return None
+        runs = [r for r in self.store.runs() if r.get("experiment_id")]
+        ids = [r["workflow_id"] for r in runs]
+        earlier = runs[:ids.index(run["workflow_id"])] if run["workflow_id"] in ids else runs
+        recent: list[dict[str, Any]] = []
+        for other in earlier[::-1]:
+            texts = recorded_prompts(dirs, self.store.track_ids(str(other["experiment_id"])))
+            if texts:
+                recent.append({"style": STYLE_LABELS.get(str(other.get("style")),
+                                                         other.get("style")),
+                               "title": other.get("title"), "prompts": texts})
+            if len(recent) >= RECENT_VIDEOS:
+                break
+        length = run.get("length")
+        return Brief(direction={
+            "sub_style": STYLE_LABELS.get(str(run.get("style")), run.get("style")),
+            "title": run.get("title"),
+            "length_minutes": [round(s / 60) for s in length] if length else None,
+            "songs": len(songs),
+            "tool": next((source for source, inbox in inboxes
+                          if inbox == songs[0].sheet.parent), None)},
+            songs=songs, recent=recent)
 
     def save_song(self, stem: str, data: bytes) -> dict[str, Any]:
         self._music_inboxes()
@@ -1198,6 +1307,7 @@ class Studio:
                 run["youtube"] = {**run["youtube"],
                                   "stats": stats.get(run["youtube"]["video_id"])}
             hold = holds.get(run["workflow_id"]) if run["state"] == "HELD" else None
+            self._direct(run, hold)
             explained = None if hold is None else explain_hold(hold, owner_roles=roles)
             yours = bool(explained and explained["your_turn"])
             listed.append({
@@ -1263,6 +1373,7 @@ class Studio:
         hold = self._holds_by_run().get(run["workflow_id"]) if run["state"] == "HELD" else None
         explained = None if hold is None else explain_hold(hold, owner_roles=self._owner_roles())
         reason = None if hold is None else hold.get("reason_code")
+        self._direct(run, hold)
         experiment = run.get("experiment_id")
         tracks = set(self.store.track_ids(experiment)) if experiment else set()
         sheets: list[dict[str, Any]] = []
@@ -1293,7 +1404,11 @@ class Studio:
             "problem": run["state"] == "HELD" and not (explained and explained["your_turn"]),
             "hold": explained,
             "log": plain_log(self.store.transitions(run["workflow_id"])),
-            "songs": {"sheets": sheets, "waiting": reason == SONGS_REASON},
+            "songs": {"sheets": sheets, "waiting": reason == SONGS_REASON,
+                      "director": None if self.director is None else {
+                          "enabled": self.director.enabled,
+                          "writing": hold is not None and self.director.writing(
+                              self._director_key(run, hold))}},
             "art": art, "art_waiting": reason == ART_REASON or reopened,
             "video": video,
             "review": self.review(hold) if reason == APPROVAL_REASON and hold else None,
@@ -1650,4 +1765,5 @@ def build_studio(platform: Any, live: Any, actions: ExceptionActions, apis: Any,
                   open_holds=open_holds, package=package, media=media, runs=runs,
                   import_art=import_art, start=start, styles=styles, edit=edit,
                   reopen=reopen, store=store, cancel=cancel, video_stats=video_stats,
-                  clock=clock or SystemClock())
+                  clock=clock or SystemClock(),
+                  director=director_from_env(dotenv_path=dotenv_path, clock=clock))
