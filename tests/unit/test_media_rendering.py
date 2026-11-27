@@ -404,7 +404,8 @@ def test_ffmpeg_step_timeouts_scale_with_the_programme_length(
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         timeouts.append(float(kwargs["timeout"]))  # type: ignore[arg-type]
         stderr = ('{"input_i": "-20", "input_tp": "-2", "input_lra": "5", '
-                  '"input_thresh": "-30", "target_offset": "0"}')
+                  '"input_thresh": "-30", "target_offset": "0", '
+                  '"normalization_type": "linear"}')
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr=stderr)
 
     monkeypatch.setattr(ffmpeg_module.subprocess, "run", fake_run)
