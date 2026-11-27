@@ -84,6 +84,9 @@ class GenerationRequest(BaseModel):
     plan_id: str | None = None
     variant_code: str | None = None
     """The creative variant (``v1``...); an owner-made song's file is named after it."""
+    replacement: int = Field(default=0, ge=0)
+    """How many of the variant's songs were replaced (P5 rejected them): the owner saves
+    the next one as ``<name>-r<replacement + 1>``."""
     duration_min_seconds: int | None = None
     duration_max_seconds: int | None = None
     """The spec's accepted length range; ``None`` when the caller did not give one."""

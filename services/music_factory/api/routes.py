@@ -39,6 +39,7 @@ from ..candidates.bank import (
     get_candidate_detail,
     mark_candidate_exported_to_p5,
     reject_candidate,
+    replace_candidate,
 )
 from ..config import MusicFactorySettings
 from ..domain.enums import CandidateStatus
@@ -581,6 +582,22 @@ def build_router(
         except InvalidCandidateTransitionError as exc:
             session.rollback()
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    @router.post("/candidates/{candidate_id}/replace", dependencies=[Depends(auth_dep)])
+    def replace_candidate_endpoint(
+        candidate_id: str,
+        session: Annotated[Session, Depends(_require_session)],
+        payload: RejectCandidateRequest | None = None,
+    ) -> dict[str, Any]:
+        """Replace one owner-made song P5 rejected: the next execute of its plan asks
+        for ``<track>-<variant>-r2.wav`` and waits for it (``manual_audio_awaited``)."""
+        try:
+            cand = replace_candidate(session, candidate_id, now=service_clock.now())
+            session.commit()
+            return cand.model_dump(mode="json")
+        except CandidateNotFoundError as exc:
+            session.rollback()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     @router.post("/candidates/{candidate_id}/export-to-p5", dependencies=[Depends(auth_dep)])
     def export_candidate_endpoint(

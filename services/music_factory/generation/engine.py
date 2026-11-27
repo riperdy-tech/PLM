@@ -128,11 +128,12 @@ def _record_outcome(session: Session, attempt: GenerationAttempt,
 
 def _request(plan: GenerationPlan, spec: AdaptedTrackSpec, prompt_obj: Any,
              adapter: MusicProviderProtocol, *, seed: int,
-             variant_code: str) -> GenerationRequest:
+             variant_code: str, replacement: int = 0) -> GenerationRequest:
     """The provider request for one variant's prompt."""
     return GenerationRequest(
         plan_id=plan.plan_id,
         variant_code=variant_code,
+        replacement=replacement,
         duration_min_seconds=spec.duration_range.min_seconds,
         duration_max_seconds=spec.duration_range.max_seconds,
         experiment_id=plan.experiment_id,
@@ -372,6 +373,19 @@ class GenerationEngine:
         capability = getattr(adapter, "write_capability", GENERATE_CAPABILITY)
         # Only an adapter that says so is free; no capability is assumed to cost nothing.
         free = bool(getattr(adapter, "costs_nothing", False))
+        # An owner-made song P5 rejected and the owner replaces (candidate REJECTED,
+        # review 2026-11-26 #47) is no longer the variant's song: its attempt is set
+        # aside like an abandoned import and the variant is asked for again, as the
+        # variant's next replacement file. Never for a paid provider: that would re-buy.
+        replaced = {aid: c for aid, c in stored_candidates.items()
+                    if free and c.status is CandidateStatus.REJECTED}
+        for aid in replaced:
+            del stored_candidates[aid]
+        replacements: dict[str, int] = {}
+        for a in stored_attempts:
+            if a.attempt_id in replaced:
+                replacements[a.creative_variant_id] = (
+                    replacements.get(a.creative_variant_id, 0) + 1)
         # An import re-reads the owner's file from the inbox and spends nothing through
         # PLM. One stored without its candidate (before 2026-11-02 an import's attempt
         # was committed ahead of it) is abandoned, not a paid job to reconcile: it is
@@ -426,7 +440,8 @@ class GenerationEngine:
                 requests = [
                     _request(plan, spec, build_generation_prompt(
                         spec, variant_delta=v.prompt_delta), adapter, seed=0,
-                        variant_code=v.variant_code)
+                        variant_code=v.variant_code,
+                        replacement=replacements.get(v.variant_id, 0))
                     for v in pending
                 ]
             except ProtectedArtistPromptRefused:
@@ -498,7 +513,8 @@ class GenerationEngine:
                 )
 
                 gen_req = _request(plan, spec, prompt_obj, adapter, seed=current_seed,
-                                   variant_code=variant.variant_code)
+                                   variant_code=variant.variant_code,
+                                   replacement=replacements.get(variant.variant_id, 0))
 
                 mode = provider_mode_of(adapter)
                 # The global ledger does not enforce this plan's own ceilings.
