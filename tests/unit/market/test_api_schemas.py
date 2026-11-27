@@ -45,7 +45,7 @@ def test_the_list_envelope_is_the_registry_shape_not_a_page() -> None:
 
 def test_cursors_round_trip_and_refuse_garbage() -> None:
     cursor = encode_cursor(82.4, "rnb_late_night_drive")
-    assert decode_cursor(cursor) == (82.4, "rnb_late_night_drive")
+    assert decode_cursor(cursor) == (0, 82.4, "rnb_late_night_drive")
     import pytest
 
     with pytest.raises(ValueError):

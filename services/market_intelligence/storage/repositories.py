@@ -829,8 +829,9 @@ def retire_arms_outside_namespace(session: Session, *, prefix: str) -> int:
 
 
 def latest_scores(
-    session: Session, *, limit: int = 100, min_score: float | None = None,
+    session: Session, *, limit: int | None = 100, min_score: float | None = None,
     min_confidence: float | None = None, min_basis_weight: float | None = None,
+    arm_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Newest score per arm, ranked — the API's read path (§25). Retired arms are left out.
 
@@ -840,6 +841,8 @@ def latest_scores(
     flag stays on the returned rows; the frozen C1 wire (registry entry C1) carries
     no coverage field and is deliberately unchanged. Within each group the order is
     the score's descending, ties broken by `arm_id` — a deterministic total order.
+    `limit=None` returns every row (the API pages over the whole order); `arm_id` reads
+    one arm's newest score.
     """
     newest = (
         sa.select(scores.c.arm_id, sa.func.max(scores.c.computed_at).label("computed_at"))
@@ -856,6 +859,8 @@ def latest_scores(
         statement = statement.where(scores.c.market_opportunity_score >= min_score)
     if min_confidence is not None:
         statement = statement.where(scores.c.confidence >= min_confidence)
+    if arm_id is not None:
+        statement = statement.where(scores.c.arm_id == arm_id)
     order: list[Any] = []
     if min_basis_weight is not None:
         order.append(sa.case((scores.c.basis_weight >= min_basis_weight, 0), else_=1))

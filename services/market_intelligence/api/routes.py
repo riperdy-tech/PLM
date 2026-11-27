@@ -64,15 +64,25 @@ def build_router(*, session_factory: SessionFactory | None,
         genre: str | None = None,
         use_case: str | None = None,
     ) -> OpportunityListResponse:
-        rows = latest_scores(session, limit=limit * 3, min_score=min_score,
-                             min_confidence=min_confidence,
-                             min_basis_weight=settings.min_rank_basis_weight)
         if country is not None:
             raise HTTPException(status_code=422, detail=ErrorShape(
                 code="unsupported_parameter", field_paths=["country"],
                 message=("the frozen C1 wire carries no country field; P1 refuses the filter "
                          "rather than silently returning an empty list (registry C1)"),
             ).model_dump())
+        position: tuple[int, float, str] | None = None
+        if cursor is not None:
+            try:
+                position = decode_cursor(cursor)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=ErrorShape(
+                    code="invalid_cursor", field_paths=["cursor"], message=str(exc),
+                ).model_dump()) from exc
+        # Every row, in the full order: the filters below run in Python, so a SQL limit
+        # (it was `limit * 3`) cut paging off after about three pages (review 2026-11-26).
+        rows = latest_scores(session, limit=None, min_score=min_score,
+                             min_confidence=min_confidence,
+                             min_basis_weight=settings.min_rank_basis_weight)
         filtered = [row for row in rows if _matches(row, language=language, genre=genre,
                                                     use_case=use_case)]
         now = datetime.now(UTC)
@@ -84,14 +94,14 @@ def build_router(*, session_factory: SessionFactory | None,
                             normal_hours=settings.freshness_normal_hours,
                             stale_hours=settings.freshness_stale_hours,
                         ).bucket.value == freshness]
-        if cursor is not None:
-            score_floor, arm_floor = decode_cursor(cursor)
-            filtered = [row for row in filtered if _after_cursor(row, score_floor, arm_floor)]
+        if position is not None:
+            filtered = [row for row in filtered if _after_cursor(row, position)]
         items = filtered[:limit]
         next_cursor = None
         if len(filtered) > limit and items:
             last = items[-1]
-            next_cursor = encode_cursor(float(last["market_opportunity_score"]), last["arm_id"])
+            next_cursor = encode_cursor(float(last["market_opportunity_score"]),
+                                        str(last["arm_id"]), group=_group(last))
         as_of = max((_instant(item["as_of"]) for item in items), default=now)
         return OpportunityListResponse.build(
             items=[_opportunity(row) for row in items], next_cursor=next_cursor, as_of=as_of,
@@ -101,7 +111,7 @@ def build_router(*, session_factory: SessionFactory | None,
     @router.get("/opportunities/{arm_id}", response_model=OpportunityDetail)
     def opportunity_detail(arm_id: str, _: Annotated[None, Depends(_auth(settings))],
                            session: Annotated[Session, Depends(dependency)]) -> OpportunityDetail:
-        rows = [row for row in latest_scores(session, limit=200) if row["arm_id"] == arm_id]
+        rows = latest_scores(session, limit=1, arm_id=arm_id)
         if not rows:
             raise _not_found("arm", arm_id)
         row = rows[0]
@@ -302,8 +312,16 @@ def _arm(row: Mapping[str, Any]) -> ArmOut:
     )
 
 
-def _after_cursor(row: Mapping[str, Any], score_floor: float, arm_floor: str) -> bool:
-    """Keyset position under `(score desc, arm_id asc)`."""
+def _group(row: Mapping[str, Any]) -> int:
+    """0 for a ranked arm, 1 for an under-covered one (`latest_scores` puts them last)."""
+    return 1 if row.get("insufficient_coverage") else 0
+
+
+def _after_cursor(row: Mapping[str, Any], position: tuple[int, float, str]) -> bool:
+    """Keyset position under `latest_scores`' order: `(group asc, score desc, arm_id asc)`."""
+    group, score_floor, arm_floor = position
+    if _group(row) != group:
+        return _group(row) > group
     score = float(row["market_opportunity_score"])
     if score != score_floor:
         return score < score_floor
