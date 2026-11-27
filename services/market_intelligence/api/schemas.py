@@ -98,15 +98,20 @@ class RunOut(_Frozen):
     software_version: str
 
 
-def encode_cursor(score: float, arm_id: str) -> str:
-    """Opaque keyset cursor over `(score desc, arm_id asc)` — stable under insertion."""
-    payload = json.dumps({"s": score, "a": arm_id}, separators=(",", ":")).encode("utf-8")
+def encode_cursor(score: float, arm_id: str, *, group: int = 0) -> str:
+    """Opaque keyset cursor over the list's whole order: `(coverage group asc, score desc,
+    arm_id asc)`, group 0 the ranked arms and 1 the under-covered ones after them —
+    stable under insertion. (Review 2026-11-26: without the group a cursor crossing into
+    the under-covered arms skipped or repeated some.)"""
+    payload = json.dumps({"g": group, "s": score, "a": arm_id},
+                         separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(payload).decode("ascii")
 
 
-def decode_cursor(cursor: str) -> tuple[float, str]:
+def decode_cursor(cursor: str) -> tuple[int, float, str]:
+    """`(group, score, arm_id)`; a cursor written before the group is in group 0."""
     try:
         decoded = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
-        return float(decoded["s"]), str(decoded["a"])
+        return int(decoded.get("g", 0)), float(decoded["s"]), str(decoded["a"])
     except Exception as exc:  # any malformed cursor is one message
         raise ValueError(f"invalid cursor {cursor!r}") from exc
