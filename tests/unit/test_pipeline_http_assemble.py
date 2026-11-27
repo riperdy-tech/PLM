@@ -273,3 +273,45 @@ def test_songs_the_sequence_left_out_are_kept_in_the_result() -> None:
                                    "not_selected": ["c2"]})})
     result = asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
     assert result.outputs["packages"][0]["not_selected"] == ["c2"]
+
+
+class _FailedRender(_Phases):
+    """P6 refuses the assemble (the earlier claimed render failed) and answers the
+    retry-render with ``retry`` (status, body)."""
+
+    def __init__(self, retry: tuple[int, dict[str, Any]]) -> None:
+        super().__init__({"c0": (409, {"detail": {
+            "code": "render_job_reconciliation_required", "field_paths": ["candidate_ids"],
+            "message": "Render job is already running or terminal",
+            "facts": {"media_package_id": "mpkg_aaaaaaaa"}}})})
+        self.retry = retry
+        self.retries: list[dict[str, Any]] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/media/packages/mpkg_aaaaaaaa/retry-render":
+            self.retries.append(json.loads(request.content))
+            return httpx.Response(self.retry[0], json=self.retry[1])
+        return super().handler(request)
+
+
+def test_a_failed_render_is_rendered_again_with_the_same_request() -> None:
+    """Review 2026-11-26 #22: a package whose claimed render failed is no longer blocked
+    for good; the step asks P6 to retry the render with the very same request."""
+    phases = _FailedRender((200, {"media_package_id": "mpkg_aaaaaaaa",
+                                  "status": "ready_for_publish", "video_checksum": "a" * 64,
+                                  "blocking_reason_codes": []}))
+    result = asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
+    assert result.outputs["media_package_ids"] == ["mpkg_aaaaaaaa"]
+    (retry,) = phases.retries
+    assert retry["assembly"] == phases.p6_bodies[0]
+    assert retry["recorded_by"].startswith("pipeline:")
+
+
+def test_a_render_p6_will_not_retry_keeps_the_original_refusal() -> None:
+    phases = _FailedRender((409, {"detail": {
+        "code": "render_job_reconciliation_required", "field_paths": [],
+        "message": "render job is RUNNING"}}))
+    with pytest.raises(PhaseRequestRefused) as raised:
+        asyncio.run(_steps(phases).assemble(_request(["c0", "c1", "c2"])))
+    assert raised.value.code == "render_job_reconciliation_required"
+    assert len(phases.retries) == 1

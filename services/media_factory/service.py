@@ -157,6 +157,8 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
                     "render_job_reconciliation_required",
                     "Render job is already running or terminal; inspect its state before retry",
                     ["candidate_ids"],
+                    # The caller retries a failed render by this id (retry-render, #22).
+                    facts={"media_package_id": package_id},
                 )
             claim_session.commit()
         claim = (queued.id, worker_id, input_hash, started)

@@ -94,6 +94,10 @@ class PlaylistSupplyShort(ValidationFailure):
         super().__init__(f"playlist supply short of the declared minimum: {listed}")
 
 
+RENDER_RETRY_NEEDED_CODE = "render_job_reconciliation_required"
+"""P6: this package's earlier render was claimed and failed (or still runs)."""
+
+
 def _missing_seconds(refusal: PhaseRequestRefused) -> int:
     """P6's ``detail.facts.missing_seconds`` (R5), never guessed."""
     facts = refusal.body.get("facts")
@@ -634,11 +638,14 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                     idempotency_key=request_key(key, "assemble", package_id),
                     timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS, body=body)
             except PhaseRequestRefused as exc:
-                if exc.code != PLAYLIST_SUPPLY_SHORT_CODE:
+                if exc.code == RENDER_RETRY_NEEDED_CODE:
+                    assembled = self._retry_render(p6, key, package_id, body, exc)
+                elif exc.code != PLAYLIST_SUPPLY_SHORT_CODE:
                     raise
-                short.append({**shortage, "cleared_count": len(members),
-                              "missing_seconds": _missing_seconds(exc)})
-                continue
+                else:
+                    short.append({**shortage, "cleared_count": len(members),
+                                  "missing_seconds": _missing_seconds(exc)})
+                    continue
             media_package_id = str(require(assembled, "media_package_id", "P6 package"))
             package_status = str(require(assembled, "status", "P6 package"))
             if package_status == THUMBNAIL_ART_STATUS:
@@ -674,6 +681,28 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
             provider_ids={f"media_package.{n}": p["media_package_id"]
                           for n, p in enumerate(packages)},
         )
+
+    def _retry_render(self, p6: Any, key: str, package_id: str, body: dict[str, Any],
+                      refusal: PhaseRequestRefused) -> Any:
+        """Review 2026-11-26 #22: a render that failed after its claim blocked the package
+        for good. The step runs again only after a retry or the owner's resume, so it asks
+        P6 to render the same request again (P6 lists and records the failed attempt's
+        output first). A render still running, or one P6 will not retry, keeps the
+        original refusal."""
+        facts = refusal.body.get("facts")
+        media_package_id = facts.get("media_package_id") if isinstance(facts, dict) else None
+        if not isinstance(media_package_id, str) or not media_package_id:
+            raise refusal
+        try:
+            return p6.post(
+                f"/media/packages/{media_package_id}/retry-render",
+                idempotency_key=request_key(key, "retry-render", package_id),
+                timeout_seconds=self.ASSEMBLE_TIMEOUT_SECONDS,
+                body={"assembly": body, "recorded_by": f"pipeline:{key}",
+                      "orphan_evidence_ref": f"pipeline {key}: render retried after the "
+                                             "failed attempt's output was listed by P6"})
+        except PhaseRequestRefused as retry_refusal:
+            raise refusal from retry_refusal
 
     # -- extend: P3 tops a short package up with more track specs --------------------------
 
