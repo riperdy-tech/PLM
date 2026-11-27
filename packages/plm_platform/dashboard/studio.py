@@ -728,47 +728,67 @@ class Studio:
         The still video takes minutes (about a quarter of the video's length), so the
         import runs on its own: closing or refreshing the page cannot lose it, and the
         project page shows it with its time estimate until it is done or failed.
-        ``wait``: return when it is done (tests, scripts)."""
-        folder = self._art_folder(package_id)
+        ``wait``: return when it is done (tests, scripts).
+
+        A package already ``ready_for_publish`` under a thumbnail hold was imported
+        before and only its resume failed (a restart, a P6 hiccup): P6 refuses a second
+        import, so it is only resumed (review 2026-11-26 #15)."""
         if (self._imports.get(package_id) or {}).get("state") == "running":
             raise _refuse(409, "import_running", f"{package_id} is already being imported")
-        if pick is not None:
-            job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
-            letters = _LETTERS[:len(job.get("variants") or [])]
-            if pick.upper() not in letters:
-                raise _refuse(422, "pick_unknown", f"pick one of {', '.join(letters)}")
-        cases = [c for c in self._cases(ART_REASON) if package_id in self._package_ids(c)]
-        in_review = [c for c in self._cases(APPROVAL_REASON)
-                     if package_id in self._package_ids(c)]
-        if not cases and not in_review:
-            raise _refuse(409, "thumbnail_hold_not_found",
-                          f"no active thumbnail hold names {package_id}")
-        try:
-            seconds = float(self.package(package_id).get("video_duration_seconds") or 0)
-        except Exception:  # noqa: BLE001 - the estimate is only shown, never relied on
-            seconds = 0.0
-        if pick is not None:
+
+        def prepare() -> tuple[Path, list[dict[str, Any]], dict[str, Any] | None]:
+            folder = self._art_folder(package_id)
+            if pick is not None:
+                job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+                letters = _LETTERS[:len(job.get("variants") or [])]
+                if pick.upper() not in letters:
+                    raise _refuse(422, "pick_unknown", f"pick one of {', '.join(letters)}")
+            cases = [c for c in self._cases(ART_REASON) if package_id in self._package_ids(c)]
+            in_review = [c for c in self._cases(APPROVAL_REASON)
+                         if package_id in self._package_ids(c)]
+            if not cases and not in_review:
+                raise _refuse(409, "thumbnail_hold_not_found",
+                              f"no active thumbnail hold names {package_id}")
+            try:
+                pkg: dict[str, Any] | None = self.package(package_id)
+            except Exception:  # noqa: BLE001 - the estimate is only shown, never relied on
+                pkg = None
+            return folder, cases, pkg
+
+        folder, cases, pkg = await asyncio.to_thread(prepare)
+        seconds = float((pkg or {}).get("video_duration_seconds") or 0)
+        imported_before = bool(cases) and (pkg or {}).get("status") == "ready_for_publish"
+        if pick is not None and not imported_before:
             _write_atomic(folder / "pick.txt", pick.upper().encode())
         self._imports[package_id] = {
             "since": self.clock.now().isoformat(), "state": "running", "error": None,
             "pick": pick.upper() if pick else "A",
-            "expected_seconds": round(seconds * RENDER_SECONDS_PER_VIDEO_SECOND) + 60}
+            "expected_seconds": 0 if imported_before
+            else round(seconds * RENDER_SECONDS_PER_VIDEO_SECOND) + 60}
+        work = self._import_and_resume(package_id, folder, cases,
+                                       imported_before=imported_before)
         if wait:
-            return await self._import_and_resume(package_id, folder, cases)
-        task = asyncio.create_task(self._import_and_resume(package_id, folder, cases))
+            return await work
+        task = asyncio.create_task(work)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return {"importing": package_id, **self._imports[package_id]}
 
     async def _import_and_resume(self, package_id: str, folder: Path,
-                                 cases: list[dict[str, Any]]) -> dict[str, Any]:
+                                 cases: list[dict[str, Any]], *,
+                                 imported_before: bool = False) -> dict[str, Any]:
         try:
-            released = await asyncio.to_thread(self.import_art, package_id, folder)
+            if imported_before:
+                released = {"media_package_id": package_id, "status": "ready_for_publish",
+                            "imported_before": True}
+            else:
+                released = await asyncio.to_thread(self.import_art, package_id, folder)
             resumed: list[dict[str, Any]] = []
             waiting: set[str] = set()
             for case in cases:  # none: reopened at the review, still held for approval
-                not_ready = [p for p in self._package_ids(case)
-                             if self.package(p).get("status") != "ready_for_publish"]
+                not_ready = await asyncio.to_thread(
+                    lambda case=case: [p for p in self._package_ids(case)
+                                       if self.package(p).get("status") != "ready_for_publish"])
                 if not_ready:
                     waiting.update(not_ready)
                     continue
@@ -1081,6 +1101,13 @@ class Studio:
                                for p in packages) if job["variants"]]
         latest = packages[0]["media_package_id"] if packages else None
         video = self._project_video(str(latest)) if latest else None
+        # Step 2's controls whenever the package waits for art and nothing runs for it,
+        # also at the review: a failed or lost remake (in memory only) must still leave
+        # an Import button (review 2026-11-26 #16).
+        reopened = (reason == APPROVAL_REASON and bool(packages)
+                    and packages[0].get("status") == "awaiting_thumbnail_art"
+                    and all((table.get(str(latest)) or {}).get("state") != "running"
+                            for table in (self._imports, self._remakes)))
         return {
             "number": number, "workflow_id": run["workflow_id"], "title": run.get("title"),
             "style": run.get("style"),
@@ -1094,7 +1121,7 @@ class Studio:
             "hold": explained,
             "log": plain_log(self.store.transitions(run["workflow_id"])),
             "songs": {"sheets": sheets, "waiting": reason == SONGS_REASON},
-            "art": art, "art_waiting": reason == ART_REASON,
+            "art": art, "art_waiting": reason == ART_REASON or reopened,
             "video": video,
             "review": self.review(hold) if reason == APPROVAL_REASON and hold else None,
             "can_replace_songs": reason in (ART_REASON, APPROVAL_REASON) and bool(video),

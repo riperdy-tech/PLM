@@ -231,6 +231,40 @@ def test_the_picture_import_runs_on_its_own_with_a_time_estimate(tmp_path: Path)
     assert [c[1] for c in actions.calls] == ["c-art"]
 
 
+def test_an_import_whose_resume_failed_is_only_resumed_the_second_time(
+        tmp_path: Path) -> None:
+    """Review 2026-11-26 #15: the import committed, then the resume failed; P6 refuses a
+    second import (thumbnail_art_not_awaited), so the run was stuck. A package already
+    ready_for_publish under a thumbnail hold is only resumed."""
+    imported: list[str] = []
+    studio, actions = _studio(tmp_path, [ART_HOLD], imported, status="ready_for_publish")
+    result = asyncio.run(studio.import_thumbnails(PKG, wait=True))
+    assert imported == [] and [c[1] for c in actions.calls] == ["c-art"]
+    assert result["package"]["status"] == "ready_for_publish"
+
+
+APPROVAL_HOLD = {"case_id": "c-ok", "reason_code": "PUBLISH_APPROVAL_AWAITED",
+                 "reviewer_role": "production_owner",
+                 "details": {"media_package_ids": [PKG]},
+                 "pipeline": {"run_state": "HELD", "workflow_id": "pipeline.now"}}
+
+
+def test_step_2_controls_show_when_a_reopened_package_has_nothing_running(
+        tmp_path: Path) -> None:
+    """Review 2026-11-26 #16: a failed or lost remake left the review with no Import
+    button. Step 2 is open whenever the package waits for art and nothing runs."""
+    studio, _ = _project_studio(tmp_path, [APPROVAL_HOLD])
+    assert studio.project(2)["art_waiting"] is True  # remake lost (dashboard restarted)
+    studio._remakes[PKG] = {"since": "t", "state": "failed", "error": "1024 px"}
+    assert studio.project(2)["art_waiting"] is True
+    studio._remakes[PKG] = {"since": "t", "state": "running", "error": None}
+    assert studio.project(2)["art_waiting"] is False
+    studio._remakes.clear()
+    studio.store.packages = lambda experiment_id: [
+        {"media_package_id": PKG, "status": "ready_for_publish"}]
+    assert studio.project(2)["art_waiting"] is False
+
+
 def test_start_takes_a_length_choice(tmp_path: Path) -> None:
     studio, _ = _studio(tmp_path, [])
     (tmp_path / "suno").mkdir()
