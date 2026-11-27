@@ -700,16 +700,21 @@ def update_media_package_presentation(
     thumbnails: list[dict[str, Any]],
     expected_status: PackageStatus,
     now: datetime,
+    render_report: dict[str, Any] | None = None,
 ) -> bool:
     """Replace the package's metadata candidates and the order of its thumbnails (the
-    owner's review edits), only while it is ``expected_status``; ``False`` when another
+    owner's review edits), and its render report when given (the edited title's
+    variation record), only while it is ``expected_status``; ``False`` when another
     writer moved it first. The video, its checksum and the manifest hash are untouched."""
+    values: dict[str, Any] = {"metadata_candidates_json": json.dumps(metadata_candidates),
+                              "thumbnails_json": json.dumps(thumbnails), "updated_at": now}
+    if render_report is not None:
+        values["render_report_json"] = json.dumps(render_report)
     result = session.execute(
         media_packages_table.update()
         .where(media_packages_table.c.media_package_id == package_id,
                media_packages_table.c.status == expected_status.value)
-        .values(metadata_candidates_json=json.dumps(metadata_candidates),
-                thumbnails_json=json.dumps(thumbnails), updated_at=now)
+        .values(**values)
     )
     return bool(getattr(result, "rowcount", 0))
 

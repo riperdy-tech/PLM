@@ -5,7 +5,9 @@ need no new render, and one that does:
 
 * :func:`edit_presentation`: a new title (of the first metadata candidate, the one P7
   publishes), description or tags (of every candidate), or a different thumbnail put
-  first (P7 offers the first one). The description must keep every chapter timestamp,
+  first (P7 offers the first one; refused for the owner's art, whose first image is the
+  video's picture: re-pick through :func:`reopen_art`). An edited title is also stored as
+  the package's variation title. The description must keep every chapter timestamp,
   since the chapters are read from it. The translations keep their own text.
 * :func:`reopen_art`: new art. The package goes back to ``awaiting_thumbnail_art``
   and forgets its imported art, so the owner's next import (which also renders the
@@ -104,9 +106,26 @@ def edit_presentation(session: Session, package_id: str, *, title: str | None = 
         if not chosen:
             raise MediaAssemblyError("thumbnail_unknown",
                                      f"{package_id} has no thumbnail {thumbnail_id!r}")
+        if (thumbnails[0].get("id") != thumbnail_id
+                and (pkg.render_report.get("video_pipeline") or {}).get("still_image")):
+            # The owner's first image is the video's picture: reordering would publish a
+            # thumbnail that is not the video. Re-picking renders the video again.
+            raise MediaAssemblyError(
+                "thumbnail_is_the_video_picture",
+                f"{package_id}'s first thumbnail is its video picture; to use "
+                f"{thumbnail_id!r} instead, reopen the art, pick it and import again")
         thumbnails = chosen + [t for t in thumbnails if t.get("id") != thumbnail_id]
+    render_report = None
+    variation = pkg.render_report.get("variation")
+    if title is not None and isinstance(variation, dict) and variation.get("titles"):
+        # The upload-variation check of later packages compares the titles stored here:
+        # keep the one that is published (the first candidate's), not P6's first draft.
+        variation = {**variation, "concept": title,
+                     "titles": [title, *list(variation["titles"])[1:]]}
+        render_report = {**pkg.render_report, "variation": variation}
     if not update_media_package_presentation(
             session, package_id, metadata_candidates=candidates, thumbnails=thumbnails,
+            render_report=render_report,
             expected_status=PackageStatus.READY_FOR_PUBLISH, now=now):
         raise MediaAssemblyError("package_not_in_review", f"{package_id} left review")
     changed = get_media_package_by_id(session, package_id)
