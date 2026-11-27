@@ -112,6 +112,10 @@ def _row_to_directive(row: Any) -> ProductionDirective:
     )
 
 
+P1_SCORE_SCALE: float = 100.0
+"""P1's opportunity score is a 0-100 weighted percentile; a regime shift is a move of a
+share of that range (§28), never a ratio of two percentiles."""
+
 SUBGENRE_MEMORY: int = 2
 """How many of the brand's latest autonomous picks name sub-styles the next pick avoids
 (owner 2026-11-09: videos must not sound alike from one to the next). Arm cooldowns alone
@@ -256,12 +260,15 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     mature_counts = {arm_id: int(row["mature_result_count"])
                      for arm_id, row in state_rows.items()}
     retirement_decisions = evaluate_retirements(posteriors, mature_counts=mature_counts,
-                                                policy=policy, now=now)
+                                                policy=policy, now=now, states=states)
+    retired_reasons = {arm_id: row.get("retirement_reason")
+                       for arm_id, row in state_rows.items()}
     for decision in retirement_decisions:
         repositories.set_arm_status(session, arm_id=decision.arm_id,
                                     status=ArmLifecycleStatus.RETIRED, now=now,
                                     reason=decision.reason)
         states[decision.arm_id] = ArmLifecycleStatus.RETIRED
+        retired_reasons[decision.arm_id] = decision.reason
         warnings.append(ReasonCode.WEAK_POSTERIOR.value)  # §38 evidence, never silent
     retirements = len(retirement_decisions)
     reactivations = 0
@@ -272,7 +279,8 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         if previous is None or previous["p1_score"] is None:
             continue  # §39 needs a stored score to compare against; none means no reopen
         reason = reopen_reason(arm, stored_score=float(previous["p1_score"]),
-                               policy=policy, state=states[arm.arm_id])
+                               policy=policy, state=states[arm.arm_id],
+                               retirement_reason=retired_reasons.get(arm.arm_id))
         if reason is not None:
             repositories.set_arm_status(session, arm_id=arm.arm_id,
                                         status=ArmLifecycleStatus.ACTIVE, now=now,
@@ -298,7 +306,8 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         if previous is not None:
             regime_shift = regime_shift or bool(detect_regime_shift(
                 arm.p1_score, float(previous["p1_score"]),
-                relative_threshold=policy.nonstationarity.regime_relative_threshold))
+                relative_threshold=policy.nonstationarity.regime_relative_threshold,
+                scale=P1_SCORE_SCALE))
     low_confidence = all(posteriors[arm.arm_id].observation_count == 0
                          for arm in snapshot_arms)
     if regime_shift:

@@ -308,11 +308,40 @@ def test_retirement_needs_mature_evidence_and_reopens_on_a_market_rise() -> None
     recovered, stable = _arm("rnb-1", score=75.0), _arm("rnb-1", score=45.0)
     retired = ArmLifecycleStatus.RETIRED
     assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=retired) == "market_score_recovered"
+                         state=retired, retirement_reason="WEAK_POSTERIOR"
+                         ) == "market_score_recovered"
     assert reopen_reason(stable, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=retired) is None
+                         state=retired, retirement_reason="WEAK_POSTERIOR") is None
     assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=ArmLifecycleStatus.ACTIVE) is None
+                         state=ArmLifecycleStatus.ACTIVE,
+                         retirement_reason="WEAK_POSTERIOR") is None
+
+
+def test_only_candidate_or_active_arms_retire_and_only_weak_ones_reopen() -> None:
+    """Review 2026-11-26: retirement overwrote BLOCKED (out-of-identity) arms, and a
+    reopen then made an old blocked arm eligible again."""
+    from services.autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
+
+    weak = PosteriorState(
+        arm_id="a", model_type="normal-normal", model_version="p2-nn-v1",
+        prior_mean=0.5, prior_variance=0.05, posterior_mean=0.10, posterior_variance=0.01,
+        observation_count=6, effective_observation_count=6.0, update_version=6,
+        last_update_at=NOW,
+    )
+    posteriors = {arm_id: replace(weak, arm_id=arm_id) for arm_id in ("a", "b", "c", "d")}
+    states = {"a": ArmLifecycleStatus.ACTIVE, "b": ArmLifecycleStatus.CANDIDATE,
+              "c": ArmLifecycleStatus.BLOCKED, "d": ArmLifecycleStatus.RETIRED}
+    decided = evaluate_retirements(posteriors, mature_counts=dict.fromkeys(posteriors, 5),
+                                   policy=DEFAULT_POLICY, now=NOW, states=states)
+    assert [decision.arm_id for decision in decided] == ["a", "b"]
+    recovered = _arm("a", score=75.0)
+    retired = ArmLifecycleStatus.RETIRED
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason="WEAK_POSTERIOR") == "market_score_recovered"
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason="out_of_identity:brand-identity-v2") is None
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason=None) is None
 
 
 def test_every_directive_is_recorded_in_the_decision_log() -> None:

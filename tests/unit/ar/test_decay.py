@@ -40,6 +40,17 @@ def test_regime_shift_needs_both_sides_and_fires_in_either_direction() -> None:
     assert detect_regime_shift(0.55, 0.60, relative_threshold=0.3) is False
 
 
+def test_a_percentile_score_shift_is_measured_on_its_scale() -> None:
+    """P1 scores are 0-100 percentiles: 10 -> 14 is four points, not a 40 % regime
+    change (review 2026-11-26). On the scale the threshold is a share of the range."""
+    assert detect_regime_shift(14.0, 10.0, relative_threshold=0.3) is True  # old reading
+    assert detect_regime_shift(14.0, 10.0, relative_threshold=0.3, scale=100.0) is False
+    assert detect_regime_shift(40.0, 75.0, relative_threshold=0.3, scale=100.0) is True
+    assert detect_regime_shift(80.0, 45.0, relative_threshold=0.3, scale=100.0) is True
+    with pytest.raises(ValueError, match="scale"):
+        detect_regime_shift(1.0, 2.0, relative_threshold=0.3, scale=0.0)
+
+
 def test_history_is_discounted_never_deleted() -> None:
     ancient = NOW - timedelta(days=45 * 20)  # twenty half-lives old
     weight = recency_weight(ancient, now=NOW, half_life_days=45.0)
