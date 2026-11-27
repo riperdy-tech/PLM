@@ -20,25 +20,25 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from market_intelligence.api.app import create_app
+from market_intelligence.cli import run_daily
+from market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
+from market_intelligence.collection.seeds import load_bootstrap_seeds
+from market_intelligence.config import MarketSettings, load_market_settings
+from market_intelligence.connectors.youtube import (
+    BASE_URL,
+    YouTubeCredentials,
+    YouTubeDataAPIConnector,
+)
+from market_intelligence.reports.exports import render_markdown, store_report
+from market_intelligence.reports.market_snapshot import build_snapshot
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import queries
 from plm_platform.config import Secret, load_settings
 from plm_platform.db import build_engine
 from plm_platform.storage import build_client, ensure_bucket, from_uri, get_verified
 from sqlalchemy.orm import Session, sessionmaker
 
-from services.market_intelligence.api.app import create_app
-from services.market_intelligence.cli import run_daily
-from services.market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
-from services.market_intelligence.collection.seeds import load_bootstrap_seeds
-from services.market_intelligence.config import MarketSettings, load_market_settings
-from services.market_intelligence.connectors.youtube import (
-    BASE_URL,
-    YouTubeCredentials,
-    YouTubeDataAPIConnector,
-)
-from services.market_intelligence.reports.exports import render_markdown, store_report
-from services.market_intelligence.reports.market_snapshot import build_snapshot
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import queries
 from tests.support.c1_api import SyncASGIClient
 from tests.support.http import MockHTTP
 

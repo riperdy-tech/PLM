@@ -2,16 +2,15 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-
-from services.analytics.storage.models import ANALYTICS_METADATA
-from services.distribution.storage.models import DISTRIBUTION_METADATA
-from services.experiments.storage.models import EXPERIMENTS_METADATA
-from services.market_intelligence.domain.enums import TaxonomyDimension as D
-from services.market_intelligence.taxonomy.arms import generate_candidate_arms
-from services.market_intelligence.taxonomy.validators import ClassificationDraft
-from services.media_factory.storage.models import MEDIA_METADATA
-from services.quality_gate.storage.models import QA_METADATA
-from services.youtube_publishing.storage.models import YOUTUBE_METADATA
+from analytics.storage.models import ANALYTICS_METADATA
+from distribution.storage.models import DISTRIBUTION_METADATA
+from experiments.storage.models import EXPERIMENTS_METADATA
+from market_intelligence.domain.enums import TaxonomyDimension as D
+from market_intelligence.taxonomy.arms import generate_candidate_arms
+from market_intelligence.taxonomy.validators import ClassificationDraft
+from media_factory.storage.models import MEDIA_METADATA
+from quality_gate.storage.models import QA_METADATA
+from youtube_publishing.storage.models import YOUTUBE_METADATA
 
 
 def test_v3_ids_fit_narrowest_downstream_arm_column() -> None:

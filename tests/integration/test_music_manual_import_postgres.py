@@ -12,16 +12,16 @@ from typing import Any
 
 import pytest
 import sqlalchemy as sa
+from music_factory.domain.enums import PlanStatus
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.suno_manual import SunoManualAdapter
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.repositories import list_generation_attempts
 from plm_platform.clock import FixedClock
 from sqlalchemy.orm import Session
 
-from services.music_factory.domain.enums import PlanStatus
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.suno_manual import SunoManualAdapter
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.repositories import list_generation_attempts
 from tests.integration.test_music_paid_attempt_checkpoints_postgres import (
     isolated_music_db,  # noqa: F401  (fixture)
 )

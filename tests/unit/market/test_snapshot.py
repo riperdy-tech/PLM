@@ -9,9 +9,10 @@ printing a score that was never observed.
 import json
 from datetime import UTC, datetime
 
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.reports.exports import render_machine, render_markdown
-from services.market_intelligence.reports.market_snapshot import build_snapshot
+from market_intelligence.config import load_market_settings
+from market_intelligence.reports.exports import render_machine, render_markdown
+from market_intelligence.reports.market_snapshot import build_snapshot
+
 from tests.support.golden import assert_golden, golden_path
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

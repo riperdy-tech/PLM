@@ -3,10 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts.seams.c3 import TrackSpecPayload
-from plm_platform.clock import FixedClock
-
-from services.music_factory.candidates.bank import (
+from music_factory.candidates.bank import (
     CandidateNotFoundError,
     InvalidCandidateTransitionError,
     accept_candidate,
@@ -16,12 +13,15 @@ from services.music_factory.candidates.bank import (
     mark_candidate_exported_to_p5,
     reject_candidate,
 )
-from services.music_factory.domain.enums import CandidateStatus
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.models import generation_attempts_table
+from music_factory.domain.enums import CandidateStatus
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.models import generation_attempts_table
+from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
+
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 

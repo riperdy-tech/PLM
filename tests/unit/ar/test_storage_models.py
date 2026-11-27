@@ -1,7 +1,6 @@
 # tests/unit/ar/test_storage_models.py
 import sqlalchemy as sa
-
-from services.autonomous_ar.storage.models import AR_METADATA, AR_SCHEMA, AR_TABLES
+from autonomous_ar.storage.models import AR_METADATA, AR_SCHEMA, AR_TABLES
 
 EXPECTED_TABLES = {
     "ar_content_arm_state", "ar_arm_feature_snapshot", "ar_arm_posterior",

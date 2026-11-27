@@ -1,12 +1,11 @@
 import pytest
-
-from services.market_intelligence.domain.enums import TaxonomyDimension as D
-from services.market_intelligence.taxonomy.classifier import (
+from market_intelligence.domain.enums import TaxonomyDimension as D
+from market_intelligence.taxonomy.classifier import (
     ClassificationInput,
     RuleBasedClassifier,
     classify_observation,
 )
-from services.market_intelligence.taxonomy.validators import (
+from market_intelligence.taxonomy.validators import (
     classification_input_fingerprint,
     measured_duration_bucket,
 )
@@ -122,7 +121,7 @@ def test_unmapped_terms_are_recorded_and_never_guessed() -> None:
 
 
 def test_the_classifier_output_round_trips_through_validation() -> None:
-    from services.market_intelligence.taxonomy.validators import validate_classification
+    from market_intelligence.taxonomy.validators import validate_classification
 
     draft = RuleBasedClassifier().classify(EXAMPLE)
     raw = {dimension.value: list(values) for dimension, values in draft.dimensions.items()}

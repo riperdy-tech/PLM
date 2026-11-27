@@ -1,8 +1,8 @@
 # tests/unit/ar/test_properties.py
 """§96's invariants as executable loop properties over seeded runs — no hypothesis dependency."""
 
-from services.autonomous_ar.simulation.scenarios import ALL_SCENARIOS
-from services.autonomous_ar.simulation.simulator import SimConfig, run_simulation
+from autonomous_ar.simulation.scenarios import ALL_SCENARIOS
+from autonomous_ar.simulation.simulator import SimConfig, run_simulation
 
 CONFIGS = tuple(SimConfig(cycles=30, slot_count=4, seed=seed) for seed in (1, 2, 3, 5, 8))
 

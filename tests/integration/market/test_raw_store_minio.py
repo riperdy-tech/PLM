@@ -7,17 +7,16 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
-from plm_platform.db import build_engine, scoped_session
-from plm_platform.storage import build_client, ensure_bucket, from_uri, get_verified
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.enums import (
     ConnectorType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.raw_store import store_raw_observation
+from market_intelligence.storage import repositories
+from market_intelligence.storage.raw_store import store_raw_observation
+from plm_platform.db import build_engine, scoped_session
+from plm_platform.storage import build_client, ensure_bucket, from_uri, get_verified
 
 pytestmark = pytest.mark.integration
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

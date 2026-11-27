@@ -1,11 +1,11 @@
 # tests/unit/ar/test_prior.py
 from datetime import UTC, datetime
 
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.domain.posterior import PosteriorState
-from services.autonomous_ar.modeling.prior import cold_start_prior, transfer_contribution
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.domain.posterior import PosteriorState
+from autonomous_ar.modeling.prior import cold_start_prior, transfer_contribution
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 COMPONENTS = {"demand": 70.0, "growth": 50.0, "competitor_velocity": 55.0,

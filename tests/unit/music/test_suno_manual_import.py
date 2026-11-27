@@ -21,6 +21,25 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from music_factory.api.app import create_app
+from music_factory.api.events import (
+    MANUAL_HUMAN_CONTRIBUTION,
+    build_candidate_ready_event,
+)
+from music_factory.config import default_provider_for, load_music_factory_settings
+from music_factory.domain.enums import PlanStatus
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.suno_manual import (
+    IMPORT_CAPABILITY,
+    MANUAL_MODEL_ID,
+    SunoManualAdapter,
+    SunoManualSettings,
+    load_suno_manual_settings,
+)
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.repositories import list_generation_attempts
 from plm_contracts import CommercialUseEligibility, ExecutionPolicy, ProviderMode
 from plm_contracts.money import Money
 from plm_contracts.seams.c3 import TrackSpecPayload
@@ -39,25 +58,6 @@ from plm_platform.pipeline.phase_client import MANUAL_AUDIO_HOLD_REASON, Externa
 from plm_platform.pipeline.types import StepRequest
 from plm_platform.temporal import Phase
 
-from services.music_factory.api.app import create_app
-from services.music_factory.api.events import (
-    MANUAL_HUMAN_CONTRIBUTION,
-    build_candidate_ready_event,
-)
-from services.music_factory.config import default_provider_for, load_music_factory_settings
-from services.music_factory.domain.enums import PlanStatus
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.suno_manual import (
-    IMPORT_CAPABILITY,
-    MANUAL_MODEL_ID,
-    SunoManualAdapter,
-    SunoManualSettings,
-    load_suno_manual_settings,
-)
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.repositories import list_generation_attempts
 from tests.support.music_db import create_music_engine, music_db_session, music_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
@@ -323,7 +323,8 @@ def test_the_settings_come_from_env_and_the_inbox_selects_manual_suno(tmp_path: 
 def test_api_waits_unrecorded_then_imports_under_the_same_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     monkeypatch.setenv("PLM_SUNO_MANUAL_INBOX", str(tmp_path))
@@ -392,8 +393,8 @@ def test_pipeline_runs_every_plan_then_holds_for_the_owners_files() -> None:
 
 
 def test_styles_text_keeps_every_descriptor_of_the_prompt() -> None:
-    from services.music_factory.domain.models import GenerationRequest
-    from services.music_factory.providers.suno_manual import suno_styles
+    from music_factory.domain.models import GenerationRequest
+    from music_factory.providers.suno_manual import suno_styles
 
     prompt = (
         "LOFI track. mood: calm, nostalgic, reflective. for study_focus. 75 BPM. "
@@ -424,8 +425,8 @@ def test_styles_text_keeps_every_descriptor_of_the_prompt() -> None:
 
 
 def test_a_value_that_already_names_its_kind_is_not_doubled() -> None:
-    from services.music_factory.domain.models import GenerationRequest
-    from services.music_factory.providers.suno_manual import suno_styles
+    from music_factory.domain.models import GenerationRequest
+    from music_factory.providers.suno_manual import suno_styles
 
     styles = suno_styles(GenerationRequest(
         track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
@@ -441,8 +442,8 @@ def test_a_value_that_already_names_its_kind_is_not_doubled() -> None:
 
 
 def test_the_mix_balance_reads_as_a_mix_phrase() -> None:
-    from services.music_factory.domain.models import GenerationRequest
-    from services.music_factory.providers.suno_manual import suno_styles
+    from music_factory.domain.models import GenerationRequest
+    from music_factory.providers.suno_manual import suno_styles
 
     styles = suno_styles(GenerationRequest(
         track_spec_id="trk", experiment_id="exp", vocal_mode="instrumental",
@@ -456,7 +457,8 @@ def test_a_run_picks_suno_or_flow_music_per_plan_on_a_manual_deployment(
     """The dashboard's Start choice: ``provider`` on execute writes the prompt sheet for
     that tool into its own inbox, whatever the service default; anything but a manual
     import provider is refused, and a non-manual deployment cannot be switched."""
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     suno, flow = tmp_path / "suno", tmp_path / "flow"

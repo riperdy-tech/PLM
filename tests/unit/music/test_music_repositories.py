@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from services.music_factory.domain.enums import (
+from music_factory.domain.enums import (
     ArtifactType,
     AttemptStatus,
     AttemptType,
@@ -13,7 +13,7 @@ from services.music_factory.domain.enums import (
     CostType,
     PlanStatus,
 )
-from services.music_factory.domain.models import (
+from music_factory.domain.models import (
     AudioArtifact,
     CostRecord,
     CreativeVariant,
@@ -22,7 +22,8 @@ from services.music_factory.domain.models import (
     GenerationPlan,
     RightsSnapshot,
 )
-from services.music_factory.storage import repositories
+from music_factory.storage import repositories
+
 from tests.support.music_db import create_music_engine, music_session
 from tests.support.seams import sample_lineage
 

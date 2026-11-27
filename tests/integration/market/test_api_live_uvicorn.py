@@ -15,9 +15,8 @@ import time
 import httpx
 import pytest
 import uvicorn
-
-from services.market_intelligence.api.app import create_app
-from services.market_intelligence.config import load_market_settings
+from market_intelligence.api.app import create_app
+from market_intelligence.config import load_market_settings
 
 pytestmark = pytest.mark.integration
 

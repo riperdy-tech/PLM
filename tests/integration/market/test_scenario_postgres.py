@@ -25,25 +25,25 @@ from typing import Any
 
 import pytest
 import sqlalchemy as sa
-from plm_platform.db import build_engine, scoped_session
-from sqlalchemy.orm import sessionmaker
-
-from services.market_intelligence.config import MarketSettings, load_market_settings
-from services.market_intelligence.domain.entities import OpportunityScore
-from services.market_intelligence.domain.enums import (
+from market_intelligence.config import MarketSettings, load_market_settings
+from market_intelligence.domain.entities import OpportunityScore
+from market_intelligence.domain.enums import (
     ConnectorType,
     EntityType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.domain.value_objects import TaxonomyProfile
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.normalization.canonical import normalize_text, text_fingerprint
-from services.market_intelligence.scoring.opportunity import persist_scores, score_all_arms
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import raw_observations
-from services.market_intelligence.storage.raw_store import SCHEMA_VERSION
-from services.market_intelligence.taxonomy.arms import ArmDraft
+from market_intelligence.domain.value_objects import TaxonomyProfile
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.normalization.canonical import normalize_text, text_fingerprint
+from market_intelligence.scoring.opportunity import persist_scores, score_all_arms
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import raw_observations
+from market_intelligence.storage.raw_store import SCHEMA_VERSION
+from market_intelligence.taxonomy.arms import ArmDraft
+from plm_platform.db import build_engine, scoped_session
+from sqlalchemy.orm import sessionmaker
+
 from tests.fixtures.market.scenario import (
     MID_ARM_ID,
     PRIMARY_ARM_ID,

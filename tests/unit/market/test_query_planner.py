@@ -1,13 +1,13 @@
 from datetime import UTC, datetime, timedelta
 
-from services.market_intelligence.collection.query_planner import (
+from market_intelligence.collection.query_planner import (
     QueryState,
     next_run_at,
     plan_refresh,
     priority_score,
     staleness_hours,
 )
-from services.market_intelligence.config import load_market_settings
+from market_intelligence.config import load_market_settings
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()

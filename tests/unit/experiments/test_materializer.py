@@ -5,19 +5,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from services.experiments.domain.enums import ExperimentStatus, PackageStatus, TrackRole
-from services.experiments.domain.errors import ExperimentStateError
-from services.experiments.domain.experiment import (
+from experiments.domain.enums import ExperimentStatus, PackageStatus, TrackRole
+from experiments.domain.errors import ExperimentStateError
+from experiments.domain.experiment import (
     Experiment,
     Hypothesis,
     Treatment,
 )
-from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
-from services.experiments.materialization.builder import (
+from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
+from experiments.materialization.builder import (
     BudgetEnvelopeExceededError,
     materialize_package,
 )
+
 from tests.support.experiments_factories import design_facts
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)

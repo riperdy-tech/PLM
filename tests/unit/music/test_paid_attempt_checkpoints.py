@@ -11,26 +11,26 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from music_factory.api.app import create_app
+from music_factory.config import load_music_factory_settings
+from music_factory.domain.enums import AttemptStatus, PlanStatus
+from music_factory.domain.models import GenerationRequest, GenerationResponse
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import (
+    ArtifactStorageUnavailable,
+    InMemoryArtifactStorage,
+)
+from music_factory.storage.repositories import (
+    list_candidates_by_track,
+    list_generation_attempts,
+)
 from plm_platform.clock import FixedClock
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
 from plm_platform.execution import ExternalWriteGuard
 from sqlalchemy.orm import Session
 
-from services.music_factory.api.app import create_app
-from services.music_factory.config import load_music_factory_settings
-from services.music_factory.domain.enums import AttemptStatus, PlanStatus
-from services.music_factory.domain.models import GenerationRequest, GenerationResponse
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import (
-    ArtifactStorageUnavailable,
-    InMemoryArtifactStorage,
-)
-from services.music_factory.storage.repositories import (
-    list_candidates_by_track,
-    list_generation_attempts,
-)
 from tests.support.music_db import create_music_engine, music_session
 from tests.unit.music.test_write_guard_and_idempotency import (
     ENV,
@@ -144,8 +144,9 @@ def test_api_execute_keeps_paid_attempts_when_the_request_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real route wires the checkpoint: a 500 cannot erase a paid job."""
-    from services.music_factory.providers.adapters import ElevenLabsAdapter
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.providers.adapters import ElevenLabsAdapter
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     calls: list[str] = []
@@ -212,7 +213,7 @@ def test_mock_provider_runs_are_unchanged_by_checkpoints() -> None:
 def test_a_failed_settle_keeps_the_provider_job_id_in_the_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.music_factory.generation import engine as engine_module
+    from music_factory.generation import engine as engine_module
 
     def broken_settle(session: Session, attempt: Any) -> None:
         raise RuntimeError("database went away")

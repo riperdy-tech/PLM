@@ -6,14 +6,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from experiments.config import load_experiments_settings
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import build_genome_from_directive
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.materialization.builder import materialize_package
+from experiments.validation.engine import promote_to_validated, validate_experiment
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 
-from services.experiments.config import load_experiments_settings
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import build_genome_from_directive
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.materialization.builder import materialize_package
-from services.experiments.validation.engine import promote_to_validated, validate_experiment
 from tests.support.seams import directive_fields
 
 FIXED_NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
@@ -63,9 +63,8 @@ def test_manual_supply_package_asks_one_candidate_per_track() -> None:
 
 
 def test_manual_supply_package_widens_the_per_song_range_only() -> None:
+    from experiments.config import MANUAL_TRACK_SECONDS
     from plm_contracts.seams.c3 import DurationRangeSeconds
-
-    from services.experiments.config import MANUAL_TRACK_SECONDS
 
     directive, genome = _setup()
     exp = design_experiment(directive, genome, seed=7, created_at=FIXED_NOW, control_only=True)

@@ -1,7 +1,6 @@
 # tests/unit/market/test_normalization_scoring.py
 import pytest
-
-from services.market_intelligence.scoring.normalization import percentile_score, winsorize
+from market_intelligence.scoring.normalization import percentile_score, winsorize
 
 
 def test_winsorization_clamps_the_tails_not_the_middle() -> None:

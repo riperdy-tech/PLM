@@ -1,12 +1,12 @@
 # tests/unit/ar/test_api_auth.py
 """P2.13: the AR service token is fail-closed and never echoed (P1.10's semantics)."""
 
+from autonomous_ar.api.app import create_app
+from autonomous_ar.config import load_ar_settings
 from fastapi.testclient import TestClient
 from plm_platform.config import load_settings
 from sqlalchemy.orm import sessionmaker
 
-from services.autonomous_ar.api.app import create_app
-from services.autonomous_ar.config import load_ar_settings
 from tests.support.ar_db import create_ar_engine
 
 ENV_WITH_TOKEN = {

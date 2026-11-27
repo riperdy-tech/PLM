@@ -13,8 +13,7 @@ import json
 
 import httpx
 import pytest
-
-from services.autonomous_ar.ingestion.p1_adapter import (
+from autonomous_ar.ingestion.p1_adapter import (
     EvidencePayload,
     MarketUnavailable,
     OpportunityPayload,
@@ -22,6 +21,7 @@ from services.autonomous_ar.ingestion.p1_adapter import (
     TaxonomyPayload,
     adapt_opportunity,
 )
+
 from tests.support.c1_api import SEAM_TOKEN, SyncASGITransport, open_c1_client
 from tests.support.contract import SeamRegistry, assert_seam_payload
 

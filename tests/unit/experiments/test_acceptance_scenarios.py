@@ -5,30 +5,30 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from fastapi.testclient import TestClient
-from plm_contracts.seams.c2 import ProductionDirectivePayload
-from plm_platform.config import load_settings
-from sqlalchemy.orm import sessionmaker
-
-from services.experiments.api.app import create_app
-from services.experiments.config import load_experiments_settings
-from services.experiments.domain.enums import (
+from experiments.api.app import create_app
+from experiments.config import load_experiments_settings
+from experiments.domain.enums import (
     ExperimentStatus,
     ExperimentType,
     VariableClass,
     VocalGender,
     VocalMode,
 )
-from services.experiments.domain.experiment import Treatment
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import build_genome_from_directive
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.materialization.builder import (
+from experiments.domain.experiment import Treatment
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import build_genome_from_directive
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.materialization.builder import (
     BudgetEnvelopeExceededError,
     materialize_package,
 )
-from services.experiments.storage import repositories
-from services.experiments.validation.engine import promote_to_validated, validate_experiment
+from experiments.storage import repositories
+from experiments.validation.engine import promote_to_validated, validate_experiment
+from fastapi.testclient import TestClient
+from plm_contracts.seams.c2 import ProductionDirectivePayload
+from plm_platform.config import load_settings
+from sqlalchemy.orm import sessionmaker
+
 from tests.support.experiments_db import create_experiments_engine
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)

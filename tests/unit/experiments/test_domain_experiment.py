@@ -5,9 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
-
-from services.experiments.domain.enums import (
+from experiments.domain.enums import (
     ExperimentStatus,
     ExperimentType,
     PackageStatus,
@@ -15,19 +13,19 @@ from services.experiments.domain.enums import (
     VocalGender,
     VocalMode,
 )
-from services.experiments.domain.experiment import (
+from experiments.domain.experiment import (
     Experiment,
     ExperimentVariable,
     Hypothesis,
     Treatment,
 )
-from services.experiments.domain.fingerprint import (
+from experiments.domain.fingerprint import (
     compute_experiment_fingerprint,
     compute_genome_fingerprint,
     compute_package_hash,
 )
-from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
-from services.experiments.domain.package import (
+from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
+from experiments.domain.package import (
     ContentPackage,
     PlaylistSpec,
     ThumbnailSpec,
@@ -35,6 +33,8 @@ from services.experiments.domain.package import (
     TrackSpec,
     VisualSpec,
 )
+from pydantic import ValidationError
+
 from tests.support.experiments_factories import design_facts, playlist_spec_fields
 from tests.support.seams import lineage_fields, track_spec_fields
 

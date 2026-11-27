@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import pytest
 import sqlalchemy as sa
+from autonomous_ar.storage.models import AR_METADATA
 from plm_platform.db import build_engine
-
-from services.autonomous_ar.storage.models import AR_METADATA
 
 
 @pytest.mark.integration

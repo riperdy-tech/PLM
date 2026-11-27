@@ -5,9 +5,8 @@ import pytest
 
 from collections.abc import Callable
 
+from autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
 
 # Exercises code that loads platform settings; the values are set explicitly.
 pytestmark = pytest.mark.usefixtures("platform_env")
@@ -16,7 +15,7 @@ pytestmark = pytest.mark.usefixtures("platform_env")
 def test_run_cycle_once_uses_the_injected_factory(
         ar_factory: sessionmaker[Session],
         market_source: Callable[[CycleRequest], MarketSnapshot]) -> None:
-    from services.autonomous_ar.cli import run_cycle_once
+    from autonomous_ar.cli import run_cycle_once
 
     summary = run_cycle_once(session_factory=ar_factory, market_source=market_source,
                              slot_count=1, budget=1.0)
@@ -24,7 +23,7 @@ def test_run_cycle_once_uses_the_injected_factory(
 
 
 def test_simulate_prints_metrics_for_every_scenario() -> None:
-    from services.autonomous_ar.cli import simulate
+    from autonomous_ar.cli import simulate
 
     for scenario in ("clear_winner", "sparse_observations", "regime_change"):
         output = simulate(scenario, cycles=10, seed=3)
@@ -34,8 +33,8 @@ def test_simulate_prints_metrics_for_every_scenario() -> None:
 def test_show_and_explain_read_the_stored_rows_through_the_injected_factory(
         ar_factory: sessionmaker[Session],
         market_source: Callable[[CycleRequest], MarketSnapshot]) -> None:
-    from services.autonomous_ar.cli import explain, run_cycle_once, show_cycle
-    from services.autonomous_ar.storage import repositories
+    from autonomous_ar.cli import explain, run_cycle_once, show_cycle
+    from autonomous_ar.storage import repositories
 
     summary = run_cycle_once(session_factory=ar_factory, market_source=market_source,
                              slot_count=1, budget=1.0)

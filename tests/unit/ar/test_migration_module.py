@@ -9,8 +9,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-
-from services.autonomous_ar.storage.models import AR_METADATA
+from autonomous_ar.storage.models import AR_METADATA
 
 MIGRATION_PATH = Path("migrations/versions/ar/ar_0008_initial_tables.py")
 

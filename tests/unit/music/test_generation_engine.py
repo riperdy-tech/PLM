@@ -1,28 +1,28 @@
 """Unit tests for durable generation engine (§4.4, §65, §111, R6)."""
 from datetime import UTC, datetime
 
-from plm_contracts.seams.c3 import TrackSpecPayload
-from plm_platform.clock import FixedClock
-
-from services.music_factory.domain.enums import (
+from music_factory.domain.enums import (
     AttemptStatus,
     CandidateStatus,
     CommercialUseStatus,
     PlanStatus,
 )
-from services.music_factory.domain.models import GenerationRequest, GenerationResponse
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.mock_provider import MockMusicProvider
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.repositories import (
+from music_factory.domain.models import GenerationRequest, GenerationResponse
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.mock_provider import MockMusicProvider
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.repositories import (
     get_candidate,
     get_generation_plan,
     get_rights_snapshot_for_attempt,
     list_artifacts_for_candidate,
     list_generation_attempts,
 )
+from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
+
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
@@ -164,9 +164,8 @@ def test_generation_engine_successful_execution() -> None:
         # Credits have no currency exchange rate: P4 must not invent USD.
         assert all(a.actual_cost is None and a.cost_currency is None
                    and a.money_basis == "unpriced" for a in attempts)
+        from music_factory.storage.models import provider_cost_records_table
         from sqlalchemy import select
-
-        from services.music_factory.storage.models import provider_cost_records_table
         costs = session.execute(select(provider_cost_records_table)).mappings().all()
         assert len(costs) == 2
         assert all(c["actual_amount"] is None and c["currency"] is None
@@ -191,7 +190,7 @@ def test_generation_engine_successful_execution() -> None:
 
 def test_variant_request_metadata_matches_compiled_prompt() -> None:
     """Every variant preserves the declared C3 BPM/genre experiment dimensions."""
-    from services.music_factory.providers.adapters import get_provider_adapter
+    from music_factory.providers.adapters import get_provider_adapter
 
     class CapturingAdapter:
         def __init__(self) -> None:

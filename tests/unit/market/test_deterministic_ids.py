@@ -14,21 +14,21 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from plm_platform.storage import StoredObject, sha256_digest
-from sqlalchemy.orm import Session
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.enums import (
     ConnectorType,
     EntityType,
     ProviderName,
     ProviderObjectType,
     QueryType,
 )
-from services.market_intelligence.normalization.canonical import text_fingerprint
-from services.market_intelligence.normalization.youtube import normalize_video_object
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.raw_store import store_raw_observation
+from market_intelligence.normalization.canonical import text_fingerprint
+from market_intelligence.normalization.youtube import normalize_video_object
+from market_intelligence.storage import repositories
+from market_intelligence.storage.raw_store import store_raw_observation
+from plm_platform.storage import StoredObject, sha256_digest
+from sqlalchemy.orm import Session
+
 from tests.support.market_db import create_market_engine
 
 # Exercises code that loads platform settings; the values are set explicitly.

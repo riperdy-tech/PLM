@@ -10,8 +10,7 @@ corpus into two fresh instances and comparing the ids it minted — call
 from __future__ import annotations
 
 import sqlalchemy as sa
-
-from services.market_intelligence.storage.models import MARKET_METADATA
+from market_intelligence.storage.models import MARKET_METADATA
 
 __all__ = ["create_market_engine"]
 

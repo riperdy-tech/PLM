@@ -1,15 +1,14 @@
 """Unit tests for music factory provider protocol and adapters (§4.4, §111)."""
 
 import pytest
-
-from services.music_factory.domain.enums import AttemptStatus
-from services.music_factory.domain.models import GenerationRequest
-from services.music_factory.providers.adapters import (
+from music_factory.domain.enums import AttemptStatus
+from music_factory.domain.models import GenerationRequest
+from music_factory.providers.adapters import (
     ElevenLabsAdapter,
     MockAdapter,
     get_provider_adapter,
 )
-from services.music_factory.providers.protocol import MusicProviderProtocol
+from music_factory.providers.protocol import MusicProviderProtocol
 
 
 def test_adapters_satisfy_protocol() -> None:

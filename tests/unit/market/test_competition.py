@@ -3,16 +3,15 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import Tri
-
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.features.arm_features import arm_competition
-from services.market_intelligence.features.competition import (
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.features.arm_features import arm_competition
+from market_intelligence.features.competition import (
     competition_metrics,
     herfindahl_index,
     percentile,
     top_n_share,
 )
+from plm_contracts import Tri
 
 
 def test_percentile_interpolates_and_handles_small_samples() -> None:

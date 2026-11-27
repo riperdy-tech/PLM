@@ -5,20 +5,20 @@ from __future__ import annotations
 import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
-from plm_contracts.seams.c3 import TrackSpecPayload
-
-from services.music_factory.api.app import create_app
-from services.music_factory.domain.enums import AttemptStatus
-from services.music_factory.domain.models import GenerationRequest, GenerationResponse
-from services.music_factory.providers.adapters import MockAdapter
-from services.music_factory.storage.artifacts import MinioArtifactStorage
-from services.music_factory.storage.models import (
+from music_factory.api.app import create_app
+from music_factory.domain.enums import AttemptStatus
+from music_factory.domain.models import GenerationRequest, GenerationResponse
+from music_factory.providers.adapters import MockAdapter
+from music_factory.storage.artifacts import MinioArtifactStorage
+from music_factory.storage.models import (
     creative_variants_table,
     generated_candidates_table,
     generation_attempts_table,
     generation_plans_table,
     rights_snapshots_table,
 )
+from plm_contracts.seams.c3 import TrackSpecPayload
+
 from tests.support.fake_minio import FakeMinio
 from tests.support.music_db import create_music_engine, music_session
 from tests.support.seams import lineage_fields, track_spec_fields
@@ -48,9 +48,8 @@ SAMPLE_C3_SPEC = TrackSpecPayload.build(
 ).to_wire()
 
 
+from music_factory.config import load_music_factory_settings
 from plm_platform.config import SERVICE_TOKEN_HEADER, load_settings
-
-from services.music_factory.config import load_music_factory_settings
 
 ENV_WITH_TOKEN = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm",

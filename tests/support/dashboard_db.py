@@ -17,15 +17,14 @@ from typing import Any
 
 import sqlalchemy as sa
 from analytics.storage.models import ANALYTICS_METADATA
+from autonomous_ar.storage.models import AR_METADATA
 from distribution.storage.models import DISTRIBUTION_METADATA
+from market_intelligence.storage.models import MARKET_METADATA
 from plm_platform.exceptions import EXCEPTIONS_METADATA, ExceptionCase, ExceptionQueue
 from plm_platform.pipeline.store import PIPELINE_METADATA, PipelineStore
 from plm_platform.pipeline.types import TransitionRecord
 from sqlalchemy.orm import Session, sessionmaker
 from youtube_publishing.storage.models import YOUTUBE_METADATA
-
-from services.autonomous_ar.storage.models import AR_METADATA
-from services.market_intelligence.storage.models import MARKET_METADATA
 
 __all__ = [
     "ALL_SCHEMAS",

@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
+from market_intelligence.storage.models import observations
 
-from services.market_intelligence.storage.models import observations
 from tests.support.c1_api import open_c1_client
 
 RAW_ID = "00000000-0000-0000-0000-000000000099"

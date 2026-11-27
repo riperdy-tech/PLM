@@ -130,6 +130,19 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 import sqlalchemy as sa
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.storage import repositories as ar_repositories
+from autonomous_ar.storage.models import (
+    ar_allocation_policy,
+    ar_arm_exposure,
+    ar_arm_posterior,
+    ar_content_arm_state,
+    ar_experiment_result,
+    ar_posterior_update_log,
+    ar_reward_observation,
+)
+from market_intelligence.cli import run_daily, run_daily_step
+from market_intelligence.storage.models import queries as market_queries
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
 from plm_platform.db import database_url
 from plm_platform.exceptions import ExceptionQueue
@@ -158,19 +171,6 @@ from temporalio.client import WorkflowHandle
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.storage import repositories as ar_repositories
-from services.autonomous_ar.storage.models import (
-    ar_allocation_policy,
-    ar_arm_exposure,
-    ar_arm_posterior,
-    ar_content_arm_state,
-    ar_experiment_result,
-    ar_posterior_update_log,
-    ar_reward_observation,
-)
-from services.market_intelligence.cli import run_daily, run_daily_step
-from services.market_intelligence.storage.models import queries as market_queries
 from tests.integration.pipeline.support import factory, settings
 from tests.support.rights_detectors import register_controlled_references
 

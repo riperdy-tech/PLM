@@ -6,19 +6,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from plm_contracts.seams.c3 import TrackSpecPayload
-from plm_platform.clock import FixedClock
-
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.generation.prompts import (
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.generation.prompts import (
     ProtectedArtistPromptRefused,
     build_generation_prompt,
 )
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.adapters import get_provider_adapter
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.repositories import list_generation_attempts
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.adapters import get_provider_adapter
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.repositories import list_generation_attempts
+from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
+
 from tests.support.music_db import music_db_session
 from tests.support.seams import track_spec_fields
 
@@ -77,10 +77,9 @@ def test_protected_artist_in_the_spec_never_reaches_the_provider() -> None:
     """Proves: the refusal happens before anything is submitted (the provider's generate()
     is never called, no attempt is recorded), the plan ends FAILED rather than stuck
     RUNNING, and the P29 reason opens a hard-stop hold on the plan."""
+    from music_factory.domain.enums import PlanStatus
+    from music_factory.storage.repositories import get_generation_plan
     from plm_platform.exceptions import ExceptionQueue
-
-    from services.music_factory.domain.enums import PlanStatus
-    from services.music_factory.storage.repositories import get_generation_plan
 
     spec = _spec(mood=["melancholic", "Billie Eilish whisper"])
     plan, variants = plan_generation(spec, created_at=NOW)

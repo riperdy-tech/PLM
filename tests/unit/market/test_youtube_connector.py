@@ -4,15 +4,13 @@ from pathlib import Path
 from random import Random
 
 import pytest
-from plm_platform.config import Secret
-
-from services.market_intelligence.collection.rate_limit import (
+from market_intelligence.collection.rate_limit import (
     QuotaBudget,
     QuotaExceededError,
     RequestBudget,
 )
-from services.market_intelligence.connectors.base import ConnectorError
-from services.market_intelligence.connectors.youtube import (
+from market_intelligence.connectors.base import ConnectorError
+from market_intelligence.connectors.youtube import (
     LIST_QUOTA_UNITS,
     SEARCH_QUOTA_UNITS,
     YouTubeCredentials,
@@ -22,7 +20,8 @@ from services.market_intelligence.connectors.youtube import (
     parse_search_hits,
     parse_video_stats,
 )
-from services.market_intelligence.domain.enums import ConnectorErrorClass
+from market_intelligence.domain.enums import ConnectorErrorClass
+from plm_platform.config import Secret
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

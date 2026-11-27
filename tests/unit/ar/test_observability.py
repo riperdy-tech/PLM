@@ -3,15 +3,15 @@
 
 import logging
 
-from services.autonomous_ar.decisioning.cycle import CycleResult
-from services.autonomous_ar.domain.enums import AllocationCycleStatus
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.observability.logging import (
+from autonomous_ar.decisioning.cycle import CycleResult
+from autonomous_ar.domain.enums import AllocationCycleStatus
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.observability.logging import (
     emit_alert,
     evaluate_cycle_alerts,
     log_cycle,
 )
-from services.autonomous_ar.observability.metrics import (
+from autonomous_ar.observability.metrics import (
     ARM_RETIREMENTS,
     CONSTRAINT_REJECTIONS,
     CYCLES_TOTAL,

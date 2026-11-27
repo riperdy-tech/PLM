@@ -9,10 +9,9 @@ been quarantined as `malformed_provider_id` and made its other assertions vacuou
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import ProviderObjectType
-from services.market_intelligence.normalization.youtube import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.enums import ProviderObjectType
+from market_intelligence.normalization.youtube import (
     QUARANTINE_REASON_CODES,
     normalize_video_object,
 )

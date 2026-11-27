@@ -10,34 +10,34 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts import AllocationType, ChannelActivationState
-
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.decisioning.cycle import (
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.decisioning.cycle import (
     CycleRequest,
     MarketSnapshot,
     PolicyNotConfigured,
     run_allocation_cycle,
     seed_for_cycle,
 )
-from services.autonomous_ar.decisioning.portfolio import build_directives
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.decision import ArmSample
-from services.autonomous_ar.domain.enums import (
+from autonomous_ar.decisioning.portfolio import build_directives
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.decision import ArmSample
+from autonomous_ar.domain.enums import (
     AllocationCycleStatus,
     ArmLifecycleStatus,
     ReasonCode,
 )
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.domain.posterior import PosteriorState
-from services.autonomous_ar.policy.constraints import (
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.domain.posterior import PosteriorState
+from autonomous_ar.policy.constraints import (
     BudgetCeilingExceeded,
     Portfolio,
     Selection,
     directive_budget_share,
 )
-from services.autonomous_ar.storage import repositories
-from services.autonomous_ar.storage.models import ar_allocation_cycle
+from autonomous_ar.storage import repositories
+from autonomous_ar.storage.models import ar_allocation_cycle
+from plm_contracts import AllocationType, ChannelActivationState
+
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
@@ -190,7 +190,7 @@ def test_unknown_policy_refuses_the_cycle() -> None:
 
 
 def test_seed_is_derived_from_the_cycle_id_and_is_stable() -> None:
-    from services.autonomous_ar.storage.ids import deterministic_id
+    from autonomous_ar.storage.ids import deterministic_id
 
     cycle_id = deterministic_id("cycle", "longform_signal", NOW.isoformat(), "p2-v1")
     assert seed_for_cycle(cycle_id) == seed_for_cycle(cycle_id)
@@ -288,8 +288,8 @@ def test_the_same_request_in_two_fresh_stores_produces_the_identical_portfolio()
 
 
 def test_retirement_needs_mature_evidence_and_reopens_on_a_market_rise() -> None:
-    from services.autonomous_ar.domain.posterior import PosteriorState
-    from services.autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
+    from autonomous_ar.domain.posterior import PosteriorState
+    from autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
 
     weak = PosteriorState(
         arm_id="rnb-1", model_type="normal-normal", model_version="p2-nn-v1",
@@ -320,7 +320,7 @@ def test_retirement_needs_mature_evidence_and_reopens_on_a_market_rise() -> None
 def test_only_candidate_or_active_arms_retire_and_only_weak_ones_reopen() -> None:
     """Review 2026-11-26: retirement overwrote BLOCKED (out-of-identity) arms, and a
     reopen then made an old blocked arm eligible again."""
-    from services.autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
+    from autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
 
     weak = PosteriorState(
         arm_id="a", model_type="normal-normal", model_version="p2-nn-v1",
@@ -409,7 +409,7 @@ def test_a_shadow_pick_records_no_exposure_and_no_selection() -> None:
 
 
 def test_exposure_decays_from_the_last_selection() -> None:
-    from services.autonomous_ar.modeling.fatigue import decayed_exposure
+    from autonomous_ar.modeling.fatigue import decayed_exposure
 
     assert decayed_exposure(4.0, NOW, now=NOW + timedelta(days=14), half_life_days=14.0) == 2.0
     assert decayed_exposure(4.0, None, now=NOW, half_life_days=14.0) == 4.0

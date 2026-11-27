@@ -13,8 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf  # type: ignore[import-untyped]
-
-from services.quality_gate.evaluators.identity import (
+from quality_gate.evaluators.identity import (
     evaluate_identity_audio,
     load_identity_audio_policy,
 )

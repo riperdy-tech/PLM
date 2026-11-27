@@ -5,24 +5,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts.seams.c2 import ProductionDirectivePayload
-from plm_platform.cli import app
-from sqlalchemy.orm import sessionmaker
-from typer.testing import CliRunner
-
-from services.experiments.cli import (
+from experiments.cli import (
     list_experiments,
     materialize_treatment_cli,
     show_experiment,
     validate_experiment_cli,
 )
-from services.experiments.domain.enums import ExperimentType
-from services.experiments.domain.errors import ExperimentStateError
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import build_genome_from_directive
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.observability.logging import StructuredEvent, emit_event
-from services.experiments.observability.metrics import (
+from experiments.domain.enums import ExperimentType
+from experiments.domain.errors import ExperimentStateError
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import build_genome_from_directive
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.observability.logging import StructuredEvent, emit_event
+from experiments.observability.metrics import (
     EXPERIMENTS_CREATED,
     EXPERIMENTS_MATERIALIZED,
     EXPERIMENTS_VALIDATED,
@@ -30,8 +25,13 @@ from services.experiments.observability.metrics import (
     record_experiment_validated,
     record_package_materialized,
 )
-from services.experiments.storage import repositories
-from services.experiments.storage.ids import deterministic_id
+from experiments.storage import repositories
+from experiments.storage.ids import deterministic_id
+from plm_contracts.seams.c2 import ProductionDirectivePayload
+from plm_platform.cli import app
+from sqlalchemy.orm import sessionmaker
+from typer.testing import CliRunner
+
 from tests.support.experiments_db import create_experiments_engine
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)

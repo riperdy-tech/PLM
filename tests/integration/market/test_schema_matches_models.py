@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pytest
 import sqlalchemy as sa
+from market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
 from plm_platform.db import build_engine
-
-from services.market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
 
 pytestmark = pytest.mark.integration
 

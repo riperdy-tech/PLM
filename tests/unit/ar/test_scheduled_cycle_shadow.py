@@ -10,10 +10,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from autonomous_ar.jobs.cycle import cycle_request_from_payload
+from autonomous_ar.jobs.schedules import WEEKLY_ALLOCATION_PAYLOAD
 from plm_contracts import ChannelActivationState
-
-from services.autonomous_ar.jobs.cycle import cycle_request_from_payload
-from services.autonomous_ar.jobs.schedules import WEEKLY_ALLOCATION_PAYLOAD
 
 NOW = datetime(2026, 11, 27, 6, 0, tzinfo=UTC)
 

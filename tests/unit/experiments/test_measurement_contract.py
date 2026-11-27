@@ -5,16 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import ObservationWindow
-from plm_contracts.seams.c7 import ObservationMaturity
-from pydantic import ValidationError
-
-from services.experiments.domain.measurement import (
+from experiments.domain.measurement import (
     MaturityRule,
     MeasurementPlan,
     MetricDefinition,
     build_default_measurement_plan,
 )
+from plm_contracts import ObservationWindow
+from plm_contracts.seams.c7 import ObservationMaturity
+from pydantic import ValidationError
 
 PUBLISHED = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 

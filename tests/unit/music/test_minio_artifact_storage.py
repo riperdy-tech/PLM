@@ -19,20 +19,20 @@ import urllib3
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from minio import Minio
-from plm_platform.config import SERVICE_TOKEN_HEADER
-from plm_platform.storage import ContentIntegrityError, InvalidArtifactUriError, from_uri
-
-from services.music_factory.api.app import create_app
-from services.music_factory.api.routes import build_router
-from services.music_factory.config import load_music_factory_settings
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.providers.mock_provider import synthesize_mock_wav
-from services.music_factory.storage.artifacts import (
+from music_factory.api.app import create_app
+from music_factory.api.routes import build_router
+from music_factory.config import load_music_factory_settings
+from music_factory.generation.engine import GenerationEngine
+from music_factory.providers.mock_provider import synthesize_mock_wav
+from music_factory.storage.artifacts import (
     ArtifactStorageUnavailable,
     InMemoryArtifactStorage,
     MinioArtifactStorage,
 )
-from services.music_factory.storage.repositories import list_candidates_by_track
+from music_factory.storage.repositories import list_candidates_by_track
+from plm_platform.config import SERVICE_TOKEN_HEADER
+from plm_platform.storage import ContentIntegrityError, InvalidArtifactUriError, from_uri
+
 from tests.support.fake_minio import FakeMinio, store_settings
 from tests.support.music_db import create_music_engine, music_session
 from tests.unit.music.test_api_routes import SAMPLE_C3_SPEC

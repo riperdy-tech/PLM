@@ -13,14 +13,13 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from experiments.genome.engine import TEMPLATES_PATH
 from media_factory.artwork.generator import render_background, render_thumbnail
 from media_factory.brands.registry import DEFAULT_BRANDS
 from media_factory.rendering.profiles import RENDER_PROFILES
 from media_factory.visuals.planner import BrandProfile, plan_visual_session
 from media_factory.visuals.worlds import WORLDS, WORLDS_VERSION
 from PIL import Image
-
-from services.experiments.genome.engine import TEMPLATES_PATH
 
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
 BRAND = BrandProfile(brand_id="brand_neon", brand_name="Neon Beats",

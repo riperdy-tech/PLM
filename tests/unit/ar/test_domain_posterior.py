@@ -2,8 +2,7 @@
 from datetime import UTC, datetime
 
 import pytest
-
-from services.autonomous_ar.domain.posterior import PosteriorState, PriorParameters
+from autonomous_ar.domain.posterior import PosteriorState, PriorParameters
 
 
 def test_posterior_refuses_negative_variance() -> None:

@@ -15,20 +15,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from plm_platform.config import Secret
-from plm_platform.storage import StoredObject, sha256_digest
-
-from services.market_intelligence.cli import _run_due_collection
-from services.market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
-from services.market_intelligence.collection.scheduler import daily_quota_state, due_queries
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.connectors.youtube import (
+from market_intelligence.cli import _run_due_collection
+from market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
+from market_intelligence.collection.scheduler import daily_quota_state, due_queries
+from market_intelligence.config import load_market_settings
+from market_intelligence.connectors.youtube import (
     BASE_URL,
     YouTubeCredentials,
     YouTubeDataAPIConnector,
 )
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
-from services.market_intelligence.storage import repositories
+from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
+from market_intelligence.storage import repositories
+from plm_platform.config import Secret
+from plm_platform.storage import StoredObject, sha256_digest
+
 from tests.support.http import MockHTTP
 
 # Exercises code that loads platform settings; the values are set explicitly.
@@ -56,7 +56,7 @@ class _MemoryObjects:
 @pytest.fixture
 def memory_objects(monkeypatch: pytest.MonkeyPatch) -> _MemoryObjects:
     store = _MemoryObjects()
-    monkeypatch.setattr("services.market_intelligence.storage.raw_store.put_content", store)
+    monkeypatch.setattr("market_intelligence.storage.raw_store.put_content", store)
     return store
 
 

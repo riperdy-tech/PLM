@@ -5,9 +5,9 @@ from __future__ import annotations
 import io
 import wave
 
-from services.music_factory.domain.enums import AttemptStatus
-from services.music_factory.domain.models import GenerationRequest
-from services.music_factory.providers.mock_provider import MockMusicProvider, synthesize_mock_wav
+from music_factory.domain.enums import AttemptStatus
+from music_factory.domain.models import GenerationRequest
+from music_factory.providers.mock_provider import MockMusicProvider, synthesize_mock_wav
 
 
 def test_synthesize_mock_wav_produces_valid_wav() -> None:

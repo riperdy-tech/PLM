@@ -8,15 +8,16 @@ Temporal's retry repeated the paid searches. Fixtures only: no YouTube call is m
 
 from __future__ import annotations
 
-from services.market_intelligence.cli import _run_due_collection
-from services.market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
-from services.market_intelligence.connectors.youtube import (
+from market_intelligence.cli import _run_due_collection
+from market_intelligence.collection.rate_limit import QuotaBudget, RequestBudget
+from market_intelligence.connectors.youtube import (
     BASE_URL,
     YouTubeCredentials,
     YouTubeDataAPIConnector,
 )
-from services.market_intelligence.domain.enums import QueryType
-from services.market_intelligence.storage import repositories
+from market_intelligence.domain.enums import QueryType
+from market_intelligence.storage import repositories
+
 from tests.support.http import MockHTTP
 from tests.unit.market.test_daily_run_quota import (  # noqa: F401 - pytest fixture
     NOW,

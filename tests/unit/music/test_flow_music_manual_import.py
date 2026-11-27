@@ -11,34 +11,34 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from music_factory.api.events import (
+    FLOW_MUSIC_HUMAN_CONTRIBUTION,
+    build_candidate_ready_event,
+)
+from music_factory.config import default_provider_for
+from music_factory.domain.enums import PlanStatus
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.adapters import get_provider_adapter
+from music_factory.providers.flow_music_manual import (
+    MANUAL_MODEL_ID,
+    FlowMusicManualAdapter,
+    load_flow_music_manual_settings,
+)
+from music_factory.providers.suno_manual import (
+    IMPORT_CAPABILITY,
+    SunoManualAdapter,
+    SunoManualSettings,
+)
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.models import rights_snapshots_table
+from music_factory.storage.repositories import list_generation_attempts
 from plm_contracts import CommercialUseEligibility, ProviderMode
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_platform.clock import FixedClock
 from plm_platform.execution import ExecutionSettings
 
-from services.music_factory.api.events import (
-    FLOW_MUSIC_HUMAN_CONTRIBUTION,
-    build_candidate_ready_event,
-)
-from services.music_factory.config import default_provider_for
-from services.music_factory.domain.enums import PlanStatus
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.adapters import get_provider_adapter
-from services.music_factory.providers.flow_music_manual import (
-    MANUAL_MODEL_ID,
-    FlowMusicManualAdapter,
-    load_flow_music_manual_settings,
-)
-from services.music_factory.providers.suno_manual import (
-    IMPORT_CAPABILITY,
-    SunoManualAdapter,
-    SunoManualSettings,
-)
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.models import rights_snapshots_table
-from services.music_factory.storage.repositories import list_generation_attempts
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 from tests.unit.music.test_suno_manual_import import NOW, FreeBudget, _drop, _guard, _stems

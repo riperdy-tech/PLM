@@ -1,16 +1,15 @@
 import random
 
 import pytest
-
-from services.market_intelligence.collection.retries import (
+from market_intelligence.collection.retries import (
     RetryPolicy,
     classify_http_status,
     delay_for_attempt,
     execute_with_retries,
     is_retryable,
 )
-from services.market_intelligence.connectors.base import ConnectorError
-from services.market_intelligence.domain.enums import ConnectorErrorClass
+from market_intelligence.connectors.base import ConnectorError
+from market_intelligence.domain.enums import ConnectorErrorClass
 
 
 def test_status_mapping_covers_every_class_the_connector_can_see() -> None:

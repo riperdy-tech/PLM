@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts.seams.c3 import TrackSpecPayload
-
-from services.music_factory.domain.enums import PlanStatus
-from services.music_factory.generation.planner import (
+from music_factory.domain.enums import PlanStatus
+from music_factory.generation.planner import (
     GenerationPlanCapacityError,
     plan_generation,
 )
-from services.music_factory.generation.prompts import build_generation_prompt
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.generation.prompts import build_generation_prompt
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from plm_contracts.seams.c3 import TrackSpecPayload
+
 from tests.support.seams import lineage_fields, track_spec_fields
 
 SAMPLE_SPEC = TrackSpecPayload.build(

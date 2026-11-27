@@ -1,6 +1,7 @@
 import importlib.util
 
-from services.market_intelligence.storage.models import MARKET_TABLES
+from market_intelligence.storage.models import MARKET_TABLES
+
 from tests.support.paths import REPO_ROOT
 
 MIGRATION = REPO_ROOT / "migrations" / "versions" / "market" / "market_0002_initial_tables.py"

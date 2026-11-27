@@ -1,16 +1,15 @@
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts import AllocationType
-
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.decision import ArmSample
-from services.autonomous_ar.domain.enums import ArmLifecycleStatus, ReasonCode
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
-from services.autonomous_ar.policy.constraints import (
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.decision import ArmSample
+from autonomous_ar.domain.enums import ArmLifecycleStatus, ReasonCode
+from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
+from autonomous_ar.policy.constraints import (
     apply_portfolio_constraints,
     directive_budget_share,
 )
+from plm_contracts import AllocationType
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 COMPONENTS = {name: 50.0 for name in
@@ -297,7 +296,7 @@ def test_p2_v1_starves_a_one_identity_cycle_at_the_use_case_cap() -> None:
 
 
 def test_p2_v2_fills_a_one_identity_cycle() -> None:
-    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+    from autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
 
     assert SINGLE_IDENTITY_POLICY.version == "p2-v2"
     portfolio = _one_identity_cycle(SINGLE_IDENTITY_POLICY)
@@ -309,7 +308,7 @@ def test_p2_v2_fills_a_one_identity_cycle() -> None:
 def test_p2_v2_keeps_diversity_through_cluster_caps_and_says_why() -> None:
     """Four sub-style clusters of the same identity: concurrency (2 per cluster) still
     binds, so the cycle is PARTIAL with every refusal explained, not silently filled."""
-    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+    from autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
 
     portfolio = _one_identity_cycle(SINGLE_IDENTITY_POLICY, clusters=4)
     assert len(portfolio.selections) == 8
@@ -322,7 +321,7 @@ def test_p2_v2_keeps_diversity_through_cluster_caps_and_says_why() -> None:
 
 def test_p2_v1_is_unchanged_by_p2_v2() -> None:
     """§92: a stored version never changes; p2-v2 differs only in the three share caps."""
-    from services.autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
+    from autonomous_ar.domain.policy import SINGLE_IDENTITY_POLICY
 
     assert DEFAULT_POLICY == PolicyConfig(name="default")
     assert (DEFAULT_POLICY.max_genre_share, DEFAULT_POLICY.max_use_case_share,

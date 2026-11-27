@@ -6,26 +6,26 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts import AllocationType, ObservationWindow, Tri
-
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.directive import DirectiveBrief, ProductionDirective
-from services.autonomous_ar.domain.enums import (
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.directive import DirectiveBrief, ProductionDirective
+from autonomous_ar.domain.enums import (
     AllocationCycleStatus,
     DirectiveStatus,
     ObservationMaturity,
     UpdateStatus,
 )
-from services.autonomous_ar.domain.policy import PolicyConfig
-from services.autonomous_ar.domain.posterior import (
+from autonomous_ar.domain.policy import PolicyConfig
+from autonomous_ar.domain.posterior import (
     PosteriorState,
     PriorParameters,
     UpdateRecord,
 )
-from services.autonomous_ar.domain.reward import RewardObservation, tri_from_optional
-from services.autonomous_ar.storage import repositories
-from services.autonomous_ar.storage.ids import deterministic_id
-from services.autonomous_ar.storage.models import AR_TABLES
+from autonomous_ar.domain.reward import RewardObservation, tri_from_optional
+from autonomous_ar.storage import repositories
+from autonomous_ar.storage.ids import deterministic_id
+from autonomous_ar.storage.models import AR_TABLES
+from plm_contracts import AllocationType, ObservationWindow, Tri
+
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

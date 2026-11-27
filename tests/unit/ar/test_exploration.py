@@ -3,14 +3,12 @@ import random
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts import AllocationType
-
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.decision import ArmSample
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.domain.posterior import PosteriorState
-from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
-from services.autonomous_ar.policy.exploration import (
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.decision import ArmSample
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.domain.posterior import PosteriorState
+from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
+from autonomous_ar.policy.exploration import (
     effective_fractions,
     evidence_class,
     quota_from_fractions,
@@ -18,6 +16,7 @@ from services.autonomous_ar.policy.exploration import (
     sample_rewards,
     sampled_ranking,
 )
+from plm_contracts import AllocationType
 
 
 def test_default_quota_apportions_exactly_seven_two_one() -> None:

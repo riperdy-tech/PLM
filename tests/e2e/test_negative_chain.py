@@ -13,39 +13,40 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+
+# P9
+from analytics.ingestion.distributor import ingest_distributor_statement
+from analytics.storage.repositories import get_track_metrics
+
+# P8
+from distribution.artists.manager import get_or_create_artist
+from distribution.client.mock import MockDistributorClient
+from distribution.compiler.release_compiler import compile_canonical_release_package
+from distribution.engine import DistributionEngine
+from distribution.identifiers.allocator import allocate_isrc
+
+# P5 & P6
+from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
+from media_factory.rendering.assembler import assemble_media_package
+from media_factory.visuals.planner import BrandProfile
 from plm_contracts import GateDisposition
 from plm_contracts.money import Money
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
+from quality_gate.gate.manifest import build_release_manifest
 from sqlalchemy.orm import Session
 
-# P9
-from services.analytics.ingestion.distributor import ingest_distributor_statement
-from services.analytics.storage.repositories import get_track_metrics
-
-# P8
-from services.distribution.artists.manager import get_or_create_artist
-from services.distribution.client.mock import MockDistributorClient
-from services.distribution.compiler.release_compiler import compile_canonical_release_package
-from services.distribution.engine import DistributionEngine
-from services.distribution.identifiers.allocator import allocate_isrc
-
-# P5 & P6
-from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
-from services.media_factory.rendering.assembler import assemble_media_package
-from services.media_factory.visuals.planner import BrandProfile
-from services.quality_gate.gate.manifest import build_release_manifest
-
 # P7
-from services.youtube_publishing.domain.enums import OperatingMode, PrivacyStatus
-from services.youtube_publishing.domain.models import ChannelProfile
-from services.youtube_publishing.preflight.gates import (
+from youtube_publishing.domain.enums import OperatingMode, PrivacyStatus
+from youtube_publishing.domain.models import ChannelProfile
+from youtube_publishing.preflight.gates import (
     evaluate_gate_a_channel,
     evaluate_gate_b_artifact,
     evaluate_gate_c_metadata,
 )
+
 from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain
 from tests.support.seams import media_package, release_manifest, sample_lineage
 

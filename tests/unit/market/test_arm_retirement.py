@@ -1,10 +1,10 @@
 # tests/unit/market/test_arm_retirement.py
 """An older taxonomy's arms stop being served once the current taxonomy recomputes."""
 
+from market_intelligence.domain.enums import ArmStatus
+from market_intelligence.storage import repositories
 from sqlalchemy.orm import Session
 
-from services.market_intelligence.domain.enums import ArmStatus
-from services.market_intelligence.storage import repositories
 from tests.support.c1_api import ARM_ID, seed_market
 
 

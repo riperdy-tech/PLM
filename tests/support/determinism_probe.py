@@ -16,20 +16,20 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from autonomous_ar.simulation.scenarios import scenario_clear_winner
+from autonomous_ar.simulation.simulator import SimConfig, run_simulation
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import build_genome_from_directive
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.materialization.builder import materialize_package
+from experiments.validation.engine import promote_to_validated, validate_experiment
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import InMemoryArtifactStorage
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.clock import FixedClock
 
-from services.autonomous_ar.simulation.scenarios import scenario_clear_winner
-from services.autonomous_ar.simulation.simulator import SimConfig, run_simulation
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import build_genome_from_directive
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.materialization.builder import materialize_package
-from services.experiments.validation.engine import promote_to_validated, validate_experiment
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 from tests.support.music_db import music_db_session
 from tests.support.seams import directive_fields
 

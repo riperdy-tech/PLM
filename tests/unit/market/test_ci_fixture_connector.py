@@ -19,22 +19,21 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from plm_platform.config import load_settings
-from plm_platform.testing.mock_outcomes import load_mock_outcome_model
-
-from services.autonomous_ar.config import ARSettings
-from services.autonomous_ar.domain.arm import ArmDimensions
-from services.autonomous_ar.modeling.similarity import arm_similarity
-from services.autonomous_ar.policy.identity import load_brand_identities
-from services.market_intelligence.cli import _production_connector
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.normalization.youtube import _seconds
-from services.market_intelligence.taxonomy.arms import generate_candidate_arms
-from services.market_intelligence.taxonomy.classifier import (
+from autonomous_ar.config import ARSettings
+from autonomous_ar.domain.arm import ArmDimensions
+from autonomous_ar.modeling.similarity import arm_similarity
+from autonomous_ar.policy.identity import load_brand_identities
+from market_intelligence.cli import _production_connector
+from market_intelligence.config import load_market_settings
+from market_intelligence.normalization.youtube import _seconds
+from market_intelligence.taxonomy.arms import generate_candidate_arms
+from market_intelligence.taxonomy.classifier import (
     ClassificationInput,
     RuleBasedClassifier,
 )
-from services.market_intelligence.taxonomy.validators import ClassificationSchemaError
+from market_intelligence.taxonomy.validators import ClassificationSchemaError
+from plm_platform.config import load_settings
+from plm_platform.testing.mock_outcomes import load_mock_outcome_model
 
 pytestmark = pytest.mark.usefixtures("platform_env")
 

@@ -1,5 +1,5 @@
 # tests/unit/market/test_domain_enums.py
-from services.market_intelligence.domain.enums import (
+from market_intelligence.domain.enums import (
     CollectionRunStatus,
     ConnectorErrorClass,
     EntityType,

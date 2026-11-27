@@ -44,6 +44,23 @@ from typing import Any
 import httpx
 import pytest
 import sqlalchemy as sa
+from analytics.storage.models import (
+    OUTBOX_EVENTS,
+    CostItemRow,
+    ExperimentOutcomeRow,
+    ReleaseLinkRow,
+    RevenueStatementRow,
+    RewardPostedRow,
+    TrackMetricRow,
+    VideoMetricRow,
+)
+from analytics.storage.repositories import get_costs_for_entity, get_video_metrics
+from autonomous_ar.storage.models import (
+    ar_content_arm_state,
+    ar_experiment_result,
+    ar_reward_observation,
+)
+from autonomous_ar.storage.repositories import upsert_arm_state
 from plm_contracts import GateDisposition
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
 from plm_platform.exceptions import ExceptionQueue
@@ -61,32 +78,15 @@ from plm_platform.pipeline.types import StepRequest, WriteCostsRequest
 from plm_platform.service_urls import LOOPBACK_HOST, service_urls
 from plm_platform.storage import MUSIC_PREFIX, build_client, put_content, to_uri
 from plm_platform.temporal import Phase
+from quality_gate.gate.manifest import build_release_manifest
+from quality_gate.storage.repositories import insert_release_manifest
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.analytics.storage.models import (
-    OUTBOX_EVENTS,
-    CostItemRow,
-    ExperimentOutcomeRow,
-    ReleaseLinkRow,
-    RevenueStatementRow,
-    RewardPostedRow,
-    TrackMetricRow,
-    VideoMetricRow,
-)
-from services.analytics.storage.repositories import get_costs_for_entity, get_video_metrics
-from services.autonomous_ar.storage.models import (
-    ar_content_arm_state,
-    ar_experiment_result,
-    ar_reward_observation,
-)
-from services.autonomous_ar.storage.repositories import upsert_arm_state
-from services.quality_gate.gate.manifest import build_release_manifest
-from services.quality_gate.storage.repositories import insert_release_manifest
-from services.youtube_publishing.domain.models import ChannelProfile
-from services.youtube_publishing.storage.repositories import (
+from youtube_publishing.domain.models import ChannelProfile
+from youtube_publishing.storage.repositories import (
     get_channel_profile_by_channel_id,
     insert_channel_profile,
 )
+
 from tests.integration.pipeline.support import REPO_ROOT
 from tests.support.decisions import log_allocation_decision
 from tests.support.media_audio import synth_track

@@ -12,27 +12,27 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from plm_contracts import ObservationWindow
-from plm_contracts.seams.c2 import ProductionDirectivePayload
-
-from services.experiments.domain.enums import (
+from experiments.domain.enums import (
     ExperimentStatus,
     ExperimentType,
     FactorDesign,
     VariableClass,
 )
-from services.experiments.domain.errors import ExperimentDesignError, ExperimentStateError
-from services.experiments.domain.experiment import Experiment
-from services.experiments.domain.genome import ContentGenome
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.experiments.values import VALUE_GENERATORS
-from services.experiments.genome.engine import (
+from experiments.domain.errors import ExperimentDesignError, ExperimentStateError
+from experiments.domain.experiment import Experiment
+from experiments.domain.genome import ContentGenome
+from experiments.experiments.engine import design_experiment
+from experiments.experiments.values import VALUE_GENERATORS
+from experiments.genome.engine import (
     CreativeLatitudeEnvelope,
     build_genome_from_directive,
     default_template_library,
 )
-from services.experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
-from services.experiments.validation.engine import promote_to_validated, validate_experiment
+from experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
+from experiments.validation.engine import promote_to_validated, validate_experiment
+from plm_contracts import ObservationWindow
+from plm_contracts.seams.c2 import ProductionDirectivePayload
+
 from tests.support.seams import directive_fields
 
 FIXED_NOW = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)

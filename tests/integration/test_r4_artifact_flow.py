@@ -28,6 +28,7 @@ import httpx
 import pytest
 from minio import Minio
 from minio.error import S3Error
+from music_factory.storage.artifacts import MinioArtifactStorage
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings, SettingsError, load_settings
 from plm_platform.pipeline.http import HttpPhaseSteps, PhaseClient, PhaseRequestRefused
@@ -44,12 +45,11 @@ from plm_platform.storage import (
     to_uri,
 )
 from plm_platform.temporal import Phase
-
-from services.music_factory.storage.artifacts import MinioArtifactStorage
-from services.quality_gate.ingestion.artifact_fetch import (
+from quality_gate.ingestion.artifact_fetch import (
     ArtifactFetchRefused,
     MinioArtifactFetcher,
 )
+
 from tests.support.seams import lineage_fields, track_spec_fields
 
 pytestmark = pytest.mark.integration

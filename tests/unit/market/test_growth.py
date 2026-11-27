@@ -2,10 +2,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import Tri
-
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.features.growth import (
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.features.growth import (
     CURRENT_D0_30,
     HISTORICAL_D90_180,
     PRIOR_D30_60,
@@ -21,6 +19,7 @@ from services.market_intelligence.features.growth import (
     window_bounds,
     window_median_velocity,
 )
+from plm_contracts import Tri
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
@@ -175,8 +174,8 @@ def test_arm_24h_and_72h_velocity_are_medians_of_per_video_rates() -> None:
     assert float(v24.unwrap()) == pytest.approx(900 / (22 / 24))
 
 def test_arm_features_expose_24h_and_72h_velocity() -> None:
-    from services.market_intelligence.config import load_market_settings
-    from services.market_intelligence.features.arm_features import compute_arm_features
+    from market_intelligence.config import load_market_settings
+    from market_intelligence.features.arm_features import compute_arm_features
 
     observations = _hourly("fast", [(70, 0), (46, 2_000), (22, 4_000), (0, 6_000)])
     features = compute_arm_features({"arm": observations}, as_of=AS_OF,

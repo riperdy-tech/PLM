@@ -4,16 +4,15 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts import ObservationWindow, Tri
-
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.enums import ObservationMaturity
-from services.autonomous_ar.domain.posterior import PosteriorState, PriorParameters
-from services.autonomous_ar.domain.reward import RewardObservation
-from services.autonomous_ar.modeling.reward_model import (
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.enums import ObservationMaturity
+from autonomous_ar.domain.posterior import PosteriorState, PriorParameters
+from autonomous_ar.domain.reward import RewardObservation
+from autonomous_ar.modeling.reward_model import (
     NormalNormalRewardModel,
     UnmeasuredRewardError,
 )
+from plm_contracts import ObservationWindow, Tri
 
 NOW = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
 COMPONENTS = {name: 50.0 for name in

@@ -19,25 +19,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from plm_platform.config import Secret
-from plm_platform.storage import StoredObject, sha256_digest
-from plm_platform.testing.http import MockHTTP
-
-from services.market_intelligence.collection.collectors import hydrate_and_store
-from services.market_intelligence.collection.rate_limit import (
+from market_intelligence.collection.collectors import hydrate_and_store
+from market_intelligence.collection.rate_limit import (
     QuotaBudget,
     QuotaExceededError,
     RequestBudget,
 )
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.connectors.youtube import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.connectors.youtube import (
     BASE_URL,
     YouTubeCredentials,
     YouTubeDataAPIConnector,
 )
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.storage import repositories
+from market_intelligence.domain.enums import ConnectorType, ProviderName
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.storage import repositories
+from plm_platform.config import Secret
+from plm_platform.storage import StoredObject, sha256_digest
+from plm_platform.testing.http import MockHTTP
 
 # Exercises code that loads platform settings; the values are set explicitly.
 pytestmark = pytest.mark.usefixtures("platform_env")
@@ -61,7 +60,7 @@ def _memory_objects(monkeypatch: pytest.MonkeyPatch) -> None:
         return StoredObject(key=f"{prefix}{resource_path}/{digest}", digest=digest,
                             size=len(data))
 
-    monkeypatch.setattr("services.market_intelligence.storage.raw_store.put_content", put)
+    monkeypatch.setattr("market_intelligence.storage.raw_store.put_content", put)
 
 
 def _source(session) -> str:

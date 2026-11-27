@@ -2,18 +2,18 @@
 
 from datetime import UTC, datetime, timedelta
 
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.enums import ObservationMaturity
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.domain.posterior import PriorParameters
+from autonomous_ar.domain.reward import RewardObservation
+from autonomous_ar.ingestion.result_adapter import store_result
+from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
+from autonomous_ar.modeling.update import apply_pending_updates
+from autonomous_ar.storage import repositories
 from plm_contracts import ObservationWindow, Tri
 
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.enums import ObservationMaturity
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.domain.posterior import PriorParameters
-from services.autonomous_ar.domain.reward import RewardObservation
-from services.autonomous_ar.ingestion.result_adapter import store_result
-from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
-from services.autonomous_ar.modeling.update import apply_pending_updates
-from services.autonomous_ar.storage import repositories
 from tests.support.ar_db import ar_session, create_ar_engine
 from tests.support.seams import unmeasured_raw_metrics
 

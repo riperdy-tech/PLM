@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from services.experiments.domain.enums import (
+from experiments.domain.enums import (
     ConstraintType,
     ExperimentStatus,
     ExperimentType,
@@ -14,23 +14,23 @@ from services.experiments.domain.enums import (
     VocalGender,
     VocalMode,
 )
-from services.experiments.domain.experiment import (
+from experiments.domain.experiment import (
     Experiment,
     ExperimentVariable,
     Hypothesis,
     Treatment,
 )
-from services.experiments.domain.fingerprint import (
+from experiments.domain.fingerprint import (
     compute_genome_fingerprint,
     compute_package_hash,
 )
-from services.experiments.domain.genome import (
+from experiments.domain.genome import (
     BpmRange,
     ConstraintEnvelope,
     ContentGenome,
     DurationRange,
 )
-from services.experiments.domain.package import (
+from experiments.domain.package import (
     ContentPackage,
     PlaylistSpec,
     ThumbnailSpec,
@@ -38,7 +38,8 @@ from services.experiments.domain.package import (
     TrackSpec,
     VisualSpec,
 )
-from services.experiments.storage import repositories
+from experiments.storage import repositories
+
 from tests.support.experiments_db import create_experiments_engine, experiments_session
 from tests.support.experiments_factories import design_facts, playlist_spec_fields
 from tests.support.seams import lineage_fields, track_spec_fields
@@ -236,11 +237,11 @@ def test_audit_event_recording() -> None:
 
 
 def test_measurement_plan_budget_and_design_round_trip() -> None:
+    from experiments.experiments.engine import design_experiment
+    from experiments.genome.engine import build_genome_from_directive
+    from experiments.ingestion.p2_adapter import adapt_directive
     from plm_contracts.seams.c2 import ProductionDirectivePayload
 
-    from services.experiments.experiments.engine import design_experiment
-    from services.experiments.genome.engine import build_genome_from_directive
-    from services.experiments.ingestion.p2_adapter import adapt_directive
     from tests.support.seams import directive_fields
 
     directive = adapt_directive(
@@ -268,9 +269,8 @@ def test_measurement_plan_budget_and_design_round_trip() -> None:
 def test_legacy_row_without_a_measurement_plan_is_refused_on_load() -> None:
     import pytest
     import sqlalchemy as sa
-
-    from services.experiments.domain.errors import LegacyExperimentError
-    from services.experiments.storage.models import experiments_table
+    from experiments.domain.errors import LegacyExperimentError
+    from experiments.storage.models import experiments_table
 
     engine = create_experiments_engine()
     with experiments_session(engine) as session:

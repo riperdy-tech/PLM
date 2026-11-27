@@ -40,6 +40,10 @@ from analytics.evaluation.delivery import (
 )
 from analytics.evaluation.feedback import evaluate_experiment_outcome, record_and_enqueue_reward
 from analytics.storage.models import OUTBOX_EVENTS, ExperimentOutcomeRow, RewardPostedRow
+from autonomous_ar.api.app import create_app as create_ar_app
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.storage import repositories as ar_repositories
+from autonomous_ar.storage.models import ar_reward_observation
 from fastapi.testclient import TestClient
 from plm_contracts.money import FxTable, Money
 from plm_platform.clock import FixedClock
@@ -58,10 +62,6 @@ from plm_platform.outbox import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from services.autonomous_ar.api.app import create_app as create_ar_app
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.storage import repositories as ar_repositories
-from services.autonomous_ar.storage.models import ar_reward_observation
 from tests.support.analytics_db import create_analytics_engine
 from tests.support.ar_db import create_ar_engine
 from tests.support.decisions import log_allocation_decision

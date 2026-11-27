@@ -1,10 +1,10 @@
 # tests/unit/market/test_api_auth.py
 """P1.10: the service-token auth is fail-closed and never leaks the token."""
 
+from market_intelligence.api.app import create_app
+from market_intelligence.config import load_market_settings
 from plm_platform.config import load_settings
 
-from services.market_intelligence.api.app import create_app
-from services.market_intelligence.config import load_market_settings
 from tests.support.c1_api import SyncASGIClient
 
 BASE_ENV = {

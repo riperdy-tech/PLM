@@ -24,27 +24,27 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from plm_contracts.seams import SeamRejection, parse_seam
-from plm_contracts.seams.c3 import DurationRangeSeconds
-from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
-from plm_platform.clock import FixedClock
-
-from services.distribution.client.mock import MockDistributorClient
-from services.distribution.engine import DistributionEngine
-from services.distribution.storage.repositories import get_release_identity
-from services.distribution.submission import (
+from distribution.client.mock import MockDistributorClient
+from distribution.engine import DistributionEngine
+from distribution.storage.repositories import get_release_identity
+from distribution.submission import (
     ReleaseMetadata,
     SubmissionRefusedError,
     submit_release_from_seams,
 )
-from services.media_factory.rendering.assembler import assemble_media_package
-from services.media_factory.visuals.planner import BrandProfile
-from services.youtube_publishing.client.mock import MockYouTubeClient
-from services.youtube_publishing.domain.enums import OperatingMode
-from services.youtube_publishing.domain.models import ChannelProfile
-from services.youtube_publishing.engine import YouTubePublishingEngine
-from services.youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
-from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from media_factory.rendering.assembler import assemble_media_package
+from media_factory.visuals.planner import BrandProfile
+from plm_contracts.seams import SeamRejection, parse_seam
+from plm_contracts.seams.c3 import DurationRangeSeconds
+from plm_contracts.seams.c6 import MediaPackagePayload, YouTubePublicationPayload
+from plm_platform.clock import FixedClock
+from youtube_publishing.client.mock import MockYouTubeClient
+from youtube_publishing.domain.enums import OperatingMode
+from youtube_publishing.domain.models import ChannelProfile
+from youtube_publishing.engine import YouTubePublishingEngine
+from youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
+from youtube_publishing.storage.repositories import insert_publish_manifest
+
 from tests.support.clearance import p5_holding
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.distribution_db import distribution_db_session
@@ -236,7 +236,7 @@ def test_p7_puts_a_series_video_in_its_playlist_and_links_it(
     configured playlist and links it; with no playlist configured nothing is attached."""
     import json
 
-    from services.youtube_publishing.series import (
+    from youtube_publishing.series import (
         SERIES_PLAYLISTS_VAR,
         load_series_playlists,
     )

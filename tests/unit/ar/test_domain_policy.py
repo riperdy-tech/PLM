@@ -1,9 +1,8 @@
 # tests/unit/ar/test_domain_policy.py
 import pytest
+from autonomous_ar.config import ARSettings, load_ar_settings
+from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
 from plm_contracts import ChannelActivationState
-
-from services.autonomous_ar.config import ARSettings, load_ar_settings
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
 
 
 def test_default_policy_fractions_sum_to_exactly_one() -> None:

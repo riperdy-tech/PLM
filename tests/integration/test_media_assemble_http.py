@@ -40,11 +40,11 @@ from plm_platform.storage import (
     to_uri,
 )
 from plm_platform.temporal import Phase
+from quality_gate.gate.manifest import build_release_manifest
+from quality_gate.storage.repositories import insert_release_manifest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from services.quality_gate.gate.manifest import build_release_manifest
-from services.quality_gate.storage.repositories import insert_release_manifest
 from tests.support.media_audio import synth_track
 from tests.support.seams import sample_lineage
 

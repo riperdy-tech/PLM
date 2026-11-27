@@ -15,18 +15,17 @@ import logging
 from datetime import UTC, datetime
 
 import pytest
-from plm_platform.observability import JSONFormatter
-
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName
-from services.market_intelligence.observability.logging import log_run_summary
-from services.market_intelligence.observability.metrics import (
+from market_intelligence.domain.enums import ConnectorType, ProviderName
+from market_intelligence.observability.logging import log_run_summary
+from market_intelligence.observability.metrics import (
     QUARANTINED_TOTAL,
     QUOTA_UNITS_TOTAL,
     RUNS_TOTAL,
     record_run_metrics,
 )
-from services.market_intelligence.observability.run_summary import summarize_run
-from services.market_intelligence.storage import repositories
+from market_intelligence.observability.run_summary import summarize_run
+from market_intelligence.storage import repositories
+from plm_platform.observability import JSONFormatter
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 
@@ -99,7 +98,7 @@ def test_an_unknown_run_id_is_a_key_error(market_session) -> None:
 
 def test_a_collection_result_emits_its_six_counters(market_session, caplog) -> None:
     """Every collection entry point routes through `_emit_run_costs` (P1.14 proves it live)."""
-    from services.market_intelligence.cli import _emit_run_costs
+    from market_intelligence.cli import _emit_run_costs
 
     run_id = _running_run(market_session)
     repositories.add_run_cost(market_session, run_id, api_calls=3, api_quota_units=102,
@@ -118,6 +117,6 @@ def test_a_collection_result_emits_its_six_counters(market_session, caplog) -> N
 
 
 def test_a_collection_with_no_run_emits_nothing(market_session) -> None:
-    from services.market_intelligence.cli import _emit_run_costs
+    from market_intelligence.cli import _emit_run_costs
 
     assert _emit_run_costs(market_session, {"queries": 0}) is None

@@ -2,16 +2,15 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import Tri
-
-from services.market_intelligence.config import MarketSettings, load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.scoring.calibration import ScoreWeights, default_weights
-from services.market_intelligence.scoring.opportunity import (
+from market_intelligence.config import MarketSettings, load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.scoring.calibration import ScoreWeights, default_weights
+from market_intelligence.scoring.opportunity import (
     compute_component_scores,
     score_all_arms,
 )
+from plm_contracts import Tri
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 

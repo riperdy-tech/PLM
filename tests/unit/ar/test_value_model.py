@@ -1,14 +1,13 @@
 # tests/unit/ar/test_value_model.py
 import pytest
-from plm_contracts import Tri
-
-from services.autonomous_ar.domain.reward import RESERVED_VALUE_TERMS
-from services.autonomous_ar.modeling.value_model import (
+from autonomous_ar.domain.reward import RESERVED_VALUE_TERMS
+from autonomous_ar.modeling.value_model import (
     EARLY_STAGE_PROXY_WEIGHTS,
     VALUE_MODEL_ID,
     compose_proxy,
     term_from_raw,
 )
+from plm_contracts import Tri
 
 
 def test_proxy_weights_are_the_spec_decomposition_and_carry_no_revenue_term() -> None:

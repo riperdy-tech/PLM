@@ -6,11 +6,10 @@ The serving rule is the contract: under `SHADOW` activation `GET /ar/directives`
 seventeen frozen C2 fields — no more, no less.
 """
 
+from autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS
 from fastapi.testclient import TestClient
 from plm_contracts.seams import parse_seam
 from plm_contracts.seams.c2 import ProductionDirectivePayload
-
-from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS
 
 BRIEF_WIRE_FIELDS = ("genre", "subgenre", "mood", "use_case", "language", "vocal_mode",
                      "duration_bucket", "visual_world")

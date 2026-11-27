@@ -8,10 +8,9 @@ is refused with 409; a request without a key behaves as before.
 from __future__ import annotations
 
 import sqlalchemy as sa
+from autonomous_ar.storage.models import ar_allocation_cycle
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.autonomous_ar.storage.models import ar_allocation_cycle
 
 
 def _body(**overrides: object) -> dict[str, object]:

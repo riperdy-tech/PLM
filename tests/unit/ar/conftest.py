@@ -18,16 +18,16 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
+from autonomous_ar.api.app import create_app
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.policy import DEFAULT_POLICY, SINGLE_IDENTITY_POLICY
+from autonomous_ar.storage import repositories
 from fastapi.testclient import TestClient
 from plm_platform.config import load_settings
 from sqlalchemy.orm import Session, sessionmaker
 
-from services.autonomous_ar.api.app import create_app
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.decisioning.cycle import CycleRequest, MarketSnapshot
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, SINGLE_IDENTITY_POLICY
-from services.autonomous_ar.storage import repositories
 from tests.support.ar_db import create_ar_engine
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

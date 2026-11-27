@@ -17,24 +17,23 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import Tri
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.domain.enums import ScoringComponent
-from services.market_intelligence.domain.value_objects import ScoreComponents, TaxonomyProfile
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.normalization.youtube import NormalizedObservationDraft
-from services.market_intelligence.scoring.calibration import default_weights
-from services.market_intelligence.scoring.opportunity import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.enums import ScoringComponent
+from market_intelligence.domain.value_objects import ScoreComponents, TaxonomyProfile
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.normalization.youtube import NormalizedObservationDraft
+from market_intelligence.scoring.calibration import default_weights
+from market_intelligence.scoring.opportunity import (
     ArmComponentScores,
     compute_component_scores,
     persist_scores,
     score_all_arms,
     score_arm,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.taxonomy.arms import ArmDraft
+from market_intelligence.storage import repositories
+from market_intelligence.taxonomy.arms import ArmDraft
+from plm_contracts import Tri
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()

@@ -4,20 +4,20 @@
 from dataclasses import replace
 from datetime import UTC, timedelta
 
-from plm_contracts import Tri
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.value_objects import TaxonomyProfile
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.normalization.youtube import NormalizedObservationDraft
-from services.market_intelligence.scoring.calibration import default_weights
-from services.market_intelligence.scoring.opportunity import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.value_objects import TaxonomyProfile
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.normalization.youtube import NormalizedObservationDraft
+from market_intelligence.scoring.calibration import default_weights
+from market_intelligence.scoring.opportunity import (
     ArmComponentScores,
     persist_scores,
     score_arm,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.taxonomy.arms import ArmDraft
+from market_intelligence.storage import repositories
+from market_intelligence.taxonomy.arms import ArmDraft
+from plm_contracts import Tri
+
 from tests.support.c1_api import ARM_ID, AS_OF, open_c1_client, seed_market
 
 SETTINGS = load_market_settings()

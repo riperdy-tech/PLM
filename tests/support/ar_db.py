@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
+from autonomous_ar.storage.models import AR_METADATA
 from plm_platform.decision_log import DECISION_LOG_METADATA
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.autonomous_ar.storage.models import AR_METADATA
 
 __all__ = ["ar_session", "create_ar_engine"]
 

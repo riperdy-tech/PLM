@@ -12,10 +12,11 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.scoring.opportunity import score_all_arms
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.scoring.opportunity import score_all_arms
+
 from tests.fixtures.market.scenario import build_scenario
 
 SETTINGS = load_market_settings()
@@ -60,7 +61,7 @@ def test_replaying_the_same_observations_produces_identical_scores() -> None:
 
 def test_a_new_score_version_label_changes_the_version_not_the_arithmetic() -> None:
     scenario = build_scenario()
-    from services.market_intelligence.config import load_market_settings as load
+    from market_intelligence.config import load_market_settings as load
 
     bumped = load(score_version="p1-v3")
     bumped_scores = _scores(scenario.observations_by_arm, scenario.now, settings=bumped)

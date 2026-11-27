@@ -1,9 +1,9 @@
-from services.market_intelligence.collection.seeds import (
+from market_intelligence.collection.seeds import (
     install_bootstrap_seeds,
     load_bootstrap_seeds,
 )
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
-from services.market_intelligence.storage import repositories
+from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
+from market_intelligence.storage import repositories
 
 SPECIALISED = {
     "music_genre", "music_mood", "use_case", "playlist_pattern",

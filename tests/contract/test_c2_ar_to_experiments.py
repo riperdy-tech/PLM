@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS, ProductionDirective
+from experiments.ingestion.p2_adapter import DirectiveValidationError, adapt_directive
 from plm_contracts import AllocationType
 from plm_contracts.seams.c2 import C2_WIRE_FIELDS
 
-from services.autonomous_ar.domain.directive import DIRECTIVE_WIRE_FIELDS, ProductionDirective
-from services.experiments.ingestion.p2_adapter import DirectiveValidationError, adapt_directive
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 
 REGISTRY_ENTRY = "C2 · PHASE-P2 → PHASE-P3"
@@ -50,15 +50,16 @@ def producer_directive() -> ProductionDirective:
     """The producer: a directive produced by the real allocation cycle (P2.10), not a
     hand-built fixture — the P2.1A note promised this swap. Every assertion below is
     unchanged; the payload now proves the engine's own output crosses the frozen wire."""
-    from services.autonomous_ar.config import load_ar_settings
-    from services.autonomous_ar.decisioning.cycle import (
+    from autonomous_ar.config import load_ar_settings
+    from autonomous_ar.decisioning.cycle import (
         CycleRequest,
         MarketSnapshot,
         run_allocation_cycle,
     )
-    from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-    from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-    from services.autonomous_ar.storage import repositories
+    from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+    from autonomous_ar.domain.policy import DEFAULT_POLICY
+    from autonomous_ar.storage import repositories
+
     from tests.support.ar_db import ar_session, create_ar_engine
 
     now = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

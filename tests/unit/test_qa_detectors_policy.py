@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from music_factory.generation import prompts as p4_prompts
 from plm_platform.protected_artists import (
     ProtectedArtistPolicyError,
     load_protected_artist_policy,
@@ -12,7 +13,6 @@ from plm_platform.protected_artists import (
 from quality_gate.evaluators import policy as p5_policy
 from quality_gate.evaluators.policy import screen_policy_and_risk
 
-from services.music_factory.generation import prompts as p4_prompts
 from tests.support.seams import candidate_event  # noqa: F401  (fixtures share the seam)
 
 POLICY = load_protected_artist_policy()

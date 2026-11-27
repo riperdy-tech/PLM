@@ -29,21 +29,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from media_factory.audio.features import measure_features
+from media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
+from media_factory.rendering.assembler import assemble_media_package
+from media_factory.visuals.planner import BrandProfile
 from plm_contracts import GateDisposition
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_platform.clock import FixedClock
 from plm_platform.exceptions import ExceptionQueue, StaticReviewerDirectory
+from quality_gate.domain.enums import ResolutionCode
+from quality_gate.gate.engine import run_candidate_evaluation
+from quality_gate.gate.persistence import persist_gate_result
+from quality_gate.gate.quarantine import resolve_quarantine
 
-from services.media_factory.audio.features import measure_features
-from services.media_factory.playlist.assembler import PlaylistAssemblyError, assemble_playlist
-from services.media_factory.rendering.assembler import assemble_media_package
-from services.media_factory.visuals.planner import BrandProfile
-from services.quality_gate.domain.enums import ResolutionCode
-from services.quality_gate.gate.engine import run_candidate_evaluation
-from services.quality_gate.gate.persistence import persist_gate_result
-from services.quality_gate.gate.quarantine import resolve_quarantine
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.media_backend import InMemoryArtifactStore, StandInToolchain
 from tests.support.qa_db import qa_db_session

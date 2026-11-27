@@ -14,20 +14,20 @@ from datetime import timedelta
 
 import pytest
 import sqlalchemy as sa
-from plm_platform.db import scoped_session
-from sqlalchemy.orm import sessionmaker
-
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.decisioning.cycle import (
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.decisioning.cycle import (
     CycleRequest,
     MarketSnapshot,
     run_allocation_cycle,
 )
-from services.autonomous_ar.domain.enums import ReasonCode
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.ingestion.result_adapter import store_result
-from services.autonomous_ar.modeling.update import apply_pending_updates
-from services.autonomous_ar.storage import repositories
+from autonomous_ar.domain.enums import ReasonCode
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.ingestion.result_adapter import store_result
+from autonomous_ar.modeling.update import apply_pending_updates
+from autonomous_ar.storage import repositories
+from plm_platform.db import scoped_session
+from sqlalchemy.orm import sessionmaker
+
 from tests.fixtures.ar.scenario import (
     BRAND_ID,
     NOW,

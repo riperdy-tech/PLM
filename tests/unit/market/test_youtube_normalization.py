@@ -2,14 +2,14 @@
 import json
 from datetime import UTC, datetime
 
-from plm_contracts import Tri, TriState
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import ProviderObjectType
-from services.market_intelligence.normalization.youtube import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.enums import ProviderObjectType
+from market_intelligence.normalization.youtube import (
     normalize_channel_object,
     normalize_video_object,
 )
+from plm_contracts import Tri, TriState
+
 from tests.support.golden import assert_golden, golden_path
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

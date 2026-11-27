@@ -11,14 +11,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from services.market_intelligence.connectors.base import ConnectorError
-from services.market_intelligence.connectors.spotify import (
+from market_intelligence.connectors.base import ConnectorError
+from market_intelligence.connectors.spotify import (
     SpotifyConnector,
     SpotifyCredentials,
     parse_track_stats,
 )
-from services.market_intelligence.domain.enums import ConnectorErrorClass
+from market_intelligence.domain.enums import ConnectorErrorClass
+
 from tests.support.http import MockHTTP
 from tests.support.provider_fixtures import enqueue
 

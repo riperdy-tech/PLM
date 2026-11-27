@@ -33,10 +33,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.enums import EntityType
 from plm_contracts import Tri
-
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.domain.enums import EntityType
 
 SCENARIO_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 PRIMARY_ARM_ID = "lofi_study_focus"        # Channel B: small, fast, cheap to compete with

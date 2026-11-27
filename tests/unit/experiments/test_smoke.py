@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from experiments.acceptance.smoke import run_smoke_test
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
-from services.experiments.acceptance.smoke import run_smoke_test
 from tests.support.experiments_db import create_experiments_engine
 
 MINIMAL_ENV = {
@@ -49,7 +49,7 @@ def test_smoke_blocked_when_database_unreachable(monkeypatch) -> None:
     mock_engine = MagicMock()
     mock_engine.connect.side_effect = RuntimeError("connection refused")
 
-    with patch("services.experiments.acceptance.smoke.build_engine", return_value=mock_engine):
+    with patch("experiments.acceptance.smoke.build_engine", return_value=mock_engine):
         reason = run_smoke_test()
         assert reason is not None
         assert reason.startswith("blocked: database unreachable")
@@ -64,8 +64,8 @@ def test_smoke_successful_execution(monkeypatch) -> None:
     factory = sessionmaker(bind=engine)
 
     with (
-        patch("services.experiments.acceptance.smoke.build_engine", return_value=engine),
-        patch("services.experiments.acceptance.smoke.session_factory", return_value=factory),
+        patch("experiments.acceptance.smoke.build_engine", return_value=engine),
+        patch("experiments.acceptance.smoke.session_factory", return_value=factory),
     ):
         result = run_smoke_test()
         assert result is None

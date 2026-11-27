@@ -1,12 +1,12 @@
 # tests/unit/ar/test_api_results.py
 """P2.13: §72/§73 result ingestion and §74 updates over the API, once and once only."""
 
+from autonomous_ar.api.app import create_app
+from autonomous_ar.config import load_ar_settings
 from fastapi.testclient import TestClient
 from plm_platform.config import load_settings
 from sqlalchemy.orm import sessionmaker
 
-from services.autonomous_ar.api.app import create_app
-from services.autonomous_ar.config import load_ar_settings
 from tests.support.ar_db import create_ar_engine
 from tests.support.seams import unmeasured_raw_metrics
 

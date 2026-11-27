@@ -7,18 +7,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
+from autonomous_ar.domain.posterior import PriorParameters
+from autonomous_ar.ingestion.result_adapter import store_result
+from autonomous_ar.modeling.evidence import posterior_as_of
+from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
+from autonomous_ar.modeling.update import apply_pending_updates
+from autonomous_ar.storage import repositories
+from autonomous_ar.storage.models import ar_allocation_policy, ar_posterior_update_log
 from plm_contracts import ObservationWindow
 
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
-from services.autonomous_ar.domain.posterior import PriorParameters
-from services.autonomous_ar.ingestion.result_adapter import store_result
-from services.autonomous_ar.modeling.evidence import posterior_as_of
-from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
-from services.autonomous_ar.modeling.update import apply_pending_updates
-from services.autonomous_ar.storage import repositories
-from services.autonomous_ar.storage.models import ar_allocation_policy, ar_posterior_update_log
 from tests.support.ar_db import ar_session, create_ar_engine
 from tests.support.seams import unmeasured_raw_metrics
 

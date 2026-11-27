@@ -12,14 +12,14 @@ from __future__ import annotations
 from typing import Any
 
 import sqlalchemy as sa
+from market_intelligence.api.schemas import decode_cursor, encode_cursor
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.value_objects import TaxonomyProfile
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import scores
+from market_intelligence.taxonomy.arms import ArmDraft
 from sqlalchemy.orm import Session
 
-from services.market_intelligence.api.schemas import decode_cursor, encode_cursor
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.value_objects import TaxonomyProfile
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import scores
-from services.market_intelligence.taxonomy.arms import ArmDraft
 from tests.support.c1_api import ARM_ID, open_c1_client, seed_market
 
 SETTINGS = load_market_settings()

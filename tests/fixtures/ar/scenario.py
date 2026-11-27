@@ -30,18 +30,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from autonomous_ar.config import ARSettings, load_ar_settings
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.enums import ArmLifecycleStatus, ObservationMaturity
+from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
+from autonomous_ar.ingestion.result_adapter import store_result
+from autonomous_ar.modeling.prior import cold_start_prior
+from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
+from autonomous_ar.modeling.update import apply_pending_updates
+from autonomous_ar.storage import repositories
 from plm_contracts import ObservationWindow
 from sqlalchemy.orm import Session
 
-from services.autonomous_ar.config import ARSettings, load_ar_settings
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.enums import ArmLifecycleStatus, ObservationMaturity
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
-from services.autonomous_ar.ingestion.result_adapter import store_result
-from services.autonomous_ar.modeling.prior import cold_start_prior
-from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
-from services.autonomous_ar.modeling.update import apply_pending_updates
-from services.autonomous_ar.storage import repositories
 from tests.support.seams import unmeasured_raw_metrics
 
 __all__ = ["BRAND_ID", "NOW", "AcceptanceEnvironment", "build_acceptance_environment",

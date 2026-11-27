@@ -4,9 +4,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from services.market_intelligence.collection.rate_limit import QuotaExceededError
-from services.market_intelligence.collection.scheduler import (
+from market_intelligence.collection.rate_limit import QuotaExceededError
+from market_intelligence.collection.scheduler import (
     daily_quota_state,
     due_queries,
     mark_run,
@@ -14,9 +13,9 @@ from services.market_intelligence.collection.scheduler import (
     reset_schedule,
     run_quota_budget,
 )
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
-from services.market_intelligence.storage import repositories
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
+from market_intelligence.storage import repositories
 
 NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 SETTINGS = load_market_settings()

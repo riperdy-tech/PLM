@@ -12,11 +12,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from plm_contracts.seams.c2 import ProductionDirectivePayload
-
-from services.experiments.domain.enums import VocalGender, VocalMode
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import (
+from experiments.domain.enums import VocalGender, VocalMode
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import (
     TEMPLATES_PATH,
     TemplateLibrary,
     TemplateLibraryError,
@@ -24,10 +22,12 @@ from services.experiments.genome.engine import (
     build_genome_from_directive,
     default_template_library,
 )
-from services.experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
-from services.experiments.materialization.builder import extend_package, materialize_package
-from services.experiments.validation.engine import promote_to_validated, validate_experiment
-from services.media_factory.visuals.worlds import WORLDS
+from experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
+from experiments.materialization.builder import extend_package, materialize_package
+from experiments.validation.engine import promote_to_validated, validate_experiment
+from media_factory.visuals.worlds import WORLDS
+from plm_contracts.seams.c2 import ProductionDirectivePayload
+
 from tests.support.seams import directive_fields
 
 FIXED_NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
@@ -153,12 +153,12 @@ def test_the_chosen_sub_style_skips_the_recent_videos() -> None:
 def test_nine_consecutive_genre_less_videos_use_all_nine_sub_styles() -> None:
     """Over HTTP and the experiments DB: each new focus experiment reads the previous ones,
     so nine in a row never repeat a sub-style."""
+    from experiments.api.app import create_app
+    from experiments.config import load_experiments_settings
     from fastapi.testclient import TestClient
     from plm_platform.config import load_settings
     from sqlalchemy.orm import sessionmaker
 
-    from services.experiments.api.app import create_app
-    from services.experiments.config import load_experiments_settings
     from tests.support.experiments_db import create_experiments_engine
     from tests.unit.experiments.test_api_endpoints import ENV_WITH_TOKEN
 

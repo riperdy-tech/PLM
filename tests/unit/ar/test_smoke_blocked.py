@@ -6,10 +6,9 @@ what a hermetic suite can pin is that every missing precondition returns the nam
 `blocked: …` reason and that the CLI turns it into `BLOCKED_EXIT_CODE`.
 """
 
+from autonomous_ar.acceptance.production_smoke import run_production_smoke
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from typer.testing import CliRunner
-
-from services.autonomous_ar.acceptance.production_smoke import run_production_smoke
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql://plm:x@127.0.0.1:9/plm", "POSTGRES_PASSWORD": "x",

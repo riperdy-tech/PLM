@@ -25,20 +25,20 @@ from typing import Any
 
 import pytest
 import sqlalchemy as sa
+from music_factory.api.events import CandidateExportError, build_candidate_ready_event
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.models import generation_attempts_table
 from plm_contracts import CommercialUseEligibility, GateDisposition
 from plm_contracts.seams.c3 import TrackSpecPayload
 from plm_contracts.seams.c4 import CandidateReadyPayload
 from plm_platform.clock import FixedClock
+from quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
+from quality_gate.gate.engine import run_candidate_evaluation
+from quality_gate.ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 
-from services.music_factory.api.events import CandidateExportError, build_candidate_ready_event
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.models import generation_attempts_table
-from services.quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
-from services.quality_gate.gate.engine import run_candidate_evaluation
-from services.quality_gate.ingestion.c4_adapter import CandidateEventRejected, consume_c4_event
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.music_db import music_db_session
 from tests.support.seams import track_spec_fields

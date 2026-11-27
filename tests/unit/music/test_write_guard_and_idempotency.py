@@ -18,6 +18,33 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from music_factory.api.app import create_app
+from music_factory.config import default_provider_for, load_music_factory_settings
+from music_factory.domain.enums import AttemptStatus, CandidateStatus, PlanStatus
+from music_factory.domain.models import (
+    GeneratedCandidate,
+    GenerationAttempt,
+    GenerationRequest,
+    GenerationResponse,
+)
+from music_factory.generation.engine import (
+    GENERATE_CAPABILITY,
+    GenerationEngine,
+    GenerationPlanSpecMismatch,
+)
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.adapters import ElevenLabsAdapter
+from music_factory.providers.mock_provider import MockMusicProvider
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.repositories import (
+    get_generation_plan,
+    insert_candidate,
+    insert_creative_variant,
+    insert_generation_attempt,
+    insert_generation_plan,
+    list_generation_attempts,
+)
 from plm_contracts import ExecutionPolicy, ProviderMode
 from plm_contracts.money import Money
 from plm_contracts.seams.c3 import TrackSpecPayload
@@ -32,33 +59,6 @@ from plm_platform.execution import (
 )
 from plm_platform.ledger import BudgetLedger, PersistentBudgetGate
 
-from services.music_factory.api.app import create_app
-from services.music_factory.config import default_provider_for, load_music_factory_settings
-from services.music_factory.domain.enums import AttemptStatus, CandidateStatus, PlanStatus
-from services.music_factory.domain.models import (
-    GeneratedCandidate,
-    GenerationAttempt,
-    GenerationRequest,
-    GenerationResponse,
-)
-from services.music_factory.generation.engine import (
-    GENERATE_CAPABILITY,
-    GenerationEngine,
-    GenerationPlanSpecMismatch,
-)
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.adapters import ElevenLabsAdapter
-from services.music_factory.providers.mock_provider import MockMusicProvider
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.repositories import (
-    get_generation_plan,
-    insert_candidate,
-    insert_creative_variant,
-    insert_generation_attempt,
-    insert_generation_plan,
-    list_generation_attempts,
-)
 from tests.support.music_db import create_music_engine, music_db_session, music_session
 from tests.support.ops_db import create_ops_engine, ops_session_factory
 from tests.support.seams import lineage_fields, track_spec_fields
@@ -1011,7 +1011,8 @@ def test_engine_refuses_stale_plan_budget_and_variant_before_real_write() -> Non
 
 def _client(*, default_provider: str = "mock",
             guard: ExternalWriteGuard | None = None) -> TestClient:
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     platform = load_settings(env=dict(ENV))
@@ -1106,7 +1107,8 @@ def test_service_guard_reads_the_owner_grants_file(
     }] if granted else []), encoding="utf-8")
     monkeypatch.setenv("PLM_WRITE_AUTHORIZATIONS_FILE", str(grants))
 
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     platform = load_settings(env=dict(ENV))

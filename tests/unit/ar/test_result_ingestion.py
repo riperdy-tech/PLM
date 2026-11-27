@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
-
-from services.autonomous_ar.ingestion.result_adapter import (
+from autonomous_ar.ingestion.result_adapter import (
     ResultValidationError,
     parse_result_payload,
     store_result,
 )
-from services.autonomous_ar.storage import repositories
-from services.autonomous_ar.storage.models import ar_reward_observation
+from autonomous_ar.storage import repositories
+from autonomous_ar.storage.models import ar_reward_observation
+
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)

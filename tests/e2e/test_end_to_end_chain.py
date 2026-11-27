@@ -13,6 +13,60 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from analytics.domain.enums import PaybackStatus
+from analytics.economics.calculator import compute_unit_economics
+from analytics.evaluation.feedback import (
+    evaluate_experiment_outcome,
+    record_and_enqueue_reward,
+)
+from analytics.ingestion.releases import ingest_distribution_record, lineage_for_isrc
+
+# P2
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.directive import (
+    DirectiveBrief,
+    ProductionDirective,
+)
+from autonomous_ar.domain.enums import DirectiveStatus
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.domain.posterior import PriorParameters
+
+# P1
+from autonomous_ar.ingestion.p1_adapter import (
+    ComponentsPayload,
+    EvidencePayload,
+    OpportunityPayload,
+    TaxonomyPayload,
+    adapt_opportunity,
+)
+from autonomous_ar.ingestion.result_adapter import store_result
+from autonomous_ar.modeling.reward_model import NormalNormalRewardModel
+from autonomous_ar.modeling.update import apply_pending_updates
+from autonomous_ar.storage import repositories
+from distribution.client.mock import MockDistributorClient
+
+# P8
+from distribution.engine import DistributionEngine
+from distribution.submission import ReleaseMetadata, submit_release_from_seams
+
+# P3
+from experiments.domain.enums import VocalMode
+from experiments.domain.experiment import Experiment, Hypothesis, Treatment
+from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.materialization.builder import materialize_package
+
+# P6
+from media_factory.rendering.assembler import assemble_media_package
+from media_factory.visuals.planner import BrandProfile
+from music_factory.api.events import build_candidate_ready_event
+
+# P4
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import InMemoryArtifactStorage
 from plm_contracts import AllocationType, GateDisposition
 
 # P9
@@ -22,73 +76,19 @@ from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_contracts.seams.c5 import ReleaseManifestPayload
 from plm_contracts.seams.c6 import MediaPackagePayload
 from plm_platform.clock import FixedClock
-from sqlalchemy.orm import Session
-
-from services.analytics.domain.enums import PaybackStatus
-from services.analytics.economics.calculator import compute_unit_economics
-from services.analytics.evaluation.feedback import (
-    evaluate_experiment_outcome,
-    record_and_enqueue_reward,
-)
-from services.analytics.ingestion.releases import ingest_distribution_record, lineage_for_isrc
-
-# P2
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.directive import (
-    DirectiveBrief,
-    ProductionDirective,
-)
-from services.autonomous_ar.domain.enums import DirectiveStatus
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.domain.posterior import PriorParameters
-
-# P1
-from services.autonomous_ar.ingestion.p1_adapter import (
-    ComponentsPayload,
-    EvidencePayload,
-    OpportunityPayload,
-    TaxonomyPayload,
-    adapt_opportunity,
-)
-from services.autonomous_ar.ingestion.result_adapter import store_result
-from services.autonomous_ar.modeling.reward_model import NormalNormalRewardModel
-from services.autonomous_ar.modeling.update import apply_pending_updates
-from services.autonomous_ar.storage import repositories
-from services.distribution.client.mock import MockDistributorClient
-
-# P8
-from services.distribution.engine import DistributionEngine
-from services.distribution.submission import ReleaseMetadata, submit_release_from_seams
-
-# P3
-from services.experiments.domain.enums import VocalMode
-from services.experiments.domain.experiment import Experiment, Hypothesis, Treatment
-from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.materialization.builder import materialize_package
-
-# P6
-from services.media_factory.rendering.assembler import assemble_media_package
-from services.media_factory.visuals.planner import BrandProfile
-from services.music_factory.api.events import build_candidate_ready_event
-
-# P4
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 
 # P5
-from services.quality_gate.gate.engine import run_candidate_evaluation
-from services.youtube_publishing.client.mock import MockYouTubeClient
-from services.youtube_publishing.domain.enums import OperatingMode
+from quality_gate.gate.engine import run_candidate_evaluation
+from sqlalchemy.orm import Session
+from youtube_publishing.client.mock import MockYouTubeClient
+from youtube_publishing.domain.enums import OperatingMode
 
 # P7
-from services.youtube_publishing.domain.models import ChannelProfile
-from services.youtube_publishing.engine import YouTubePublishingEngine
-from services.youtube_publishing.manifests import build_publish_manifest
-from services.youtube_publishing.storage.repositories import insert_publish_manifest
+from youtube_publishing.domain.models import ChannelProfile
+from youtube_publishing.engine import YouTubePublishingEngine
+from youtube_publishing.manifests import build_publish_manifest
+from youtube_publishing.storage.repositories import insert_publish_manifest
+
 from tests.support.clearance import p5_holding
 from tests.support.distribution_db import distribution_db_session
 from tests.support.experiments_factories import design_facts

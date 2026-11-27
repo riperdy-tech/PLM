@@ -1,5 +1,5 @@
-from services.market_intelligence.domain.enums import TaxonomyDimension
-from services.market_intelligence.taxonomy.ontology import (
+from market_intelligence.domain.enums import TaxonomyDimension
+from market_intelligence.taxonomy.ontology import (
     DIMENSION_SPECS,
     OTHER_CANDIDATE,
     controlled_values,
@@ -38,7 +38,7 @@ def test_profile_from_dimensions_keeps_multi_valued_dimensions_as_tuples() -> No
 
 
 def test_the_focus_identity_vocabulary_is_controlled_and_old_values_survive() -> None:
-    from services.market_intelligence.taxonomy.ontology import (
+    from market_intelligence.taxonomy.ontology import (
         FOCUS_SUBGENRES,
         SUBGENRE_PARENT_GENRE,
     )

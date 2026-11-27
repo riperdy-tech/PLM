@@ -5,19 +5,18 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
-from plm_platform.storage import ObjectAlreadyExistsError, StoredObject, sha256_digest
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.entities import CollectionRunCounters
-from services.market_intelligence.domain.enums import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.entities import CollectionRunCounters
+from market_intelligence.domain.enums import (
     CollectionRunStatus,
     ConnectorType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import raw_observations
-from services.market_intelligence.storage.raw_store import store_raw_observation
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import raw_observations
+from market_intelligence.storage.raw_store import store_raw_observation
+from plm_platform.storage import ObjectAlreadyExistsError, StoredObject, sha256_digest
 
 # Exercises code that loads platform settings; the values are set explicitly.
 pytestmark = pytest.mark.usefixtures("platform_env")

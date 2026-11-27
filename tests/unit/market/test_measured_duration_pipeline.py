@@ -8,13 +8,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
+from market_intelligence.cli import _classify_pending, _recompute
+from market_intelligence.config import load_market_settings
+from market_intelligence.normalization.youtube import NormalizedObservationDraft
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import classifications
 from plm_contracts import Tri
-
-from services.market_intelligence.cli import _classify_pending, _recompute
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.normalization.youtube import NormalizedObservationDraft
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import classifications
 
 NOW = datetime(2026, 10, 28, 6, 0, tzinfo=UTC)
 TITLE = "45_75m lofi study playlist"

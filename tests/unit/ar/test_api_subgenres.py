@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.enums import ArmLifecycleStatus
+from autonomous_ar.storage import repositories
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.enums import ArmLifecycleStatus
-from services.autonomous_ar.storage import repositories
 from tests.unit.ar.conftest import NOW
 
 COMPONENTS = {name: 60.0 for name in

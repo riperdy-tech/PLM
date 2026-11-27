@@ -3,8 +3,8 @@
 function takes its `now` (the cycle instant the caller persists), never a wall clock."""
 from datetime import UTC, datetime, timedelta
 
-from services.autonomous_ar.domain.policy import FatigueConfig
-from services.autonomous_ar.modeling.fatigue import (
+from autonomous_ar.domain.policy import FatigueConfig
+from autonomous_ar.modeling.fatigue import (
     exposure_score,
     fatigue_penalty,
     is_in_cooldown,

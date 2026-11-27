@@ -4,23 +4,24 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from services.experiments.domain.enums import (
+from experiments.domain.enums import (
     ExperimentStatus,
     ExperimentType,
     VariableClass,
     VocalGender,
     VocalMode,
 )
-from services.experiments.domain.experiment import (
+from experiments.domain.experiment import (
     Experiment,
     ExperimentVariable,
     Hypothesis,
     Treatment,
 )
-from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
-from services.experiments.validation.engine import (
+from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
+from experiments.validation.engine import (
     validate_experiment,
 )
+
 from tests.support.experiments_factories import design_facts
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)

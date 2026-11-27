@@ -5,15 +5,16 @@ These properties hold for the *whole* component space, not for one fixture value
 that is what makes them properties rather than examples.
 """
 
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.value_objects import ScoreComponents
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.scoring.calibration import default_weights
-from services.market_intelligence.scoring.opportunity import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.value_objects import ScoreComponents
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.scoring.calibration import default_weights
+from market_intelligence.scoring.opportunity import (
     compute_component_scores,
     score_all_arms,
     score_arm,
 )
+
 from tests.fixtures.market.scenario import (
     MID_ARM_ID,
     PRIMARY_ARM_ID,

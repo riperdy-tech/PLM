@@ -2,15 +2,14 @@
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts import ObservationWindow, Tri
-
-from services.autonomous_ar.domain.enums import ObservationMaturity
-from services.autonomous_ar.domain.reward import (
+from autonomous_ar.domain.enums import ObservationMaturity
+from autonomous_ar.domain.reward import (
     RESERVED_VALUE_TERMS,
     RewardObservation,
     observation_key,
     tri_from_optional,
 )
+from plm_contracts import ObservationWindow, Tri
 
 
 def test_tri_from_optional_is_the_only_null_path_and_zero_is_a_measurement() -> None:

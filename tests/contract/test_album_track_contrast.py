@@ -4,15 +4,16 @@ from __future__ import annotations
 from itertools import pairwise
 from typing import Any
 
-from services.experiments.domain.enums import VariableClass
-from services.experiments.domain.experiment import ExperimentVariable
-from services.experiments.materialization.arrangements import (
+from experiments.domain.enums import VariableClass
+from experiments.domain.experiment import ExperimentVariable
+from experiments.materialization.arrangements import (
     ARRANGEMENT_VERSION,
     arrangement_direction,
 )
-from services.experiments.materialization.builder import extend_package, materialize_package
-from services.music_factory.generation.prompts import build_generation_prompt
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from experiments.materialization.builder import extend_package, materialize_package
+from music_factory.generation.prompts import build_generation_prompt
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+
 from tests.unit.experiments.test_materializer import FIXED_NOW, _sample_experiment
 
 
@@ -75,7 +76,7 @@ def test_extension_gets_fresh_arrangement_not_a_clone() -> None:
 
 
 def test_a_texture_or_drum_is_never_the_lead() -> None:
-    from services.experiments.materialization.arrangements import is_melodic
+    from experiments.materialization.arrangements import is_melodic
 
     palette = ("dusty_rhodes", "vinyl_crackle", "sidechain_kick")
     leads = {arrangement_direction("album", position, palette)["lead_instrument"]
@@ -158,8 +159,8 @@ def test_a_dimension_the_experiment_tests_is_never_varied_by_the_palette() -> No
 def test_every_template_genre_has_a_palette_that_varies_without_lockstep() -> None:
     from itertools import combinations
 
-    from services.experiments.genome.engine import default_template_library
-    from services.experiments.materialization.arrangements import _GENRE_PALETTES, is_melodic
+    from experiments.genome.engine import default_template_library
+    from experiments.materialization.arrangements import _GENRE_PALETTES, is_melodic
 
     library = default_template_library()
     assert set(library.genres) <= set(_GENRE_PALETTES)
@@ -191,8 +192,8 @@ def test_every_template_genre_has_a_palette_that_varies_without_lockstep() -> No
 def test_focus_sub_style_albums_vary_inside_the_identity() -> None:
     """ADR-0044: each of the nine sub-styles keeps its own instruments, a 23-track album
     still rotates (>= 6 keys and leads), and nothing out of identity is named."""
-    from services.experiments.genome.engine import default_template_library
-    from services.experiments.materialization.arrangements import (
+    from experiments.genome.engine import default_template_library
+    from experiments.materialization.arrangements import (
         _GENRE_PALETTES,
         _SUBGENRE_PALETTES,
         is_melodic,
@@ -226,8 +227,8 @@ def test_focus_tracks_are_background_music_with_nothing_that_stands_out() -> Non
     stood out, which is wrong for background focus music. Every focus track asks for an
     understated melody, no riff or catchy hook, a soft kick and a low round bass, and
     names the standout parts to avoid; no palette asks for a forward bass."""
-    from services.experiments.genome.engine import default_template_library
-    from services.experiments.materialization.arrangements import (
+    from experiments.genome.engine import default_template_library
+    from experiments.materialization.arrangements import (
         _FOCUS_MELODIES,
         _GENRE_PALETTES,
         _SUBGENRE_PALETTES,
@@ -261,7 +262,7 @@ def test_focus_tracks_are_background_music_with_nothing_that_stands_out() -> Non
 def test_p4_carries_the_mix_balance_into_the_prompt_and_the_avoid_list() -> None:
     """The mix line reaches the provider prompt and its avoid terms join the negative
     prompt; a spec made before v7 (no mix line) compiles exactly as before."""
-    from services.experiments.materialization.arrangements import FOCUS_AVOID, FOCUS_MIX
+    from experiments.materialization.arrangements import FOCUS_AVOID, FOCUS_MIX
 
     exp, treatment, genome = _sample_experiment()
     spec = materialize_package(exp, treatment, genome, created_at=FIXED_NOW).track_specs[0]

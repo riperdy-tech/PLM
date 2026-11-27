@@ -7,10 +7,10 @@ from __future__ import annotations
 import random
 from datetime import UTC, datetime
 
-from services.autonomous_ar.config import load_ar_settings
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
-from services.autonomous_ar.simulation.metrics import exploration_ratio, late_window_share
-from services.autonomous_ar.simulation.scenarios import (
+from autonomous_ar.config import load_ar_settings
+from autonomous_ar.domain.policy import DEFAULT_POLICY, PolicyConfig
+from autonomous_ar.simulation.metrics import exploration_ratio, late_window_share
+from autonomous_ar.simulation.scenarios import (
     scenario_clear_winner,
     scenario_deceptive_early_winner,
     scenario_high_correlation,
@@ -18,7 +18,7 @@ from services.autonomous_ar.simulation.scenarios import (
     scenario_source_shock,
     scenario_sparse_observations,
 )
-from services.autonomous_ar.simulation.simulator import SimConfig, run_simulation
+from autonomous_ar.simulation.simulator import SimConfig, run_simulation
 
 # 6 slots, not 5: with the default 70/20/10 fractions and 5 slots the warm radical quota is
 # 0 seats (the tied 0.5 largest-remainder seat goes to exploit), so the arms measured in
@@ -108,7 +108,7 @@ def test_the_second_cycle_allocates_differently_because_of_the_first() -> None:
 def test_simulated_rewards_are_stamped_with_the_simulation_version() -> None:
     """§70/plan: synthetic rewards carry `p2-sim-v1`, never a measured reward version, and
     the simulator touches no storage — a simulated reward can never be read as measured."""
-    from services.autonomous_ar.simulation.simulator import _simulated_observation
+    from autonomous_ar.simulation.simulator import _simulated_observation
 
     settings = load_ar_settings()
     assert settings.simulation_reward_version == "p2-sim-v1"

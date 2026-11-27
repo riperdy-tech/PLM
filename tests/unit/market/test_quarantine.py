@@ -8,20 +8,19 @@ the assertions pin the gates implemented in `normalization/youtube.py`.
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
-from plm_contracts import TriState
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.enums import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.enums import (
     ConnectorType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.normalization.youtube import (
+from market_intelligence.normalization.youtube import (
     QUARANTINE_REASON_CODES,
     normalize_video_object,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import quarantined_records
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import quarantined_records
+from plm_contracts import TriState
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 RAW = "00000000-0000-4000-8000-000000000001"

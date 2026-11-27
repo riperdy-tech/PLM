@@ -1,4 +1,4 @@
-from services.market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
+from market_intelligence.storage.models import MARKET_METADATA, MARKET_TABLES
 
 EXPECTED = (
     "market_sources", "market_queries", "market_collection_runs", "market_raw_observations",

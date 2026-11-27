@@ -18,18 +18,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
-
-from services.music_factory.domain.models import GenerationRequest
-from services.music_factory.providers import suno_manual
-from services.music_factory.providers.flow_music_manual import FlowMusicManualAdapter
-from services.music_factory.providers.suno_manual import (
+from music_factory.domain.models import GenerationRequest
+from music_factory.providers import suno_manual
+from music_factory.providers.flow_music_manual import FlowMusicManualAdapter
+from music_factory.providers.suno_manual import (
     STYLES_LIMIT,
     SunoManualAdapter,
     SunoManualSettings,
     song_problem,
     suno_styles,
 )
-from services.music_factory.storage.artifacts import probe_audio_bytes
+from music_factory.storage.artifacts import probe_audio_bytes
 
 TRACK = "trk_sheet_01"
 

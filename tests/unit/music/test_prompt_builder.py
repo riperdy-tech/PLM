@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from plm_contracts.seams.c3 import TrackSpecPayload
-
-from services.music_factory.generation.prompts import (
+from music_factory.generation.prompts import (
     build_generation_prompt,
 )
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from plm_contracts.seams.c3 import TrackSpecPayload
+
 from tests.support.seams import lineage_fields, track_spec_fields
 
 SAMPLE_C3_SPEC = TrackSpecPayload.build(

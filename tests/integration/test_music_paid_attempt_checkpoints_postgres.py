@@ -15,19 +15,19 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from music_factory.domain.enums import AttemptStatus, PlanStatus
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.storage.artifacts import InMemoryArtifactStorage
+from music_factory.storage.models import MUSIC_METADATA
+from music_factory.storage.repositories import list_generation_attempts
 from plm_platform.clock import FixedClock
 from plm_platform.config import load_settings
 from plm_platform.db import database_url
 from plm_platform.exceptions import EXCEPTIONS_METADATA
 from sqlalchemy.orm import Session
 
-from services.music_factory.domain.enums import AttemptStatus, PlanStatus
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
-from services.music_factory.storage.models import MUSIC_METADATA
-from services.music_factory.storage.repositories import list_generation_attempts
 from tests.unit.music.test_paid_attempt_checkpoints import SecondCallRaises
 from tests.unit.music.test_write_guard_and_idempotency import (
     RecordingBudget,

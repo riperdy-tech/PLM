@@ -2,12 +2,10 @@
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts import Tri, TriState, TriStateError
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
-from services.market_intelligence.domain.enums import ScoringComponent, TaxonomyDimension
-from services.market_intelligence.domain.value_objects import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation, OpportunityScore
+from market_intelligence.domain.enums import ScoringComponent, TaxonomyDimension
+from market_intelligence.domain.value_objects import (
     EvidenceSummary,
     ScoreComponents,
     TaxonomyProfile,
@@ -15,6 +13,7 @@ from services.market_intelligence.domain.value_objects import (
     slug_token,
     tri_from_optional,
 )
+from plm_contracts import Tri, TriState, TriStateError
 
 
 def test_fingerprint_is_dimension_ordered_and_stable() -> None:

@@ -10,11 +10,10 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from experiments.domain.experiment import RandomizationRecord
+from experiments.domain.measurement import build_default_measurement_plan
 from plm_contracts import ObservationWindow
 from plm_contracts.seams.c3 import DurationRangeSeconds
-
-from services.experiments.domain.experiment import RandomizationRecord
-from services.experiments.domain.measurement import build_default_measurement_plan
 
 __all__ = ["design_facts", "playlist_spec_fields"]
 

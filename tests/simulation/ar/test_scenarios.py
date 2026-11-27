@@ -1,13 +1,13 @@
 """§69's scenarios A–G, exercised through the real policy functions (P2.12)."""
 
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.simulation.metrics import (
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.simulation.metrics import (
     coverage,
     exploration_ratio,
     late_window_share,
     winner_concentration,
 )
-from services.autonomous_ar.simulation.scenarios import (
+from autonomous_ar.simulation.scenarios import (
     scenario_clear_winner,
     scenario_deceptive_early_winner,
     scenario_high_correlation,
@@ -15,7 +15,7 @@ from services.autonomous_ar.simulation.scenarios import (
     scenario_source_shock,
     scenario_two_close_winners,
 )
-from services.autonomous_ar.simulation.simulator import SimConfig, run_simulation
+from autonomous_ar.simulation.simulator import SimConfig, run_simulation
 
 # 6 slots, not 5: with the default 70/20/10 fractions and 5 slots the warm radical quota is
 # 0 seats (largest-remainder gives the tied 0.5 seat to exploit), so the arms measured in

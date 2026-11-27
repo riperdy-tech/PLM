@@ -7,13 +7,12 @@ import asyncio
 import uuid
 
 import pytest
+from market_intelligence.jobs import REGISTRATIONS
+from market_intelligence.jobs.daily import DailyMarketWorkflow
+from market_intelligence.jobs.schedules import JOB_NAMES, ensure_schedules
 from plm_platform.temporal import TaskQueue, connect_client
 from temporalio import activity
 from temporalio.worker import Worker
-
-from services.market_intelligence.jobs import REGISTRATIONS
-from services.market_intelligence.jobs.daily import DailyMarketWorkflow
-from services.market_intelligence.jobs.schedules import JOB_NAMES, ensure_schedules
 
 pytestmark = pytest.mark.integration
 

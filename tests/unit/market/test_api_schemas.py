@@ -4,7 +4,7 @@
 import json
 from datetime import UTC, datetime
 
-from services.market_intelligence.api.schemas import (
+from market_intelligence.api.schemas import (
     ComponentsOut,
     EvidenceOut,
     OpportunityListResponse,

@@ -16,19 +16,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from plm_contracts.seams.c3 import TrackSpecPayload
-
-from services.experiments.domain.experiment import Experiment, Hypothesis, Treatment
-from services.experiments.domain.genome import BpmRange, ContentGenome, DurationRange
-from services.experiments.materialization.builder import (
+from experiments.domain.experiment import Experiment, Hypothesis, Treatment
+from experiments.domain.genome import BpmRange, ContentGenome, DurationRange
+from experiments.materialization.builder import (
     content_genome_id,
     materialize_package,
 )
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import (
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import (
     TrackSpecValidationError,
     adapt_track_spec,
 )
+from plm_contracts.seams.c3 import TrackSpecPayload
+
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.experiments_factories import design_facts
 

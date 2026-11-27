@@ -11,20 +11,20 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import EvidenceSummary, OpportunityScore
-from services.market_intelligence.domain.enums import ChangeEventType, ScoringComponent
-from services.market_intelligence.domain.value_objects import ScoreComponents
-from services.market_intelligence.reports.market_snapshot import (
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import EvidenceSummary, OpportunityScore
+from market_intelligence.domain.enums import ChangeEventType, ScoringComponent
+from market_intelligence.domain.value_objects import ScoreComponents
+from market_intelligence.reports.market_snapshot import (
     MarketSnapshot,
     build_snapshot,
     detect_changes,
     persist_snapshot,
     previous_snapshot,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import change_events
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import change_events
+
 from tests.support.c1_api import ARM_ID, seed_market
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)

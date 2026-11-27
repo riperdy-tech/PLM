@@ -17,19 +17,18 @@ from typing import Any, Self
 
 import httpx
 import sqlalchemy as sa
+from market_intelligence.api.app import create_app
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.value_objects import TaxonomyProfile
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.scoring.opportunity import persist_scores, score_all_arms
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import MARKET_METADATA
+from market_intelligence.taxonomy.arms import ArmDraft
 from plm_contracts import Tri
 from plm_platform.config import load_settings
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.market_intelligence.api.app import create_app
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.domain.value_objects import TaxonomyProfile
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.scoring.opportunity import persist_scores, score_all_arms
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import MARKET_METADATA
-from services.market_intelligence.taxonomy.arms import ArmDraft
 
 __all__ = ["ARM_ID", "AS_OF", "SEAM_TOKEN", "SyncASGIClient", "SyncASGITransport",
            "open_c1_client", "seed_market"]

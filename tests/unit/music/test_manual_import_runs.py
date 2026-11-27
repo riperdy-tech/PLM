@@ -12,23 +12,23 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from music_factory.api.app import create_app
+from music_factory.config import load_music_factory_settings
+from music_factory.domain.enums import AttemptStatus, PlanStatus
+from music_factory.domain.models import GenerationRequest, GenerationResponse
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.ingestion.p3_adapter import adapt_track_spec
+from music_factory.providers.flow_music_manual import (
+    FlowMusicManualAdapter,
+    load_flow_music_manual_settings,
+)
+from music_factory.providers.suno_manual import SunoManualAdapter, SunoManualSettings
+from music_factory.storage.artifacts import InMemoryArtifactStorage
 from plm_contracts import CommercialUseEligibility
 from plm_platform.clock import FixedClock
 from plm_platform.config import load_settings
 
-from services.music_factory.api.app import create_app
-from services.music_factory.config import load_music_factory_settings
-from services.music_factory.domain.enums import AttemptStatus, PlanStatus
-from services.music_factory.domain.models import GenerationRequest, GenerationResponse
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.ingestion.p3_adapter import adapt_track_spec
-from services.music_factory.providers.flow_music_manual import (
-    FlowMusicManualAdapter,
-    load_flow_music_manual_settings,
-)
-from services.music_factory.providers.suno_manual import SunoManualAdapter, SunoManualSettings
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage
 from tests.support.music_db import create_music_engine, music_session
 from tests.unit.music.test_suno_manual_import import (
     ENV,
@@ -78,7 +78,8 @@ def test_a_failed_import_can_be_tried_again_after_a_fix(tmp_path: Path) -> None:
 def _client(monkeypatch: pytest.MonkeyPatch, suno: Path, flow: Path) -> TestClient:
     monkeypatch.setenv("PLM_SUNO_MANUAL_INBOX", str(suno))
     monkeypatch.setenv("PLM_FLOW_MUSIC_MANUAL_INBOX", str(flow))
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     platform = load_settings(env=dict(ENV))

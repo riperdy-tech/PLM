@@ -16,17 +16,16 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.ingestion.p1_adapter import MarketUnavailable, P1Client
+from autonomous_ar.jobs import REGISTRATIONS
+from autonomous_ar.storage import repositories
 from plm_platform.db import build_engine, scoped_session
 from plm_platform.temporal import TaskQueue, connect_client
 from sqlalchemy.orm import sessionmaker
 from temporalio.client import Client
 from temporalio.worker import Worker
-
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.ingestion.p1_adapter import MarketUnavailable, P1Client
-from services.autonomous_ar.jobs import REGISTRATIONS
-from services.autonomous_ar.storage import repositories
 
 pytestmark = pytest.mark.integration
 

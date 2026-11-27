@@ -1,5 +1,5 @@
 # tests/unit/market/test_canonical_text.py
-from services.market_intelligence.normalization.canonical import (
+from market_intelligence.normalization.canonical import (
     channel_canonical_url,
     is_valid_channel_id,
     is_valid_video_id,

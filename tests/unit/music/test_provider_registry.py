@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
-from services.music_factory.domain.models import ProviderCapabilities
-from services.music_factory.providers.registry import (
+from music_factory.domain.models import ProviderCapabilities
+from music_factory.providers.registry import (
     get_capabilities,
     list_registered_providers,
     register_provider,

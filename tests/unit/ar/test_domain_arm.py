@@ -2,8 +2,7 @@
 from datetime import UTC, datetime
 
 import pytest
-
-from services.autonomous_ar.domain.arm import (
+from autonomous_ar.domain.arm import (
     ArmDimensions,
     ContentArm,
     canonical_fingerprint,

@@ -44,7 +44,7 @@ def test_the_live_smoke_is_blocked_with_a_reason_not_skipped(monkeypatch) -> Non
 
 
 def test_the_blocked_reason_names_every_missing_variable() -> None:
-    from services.market_intelligence.acceptance.youtube_smoke import missing_credentials
+    from market_intelligence.acceptance.youtube_smoke import missing_credentials
 
     platform = load_settings(env=REQUIRED_ENV)
     assert missing_credentials(platform) == ALL_YOUTUBE_VARS

@@ -16,15 +16,10 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
-from plm_contracts.seams.c3 import DurationRangeSeconds
-from plm_platform.config import load_settings
-from sqlalchemy.orm import sessionmaker
-
-from services.experiments.api.app import create_app
-from services.experiments.config import load_experiments_settings
-from services.experiments.domain.genome import DurationRange
-from services.experiments.genome.engine import (
+from experiments.api.app import create_app
+from experiments.config import load_experiments_settings
+from experiments.domain.genome import DurationRange
+from experiments.genome.engine import (
     TEMPLATES_PATH,
     GenomeBuildError,
     TemplateLibrary,
@@ -33,12 +28,17 @@ from services.experiments.genome.engine import (
     build_genome_from_directive,
     default_template_library,
 )
-from services.experiments.ingestion.p2_adapter import adapt_directive
-from services.experiments.materialization.supply import (
+from experiments.ingestion.p2_adapter import adapt_directive
+from experiments.materialization.supply import (
     SupplyPolicy,
     default_supply_policy,
     plan_supply,
 )
+from fastapi.testclient import TestClient
+from plm_contracts.seams.c3 import DurationRangeSeconds
+from plm_platform.config import load_settings
+from sqlalchemy.orm import sessionmaker
+
 from tests.support.experiments_db import create_experiments_engine
 from tests.unit.experiments.test_api_endpoints import ENV_WITH_TOKEN, SAMPLE_DIRECTIVE
 
@@ -118,7 +118,7 @@ def test_manual_supply_plans_a_small_fixed_spare() -> None:
     33 songs for a 2-hour video (26 needed). The manual policy keeps 10 % capped at 2:
     a hand-made song is already heard by the owner, P5 rejects few, and P6's top-up
     (``extend``) still covers a shortfall."""
-    from services.experiments.materialization.supply import manual_supply_policy
+    from experiments.materialization.supply import manual_supply_policy
 
     manual = manual_supply_policy()
     two_hours = DurationRange(min_seconds=5400, max_seconds=7200)
@@ -138,7 +138,7 @@ def test_a_manual_supply_package_uses_the_manual_spare() -> None:
     factory = sessionmaker(bind=create_experiments_engine(static_pool=True))
     package = _validated_package(TestClient(create_app(session_factory=factory,
                                                        settings=settings)))
-    from services.experiments.materialization.supply import manual_supply_policy
+    from experiments.materialization.supply import manual_supply_policy
 
     playlist = package["playlist_spec"]
     assert playlist["supply_policy_version"] == manual_supply_policy().supply_policy_version

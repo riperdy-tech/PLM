@@ -2,19 +2,18 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from market_intelligence.config import load_market_settings
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.enums import ProviderObjectType, ScoringComponent
+from market_intelligence.domain.value_objects import ScoreComponents
+from market_intelligence.features.arm_features import compute_arm_features
+from market_intelligence.features.confidence import ConfidenceBreakdown, confidence
+from market_intelligence.normalization.youtube import normalize_video_object
+from market_intelligence.scoring.calibration import default_weights
+from market_intelligence.scoring.opportunity import score_arm
+from market_intelligence.storage import repositories
 from plm_contracts import Tri
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.domain.enums import ProviderObjectType, ScoringComponent
-from services.market_intelligence.domain.value_objects import ScoreComponents
-from services.market_intelligence.features.arm_features import compute_arm_features
-from services.market_intelligence.features.confidence import ConfidenceBreakdown, confidence
-from services.market_intelligence.normalization.youtube import normalize_video_object
-from services.market_intelligence.scoring.calibration import default_weights
-from services.market_intelligence.scoring.opportunity import score_arm
-from services.market_intelligence.storage import repositories
 
 
 def test_confidence_is_the_weighted_breakdown_of_its_own_inputs() -> None:

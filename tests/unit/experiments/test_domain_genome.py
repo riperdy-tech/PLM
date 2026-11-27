@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
-from services.experiments.domain.enums import (
+from experiments.domain.enums import (
     ConstraintType,
     EnergyLevel,
     VocalGender,
     VocalMode,
 )
-from services.experiments.domain.genome import (
+from experiments.domain.genome import (
     CANONICAL_DIMENSIONS,
     BpmRange,
     ConstraintEnvelope,
     ContentGenome,
     DurationRange,
 )
+from pydantic import ValidationError
 
 
 def test_21_canonical_dimensions_are_defined() -> None:

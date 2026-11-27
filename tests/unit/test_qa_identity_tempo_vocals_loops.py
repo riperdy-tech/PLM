@@ -15,13 +15,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf  # type: ignore[import-untyped]
-
-from services.quality_gate.audio import decode
-from services.quality_gate.audio.rhythm import loop_repetition, vocal_presence
-from services.quality_gate.evaluators.identity import (
+from quality_gate.audio import decode
+from quality_gate.audio.rhythm import loop_repetition, vocal_presence
+from quality_gate.evaluators.identity import (
     evaluate_identity_audio,
     load_identity_audio_policy,
 )
+
 from tests.unit.test_qa_identity_audio import _clicks
 
 NOW = datetime(2026, 11, 27, 12, 0, tzinfo=UTC)
@@ -94,7 +94,7 @@ def test_vocals_in_an_instrumental_are_a_hold(tmp_path: Path) -> None:
                                    vocal_mode="instrumental")
     (finding,) = [f for f in held.findings if f.finding_code == "VOCAL_PRESENCE_SUSPECTED"]
     assert finding.blocking is False  # a hold for a listener, not a rejection
-    from services.quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
+    from quality_gate.detectors.reason_codes import P5_HOLD_REASON_CODES
 
     assert "VOCAL_PRESENCE_SUSPECTED" in P5_HOLD_REASON_CODES
     sung = evaluate_identity_audio("ev", path, ["focus_electronic"], now=NOW,

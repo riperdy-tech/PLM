@@ -3,12 +3,12 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-
-from services.autonomous_ar.ingestion.p1_adapter import (
+from autonomous_ar.ingestion.p1_adapter import (
     MarketUnavailable,
     P1Client,
     adapt_opportunity,
 )
+
 from tests.support.c1_api import AS_OF, SEAM_TOKEN, SyncASGITransport, open_c1_client
 
 NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
@@ -33,7 +33,7 @@ def _payload(**overrides: object) -> dict[str, object]:
 
 
 def test_mapping_is_exact_and_unobserved_components_stay_none() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
+    from autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
     arm = adapt_opportunity(OpportunityPayload.model_validate(_payload()), now=NOW)
     assert arm.arm_id == "rnb_late_night_drive_english_vocal_45_75m"
@@ -46,7 +46,7 @@ def test_mapping_is_exact_and_unobserved_components_stay_none() -> None:
 
 
 def test_freshness_is_derived_from_an_aware_as_of() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
+    from autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
     payload = OpportunityPayload.model_validate(_payload())
     arm = adapt_opportunity(payload, now=AS_OF + timedelta(hours=5))
@@ -57,7 +57,7 @@ def test_freshness_is_derived_from_an_aware_as_of() -> None:
 
 
 def test_payload_schema_refuses_unknown_fields() -> None:
-    from services.autonomous_ar.ingestion.p1_adapter import OpportunityPayload
+    from autonomous_ar.ingestion.p1_adapter import OpportunityPayload
 
     with pytest.raises(ValueError, match="freshness"):
         OpportunityPayload.model_validate(_payload(freshness="fresh"))

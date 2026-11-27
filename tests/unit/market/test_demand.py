@@ -10,10 +10,9 @@ per-subscriber rate, never a raw cumulative view count.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.features.demand import demand_inputs
 from plm_contracts import Tri
-
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.features.demand import demand_inputs
 
 AS_OF = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 

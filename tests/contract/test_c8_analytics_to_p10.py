@@ -15,13 +15,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from analytics.evaluation.feedback import evaluate_experiment_outcome
+from analytics.projection.p10_features import build_p10_feature_view
 from plm_contracts import ObservationWindow
 from plm_contracts.money import FxTable, Money
 from plm_contracts.seams import SeamRejection, parse_seam
 from plm_contracts.seams.c8 import P10FeatureViewPayload
 
-from services.analytics.evaluation.feedback import evaluate_experiment_outcome
-from services.analytics.projection.p10_features import build_p10_feature_view
 from tests.support.analytics_db import analytics_db_session
 from tests.support.contract import SeamRegistry, assert_refused, with_value, without
 from tests.support.seams import sample_lineage

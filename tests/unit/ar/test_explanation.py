@@ -1,7 +1,7 @@
 # tests/unit/ar/test_explanation.py
 """P2.14 §109: the explanation is a deterministic template, reconstructable from rows."""
 
-from services.autonomous_ar.observability.explanation import explain_decision
+from autonomous_ar.observability.explanation import explain_decision
 
 
 def test_explanation_is_deterministic_and_reconstructable_without_an_llm() -> None:

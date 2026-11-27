@@ -4,22 +4,21 @@ from datetime import UTC, datetime
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts import Tri, TriState
-
-from services.market_intelligence.connectors.base import FetchedObject
-from services.market_intelligence.domain.entities import QuarantinedRecord
-from services.market_intelligence.domain.enums import (
+from market_intelligence.connectors.base import FetchedObject
+from market_intelligence.domain.entities import QuarantinedRecord
+from market_intelligence.domain.enums import (
     ConnectorType,
     EntityType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.normalization.youtube import (
+from market_intelligence.normalization.youtube import (
     normalize_search_hit,
     normalize_video_object,
 )
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import entity_identities, observations
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import entity_identities, observations
+from plm_contracts import Tri, TriState
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 LATER = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)

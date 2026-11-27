@@ -5,9 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
-
-from services.music_factory.domain.enums import (
+from music_factory.domain.enums import (
     ArtifactType,
     AttemptStatus,
     AttemptType,
@@ -15,14 +13,14 @@ from services.music_factory.domain.enums import (
     CommercialUseStatus,
     PlanStatus,
 )
-from services.music_factory.domain.ids import (
+from music_factory.domain.ids import (
     artifact_id,
     attempt_id,
     candidate_id,
     plan_id,
     rights_snapshot_id,
 )
-from services.music_factory.domain.models import (
+from music_factory.domain.models import (
     AudioArtifact,
     GeneratedCandidate,
     GenerationAttempt,
@@ -30,6 +28,8 @@ from services.music_factory.domain.models import (
     ProviderCapabilities,
     RightsSnapshot,
 )
+from pydantic import ValidationError
+
 from tests.support.seams import sample_lineage
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=UTC)

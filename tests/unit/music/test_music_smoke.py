@@ -5,11 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from music_factory.acceptance.smoke import run_smoke_test
 from plm_platform.cli import BLOCKED_EXIT_CODE, app
 from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
-from services.music_factory.acceptance.smoke import run_smoke_test
 from tests.support.music_db import create_music_engine
 
 MINIMAL_ENV = {
@@ -50,7 +50,7 @@ def test_smoke_blocked_when_database_unreachable(monkeypatch: pytest.MonkeyPatch
     mock_engine = MagicMock()
     mock_engine.connect.side_effect = RuntimeError("connection refused")
 
-    with patch("services.music_factory.acceptance.smoke.build_engine", return_value=mock_engine):
+    with patch("music_factory.acceptance.smoke.build_engine", return_value=mock_engine):
         reason = run_smoke_test()
         assert reason is not None
         assert reason.startswith("blocked: database unreachable")
@@ -65,8 +65,8 @@ def test_smoke_successful_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     factory = sessionmaker(bind=engine)
 
     with (
-        patch("services.music_factory.acceptance.smoke.build_engine", return_value=engine),
-        patch("services.music_factory.acceptance.smoke.session_factory", return_value=factory),
+        patch("music_factory.acceptance.smoke.build_engine", return_value=engine),
+        patch("music_factory.acceptance.smoke.session_factory", return_value=factory),
     ):
         result = run_smoke_test()
         assert result is None

@@ -4,8 +4,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from services.autonomous_ar.modeling.decay import (
+from autonomous_ar.modeling.decay import (
     detect_regime_shift,
     effective_observation_count,
     recency_weight,

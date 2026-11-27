@@ -2,9 +2,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from plm_contracts import Tri, TriState
-
-from services.market_intelligence.features.velocity import (
+from market_intelligence.features.velocity import (
     channel_relative_views,
     comment_rate,
     lifetime_views_per_day,
@@ -13,6 +11,7 @@ from services.market_intelligence.features.velocity import (
     video_age_hours,
     windowed_views_per_day,
 )
+from plm_contracts import Tri, TriState
 
 OBSERVED = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 PUBLISHED = OBSERVED - timedelta(hours=48)

@@ -1,5 +1,5 @@
 # tests/unit/ar/test_domain_enums.py
-from services.autonomous_ar.domain.enums import (
+from autonomous_ar.domain.enums import (
     AllocationCycleStatus,
     ArmLifecycleStatus,
     DirectiveStatus,

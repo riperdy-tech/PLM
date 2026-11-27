@@ -4,15 +4,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from plm_platform.config import Secret
-
-from services.market_intelligence.collection.rate_limit import QuotaBudget
-from services.market_intelligence.connectors.base import ConnectorError, hash_request_context
-from services.market_intelligence.connectors.youtube import (
+from market_intelligence.collection.rate_limit import QuotaBudget
+from market_intelligence.connectors.base import ConnectorError, hash_request_context
+from market_intelligence.connectors.youtube import (
     YouTubeCredentials,
     YouTubeDataAPIConnector,
     parse_video_stats,
 )
+from plm_platform.config import Secret
 
 SENTINEL = "yt-secret-sentinel-0123456789"
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "market" / "youtube"

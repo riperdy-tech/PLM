@@ -1,11 +1,11 @@
 # tests/unit/market/test_cross_platform.py
 from datetime import UTC, datetime
 
-from services.market_intelligence.connectors.base import ConnectorError
-from services.market_intelligence.connectors.browser import BrowserConnector
-from services.market_intelligence.connectors.trends import PublicTrendsConnector, parse_trend_points
-from services.market_intelligence.domain.enums import ConnectorErrorClass
-from services.market_intelligence.features.cross_platform import cross_platform_signal
+from market_intelligence.connectors.base import ConnectorError
+from market_intelligence.connectors.browser import BrowserConnector
+from market_intelligence.connectors.trends import PublicTrendsConnector, parse_trend_points
+from market_intelligence.domain.enums import ConnectorErrorClass
+from market_intelligence.features.cross_platform import cross_platform_signal
 
 FIXED_NOW = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
 

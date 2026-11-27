@@ -1,11 +1,10 @@
 import pytest
-from plm_contracts import ErrorShape
-
-from services.market_intelligence.domain.enums import TaxonomyDimension
-from services.market_intelligence.taxonomy.validators import (
+from market_intelligence.domain.enums import TaxonomyDimension
+from market_intelligence.taxonomy.validators import (
     ClassificationSchemaError,
     validate_classification,
 )
+from plm_contracts import ErrorShape
 
 GOOD = {
     "genre": ["rnb"],

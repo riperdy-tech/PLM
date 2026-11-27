@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from media_factory.rendering.toolchain import ProbeReport, StreamInfo
 from plm_platform.config import Env
 
 from scripts.audit_p6_media_streams import (
@@ -15,7 +16,6 @@ from scripts.audit_p6_media_streams import (
     _require_local_dev,
     classify_probe,
 )
-from services.media_factory.rendering.toolchain import ProbeReport, StreamInfo
 
 
 def _probe(audio: float | None, video: float | None, container: float = 10.0) -> ProbeReport:

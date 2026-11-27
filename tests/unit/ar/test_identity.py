@@ -4,21 +4,22 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from services.autonomous_ar.config import load_ar_settings, production_settings
-from services.autonomous_ar.decisioning.cycle import (
+from autonomous_ar.config import load_ar_settings, production_settings
+from autonomous_ar.decisioning.cycle import (
     CycleRequest,
     MarketSnapshot,
     run_allocation_cycle,
 )
-from services.autonomous_ar.domain.arm import ArmDimensions, ContentArm
-from services.autonomous_ar.domain.enums import ArmLifecycleStatus, ReasonCode
-from services.autonomous_ar.domain.policy import DEFAULT_POLICY
-from services.autonomous_ar.policy.identity import (
+from autonomous_ar.domain.arm import ArmDimensions, ContentArm
+from autonomous_ar.domain.enums import ArmLifecycleStatus, ReasonCode
+from autonomous_ar.domain.policy import DEFAULT_POLICY
+from autonomous_ar.policy.identity import (
     OUT_OF_IDENTITY_PREFIX,
     BrandIdentity,
     load_brand_identities,
 )
-from services.autonomous_ar.storage import repositories
+from autonomous_ar.storage import repositories
+
 from tests.support.ar_db import ar_session, create_ar_engine
 
 NOW = datetime(2026, 11, 1, 6, 0, tzinfo=UTC)

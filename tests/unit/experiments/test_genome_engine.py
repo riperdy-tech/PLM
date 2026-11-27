@@ -8,12 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from plm_contracts.seams.c2 import ProductionDirectivePayload
-
-from services.experiments.domain.enums import VocalGender, VocalMode
-from services.experiments.domain.errors import GenomeBuildError
-from services.experiments.experiments.engine import design_experiment
-from services.experiments.genome.engine import (
+from experiments.domain.enums import VocalGender, VocalMode
+from experiments.domain.errors import GenomeBuildError
+from experiments.experiments.engine import design_experiment
+from experiments.genome.engine import (
     TEMPLATES_PATH,
     CreativeLatitudeEnvelope,
     GenomeEngine,
@@ -25,7 +23,9 @@ from services.experiments.genome.engine import (
     default_template_library,
     normalize_dimension_value,
 )
-from services.experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
+from experiments.ingestion.p2_adapter import AdaptedDirective, adapt_directive
+from plm_contracts.seams.c2 import ProductionDirectivePayload
+
 from tests.support.seams import directive_fields
 
 FIXED_NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)

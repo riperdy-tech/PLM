@@ -4,23 +4,23 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from music_factory.domain.enums import AttemptStatus
+from music_factory.domain.models import (
+    CostRecord,
+    GenerationAttempt,
+)
+from music_factory.storage.models import (
+    generation_attempts_table,
+    provider_cost_records_table,
+)
+from music_factory.storage.repositories import (
+    insert_cost_record,
+    insert_generation_attempt,
+)
 from pydantic import ValidationError
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
-from services.music_factory.domain.enums import AttemptStatus
-from services.music_factory.domain.models import (
-    CostRecord,
-    GenerationAttempt,
-)
-from services.music_factory.storage.models import (
-    generation_attempts_table,
-    provider_cost_records_table,
-)
-from services.music_factory.storage.repositories import (
-    insert_cost_record,
-    insert_generation_attempt,
-)
 from tests.support.music_db import music_db_session
 
 NOW = datetime(2026, 10, 28, tzinfo=UTC)

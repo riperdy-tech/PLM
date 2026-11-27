@@ -2,11 +2,10 @@
 from datetime import UTC, datetime
 
 import pytest
+from autonomous_ar.domain.decision import ArmSample, ConstraintRejection
+from autonomous_ar.domain.directive import DirectiveBrief, ProductionDirective
+from autonomous_ar.domain.enums import ReasonCode
 from plm_contracts import AllocationType
-
-from services.autonomous_ar.domain.decision import ArmSample, ConstraintRejection
-from services.autonomous_ar.domain.directive import DirectiveBrief, ProductionDirective
-from services.autonomous_ar.domain.enums import ReasonCode
 
 
 def _directive(**overrides: object) -> ProductionDirective:

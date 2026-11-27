@@ -3,13 +3,12 @@
 
 from datetime import UTC, datetime, timedelta
 
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.entities import NormalizedObservation
+from market_intelligence.domain.enums import FreshnessBucket
+from market_intelligence.domain.value_objects import classify_freshness
+from market_intelligence.features.arm_features import compute_arm_features
 from plm_contracts import Tri
-
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.entities import NormalizedObservation
-from services.market_intelligence.domain.enums import FreshnessBucket
-from services.market_intelligence.domain.value_objects import classify_freshness
-from services.market_intelligence.features.arm_features import compute_arm_features
 
 SETTINGS = load_market_settings()
 

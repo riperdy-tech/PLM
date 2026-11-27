@@ -16,26 +16,25 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from plm_contracts import Tri
-from plm_platform.config import load_settings
-from plm_platform.db import database_url
-from sqlalchemy.orm import Session
-
-from services.market_intelligence.cli import _classify_pending, _recompute
-from services.market_intelligence.config import load_market_settings
-from services.market_intelligence.domain.enums import (
+from market_intelligence.cli import _classify_pending, _recompute
+from market_intelligence.config import load_market_settings
+from market_intelligence.domain.enums import (
     ConnectorType,
     EntityType,
     ProviderName,
     ProviderObjectType,
 )
-from services.market_intelligence.domain.enums import TaxonomyDimension as D
-from services.market_intelligence.normalization.youtube import NormalizedObservationDraft
-from services.market_intelligence.storage import repositories
-from services.market_intelligence.storage.models import MARKET_METADATA, raw_observations
-from services.market_intelligence.storage.raw_store import SCHEMA_VERSION
-from services.market_intelligence.taxonomy.arms import generate_candidate_arms
-from services.market_intelligence.taxonomy.validators import ClassificationDraft
+from market_intelligence.domain.enums import TaxonomyDimension as D
+from market_intelligence.normalization.youtube import NormalizedObservationDraft
+from market_intelligence.storage import repositories
+from market_intelligence.storage.models import MARKET_METADATA, raw_observations
+from market_intelligence.storage.raw_store import SCHEMA_VERSION
+from market_intelligence.taxonomy.arms import generate_candidate_arms
+from market_intelligence.taxonomy.validators import ClassificationDraft
+from plm_contracts import Tri
+from plm_platform.config import load_settings
+from plm_platform.db import database_url
+from sqlalchemy.orm import Session
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 10, 28, 6, 0, tzinfo=UTC)

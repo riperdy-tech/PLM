@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from experiments.api.app import create_app
+from experiments.config import load_experiments_settings
 from fastapi.testclient import TestClient
 from plm_contracts.seams.c2 import ProductionDirectivePayload
 from plm_platform.config import load_settings
 from sqlalchemy.orm import sessionmaker
 
-from services.experiments.api.app import create_app
-from services.experiments.config import load_experiments_settings
 from tests.support.experiments_db import create_experiments_engine
 
 ENV_WITH_TOKEN = {

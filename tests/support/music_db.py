@@ -6,10 +6,9 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import sqlalchemy as sa
+from music_factory.storage.models import MUSIC_METADATA
 from plm_platform.exceptions import EXCEPTIONS_METADATA
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.music_factory.storage.models import MUSIC_METADATA
 
 __all__ = ["create_music_engine", "music_db_session", "music_session"]
 

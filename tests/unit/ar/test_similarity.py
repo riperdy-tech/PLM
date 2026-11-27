@@ -1,11 +1,11 @@
 # tests/unit/ar/test_similarity.py
-from services.autonomous_ar.domain.arm import ArmDimensions
-from services.autonomous_ar.modeling.similarity import (
+from autonomous_ar.domain.arm import ArmDimensions
+from autonomous_ar.modeling.similarity import (
     arm_similarity,
     cluster_arms,
     structural_overlap,
 )
-from services.autonomous_ar.storage.ids import deterministic_id
+from autonomous_ar.storage.ids import deterministic_id
 
 WINNER = ArmDimensions(genre="rnb", moods=("melancholic", "dreamy"),
                        use_cases=("late_night_drive",), language="english",

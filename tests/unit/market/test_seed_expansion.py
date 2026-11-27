@@ -1,11 +1,11 @@
-from services.market_intelligence.collection.seed_expansion import (
+from market_intelligence.collection.seed_expansion import (
     SeedProposal,
     propose_from_observations,
 )
-from services.market_intelligence.collection.seeds import validate_candidate_seed
-from services.market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
-from services.market_intelligence.normalization.canonical import text_fingerprint
-from services.market_intelligence.storage import repositories
+from market_intelligence.collection.seeds import validate_candidate_seed
+from market_intelligence.domain.enums import ConnectorType, ProviderName, QueryType
+from market_intelligence.normalization.canonical import text_fingerprint
+from market_intelligence.storage import repositories
 
 # `market_seed_evidence.raw_observation_id` is a Uuid column: it must round-trip a
 # real uuid string (the bind/result processors strip and re-hyphenate).

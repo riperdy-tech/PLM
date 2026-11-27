@@ -1,6 +1,5 @@
 import pytest
-
-from services.market_intelligence.collection.rate_limit import (
+from market_intelligence.collection.rate_limit import (
     QuotaBudget,
     QuotaExceededError,
     RateLimiter,

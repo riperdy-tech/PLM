@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
+from experiments.storage.models import EXPERIMENTS_METADATA
 from sqlalchemy.orm import Session, sessionmaker
-
-from services.experiments.storage.models import EXPERIMENTS_METADATA
 
 __all__ = ["create_experiments_engine", "experiments_session"]
 

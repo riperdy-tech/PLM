@@ -8,13 +8,12 @@ turned a provider-schema problem into a plausible-looking observation instant.
 from datetime import UTC, datetime
 
 import pytest
-
-from services.market_intelligence.connectors.base import ConnectorError
-from services.market_intelligence.connectors.spotify import (
+from market_intelligence.connectors.base import ConnectorError
+from market_intelligence.connectors.spotify import (
     SpotifyConnector,
     SpotifyCredentials,
 )
-from services.market_intelligence.domain.enums import ConnectorErrorClass
+from market_intelligence.domain.enums import ConnectorErrorClass
 
 
 def connector(mock_http) -> SpotifyConnector:

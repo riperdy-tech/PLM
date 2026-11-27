@@ -1,7 +1,7 @@
 """Credits used by providers are measured facts, not inferred from a token."""
 from __future__ import annotations
 
-from services.music_factory.observability.metrics import MusicMetricsCollector
+from music_factory.observability.metrics import MusicMetricsCollector
 
 
 def test_real_provider_unknown_credit_usage_is_not_reported_as_zero_spend() -> None:

@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+from music_factory.api.app import create_app
+from music_factory.candidates.bank import replace_candidate
+from music_factory.config import load_music_factory_settings
+from music_factory.domain.enums import CandidateStatus, PlanStatus
+from music_factory.storage.repositories import get_candidate
 from plm_platform.clock import FixedClock
 from plm_platform.config import load_settings
 
-from services.music_factory.api.app import create_app
-from services.music_factory.candidates.bank import replace_candidate
-from services.music_factory.config import load_music_factory_settings
-from services.music_factory.domain.enums import CandidateStatus, PlanStatus
-from services.music_factory.storage.repositories import get_candidate
 from tests.support.music_db import create_music_engine, music_session
 from tests.unit.music.test_suno_manual_import import (
     ENV,
@@ -77,7 +77,8 @@ def test_a_replaced_song_is_asked_for_again_and_its_import_takes_its_place(
 
 
 def test_the_replace_route_marks_the_song_replaced(tmp_path: Path, monkeypatch: Any) -> None:
-    from services.music_factory.storage.artifacts import MinioArtifactStorage
+    from music_factory.storage.artifacts import MinioArtifactStorage
+
     from tests.support.fake_minio import FakeMinio
 
     monkeypatch.setenv("PLM_SUNO_MANUAL_INBOX", str(tmp_path))

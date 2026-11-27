@@ -5,27 +5,27 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from plm_contracts.seams.c3 import TrackSpecPayload
-from plm_platform.clock import FixedClock
-
-from services.music_factory.api.events import build_candidate_ready_event
-from services.music_factory.candidates.bank import (
+from music_factory.api.events import build_candidate_ready_event
+from music_factory.candidates.bank import (
     accept_candidate,
     mark_candidate_exported_to_p5,
 )
-from services.music_factory.domain.enums import (
+from music_factory.domain.enums import (
     CandidateStatus,
     CommercialUseStatus,
     PlanStatus,
 )
-from services.music_factory.generation.engine import GenerationEngine
-from services.music_factory.generation.planner import plan_generation
-from services.music_factory.generation.prompts import build_generation_prompt
-from services.music_factory.ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
-from services.music_factory.providers.mock_provider import synthesize_mock_wav
-from services.music_factory.providers.registry import select_provider_and_model
-from services.music_factory.storage.artifacts import InMemoryArtifactStorage, probe_audio_bytes
-from services.music_factory.storage.repositories import get_rights_snapshot_for_attempt
+from music_factory.generation.engine import GenerationEngine
+from music_factory.generation.planner import plan_generation
+from music_factory.generation.prompts import build_generation_prompt
+from music_factory.ingestion.p3_adapter import TrackSpecValidationError, adapt_track_spec
+from music_factory.providers.mock_provider import synthesize_mock_wav
+from music_factory.providers.registry import select_provider_and_model
+from music_factory.storage.artifacts import InMemoryArtifactStorage, probe_audio_bytes
+from music_factory.storage.repositories import get_rights_snapshot_for_attempt
+from plm_contracts.seams.c3 import TrackSpecPayload
+from plm_platform.clock import FixedClock
+
 from tests.support.music_db import music_db_session
 from tests.support.seams import lineage_fields, track_spec_fields
 
