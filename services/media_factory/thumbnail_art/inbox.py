@@ -131,10 +131,12 @@ class ArtCheck:
     1280x720 image to upload and ``content_type`` its type."""
 
     def __init__(self, problem: str | None, data: bytes = b"",
-                 content_type: str = "") -> None:
+                 content_type: str = "", source_width: int = 0) -> None:
         self.problem = problem
         self.data = data
         self.content_type = content_type
+        self.source_width = source_width
+        """The owner's original width (the still video is rendered from the original)."""
 
 
 def check_image(raw: bytes) -> ArtCheck:
@@ -145,6 +147,8 @@ def check_image(raw: bytes) -> ArtCheck:
         opened.load()
     except (UnidentifiedImageError, OSError):
         return ArtCheck("not a readable PNG, JPEG or WebP image")
+    except Image.DecompressionBombError:
+        return ArtCheck("too large to decode safely (over Pillow's pixel limit)")
     width, height = opened.size
     if abs(width / height - 16 / 9) > _ASPECT_TOLERANCE * 16 / 9:
         return ArtCheck(f"{width}x{height} is not 16:9")
@@ -158,10 +162,10 @@ def check_image(raw: bytes) -> ArtCheck:
     out = io.BytesIO()
     image.save(out, format="PNG", optimize=True)
     if out.tell() <= MAX_BYTES:
-        return ArtCheck(None, out.getvalue(), "image/png")
+        return ArtCheck(None, out.getvalue(), "image/png", width)
     for quality in (92, 85, 75):
         out = io.BytesIO()
         image.save(out, format="JPEG", quality=quality)
         if out.tell() <= MAX_BYTES:
-            return ArtCheck(None, out.getvalue(), "image/jpeg")
+            return ArtCheck(None, out.getvalue(), "image/jpeg", width)
     return ArtCheck("over 2 MB even as JPEG")

@@ -654,10 +654,13 @@ def replace_media_package_art(
     expected_status: PackageStatus,
     status: PackageStatus,
     now: datetime,
+    render_profile: str | None = None,
 ) -> bool:
-    """Swap the package's offered thumbnails and its video (with the report and manifest
-    hash that describe it) and status, only from ``expected_status``; ``False`` when
-    another writer moved the package first."""
+    """Swap the package's offered thumbnails and its video (with the report, manifest
+    hash and, when given, render profile that describe it) and status, only from
+    ``expected_status``; ``False`` when another writer moved the package first."""
+    extra: dict[str, Any] = {} if render_profile is None else {
+        "render_profile": render_profile}
     result = session.execute(
         media_packages_table.update()
         .where(media_packages_table.c.media_package_id == package_id,
@@ -665,7 +668,7 @@ def replace_media_package_art(
         .values(thumbnails_json=json.dumps(thumbnails), video_master_uri=video_master_uri,
                 video_checksum=video_checksum, video_duration_seconds=video_duration_seconds,
                 render_report_json=json.dumps(render_report), manifest_hash=manifest_hash,
-                status=status.value, updated_at=now)
+                status=status.value, updated_at=now, **extra)
     )
     return bool(cast(CursorResult[Any], result).rowcount)
 

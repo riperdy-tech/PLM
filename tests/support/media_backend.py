@@ -152,6 +152,7 @@ class StandInToolchain:
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:
         self.calls.append("still")
+        self._profile = profile  # the owner's-art still may render at another profile
         out.write_bytes(b"STAND-IN STILL VIDEO " + hashlib.sha256(
             audio_master.read_bytes() + image.read_bytes()).hexdigest().encode())
 
