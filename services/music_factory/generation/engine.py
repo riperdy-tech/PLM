@@ -802,6 +802,15 @@ class GenerationEngine:
             for decision in pending_imports:
                 self.write_guard.settle_external_write(decision, performed=True)
             pending_imports.clear()
+        archive_plan = getattr(adapter, "archive_plan", None)
+        if (archive_plan is not None and free and checkpoint is not None
+                and final_status is PlanStatus.COMPLETED):
+            # Every song is imported and committed: the plan's files leave the inbox
+            # (review 2026-11-26 #52). Only after the commit, so a rolled-back import never
+            # loses its files; a crash before the move is moved by the next run or the
+            # Studio's sweep.
+            checkpoint()
+            archive_plan(plan.track_spec_id, plan.plan_id)
 
         return GenerationEngineResult(
             plan_id=plan.plan_id,

@@ -23,6 +23,12 @@ Executing the plan then imports those files.
   frames the file holds, not its header), and for a vocal track ``<name>.lyrics.txt``
   with the lyrics as sung: P5 screens them. A file is read and hashed once per version
   (path, size, modification time).
+* **Finished plans leave the inbox.** Once every song of a plan is imported (and
+  committed), its sheet, record and song files move to ``<inbox>/imported/<plan_id>/``;
+  the Studio moves a cancelled or failed run's to ``<inbox>/cancelled/<plan_id>/``
+  (:func:`archive_track`). Nothing is deleted. Moved WAVs still count as the inbox's
+  audio (the same audio saved again waits) and a moved record still names the songs (a
+  replacement keeps its name); only a file in the inbox itself is ever imported.
 * **Identity.** The provider is ``suno`` (P3's allowlist applies) and the model
   :data:`MANUAL_MODEL_ID`. The job id is ``manual:<sha256 of the WAV>``.
 * **Rights.** The owner declares the plan tier and account (``PLM_SUNO_PLAN_TIER``,
@@ -54,12 +60,14 @@ from ..domain.enums import AttemptStatus
 from ..domain.models import GenerationRequest, GenerationResponse
 
 __all__ = [
+    "ARCHIVE_FOLDERS",
     "IMPORT_CAPABILITY",
     "MANUAL_MODEL_ID",
     "STYLES_LIMIT",
     "SunoManualAdapter",
     "SunoManualSettings",
     "WavFacts",
+    "archive_track",
     "load_manual_settings",
     "load_suno_manual_settings",
     "song_problem",
@@ -329,6 +337,40 @@ def _safe(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", name)
 
 
+ARCHIVE_FOLDERS: Final = ("imported", "cancelled")
+"""Where a finished plan's files go: all imported, or its run cancelled or failed."""
+
+
+def archive_track(inbox: Path, track_spec_id: str, plan_id: str | None,
+                  kind: str) -> list[Path]:
+    """Move one track's sheet, record and song files (``<track>-*``: WAVs, lyrics, M4As)
+    from ``inbox`` into ``<inbox>/<kind>/<plan_id>/`` and return where they went.
+
+    Never deletes: when the folder already holds one of the names (a replacement song's
+    second sheet), the files go to ``<plan_id>-2`` (``-3``...) instead. Each file is one
+    rename on the same volume, the sheet first, so a crash mid-way leaves at most song
+    files behind and a second call moves them; with nothing left it does nothing."""
+    if kind not in ARCHIVE_FOLDERS:
+        raise ValueError(f"unknown archive folder {kind!r}")
+    name = _safe(track_spec_id)
+    files = [inbox / f"{name}.prompts.txt", inbox / f"{name}.songs.json",
+             *sorted(inbox.glob(f"{name}-*"))]
+    files = [f for f in files if f.is_file()]
+    if not files:
+        return []
+    base = inbox / kind / _safe(plan_id or name)
+    folder, n = base, 1
+    while any((folder / f.name).exists() for f in files):
+        n += 1
+        folder = base.with_name(f"{base.name}-{n}")
+    folder.mkdir(parents=True, exist_ok=True)
+    moved: list[Path] = []
+    for source in files:
+        os.replace(source, folder / source.name)
+        moved.append(folder / source.name)
+    return moved
+
+
 class SunoManualAdapter:
     """Imports owner-made Suno songs from the inbox (no call to Suno)."""
 
@@ -403,13 +445,24 @@ class SunoManualAdapter:
     def _record_path(inbox: Path, track_spec_id: str) -> Path:
         return inbox / f"{_safe(track_spec_id)}.songs.json"
 
+    def _record_paths(self, inbox: Path, track_spec_id: str,
+                      plan_id: str | None) -> list[Path]:
+        """The track's record in the inbox, then where a finished plan's record went."""
+        found = [self._record_path(inbox, track_spec_id)]
+        if plan_id is not None:
+            found += [self._record_path(inbox / kind / _safe(plan_id), track_spec_id)
+                      for kind in ARCHIVE_FOLDERS]
+        return found
+
     def _record(self, inbox: Path, track_spec_id: str, plan_id: str | None) -> dict[str, Any]:
         """The track's recorded names and prompt texts (a new record for another plan)."""
-        path = self._record_path(inbox, track_spec_id)
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            loaded = None
+        loaded = None
+        for path in self._record_paths(inbox, track_spec_id, plan_id):
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                break
+            except (OSError, ValueError):
+                loaded = None
         if (not isinstance(loaded, dict) or not isinstance(loaded.get("songs"), dict)
                 or (plan_id is not None and loaded.get("plan_id") != plan_id)):
             return {"plan_id": plan_id, "provider": self.provider_id, "songs": {}}
@@ -420,12 +473,21 @@ class SunoManualAdapter:
         inbox = self._settings.inbox
         if inbox is None:
             return False
-        try:
-            loaded = json.loads(self._record_path(inbox, track_spec_id).read_text(
-                encoding="utf-8"))
-        except (OSError, ValueError):
-            return False
-        return isinstance(loaded, dict) and loaded.get("plan_id") == plan_id
+        for path in self._record_paths(inbox, track_spec_id, plan_id):
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(loaded, dict) and loaded.get("plan_id") == plan_id:
+                return True
+        return False
+
+    def archive_plan(self, track_spec_id: str, plan_id: str) -> list[Path]:
+        """Move a plan whose songs are all imported out of the inbox (``imported/``)."""
+        inbox = self._settings.inbox
+        if inbox is None or not inbox.is_dir():
+            return []
+        return archive_track(inbox, track_spec_id, plan_id, "imported")
 
     def _stem(self, inbox: Path, request: GenerationRequest,
               record: dict[str, Any]) -> str:
@@ -459,12 +521,15 @@ class SunoManualAdapter:
                           self._record(inbox, request.track_spec_id, request.plan_id))
 
     def _inbox_index(self, inbox: Path) -> dict[str, list[str]]:
-        """SHA-256 -> names of every usable WAV in the inbox."""
+        """SHA-256 -> paths (relative to the inbox) of every usable WAV in the inbox and
+        in its folders of finished plans."""
         index: dict[str, list[str]] = {}
-        for wav in sorted(inbox.glob("*.wav")):
+        wavs = [*inbox.glob("*.wav"),
+                *(w for kind in ARCHIVE_FOLDERS for w in inbox.glob(f"{kind}/*/*.wav"))]
+        for wav in sorted(wavs):
             facts = wav_facts(wav)
             if facts.sha256 is not None:
-                index.setdefault(facts.sha256, []).append(wav.name)
+                index.setdefault(facts.sha256, []).append(wav.relative_to(inbox).as_posix())
         return index
 
     def awaiting_audio(self, requests: Sequence[GenerationRequest], *,
