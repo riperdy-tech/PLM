@@ -70,7 +70,7 @@ jobs:
           test "$CI" = "true"
           cp .env.example .env
           # The example's change-me service token is accepted only in CI
-          # (plm_platform.config); the containers read this .env through the bind mount.
+          # (plm_platform.config); compose passes CI from this .env to the containers.
           echo 'CI=true' >> .env
           # A disposable database (plm_platform.migration_safety): the code-only
           # migration hold and the R5 guard exempt only reserved names on a loopback,
@@ -164,7 +164,7 @@ jobs:
           test "$CI" = "true"
           cp .env.example .env
           # The example's change-me service token is accepted only in CI
-          # (plm_platform.config); the containers read this .env through the bind mount.
+          # (plm_platform.config); compose passes CI from this .env to the containers.
           echo 'CI=true' >> .env
           # A disposable database (plm_platform.migration_safety): the code-only
           # migration hold and the R5 guard exempt only reserved names on a loopback,

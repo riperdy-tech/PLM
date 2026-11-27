@@ -18,6 +18,7 @@ be recovered safely — the key, never the value: a ``.env`` file holds secrets.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -38,8 +39,18 @@ class EnvFileError(ValueError):
     """A ``.env`` file exists but cannot be parsed."""
 
 
+DISABLED_VAR = "PLM_DOTENV_DISABLED"
+"""Set (``1``/``true``) in the process environment, no ``.env`` file is read at all.
+
+The compose containers set it: the repo (and its ``.env``) is bind-mounted at ``/app``,
+and every key they need is passed explicitly by ``docker-compose.yml`` instead.
+"""
+
+
 def load_env_file(path: str | Path) -> dict[str, str]:
     """Parse ``path``; a missing file yields ``{}`` — the file is never required."""
+    if os.environ.get(DISABLED_VAR, "").strip().lower() in ("1", "true"):
+        return {}
     file_path = Path(path)
     try:
         text = file_path.read_text(encoding="utf-8-sig")
