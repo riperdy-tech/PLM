@@ -86,3 +86,18 @@ def test_measured_duration_pipeline_preserves_all_cached_observation_evidence(
     assert set(arms[0]["source_observation_ids"]) == {long_a, long_b}
     assert short not in arms[0]["source_observation_ids"]
     assert future not in arms[0]["source_observation_ids"]
+
+
+def test_a_score_is_as_old_as_its_newest_observation_not_its_recompute(
+    market_session: sa.orm.Session,
+) -> None:
+    """Review #41: a score stamped with the recompute instant looked fresh to P2 however
+    old the evidence was. `as_of` is the newest observation behind the arm."""
+    newest = NOW - timedelta(days=3)
+    _store(market_session, suffix="a", seconds=3600.0, when=newest - timedelta(hours=5))
+    _store(market_session, suffix="b", seconds=3900.0, when=newest)
+    _classify_pending(market_session, now=NOW, settings=SETTINGS, full=True)
+    assert _recompute(market_session, now=NOW, settings=SETTINGS)["scores"] == 1
+    row = repositories.latest_scores(market_session, limit=5)[0]
+    as_of = row["as_of"] if row["as_of"].tzinfo else row["as_of"].replace(tzinfo=UTC)
+    assert as_of == newest

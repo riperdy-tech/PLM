@@ -20,7 +20,12 @@ from ..connectors.youtube import (
     parse_video_stats,
 )
 from ..domain.entities import CollectionRunCounters
-from ..domain.enums import CollectionRunStatus, EntityType, ProviderObjectType
+from ..domain.enums import (
+    CollectionRunStatus,
+    ConnectorErrorClass,
+    EntityType,
+    ProviderObjectType,
+)
 from ..normalization.canonical import (
     channel_canonical_url,
     is_valid_channel_id,
@@ -53,6 +58,8 @@ class CollectionRunSummary:
     quarantined_count: int
     error_classes: tuple[str, ...] = ()
     status: CollectionRunStatus = CollectionRunStatus.RUNNING
+    searched: bool = True
+    """False when the query's search itself failed: the query has not run (review #41)."""
 
     def counters(self, *, requests: int, successes: int, rate_limits: int) -> CollectionRunCounters:
         return CollectionRunCounters(
@@ -80,9 +87,10 @@ def collect_query(
             relevance_language=settings.search_relevance_language,
         )
     except ConnectorError as exc:
+        _raise_if_provider_quota(exc)
         return CollectionRunSummary(run_id=run_id, raw_count=0, normalized_count=0,
                                     quarantined_count=0, error_classes=(exc.error_class.value,),
-                                    status=CollectionRunStatus.PARTIAL)
+                                    status=CollectionRunStatus.PARTIAL, searched=False)
     for fetched in page.objects:
         raw = _store(session, run_id=run_id, source_id=source_id, fetched=fetched,
                      context=page.request_context_hash, storage_client=storage_client)
@@ -157,10 +165,12 @@ def fetch_channel_subscribers(
     for offset in range(0, len(wanted), _MAX_CHANNEL_IDS_PER_CALL):
         batch = wanted[offset:offset + _MAX_CHANNEL_IDS_PER_CALL]
         try:
-            fetch = connector.fetch_channels(batch)
-        except ConnectorError as exc:
-            errors.append(exc.error_class.value)
-            continue
+            try:
+                fetch = connector.fetch_channels(batch)
+            except ConnectorError as exc:
+                _raise_if_provider_quota(exc)
+                errors.append(exc.error_class.value)
+                continue
         except (QuotaExceededError, RequestBudgetExceededError) as exc:
             return ChannelHydration(subscribers=subscribers, raw_count=raw_count,
                                     quarantined_count=quarantined, error_classes=tuple(errors),
@@ -216,6 +226,7 @@ def hydrate_and_store(
     try:
         fetch = connector.fetch_videos(video_ids)
     except ConnectorError as exc:
+        _raise_if_provider_quota(exc)
         return CollectionRunSummary(run_id=run_id, raw_count=0, normalized_count=0,
                                     quarantined_count=0, error_classes=(exc.error_class.value,),
                                     status=CollectionRunStatus.PARTIAL)
@@ -257,6 +268,13 @@ def hydrate_and_store(
                                 normalized_count=normalized_count,
                                 quarantined_count=quarantined, error_classes=tuple(error_classes),
                                 status=status)
+
+
+def _raise_if_provider_quota(exc: ConnectorError) -> None:
+    """YouTube's own `quotaExceeded` ends the run like the local budget does (§27): every
+    further call would be refused too (review #41)."""
+    if exc.error_class is ConnectorErrorClass.QUOTA_EXCEEDED:
+        raise QuotaExceededError(f"provider quota exhausted: {exc.detail}") from exc
 
 
 def _store(session: Session, *, run_id: str, source_id: str, fetched: FetchedObject,
