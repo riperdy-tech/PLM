@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -21,7 +22,8 @@ from plm_platform.clock import Clock
 from plm_platform.execution import ExternalWriteGuard, WriteDecision, provider_mode_of
 from pydantic import AwareDatetime
 
-from ..analytics import YouTubeAnalyticsSource
+from ..analytics import AnalyticsNotFinal, AnalyticsUnavailable, YouTubeAnalyticsSource
+from ..client.base import YouTubeClientError
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import FailureReasonCode, OperatingMode
 from ..domain.ids import build_manifest_id
@@ -95,6 +97,36 @@ def _refused(status: int, code: str, message: str,
         status_code=status,
         detail=ErrorShape(code=code, field_paths=fields or [], message=message).model_dump(),
     )
+
+
+def _youtube_publish_time(client: Any, video_id: str) -> datetime:
+    """When YouTube says the video became public (``snippet.publishedAt``), read now.
+
+    Refuses a video YouTube does not show as public: its audience is not the one the
+    window measures (review 2026-11-26 #33)."""
+    try:
+        resource = client.get_video(video_id)
+    except YouTubeClientError as exc:
+        raise _refused(503, "analytics_unavailable",
+                       f"YouTube could not be asked about {video_id}: {exc}") from exc
+    if not resource:
+        raise _refused(409, "video_not_found_on_youtube", f"YouTube has no video {video_id!r}")
+    status = resource.get("status") or {}
+    privacy = status.get("privacyStatus")
+    if privacy != "public":
+        raise _refused(409, "video_not_public",
+                       f"{video_id} is {privacy or 'of unknown privacy'}; only a public "
+                       "video is measured")
+    raw = (resource.get("snippet") or {}).get("publishedAt")
+    published_at: datetime | None
+    try:
+        published_at = datetime.fromisoformat(raw) if isinstance(raw, str) else None
+    except ValueError:
+        published_at = None
+    if published_at is None or published_at.tzinfo is None:
+        raise _refused(409, "publish_time_unknown",
+                       f"YouTube returned no publish time for {video_id}")
+    return published_at
 
 
 def _channel_response(profile: ChannelProfile, *, created: bool) -> ChannelProfileResponse:
@@ -366,43 +398,68 @@ def create_youtube_router(
         """One cumulative snapshot of a video P7 published, for ``window`` as of ``as_of``.
 
         The video must have a publication record (404 otherwise); the source is keyed by
-        the record's stored arm and publication time. ``as_of`` is the caller's instant
-        (the pipeline's ``workflow.now()``); one before the publication is 422.
+        the record's stored arm. ``as_of`` is the caller's instant (the pipeline's
+        ``workflow.now()``).
+
+        A real source measures from YouTube's own publish time (``snippet.publishedAt``,
+        when the video became public), read again now, never from when P7 finished: a
+        video uploaded private and made public later starts its window then (review
+        2026-11-26 #33). A video that is not public is refused (409
+        ``video_not_public``). Until the window's Analytics numbers are final (Pacific
+        days, plus three days) the answer is 409 ``analytics_not_final``; the caller
+        asks again later. A mock source keeps the record's publication time, and an
+        observation before it is 422.
         """
         if analytics is None:
             raise _refused(
                 409, "analytics_source_not_configured",
-                "no YouTube Analytics source: the mock needs PLM_MOCK_OUTCOMES_FILE and a "
-                "real client is R6")
+                "no YouTube Analytics source: the mock needs PLM_MOCK_OUTCOMES_FILE; a "
+                "real one needs YouTube OAuth credentials")
         with session_factory() as session:
             record = get_publication_record_by_video_id(session, video_id)
         if record is None:
             raise _refused(404, "video_not_published", f"P7 published no video {video_id!r}",
                            ["video_id"])
         observed_at: datetime = as_of
-        if observed_at < record.published_at:
+        real = analytics.provider_mode is ProviderMode.REAL
+        published_at = record.published_at
+        if real:
+            published_at = _youtube_publish_time(yt_client, video_id)
+        if observed_at < published_at:
+            if real:
+                raise _refused(409, "analytics_not_final",
+                               f"{video_id} became public at {published_at.isoformat()}, "
+                               "after the observation")
             raise _refused(422, "observation_precedes_publication",
                            "an observation cannot predate the publication it measures",
                            ["as_of"])
-        snapshot = analytics.snapshot(record, window=window, observed_at=observed_at)
+        try:
+            snapshot = analytics.snapshot(record, window=window, observed_at=observed_at,
+                                          published_at=published_at)
+        except AnalyticsNotFinal as exc:
+            raise _refused(409, "analytics_not_final", str(exc)) from exc
+        except AnalyticsUnavailable as exc:
+            raise _refused(503, "analytics_unavailable", str(exc)) from exc
         revenue = snapshot.estimated_revenue
+
+        def number(value: Decimal | None) -> float | None:
+            return None if value is None else float(value)
+
         return VideoAnalyticsResponse(
             video_id=video_id, channel_id=record.channel_id,
             content_arm_id=record.content_arm_id, window=window.value,
-            published_at=record.published_at, observed_at=observed_at,
+            published_at=published_at, observed_at=observed_at,
             provider_mode=analytics.provider_mode.value, source=analytics.source_name,
             model_version=analytics.model_version,
             metrics={
                 "views": snapshot.views,
-                "watch_time_minutes": float(snapshot.watch_time_minutes),
-                "average_view_duration_seconds": (
-                    None if snapshot.average_view_duration_seconds is None
-                    else float(snapshot.average_view_duration_seconds)),
-                "average_percentage_viewed": float(snapshot.average_percentage_viewed),
+                "watch_time_minutes": number(snapshot.watch_time_minutes),
+                "average_view_duration_seconds": number(snapshot.average_view_duration_seconds),
+                "average_percentage_viewed": number(snapshot.average_percentage_viewed),
                 "subscribers_gained": snapshot.subscribers_gained,
                 "subscribers_lost": snapshot.subscribers_lost,
-                "estimated_revenue": {"amount": str(revenue.amount),
-                                      "currency": revenue.currency},
+                "estimated_revenue": None if revenue is None else {
+                    "amount": str(revenue.amount), "currency": revenue.currency},
             },
         )
 

@@ -22,6 +22,7 @@ from plm_platform.execution import (
 )
 from plm_platform.ledger import budget_gate_for
 
+from .analytics import RealYouTubeAnalytics
 from .client.mock import MockYouTubeClient
 from .client.real import RealYouTubeClient
 from .domain.enums import OperatingMode
@@ -223,10 +224,21 @@ def serve(host: str = "127.0.0.1", port: int = 8007) -> None:
     from .api.app import create_app
 
     exec_settings = load_execution_settings()
-    client = (
-        RealYouTubeClient()
-        if exec_settings.provider_mode("youtube") == ProviderMode.REAL
-        else MockYouTubeClient()
-    )
-    app = create_app(client=client)
+    real = exec_settings.provider_mode("youtube") == ProviderMode.REAL
+    client = RealYouTubeClient() if real else MockYouTubeClient()
+    app = create_app(client=client, analytics=real_analytics_source() if real else None)
     uvicorn.run(app, host=host, port=port)
+
+
+def real_analytics_source() -> RealYouTubeAnalytics | None:
+    """The real YouTube Analytics source over the channel's OAuth credentials (read-only);
+    ``None`` without them, so the analytics route refuses instead of inventing numbers."""
+    from analytics.ingestion.youtube_client import (
+        RealYouTubeAnalyticsClient,
+        YouTubeAnalyticsError,
+    )
+
+    client = RealYouTubeAnalyticsClient()
+    if not client.is_configured:
+        return None
+    return RealYouTubeAnalytics(client, unavailable=YouTubeAnalyticsError)
