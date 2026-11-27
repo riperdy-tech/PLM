@@ -12,8 +12,10 @@ Order of decisions for a pending observation:
    R11: P9 owns the number, P2 never invents it);
 6. another outcome of the same (experiment, content) at the horizon already applied →
    `skipped_duplicate`;
-7. otherwise `applied`. The posterior row is then recomputed from the prior and every
-   applied outcome as of `now` (`modeling.evidence`), never folded in sequentially.
+7. otherwise `applied`. After the pass, every measured arm of the brand has its posterior
+   row recomputed from its prior and every applied outcome as of `now`, on the one
+   current channel scale (`modeling.evidence`), never folded in sequentially: a new
+   video re-ranks the others, so an arm's stored row is never left on an older scale.
 
 The partial unique index on `applied` is the backstop if two workers race anyway.
 """
@@ -103,6 +105,37 @@ def _classify(session: Any, observation: RewardObservation,
     return UpdateStatus.APPLIED
 
 
+def _recompute_brand(session: Any, *, brand_id: str, versions: dict[str, int],
+                     settings: ARSettings, policy: PolicyConfig, model: RewardModel | None,
+                     fallback: NormalNormalRewardModel, now: datetime) -> None:
+    """Rewrite every measured arm of the brand from all its stored rewards, on the one
+    channel scale at `now` (#39; CI Gate R5 run 45990841649).
+
+    Once rewards are ranked against the channel's own videos, a new video moves every
+    other video's rank. Rewriting only the updated arm left the other arms' stored rows
+    on an older scale (raw before the channel had three videos, ranked after), so a
+    clearly better arm could be stored below a weaker one depending on the order the
+    rewards arrived. Recomputing all of them from the stored evidence once per pass is
+    exact, order-free and deterministic: it depends only on the evidence and `now`. An arm
+    that gained evidence takes its new version; the others keep theirs (a cache refresh,
+    not an update)."""
+    scale = channel_reward_scale(session, brand_id=brand_id, as_of=now,
+                                 default_variance=settings.observation_variance)
+    scaled = model or replace(fallback, observation_variance=scale.observation_variance)
+    measured = sorted({str(row["arm_id"]) for row in repositories.load_channel_applied_evidence(
+        session, brand_id=brand_id, as_of=now)} | set(versions))
+    for arm_id in measured:
+        stored = repositories.load_posterior(session, arm_id)
+        if stored is None:  # pragma: no cover - an applied outcome has its posterior row
+            continue
+        recomputed = posterior_as_of(session, stored, model=scaled, policy=policy, as_of=now,
+                                     scale=scale)
+        repositories.upsert_posterior(
+            session, replace(recomputed,
+                             update_version=versions.get(arm_id, stored.update_version)),
+            brand_id=brand_id, expected_version=stored.update_version)
+
+
 def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
                           policy: PolicyConfig,
                           model: RewardModel | None = None) -> UpdateSummary:
@@ -113,6 +146,8 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
     )
     counts = dict.fromkeys(UpdateStatus, 0)
     already_settled = 0
+    versions: dict[str, int] = {}  # arm -> its posterior version after this pass
+    brands: set[str] = set()
     for row in repositories.load_pending_observations(session, now=now):
         observation_id = str(row["id"])
         if repositories.load_terminal_update(session, observation_id) is not None:
@@ -133,11 +168,11 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
         status = _classify(session, observation, policy)
         counts[status] += 1
         if status is not UpdateStatus.APPLIED:
+            current = versions.get(observation.arm_id, posterior.update_version)
             repositories.insert_posterior_update(
                 session,
                 UpdateRecord(reward_observation_id=observation_id, arm_id=observation.arm_id,
-                             version_before=posterior.update_version,
-                             version_after=posterior.update_version, status=status,
+                             version_before=current, version_after=current, status=status,
                              effective_weight=0.0, updated_at=now),
                 brand_id=row["brand_id"],
             )
@@ -145,27 +180,21 @@ def apply_pending_updates(session: Any, *, settings: ARSettings, now: datetime,
                 repositories.increment_result_counts(session, arm_id=observation.arm_id,
                                                      maturity=observation.maturity, now=now)
             continue
+        before = versions.setdefault(observation.arm_id, posterior.update_version)
         repositories.insert_posterior_update(
             session,
             UpdateRecord(reward_observation_id=observation_id, arm_id=observation.arm_id,
-                         version_before=posterior.update_version,
-                         version_after=posterior.update_version + 1,
+                         version_before=before, version_after=before + 1,
                          status=UpdateStatus.APPLIED, effective_weight=1.0, updated_at=now),
             brand_id=row["brand_id"],
         )
-        # #39: the cache is written on the channel's own scale, as the cycle draws it.
-        scale = channel_reward_scale(session, brand_id=row["brand_id"], as_of=now,
-                                     default_variance=settings.observation_variance)
-        scaled_model = model or replace(resolved_model,
-                                        observation_variance=scale.observation_variance)
-        recomputed = posterior_as_of(session, posterior, model=scaled_model, policy=policy,
-                                     as_of=now, scale=scale)
-        repositories.upsert_posterior(
-            session, replace(recomputed, update_version=posterior.update_version + 1),
-            brand_id=row["brand_id"], expected_version=posterior.update_version,
-        )
+        versions[observation.arm_id] = before + 1
+        brands.add(str(row["brand_id"]))
         repositories.increment_result_counts(session, arm_id=observation.arm_id,
                                              maturity=observation.maturity, now=now)
+    for brand_id in sorted(brands):
+        _recompute_brand(session, brand_id=brand_id, versions=versions, settings=settings,
+                         policy=policy, model=model, fallback=resolved_model, now=now)
     summary = UpdateSummary(
         applied=counts[UpdateStatus.APPLIED],
         skipped_duplicate=already_settled + counts[UpdateStatus.SKIPPED_DUPLICATE],
