@@ -44,13 +44,35 @@ def effective_fractions(policy: PolicyConfig, *, low_confidence: bool,
     return (exploit, adjacent, radical)
 
 
-def quota_from_fractions(slot_count: int, fractions: tuple[float, float, float]) -> dict[
-        AllocationType, int]:
-    """Largest-remainder apportionment; counts sum exactly to `slot_count`."""
+SMALL_CYCLE_SLOTS = 3
+"""Below this many slots each slot's class is drawn with the policy weights: largest
+remainder gives one slot to exploit every time, so the exploration policy did nothing in
+the Studio's one-video cycles (review 2026-11-26)."""
+
+
+def quota_from_fractions(slot_count: int, fractions: tuple[float, float, float], *,
+                         rng: random.Random | None = None) -> dict[AllocationType, int]:
+    """Largest-remainder apportionment; counts sum exactly to `slot_count`.
+
+    With `rng` and fewer than :data:`SMALL_CYCLE_SLOTS` slots, each slot's class is a
+    seeded draw weighted by `fractions` instead (the counts still sum to `slot_count`).
+    """
     if slot_count < 1:
         raise ValueError("slot_count must be >= 1")
     classes = (AllocationType.EXPLOIT, AllocationType.ADJACENT_EXPLORE,
                AllocationType.RADICAL_EXPLORE)
+    if rng is not None and slot_count < SMALL_CYCLE_SLOTS:
+        drawn = dict.fromkeys(classes, 0)
+        for _ in range(slot_count):
+            point, cumulative = rng.random() * sum(fractions), 0.0
+            chosen = classes[0]
+            for allocation, fraction in zip(classes, fractions, strict=True):
+                cumulative += fraction
+                if fraction > 0.0 and point < cumulative:
+                    chosen = allocation
+                    break
+            drawn[chosen] += 1
+        return drawn
     raw = [slot_count * fraction for fraction in fractions]
     counts = [math.floor(value) for value in raw]
     remainder = slot_count - sum(counts)
@@ -91,6 +113,15 @@ def sample_rewards(arms: Sequence[ContentArm], posteriors: Mapping[str, Posterio
     return tuple(samples)
 
 
-def sampled_ranking(samples: Sequence[ArmSample]) -> tuple[ArmSample, ...]:
-    """§58: sampled reward descending, `arm_id` ascending — a deterministic total order."""
-    return tuple(sorted(samples, key=lambda sample: (-sample.sampled_reward, sample.arm_id)))
+def sampled_ranking(samples: Sequence[ArmSample], *,
+                    tiebreak: Mapping[str, float] | None = None) -> tuple[ArmSample, ...]:
+    """§58: sampled reward descending, then the seeded `tiebreak` value, then `arm_id`
+    ascending — a deterministic total order.
+
+    Clamped draws tie often (every draw above 1.0 is 1.0); breaking those ties on
+    `arm_id` alone always gave the same arm the slot, so the cycle passes a seeded draw
+    per arm (review 2026-11-26). Without one, ties break on `arm_id` as before.
+    """
+    breaks = tiebreak or {}
+    return tuple(sorted(samples, key=lambda sample: (
+        -sample.sampled_reward, breaks.get(sample.arm_id, 0.0), sample.arm_id)))

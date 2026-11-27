@@ -91,5 +91,8 @@ def prepare_cycle(*, arms: Sequence[ContentArm], posteriors: Mapping[str, Poster
             sampled_reward=max(0.0, sample.sampled_reward - penalty),
             posterior_expected_reward=sample.posterior_expected_reward,
         ))
-    return PreparedCycle(ranked=sampled_ranking(adjusted), classes=classes, clusters=clusters,
+    # Drawn after the Thompson draws, so the draws themselves are unchanged by it.
+    tiebreak = {arm.arm_id: rng.random() for arm in ranked_arms}
+    return PreparedCycle(ranked=sampled_ranking(adjusted, tiebreak=tiebreak),
+                         classes=classes, clusters=clusters,
                          warnings=tuple(dict.fromkeys(collected)), ineligible=ineligible)

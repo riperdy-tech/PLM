@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from plm_contracts import AllocationType, ChannelActivationState
+from plm_platform.clock import stable_seed
 from plm_platform.decision_log import DecisionRecord, allocation_decision_key, record_decision
 
 from ..config import ARSettings
@@ -304,7 +305,9 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         warnings.append(ReasonCode.MARKET_REGIME_CHANGE_SUSPECTED.value)
     fractions = effective_fractions(policy, low_confidence=low_confidence,
                                     regime_shift=regime_shift)
-    quota = quota_from_fractions(request.slot_count, fractions)
+    # A separate stream from the cycle seed: the Thompson draws below stay as they were.
+    quota = quota_from_fractions(request.slot_count, fractions,
+                                 rng=random.Random(stable_seed("p2-class-draw", seed)))
     # 8 — contextual features snapshotted before any decision is written (no leakage)
     snapshot_ids = {arm.arm_id: repositories.insert_feature_snapshot(
         session, brand_id=request.brand_id, arm=arm, captured_at=market.as_of,
