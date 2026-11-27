@@ -38,13 +38,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The pip download directory is cached on pyproject.toml: a dependency
-      # change invalidates it, everything else restores from the last run.
+      # The pip download directory is cached on constraints.txt (the pinned set CI
+      # installs) and pyproject.toml: a dependency change invalidates it, everything else
+      # restores from the last run.
       - name: Cache pip downloads
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: pip-${{ runner.os }}-${{ hashFiles('constraints.txt', 'pyproject.toml') }}
           restore-keys: |
             pip-${{ runner.os }}-
 
@@ -65,7 +66,12 @@ jobs:
       # committed example documents the canonical local values.
       - name: Provide .env for compose and tests
         run: |
+          # Only on a CI runner: run anywhere else, this would overwrite a real .env.
+          test "$CI" = "true"
           cp .env.example .env
+          # The example's change-me service token is accepted only in CI
+          # (plm_platform.config); the containers read this .env through the bind mount.
+          echo 'CI=true' >> .env
           # A disposable database (plm_platform.migration_safety): the code-only
           # migration hold and the R5 guard exempt only reserved names on a loopback,
           # non-5432 port. The shared development DB plm on 5432 stays held.
@@ -96,6 +102,34 @@ jobs:
         if: always()
         run: docker compose down -v --remove-orphans
 
+  # The owner runs PLM on Windows: the fast suite there too (no services, no .env).
+  windows-unit:
+    name: unit tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip downloads
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ hashFiles('constraints.txt', 'pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install project (editable, dev extras)
+        run: pip install -c constraints.txt -e ".[dev]"
+
+      - name: Unit tests
+        run: pytest -q -m "not integration" tests/unit
+
   # Gate R5: the full chain from a P1 observation to LEARNING on the compose stack, with
   # Temporal's time-skipping test server for the 28-day horizon. Production content
   # scale (45-75 min playlists, about 170 P5 evaluations, previews rendered by FFmpeg)
@@ -117,7 +151,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: pip-${{ runner.os }}-${{ hashFiles('constraints.txt', 'pyproject.toml') }}
           restore-keys: |
             pip-${{ runner.os }}-
 
@@ -126,7 +160,12 @@ jobs:
 
       - name: Provide .env for compose and tests
         run: |
+          # Only on a CI runner: run anywhere else, this would overwrite a real .env.
+          test "$CI" = "true"
           cp .env.example .env
+          # The example's change-me service token is accepted only in CI
+          # (plm_platform.config); the containers read this .env through the bind mount.
+          echo 'CI=true' >> .env
           # A disposable database (plm_platform.migration_safety): the code-only
           # migration hold and the R5 guard exempt only reserved names on a loopback,
           # non-5432 port. The shared development DB plm on 5432 stays held.

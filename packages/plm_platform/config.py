@@ -18,7 +18,9 @@ through to the next layer.
   :meth:`Settings.is_mock_mode` reports whether *all* of them are absent.
 * Internal service token — ``PLM_SERVICE_TOKEN`` (:data:`SERVICE_TOKEN_VAR`, R15) — is
   optional too, but it is not a provider credential: an unconfigured token makes the
-  phase APIs answer ``503 blocked_pending_credentials`` instead of serving openly.
+  phase APIs answer ``503 blocked_pending_credentials`` instead of serving openly. The
+  ``change-me`` development placeholder (:data:`PLACEHOLDER_TOKEN_PREFIX`) is refused
+  outside CI (``ENV=ci`` or a set ``CI`` variable).
 
 Secret values are :class:`~plm_platform.secrets.Secret` wrappers: ``repr``, ``str``,
 formatting and logging show ``**********`` and the real value is reachable only through
@@ -80,6 +82,9 @@ SERVICE_TOKEN_VAR: Final[str] = "PLM_SERVICE_TOKEN"
 
 SERVICE_TOKEN_HEADER: Final[str] = "X-PLM-Service-Token"
 """Header carrying the service token; the name is defined once, here."""
+
+PLACEHOLDER_TOKEN_PREFIX: Final[str] = "change-me"
+"""The ``.env.example`` placeholder spelling; such a service token is accepted only in CI."""
 
 DEFAULTS: Final[Mapping[str, str]] = MappingProxyType({"ENV": "local", "LOG_LEVEL": "INFO"})
 """Documented defaults for the operator knobs (there are no defaults for secrets)."""
@@ -155,8 +160,9 @@ def load_settings(
     process_env: Mapping[str, str] = os.environ if env is None else env
     dotenv_values = load_env_file(_DEFAULT_DOTENV if dotenv_path is None else dotenv_path)
     layers: tuple[Mapping[str, str], ...] = (process_env, dotenv_values)
+    env_token = _parse_env_token(_resolve("ENV", layers, DEFAULTS["ENV"]))
     return Settings(
-        env=_parse_env_token(_resolve("ENV", layers, DEFAULTS["ENV"])),
+        env=env_token,
         log_level=_parse_log_level(_resolve("LOG_LEVEL", layers, DEFAULTS["LOG_LEVEL"])),
         database_url=_resolve_secret("DATABASE_URL", layers),
         postgres_password=_resolve_secret("POSTGRES_PASSWORD", layers),
@@ -165,7 +171,7 @@ def load_settings(
         minio_root_password=_resolve_secret("MINIO_ROOT_PASSWORD", layers),
         minio_bucket=_resolve("MINIO_BUCKET", layers),
         temporal_host=_resolve("TEMPORAL_HOST", layers),
-        service_token=_resolve_optional_secret(SERVICE_TOKEN_VAR, layers),
+        service_token=_resolve_service_token(layers, env_token),
         youtube_api_key=_resolve_optional_secret("YOUTUBE_API_KEY", layers),
         youtube_oauth_client_id=_resolve_optional_secret("YOUTUBE_OAUTH_CLIENT_ID", layers),
         youtube_oauth_client_secret=_resolve_optional_secret(
@@ -214,6 +220,21 @@ def _resolve_secret(
 def _resolve_optional_secret(name: str, layers: tuple[Mapping[str, str], ...]) -> Secret | None:
     value = _lookup(name, layers)
     return None if value is None else Secret(value)
+
+
+def _resolve_service_token(layers: tuple[Mapping[str, str], ...], env: Env) -> Secret | None:
+    """The service token; the ``change-me`` placeholder only in CI (review 2026-11-26)."""
+    token = _resolve_optional_secret(SERVICE_TOKEN_VAR, layers)
+    in_ci = env is Env.CI or (_lookup("CI", layers) or "").strip().lower() in ("1", "true")
+    if (
+        token is not None and not in_ci
+        and token.get_secret_value().strip().lower().startswith(PLACEHOLDER_TOKEN_PREFIX)
+    ):
+        raise SettingsError(
+            f"{SERVICE_TOKEN_VAR!r} is the change-me development placeholder: set a random "
+            "token in .env (placeholders are accepted only in CI)"
+        )
+    return token
 
 
 def _parse_env_token(raw: str) -> Env:

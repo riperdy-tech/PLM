@@ -256,8 +256,17 @@ class TestEnvExampleDrift:
         # values; .env.example must not grow or lose entries silently.
         assert set(DEFAULTS) & (active | commented) == set()
 
+    def test_example_placeholder_token_is_refused_outside_ci(self) -> None:
+        with pytest.raises(SettingsError, match="PLM_SERVICE_TOKEN") as caught:
+            load(env={}, dotenv=ENV_EXAMPLE)
+        assert "change-me-dev" not in str(caught.value)
+        for ci in ({"CI": "true"}, {"ENV": "ci"}):
+            assert load(env=ci, dotenv=ENV_EXAMPLE).service_token is not None
+        real = load(env={"PLM_SERVICE_TOKEN": "a-random-token"}, dotenv=ENV_EXAMPLE)
+        assert real.service_token is not None
+
     def test_example_placeholder_values_become_the_local_configuration(self) -> None:
-        settings = load(env={}, dotenv=ENV_EXAMPLE)
+        settings = load(env={"CI": "true"}, dotenv=ENV_EXAMPLE)
         assert settings.env is Env.LOCAL
         assert settings.log_level is LogLevel.INFO
         assert settings.postgres_password.get_secret_value() == "change-me"

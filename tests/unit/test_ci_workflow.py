@@ -42,8 +42,9 @@ def workflow() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def job(workflow: dict[str, Any]) -> dict[str, Any]:
     jobs = workflow["jobs"]
-    assert set(jobs) == {"ci", "full-chain"}, (
-        "the workflow declares the PR gate (ci) and the R5 full-chain gate (full-chain)"
+    assert set(jobs) == {"ci", "windows-unit", "full-chain"}, (
+        "the workflow declares the PR gate (ci), the Windows unit tests and the R5 "
+        "full-chain gate (full-chain)"
     )
     return jobs["ci"]
 
@@ -115,7 +116,7 @@ def test_teardown_runs_even_after_failures(job: dict[str, Any]) -> None:
 def test_pip_download_cache_is_configured(job: dict[str, Any]) -> None:
     cache = next(step for step in job["steps"] if "actions/cache" in step.get("uses", ""))
     assert cache["with"]["path"] == "~/.cache/pip"
-    assert "hashFiles('pyproject.toml')" in cache["with"]["key"]
+    assert "hashFiles('constraints.txt', 'pyproject.toml')" in cache["with"]["key"]
 
 
 def test_env_file_is_provided_from_the_committed_example(job: dict[str, Any]) -> None:
@@ -124,6 +125,18 @@ def test_env_file_is_provided_from_the_committed_example(job: dict[str, Any]) ->
         "compose and the integration tests read .env; build it from the committed "
         "example rather than duplicating values in the workflow"
     )
+    assert joined.index('test "$CI" = "true"') < joined.index("cp .env.example .env"), (
+        "the .env is written only on a CI runner, never over a developer's real .env"
+    )
+
+
+def test_windows_job_runs_the_unit_tests(workflow: dict[str, Any]) -> None:
+    win = workflow["jobs"]["windows-unit"]
+    assert win["runs-on"] == "windows-latest"
+    runs = "\n".join(_step_runs(win))
+    assert 'pip install -c constraints.txt -e ".[dev]"' in runs
+    assert 'pytest -q -m "not integration" tests/unit' in runs
+    assert "docker" not in runs
 
 
 def test_full_chain_job_configured(workflow: dict[str, Any]) -> None:
