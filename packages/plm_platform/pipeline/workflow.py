@@ -54,6 +54,7 @@ elapsed between two steps, so a time-skipping test server runs the same code.
 
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -62,6 +63,7 @@ from typing import Any, Final
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError, RetryState
+from temporalio.workflow import ActivityCancellationType
 
 with workflow.unsafe.imports_passed_through():
     from plm_contracts.enums import ObservationWindow
@@ -92,6 +94,7 @@ with workflow.unsafe.imports_passed_through():
         StepResult,
         TransitionAck,
         TransitionRecord,
+        WithdrawHoldsRequest,
         WriteCost,
         WriteCostsRequest,
     )
@@ -124,6 +127,22 @@ EXTENSION_LIMIT_CODE: Final[str] = "package_extension_limit_exceeded"
 DECIDED_FAILURES: Final[frozenset[str]] = frozenset({"CreativeRejection", "PolicyRejection"})
 """Failures that decide the content: they end the run. Any other permanent failure of a
 step is the platform's and holds it."""
+STEP_CANCELLED: Final[str] = "StepCancelled"
+"""The workflow cancelled a running step because the run was cancelled (#12)."""
+WAITING_STEPS: Final[frozenset[Step]] = frozenset({Step.AWAIT_PROCESSING, Step.DISPATCH_REWARD})
+"""Steps that poll another system until it is ready (#10)."""
+
+# Review 2026-11-26: each changed behaviour is behind its own patch, so a history
+# recorded before it replays the old commands (live runs exist).
+PATCH_PLATFORM_FAULTS: Final[str] = "platform-faults-hold"
+"""#9: platform activities retry without an attempt limit; a business refusal of
+write_costs holds the run, and one of a resume check is a recorded refusal."""
+PATCH_WAITING_RETRY: Final[str] = "waiting-step-retry"
+PATCH_QA_RESOLVE: Final[str] = "qa-hold-resolves-p5"
+PATCH_CANCEL_STEP: Final[str] = "cancel-running-step"
+PATCH_SIGNALS_FORMING: Final[str] = "signals-while-hold-forms"
+PATCH_CANCEL_WITHDRAWS: Final[str] = "cancel-withdraws-holds"
+PATCH_EXCLUSIONS_IGNORED: Final[str] = "record-ignored-exclusions"
 
 
 def topup_count(missing_seconds: int, shortest_track_seconds: int, spare: int) -> int:
@@ -219,21 +238,27 @@ class PipelineWorkflow:
         """The run's P3 packages (policy check), for a swap at an assembly hold."""
         self._receipts: list[dict[str, Any]] = []
         """Every external write the phases reported, for the cost read at the outcome."""
+        self._hold_forming = False
+        """A hold's cases are being raised: a resume sent now is kept for it (#13)."""
+        self._cleared_by: ResumeSignal | ExternalResolutionSignal | None = None
+        """The signal that cleared the last hold (a QA hold resolves P5's cases, #11)."""
 
     # -- signals and query -----------------------------------------------------------------
 
     @workflow.signal
     def resume(self, signal: ResumeSignal) -> None:
-        """Ask to continue past the open holds. Ignored unless the run is HELD."""
-        if self._state is PipelineState.HELD:
+        """Ask to continue past the open holds. Ignored unless the run is HELD (or, since
+        review 2026-11-26 #13, its hold is being raised: the cases are already OPEN)."""
+        if self._state is PipelineState.HELD or self._hold_forming:
             self._signals.append(signal)
         else:
             workflow.logger.warning("resume ignored: run is %s, not HELD", self._state)
 
     @workflow.signal
     def external_resolution(self, signal: ExternalResolutionSignal) -> None:
-        """Record a hard stop's external evidence. Ignored unless the run is HELD."""
-        if self._state is PipelineState.HELD:
+        """Record a hard stop's external evidence. Ignored unless the run is HELD (or its
+        hold is being raised)."""
+        if self._state is PipelineState.HELD or self._hold_forming:
             self._signals.append(signal)
         else:
             workflow.logger.warning("external_resolution ignored: run is %s", self._state)
@@ -342,10 +367,9 @@ class PipelineWorkflow:
         if not await self._analyze(published_at, horizon):
             return self._outcome()
 
-        costs = await self._platform(
-            PlatformActivity.WRITE_COSTS,
-            WriteCostsRequest(receipts=tuple(self._receipts), requested_at=workflow.now()),
-            list[WriteCost])
+        costs = await self._write_costs()
+        if costs is None:
+            return self._outcome()
         outcome_inputs = {
             "research": research.result.outputs, "assemble": assembled.result.outputs,
             "upload": uploaded.result.outputs, "submit_distribution": submitted.result.outputs,
@@ -403,6 +427,22 @@ class PipelineWorkflow:
                  for h in holds]
         if not await self._hold(Step.QA, specs, error_code="qa_quarantined", done=checked):
             return False
+        # Review 2026-11-26 #11: clearing the hold alone left P5's quarantine cases open,
+        # so the cleared songs had no release manifest and assembly ran short. A
+        # reviewer's resume resolves them in P5 with the same role and evidence. (A hard
+        # stop cleared by external evidence is not an override P5 can grant.)
+        signal = self._cleared_by
+        case_ids = sorted({str(h["details"]["quarantine_case_id"]) for h in holds
+                           if isinstance(h.get("details"), dict)
+                           and h["details"].get("quarantine_case_id")})
+        if (isinstance(signal, ResumeSignal) and case_ids
+                and workflow.patched(PATCH_QA_RESOLVE)):
+            resolved = await self._step(Step.QA_RESOLVE, {
+                "quarantine_case_ids": case_ids, "actor": signal.actor, "role": signal.role,
+                "evidence": dict(signal.evidence)})
+            if resolved is None:
+                return False
+            await self._move(PipelineState.QA, step=Step.QA_RESOLVE, done=resolved)
         await self._move(PipelineState.PASSED, step=Step.QA,
                          outputs={"cleared_by_hold_resolution": True,
                                   "disposition": "QUARANTINED"})
@@ -617,22 +657,65 @@ class PipelineWorkflow:
                     key_name: str) -> StepResult | _Failure:
         assert self._input is not None
         options = self._input.options
-        try:
-            result: StepResult = await workflow.execute_activity(
-                step_activity_name(step), self._request(step, inputs, key_name),
-                result_type=StepResult,
-                start_to_close_timeout=timedelta(seconds=options.step_start_to_close_seconds),
-                heartbeat_timeout=timedelta(seconds=options.step_heartbeat_seconds),
-                retry_policy=RetryPolicy(
-                    initial_interval=timedelta(seconds=1), backoff_coefficient=2.0,
-                    maximum_interval=timedelta(seconds=60),
-                    maximum_attempts=options.step_maximum_attempts,
-                    non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES),
-                ),
+        retry = RetryPolicy(
+            initial_interval=timedelta(seconds=1), backoff_coefficient=2.0,
+            maximum_interval=timedelta(seconds=60),
+            maximum_attempts=options.step_maximum_attempts,
+            non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES),
+        )
+        schedule_to_close: timedelta | None = None
+        if step in WAITING_STEPS and workflow.patched(PATCH_WAITING_RETRY):
+            # Review 2026-11-26 #10: 5 attempts at 1-8 s (~15 s) ended slow YouTube
+            # processing in a hold that needed a manual resume. Poll with a long
+            # backoff, bounded by time instead of attempts.
+            retry = RetryPolicy(
+                initial_interval=timedelta(
+                    seconds=options.waiting_step_initial_interval_seconds),
+                backoff_coefficient=2.0,
+                maximum_interval=timedelta(
+                    seconds=options.waiting_step_maximum_interval_seconds),
+                maximum_attempts=0,
+                non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES),
             )
+            schedule_to_close = timedelta(
+                seconds=options.waiting_step_schedule_to_close_seconds)
+        request = self._request(step, inputs, key_name)
+        if not workflow.patched(PATCH_CANCEL_STEP):
+            try:
+                result: StepResult = await workflow.execute_activity(
+                    step_activity_name(step), request, result_type=StepResult,
+                    start_to_close_timeout=timedelta(
+                        seconds=options.step_start_to_close_seconds),
+                    heartbeat_timeout=timedelta(seconds=options.step_heartbeat_seconds),
+                    schedule_to_close_timeout=schedule_to_close, retry_policy=retry,
+                )
+            except ActivityError as error:
+                return _failure(error)
+            return result
+        # Review 2026-11-26 #12: Cancel used to wait for the running step, so an upload
+        # in progress still published. Race the step against the cancel signal and
+        # cancel it (the step's HTTP client checks the cancellation before every request).
+        handle = workflow.start_activity(
+            step_activity_name(step), request, result_type=StepResult,
+            start_to_close_timeout=timedelta(seconds=options.step_start_to_close_seconds),
+            heartbeat_timeout=timedelta(seconds=options.step_heartbeat_seconds),
+            schedule_to_close_timeout=schedule_to_close, retry_policy=retry,
+            cancellation_type=ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+        )
+        await workflow.wait_condition(lambda: handle.done() or self._cancel is not None)
+        if not handle.done():
+            handle.cancel()
+            try:
+                await handle
+            except (ActivityError, asyncio.CancelledError):
+                pass
+            return _Failure(type=STEP_CANCELLED, message="the run was cancelled mid-step",
+                            attempt=0, non_retryable=True)
+        try:
+            done: StepResult = await handle
         except ActivityError as error:
             return _failure(error)
-        return result
+        return done
 
     async def _attempt(self, step: Step, inputs: dict[str, Any], *,
                        enter: PipelineState | None = None,
@@ -657,6 +740,9 @@ class PipelineWorkflow:
                 return _Done(result=outcome, started_at=started, inputs=inputs,
                              key_name=None if name == step.value else name)
             failure = replace(outcome, started_at=started, key_name=name)
+            if failure.type == STEP_CANCELLED:
+                await self._cancelled()
+                return None
             if failure.type == "CapabilityUnavailable":
                 if await self._capability_hold(step, failure):
                     continue
@@ -749,6 +835,10 @@ class PipelineWorkflow:
         # same directive (a closed case must never answer a new hold's resume).
         subject = f"{workflow_id}:{workflow.info().run_id}:{step.value}:{episode}"
         self._signals.clear()  # nothing sent before this hold existed may decide it
+        # Review 2026-11-26 #13: the cases are OPEN in the queue (and shown in the Studio)
+        # as soon as raise_hold commits, before the run records HELD; a resume sent in
+        # between was dropped although the Studio said "sent".
+        self._hold_forming = workflow.patched(PATCH_SIGNALS_FORMING)
         cases: list[HoldInfo] = []
         for origin, reason_code, details in specs:
             cases.append(await self._platform(
@@ -769,12 +859,22 @@ class PipelineWorkflow:
                          error_code=error_code, error_detail=error_detail,
                          hold_case_ids=tuple(c.case_id for c in cases), held_from=held_from,
                          attempt=attempt, key_name=key_name)
+        self._hold_forming = False
         self._open_cases = tuple(c.case_id for c in cases)
         cleared: set[str] = set()
         while True:
             await workflow.wait_condition(
                 lambda: bool(self._signals) or self._cancel is not None)
             if self._cancel is not None:
+                pending = tuple(c for c in self._open_cases if c not in cleared)
+                if pending and workflow.patched(PATCH_CANCEL_WITHDRAWS):
+                    # Review 2026-11-26: a cancelled held run left its cases OPEN.
+                    await self._platform(
+                        PlatformActivity.WITHDRAW_HOLDS,
+                        WithdrawHoldsRequest(case_ids=pending, actor=self._cancel.actor,
+                                             reason=self._cancel.reason,
+                                             requested_at=workflow.now()),
+                        list[str])
                 await self._cancelled()
                 return False
             signal = self._signals.pop(0)
@@ -830,6 +930,16 @@ class PipelineWorkflow:
                     if self._swap:
                         summary["exclude_candidates"] = sorted(
                             c for songs in self._swap.values() for c in songs)
+                ignored = sorted(excluded - {c for songs in self._swap.values()
+                                             for c in songs})
+                if ignored and workflow.patched(PATCH_EXCLUSIONS_IGNORED):
+                    # Review 2026-11-26: songs taken out where no swap happens (a hold
+                    # that may not rewind, a song in no package) were dropped without a
+                    # trace; the record names the ones not acted on.
+                    summary["exclude_candidates_ignored"] = ignored
+                    workflow.logger.warning("exclusions %s ignored on a %s hold",
+                                            ignored, step.value)
+                self._cleared_by = signal
                 await self._move(held_from, outputs=summary, hold_case_ids=self._open_cases)
                 self._open_cases = ()
                 if self._signals:
@@ -845,6 +955,20 @@ class PipelineWorkflow:
 
     async def _decide(self, signal: ResumeSignal | ExternalResolutionSignal,
                       case_ids: tuple[str, ...]) -> list[ResumeVerdict]:
+        if not workflow.patched(PATCH_PLATFORM_FAULTS):
+            return await self._decide_once(signal, case_ids)
+        try:
+            return await self._decide_once(signal, case_ids)
+        except ActivityError as error:
+            # Review 2026-11-26 #9: a non-retryable refusal of the check (an unknown
+            # external outcome) used to fail the run; it is a refusal, the run stays HELD.
+            failure = _failure(error)
+            return [ResumeVerdict(case_id=c, allowed=False, code="resume_check_failed",
+                                  message=f"{failure.type}: {failure.message}",
+                                  case_status="OPEN") for c in case_ids]
+
+    async def _decide_once(self, signal: ResumeSignal | ExternalResolutionSignal,
+                           case_ids: tuple[str, ...]) -> list[ResumeVerdict]:
         if isinstance(signal, ExternalResolutionSignal):
             return await self._platform(
                 PlatformActivity.RECORD_EXTERNAL_RESOLUTION,
@@ -946,17 +1070,55 @@ class PipelineWorkflow:
                            result_type: type[R]) -> R:
         assert self._input is not None
         options = self._input.options
-        result: R = await workflow.execute_activity(
-            name.value, request, result_type=result_type,
-            start_to_close_timeout=timedelta(seconds=options.platform_start_to_close_seconds),
-            retry_policy=RetryPolicy(
+        if workflow.patched(PATCH_PLATFORM_FAULTS):
+            # Review 2026-11-26 #9: 10 attempts at <= 30 s meant a ~3 min database or
+            # Docker restart failed the whole run (and REJECT_DUPLICATE means its directive
+            # can never run again). Every platform operation is idempotent: retry until
+            # the platform is back, backing off to 5 minutes.
+            retry = RetryPolicy(
+                initial_interval=timedelta(seconds=1), backoff_coefficient=2.0,
+                maximum_interval=timedelta(minutes=5), maximum_attempts=0,
+                non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES))
+        else:
+            retry = RetryPolicy(
                 initial_interval=timedelta(seconds=1), backoff_coefficient=2.0,
                 maximum_interval=timedelta(seconds=30),
                 maximum_attempts=options.platform_maximum_attempts,
-                non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES),
-            ),
+                non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES))
+        result: R = await workflow.execute_activity(
+            name.value, request, result_type=result_type,
+            start_to_close_timeout=timedelta(seconds=options.platform_start_to_close_seconds),
+            retry_policy=retry,
         )
         return result
+
+    async def _write_costs(self) -> list[WriteCost] | None:
+        """The run's write costs from the ledger; ``None`` when the run ended.
+
+        Review 2026-11-26 #9: a business refusal here (no ledger currency configured)
+        came after the video was public and failed the run. It holds the run as a
+        platform fault instead; the platform owner's resume reads the costs again."""
+        if not workflow.patched(PATCH_PLATFORM_FAULTS):
+            return await self._platform(
+                PlatformActivity.WRITE_COSTS,
+                WriteCostsRequest(receipts=tuple(self._receipts), requested_at=workflow.now()),
+                list[WriteCost])
+        while True:
+            if await self._cancelled():
+                return None
+            started = workflow.now()
+            try:
+                return await self._platform(
+                    PlatformActivity.WRITE_COSTS,
+                    WriteCostsRequest(receipts=tuple(self._receipts),
+                                      requested_at=workflow.now()),
+                    list[WriteCost])
+            except ActivityError as error:
+                failure = replace(_failure(error), started_at=started,
+                                  key_name="write_costs")
+                if not await self._platform_hold(Step.EVALUATE_OUTCOME, failure,
+                                                 PLATFORM_FAULT_HOLD_REASON):
+                    return None
 
     # -- facts -----------------------------------------------------------------------------
 

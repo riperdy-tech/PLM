@@ -68,6 +68,7 @@ from .types import (
     StepResult,
     TransitionAck,
     TransitionRecord,
+    WithdrawHoldsRequest,
     WriteCost,
     WriteCostsRequest,
 )
@@ -102,6 +103,7 @@ class PhaseSteps(Protocol):
     async def policy_check(self, request: StepRequest) -> StepResult: ...
     async def generate(self, request: StepRequest) -> StepResult: ...
     async def qa(self, request: StepRequest) -> StepResult: ...
+    async def qa_resolve(self, request: StepRequest) -> StepResult: ...
     async def assemble(self, request: StepRequest) -> StepResult: ...
     async def upload(self, request: StepRequest) -> StepResult: ...
     async def submit_distribution(self, request: StepRequest) -> StepResult: ...
@@ -122,6 +124,7 @@ class PlatformActivities(Protocol):
     async def record_external_resolution(
         self, request: ExternalResolutionRequest
     ) -> list[ResumeVerdict]: ...
+    async def withdraw_holds(self, request: WithdrawHoldsRequest) -> list[str]: ...
 
 
 class PipelineActivities(PhaseSteps, PlatformActivities, Protocol):
@@ -331,6 +334,27 @@ class PlatformOperations:
             session.commit()
         return verdicts
 
+    async def withdraw_holds(self, request: WithdrawHoldsRequest) -> list[str]:
+        return await asyncio.to_thread(self._withdraw_holds, request)
+
+    def _withdraw_holds(self, request: WithdrawHoldsRequest) -> list[str]:
+        """Close a cancelled run's still-open holds as withdrawn; the ids closed now.
+
+        Review 2026-11-26: a cancelled held run left its cases OPEN in the queue. A case
+        already closed (a retried call, a reviewer's own decision) is left as it is."""
+        withdrawn: list[str] = []
+        with self._session_factory() as session:
+            for case_id in request.case_ids:
+                if not self._queue.require(session, case_id).is_open:
+                    continue
+                self._queue.resolve(
+                    session, case_id, decision=ReviewDecision.WITHDRAW, actor=request.actor,
+                    role=None, evidence={}, notes=f"run cancelled: {request.reason}",
+                    now=request.requested_at)
+                withdrawn.append(case_id)
+            session.commit()
+        return withdrawn
+
 
 # --- Temporal adapters --------------------------------------------------------------------
 
@@ -430,6 +454,7 @@ _PLATFORM_METHODS: Mapping[PlatformActivity, tuple[str, Any, Any]] = {
     PlatformActivity.AUTHORIZE_RESUME: ("authorize_resume", ResumeRequest, list[ResumeVerdict]),
     PlatformActivity.RECORD_EXTERNAL_RESOLUTION: (
         "record_external_resolution", ExternalResolutionRequest, list[ResumeVerdict]),
+    PlatformActivity.WITHDRAW_HOLDS: ("withdraw_holds", WithdrawHoldsRequest, list[str]),
 }
 
 

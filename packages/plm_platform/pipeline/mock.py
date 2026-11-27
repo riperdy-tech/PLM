@@ -120,6 +120,8 @@ def default_scripts(*, outcome_horizon: str = "24h",
         Step.LEARN: ScriptedStep(outputs={"update": {"applied": 1},
                                           "next_cycle": {"cycle_id": "cycle-mock"}},
                                  provider_ids={"next_cycle_id": "cycle-mock"}),
+        Step.QA_RESOLVE: ScriptedStep(outputs={"resolved_case_ids": []},
+                                      provider_ids={"quarantine_resolution": "qr-mock"}),
     }
 
 
@@ -269,3 +271,6 @@ class MockPhaseSteps:
 
     async def learn(self, request: StepRequest) -> StepResult:
         return await self._run(Step.LEARN, request)
+
+    async def qa_resolve(self, request: StepRequest) -> StepResult:
+        return await self._run(Step.QA_RESOLVE, request)

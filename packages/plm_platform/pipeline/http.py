@@ -8,6 +8,8 @@ service token and an ``Idempotency-Key`` per write (:mod:`.phase_client`):
 * ``generate``: P4 plan + execute per track spec, each candidate exported to P5. Only
   the given ``track_spec_ids`` when the step is a playlist top-up.
 * ``qa``: P4's C4 event per candidate, evaluated by P5 from the artifact store.
+* ``qa_resolve``: a cleared quarantine hold resolves P5's quarantine cases with the
+  reviewer's evidence (``POST /qa/quarantine/{id}/resolve``).
 * ``assemble``: P6 assembles each P3 package's cleared recordings into a playlist whose
   length lies in the package's declared ``duration_range_seconds``. A package whose
   cleared supply is short of the minimum (P6 ``playlist_supply_short``) is reported in
@@ -436,6 +438,47 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
                                 body={"candidate_event": event})
             evaluations.append(_qa_evaluation(str(candidate_id), evaluated))
         return _qa_result(evaluations)
+
+    # -- qa_resolve: a cleared quarantine hold resolves P5's cases (review 2026-11-26 #11) --
+
+    async def qa_resolve(self, request: StepRequest) -> StepResult:
+        return await asyncio.to_thread(self._qa_resolve, request)
+
+    def _qa_resolve(self, request: StepRequest) -> StepResult:
+        """Resolve every P5 quarantine case of a cleared hold as ``CLEARED_BY_OVERRIDE``.
+
+        Clearing the pipeline's hold alone left P5's cases open, so the cleared songs had
+        no release manifest and assembly reported the playlist short. P5 authorizes the
+        override itself (the reviewer's role and evidence, as the hold did) and issues the
+        manifest. A case P5 already resolved is accepted (a retried step, or a reviewer
+        who resolved it in P5); any other refusal fails the step."""
+        case_ids = require(request.inputs, "quarantine_case_ids", "qa_resolve inputs")
+        actor = str(require(request.inputs, "actor", "qa_resolve inputs"))
+        evidence = request.inputs.get("evidence") or {}
+        if not isinstance(case_ids, list) or not isinstance(evidence, dict):
+            raise ValidationFailure("qa_resolve inputs: case ids must be a list, evidence a map")
+        p5 = self._client(Phase.QA)
+        resolved: list[str] = []
+        already: list[str] = []
+        for raw in case_ids:
+            case_id = str(raw)
+            try:
+                p5.post(f"/qa/quarantine/{case_id}/resolve",
+                        idempotency_key=request_key(request.idempotency_key, "resolve", case_id),
+                        body={"resolution": "CLEARED_BY_OVERRIDE", "auditor_id": actor,
+                              "reviewer_role": request.inputs.get("role"),
+                              "evidence": {str(k): str(v) for k, v in evidence.items()},
+                              "notes": "cleared through the pipeline's quarantine hold"})
+            except PhaseRequestRefused as exc:
+                if exc.code != "quarantine_already_resolved":
+                    raise
+                already.append(case_id)
+                continue
+            resolved.append(case_id)
+        return StepResult(
+            outputs={"resolved_case_ids": resolved, "already_resolved_case_ids": already},
+            provider_ids={f"quarantine_case.{n}": c for n, c in enumerate(resolved + already)},
+        )
 
     # -- assemble: P6 assembles and renders each P3 package's cleared recordings -----------
 
