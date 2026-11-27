@@ -153,6 +153,10 @@ class TransitionRecord:
     """For a transition into or within ``HELD``: the state the run returns to."""
     final: bool = False
     """The run's last transition (it completed, or ended in a terminal state)."""
+    run_id: str | None = None
+    """The Temporal run that offered the record. A reset run offers sequences the old
+    run already wrote; the store tells the two apart by it (review 2026-11-26). ``None``
+    on records from before that change (their digest is unchanged)."""
 
 
 @dataclass(frozen=True, slots=True)

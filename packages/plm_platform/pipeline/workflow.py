@@ -146,6 +146,15 @@ PATCH_CANCEL_STEP: Final[str] = "cancel-running-step"
 PATCH_SIGNALS_FORMING: Final[str] = "signals-while-hold-forms"
 PATCH_CANCEL_WITHDRAWS: Final[str] = "cancel-withdraws-holds"
 PATCH_EXCLUSIONS_IGNORED: Final[str] = "record-ignored-exclusions"
+PATCH_RESET_CONTINUATION: Final[str] = "transition-reset-continuation"
+"""A record names its Temporal run, and the run numbers on from the sequence the store
+assigned: after a reset the store appends the new run's transitions after the old run's
+instead of refusing them (which failed the run)."""
+PATCH_REFUSAL_RECORDED: Final[str] = "platform-refusal-recorded"
+"""#9 remainder: a permanent refusal of record_transition or raise_hold (a platform bug
+no retry fixes) ends the run with a FAILED transition that says what was refused."""
+TRANSITION_REFUSED: Final[str] = "transition_refused"
+HOLD_NOT_RAISED: Final[str] = "hold_not_raised"
 
 
 def topup_count(missing_seconds: int, shortest_track_seconds: int, spare: int) -> int:
@@ -245,6 +254,8 @@ class PipelineWorkflow:
         """A hold's cases are being raised: a resume sent now is kept for it (#13)."""
         self._cleared_by: ResumeSignal | ExternalResolutionSignal | None = None
         """The signal that cleared the last hold (a QA hold resolves P5's cases, #11)."""
+        self._refusal_recorded = False
+        """A refused transition is being recorded as the run's failure (once only)."""
 
     # -- signals and query -----------------------------------------------------------------
 
@@ -854,12 +865,33 @@ class PipelineWorkflow:
         self._hold_forming = workflow.patched(PATCH_SIGNALS_FORMING)
         cases: list[HoldInfo] = []
         for origin, reason_code, details in specs:
-            cases.append(await self._platform(
-                PlatformActivity.RAISE_HOLD,
-                HoldRequest(origin_phase=origin, subject_ref=subject, reason_code=reason_code,
-                            raised_by=f"pipeline:{workflow_id}", raised_at=workflow.now(),
-                            details=details),
-                HoldInfo))
+            try:
+                cases.append(await self._platform(
+                    PlatformActivity.RAISE_HOLD,
+                    HoldRequest(origin_phase=origin, subject_ref=subject,
+                                reason_code=reason_code, raised_by=f"pipeline:{workflow_id}",
+                                raised_at=workflow.now(), details=details),
+                    HoldInfo))
+            except ActivityError as error:
+                if not workflow.patched(PATCH_REFUSAL_RECORDED):
+                    raise
+                # Review 2026-11-26 #9: the queue refused the hold for good (a platform
+                # bug); without a hold the run cannot wait, so it ends, saying why.
+                failure = _failure(error)
+                workflow.logger.error("hold %s for %s not raised: %s: %s", reason_code,
+                                      step.value, failure.type, failure.message)
+                self._hold_forming = False
+                await self._move(
+                    PipelineState.FAILED, step=step, final=True, error_code=HOLD_NOT_RAISED,
+                    error_detail=f"the {reason_code} hold was refused: {failure.type}: "
+                                 f"{failure.message}",
+                    hold_case_ids=tuple(c.case_id for c in cases),
+                    outputs={"refused_hold": {"origin_phase": origin,
+                                              "reason_code": reason_code,
+                                              "details": details},
+                             "error_code": error_code, "error_detail": error_detail,
+                             "failure": {"type": failure.type, "details": failure.details}})
+                return False
         held_from = self._state
         assert held_from is not None
         hold_outputs: dict[str, Any] = {"holds": [
@@ -1072,12 +1104,42 @@ class PipelineWorkflow:
             hold_case_ids=hold_case_ids,
             held_from=None if held_from is None else held_from.value, final=final,
         )
-        await self._platform(PlatformActivity.RECORD_TRANSITION, record, TransitionAck)
-        self._sequence = sequence
+        # Review 2026-11-26: after a Temporal reset the store appends this run's records
+        # after the old run's and says where; the run numbers on from there.
+        continues = workflow.patched(PATCH_RESET_CONTINUATION)
+        if continues:
+            record = replace(record, run_id=workflow.info().run_id)
+        try:
+            ack = await self._platform(PlatformActivity.RECORD_TRANSITION, record,
+                                       TransitionAck)
+        except ActivityError as error:
+            if self._refusal_recorded or not workflow.patched(PATCH_REFUSAL_RECORDED):
+                raise
+            await self._refused(record, error)
+            raise  # unreachable: _refused always raises
+        self._sequence = ack.sequence if continues else sequence
         self._state = target
         self._held_from = held_from if target is PipelineState.HELD else None
         if error_code is not None:
             self._last_error = error_code
+
+    async def _refused(self, record: TransitionRecord, error: ActivityError) -> None:
+        """Review 2026-11-26 #9: the store refused a transition for good (a platform bug
+        no retry fixes). Record the run's failure from the state it is really in, saying
+        what was refused, then fail the workflow with the same message."""
+        self._refusal_recorded = True
+        failure = _failure(error)
+        detail = (f"transition {record.from_state} -> {record.to_state} (sequence "
+                  f"{record.sequence}, step {record.step}) refused: {failure.type}: "
+                  f"{failure.message}")
+        workflow.logger.error("%s", detail)
+        await self._move(PipelineState.FAILED, final=True, error_code=TRANSITION_REFUSED,
+                         error_detail=detail,
+                         outputs={"refused_transition": {
+                             "to_state": record.to_state, "step": record.step,
+                             "sequence": record.sequence, "error_code": record.error_code},
+                             "failure": {"type": failure.type, "details": failure.details}})
+        raise ApplicationError(detail, type="TransitionRefused", non_retryable=True)
 
     async def _platform[R](self, name: PlatformActivity, request: Any,
                            result_type: type[R]) -> R:
