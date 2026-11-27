@@ -9,6 +9,7 @@ all is the engine's ``ExternalWriteGuard`` decision, tested elsewhere.
 """
 from __future__ import annotations
 
+import httpx
 import pytest
 from youtube_publishing.client.base import (
     YouTubeAuthError,
@@ -171,6 +172,39 @@ def test_a_4xx_answer_marks_the_write_as_refused(mock_http: MockHTTP, error: str
     with pytest.raises(YouTubeClientError) as raised:
         _client(mock_http).insert_resumable_session(snippet={}, status={}, content_length=1)
     assert raised.value.refused is refused
+
+
+def test_one_connection_pool_serves_every_chunk(mock_http: MockHTTP,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """A new ``httpx.Client`` per chunk cost ~800 TLS handshakes per video (review P2)."""
+    import youtube_publishing.client.real as real
+
+    built: list[object] = []
+    original = httpx.Client
+
+    def counting(**options: object) -> httpx.Client:
+        client = original(transport=mock_http._transport, **options)  # type: ignore[arg-type]
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(real.httpx, "Client", counting)
+    enqueue(mock_http, P, "oauth_token", "session_created", "chunk_308_all_received",
+            "upload_complete")
+    client = RealYouTubeClient(client_id="cid", client_secret="secret", refresh_token="r")
+    client.insert_resumable_session(snippet={}, status={}, content_length=1000)
+    assert _chunk(client, 0) is None
+    assert _chunk(client, 500) is not None
+    assert len(built) == 1
+    client.close()
+
+
+def test_the_engine_uploads_in_8_mib_chunks() -> None:
+    """Google wants multiples of 256 KiB; 8 MiB keeps an 821 MB master to ~100 requests."""
+    from inspect import signature
+
+    from youtube_publishing.engine import YouTubePublishingEngine
+
+    assert signature(YouTubePublishingEngine).parameters["chunk_size"].default == 8 * 1024 * 1024
 
 
 def test_a_rejected_token_refresh_is_refused(mock_http: MockHTTP) -> None:

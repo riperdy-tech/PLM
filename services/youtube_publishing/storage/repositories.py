@@ -269,8 +269,14 @@ def update_publish_attempt(
     retry_count: int | None = None,
     updated_at: datetime | None = None,
     completed_at: datetime | None = None,
+    clear_error: bool = False,
 ) -> None:
+    """Set the given fields; ``clear_error`` empties the error code and message (a
+    completed attempt keeps no error of a failure it recovered from)."""
     values: dict[str, Any] = {}
+    if clear_error:
+        values["error_code"] = None
+        values["error_message"] = None
     if state is not None:
         values["state"] = state.value
     if upload_session_uri is not None:

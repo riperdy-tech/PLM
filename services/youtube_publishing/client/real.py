@@ -58,9 +58,18 @@ class RealYouTubeClient:
         self.timeout = timeout_seconds
         # Injected by tests (R6 conformance); the caller owns its lifetime.
         self._http_client = http_client
+        # Built once on first use and kept, so every chunk of an upload shares one
+        # connection pool (a client per chunk was a TLS handshake per MiB).
+        self._owned_client: httpx.Client | None = None
 
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
+
+    def close(self) -> None:
+        """Close the client's own connection pool (never an injected one)."""
+        if self._owned_client is not None:
+            self._owned_client.close()
+            self._owned_client = None
 
     @contextmanager
     def _http(self) -> Iterator[httpx.Client]:
@@ -70,8 +79,9 @@ class RealYouTubeClient:
             if self._http_client is not None:
                 yield self._http_client
             else:
-                with httpx.Client(timeout=self.timeout) as client:
-                    yield client
+                if self._owned_client is None:
+                    self._owned_client = httpx.Client(timeout=self.timeout)
+                yield self._owned_client
         except httpx.TransportError as exc:
             raise YouTubeTransientError(f"YouTube request did not complete: {exc!r}") from exc
 

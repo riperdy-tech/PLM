@@ -103,7 +103,7 @@ class YouTubePublishingEngine:
         *,
         clock: Clock,
         clearance: ClearanceVerifier,
-        chunk_size: int = 1024 * 1024,  # 1MB
+        chunk_size: int = 8 * 1024 * 1024,  # 8 MiB, a multiple of Google's 256 KiB
         max_processing_polls: int = 5,
         write_guard: ExternalWriteGuard | None = None,
     ) -> None:
@@ -361,9 +361,14 @@ class YouTubePublishingEngine:
             if not report.cleared:
                 return self._not_cleared(session, attempt, report.summary())
 
-        video_bytes = self._media_bytes(video_data, "placeholder_video_bytes")
-        if video_bytes is None:
-            return self._missing_media(session, attempt, "video")
+        # An uploaded video needs no bytes again (a processing poll must not re-read the
+        # master); only an upload still to do does.
+        video_bytes = b""
+        if not attempt.youtube_video_id:
+            supplied = self._media_bytes(video_data, "placeholder_video_bytes")
+            if supplied is None:
+                return self._missing_media(session, attempt, "video")
+            video_bytes = supplied
         total_bytes = len(video_bytes)
 
         privacy, publish_at = self.effective_visibility(manifest, operating_mode)
@@ -610,6 +615,7 @@ class YouTubePublishingEngine:
                 state=final_state,
                 completed_at=completed_time,
                 updated_at=completed_time,
+                clear_error=True,
             )
             session.commit()
 

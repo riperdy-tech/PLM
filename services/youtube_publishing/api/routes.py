@@ -46,6 +46,7 @@ from ..storage.repositories import (
     get_publication_record_by_package_id,
     get_publication_record_by_video_id,
     get_publish_attempt_by_id,
+    get_publish_attempt_by_idempotency_key,
     get_publish_manifest_by_id,
     insert_channel_profile,
     insert_publish_manifest,
@@ -266,13 +267,22 @@ def create_youtube_router(
             # which may be archived off this machine by now (P6, 2026-11-27).
             published = get_publication_record_by_package_id(
                 session, manifest.media_package_id) is not None
-            if provider_mode_of(yt_client) is ProviderMode.REAL and not published:
+            # A processing poll of an uploaded video fetches (and hashes) nothing it
+            # already sent: the 821 MB master was re-read on every poll.
+            attempt = get_publish_attempt_by_idempotency_key(session, manifest.idempotency_key)
+            need_video = attempt is None or not attempt.youtube_video_id
+            need_thumbnail = attempt is None or not attempt.thumbnail_uploaded
+            if (provider_mode_of(yt_client) is ProviderMode.REAL and not published
+                    and (need_video or need_thumbnail)):
                 if media_bytes is None:
                     raise _refused(503, "media_store_not_configured",
                                    "a real upload needs the package's stored bytes", [])
-                video_data = media_bytes(manifest.video_master_uri, manifest.video_checksum)
-                thumbnail_data = media_bytes(manifest.thumbnail_uri,
-                                             manifest.thumbnail_checksum)
+                if need_video:
+                    video_data = media_bytes(manifest.video_master_uri,
+                                             manifest.video_checksum)
+                if need_thumbnail:
+                    thumbnail_data = media_bytes(manifest.thumbnail_uri,
+                                                 manifest.thumbnail_checksum)
             engine = YouTubePublishingEngine(
                 yt_client, clock=clock, clearance=clearance,
                 write_guard=guard if write_guard_factory is None else write_guard_factory(),

@@ -213,6 +213,24 @@ def test_an_upload_that_never_started_releases_its_reservation(error: Exception)
     assert ledger.entry(CAPABILITY_UPLOAD, upload_key).status is EntryStatus.COMMITTED
 
 
+def test_a_resume_after_the_upload_needs_no_media_and_clears_the_old_error() -> None:
+    """A processing poll must not re-read the master (review P2: P7), and a VERIFIED
+    attempt must not keep the error code of the failure it recovered from."""
+    manifest = _sample_manifest()
+    client, ledger = RealModeClient(), _ledger()
+    client.lose_playlist_response = True
+    with youtube_db_session() as session:
+        insert_publish_manifest(session, manifest)
+        first = _publish(_engine(client, ledger), session, manifest)
+        assert first.attempt.error_code is not None
+        second = _engine(client, ledger).execute_publish(
+            session, manifest, video_data=None, thumbnail_data=None,
+            operating_mode=OperatingMode.AUTONOMOUS)
+    assert second.is_success, second.error
+    assert second.attempt.state is PublishState.VERIFIED
+    assert (second.attempt.error_code, second.attempt.error_message) == (None, None)
+
+
 def test_a_refused_thumbnail_is_released_and_an_unknown_one_stays_held() -> None:
     manifest = _sample_manifest()
     client, ledger = RealModeClient(), _ledger()

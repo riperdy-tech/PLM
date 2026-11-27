@@ -201,7 +201,9 @@ def cli_reconcile(attempt_id: str) -> None:
         if not att.youtube_video_id:
             typer.echo(f"Attempt {attempt_id} has no remote video ID", err=True)
             raise typer.Exit(code=1)
-        client = MockYouTubeClient()
+        # The deployment's configured client: a mock never knows a real video.
+        real = load_execution_settings().provider_mode("youtube") == ProviderMode.REAL
+        client = RealYouTubeClient() if real else MockYouTubeClient()
         remote = client.get_video(att.youtube_video_id) or {}
         typer.echo(
             json.dumps(
