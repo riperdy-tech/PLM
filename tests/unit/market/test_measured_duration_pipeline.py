@@ -100,3 +100,26 @@ def test_a_score_is_as_old_as_its_newest_observation_not_its_recompute(
     row = repositories.latest_scores(market_session, limit=5)[0]
     as_of = row["as_of"] if row["as_of"].tzinfo else row["as_of"].replace(tzinfo=UTC)
     assert as_of == newest
+
+
+def test_only_a_new_observation_makes_a_rescored_arm_fresh_again(
+    market_session: sa.orm.Session,
+) -> None:
+    """Gate R5's day-28 refresh (CI run 45972881446): rescoring 28 days later without
+    collecting keeps the day-0 `as_of`, so P2 rightly refuses the arm as MARKET_STALE;
+    the day-28 collection is what makes the evidence current again."""
+    day0, day28 = NOW - timedelta(days=28), NOW
+    _store(market_session, suffix="a", seconds=3600.0, when=day0 - timedelta(hours=1))
+    _store(market_session, suffix="b", seconds=3900.0, when=day0)
+    _classify_pending(market_session, now=day0, settings=SETTINGS, full=True)
+    _recompute(market_session, now=day28 - timedelta(hours=1), settings=SETTINGS)
+
+    def newest_as_of() -> datetime:
+        value = repositories.latest_scores(market_session, limit=1)[0]["as_of"]
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+    assert newest_as_of() == day0
+    _store(market_session, suffix="c", seconds=3700.0, when=day28)
+    _classify_pending(market_session, now=day28, settings=SETTINGS)
+    _recompute(market_session, now=day28, settings=SETTINGS)
+    assert newest_as_of() == day28

@@ -39,9 +39,12 @@ containers.
    (``WorkflowEnvironment.start_time_skipping()``) with an in-process worker running the
    real HTTP activities: P3 design/validate/materialize, P4 generation, P5 evaluation,
    P6 assembly and render, P7 publish, P8 release, P7 processing, then ``ANALYZING``.
-4. While both runs wait on their durable 28-day timers, P1's daily scoring job runs at
-   the earliest maturity instant (``run_daily_step("market.opportunity_scoring")``):
-   the world's P1 refresh on day 28, so the learning cycle sees current market data.
+4. While both runs wait on their durable 28-day timers, P1's daily run (collection,
+   classification, scoring: ``run_daily``) runs at the earliest maturity instant: the
+   world's P1 refresh on day 28, so the learning cycle sees current market data. A
+   rescore alone would not do: a score is as old as its newest observation (review #41),
+   and P2 refuses 28-day-old evidence as ``MARKET_STALE``. The day-28 observations are
+   dated in the future of the wall clock; P1 ignores an observation until its instant.
 5. Awaiting the results lets the test server skip the timer. ``evaluate_outcome``
    (P9 ingests P8's C7 record, P7's analytics, P8's statements, FX and ledger costs, then
    measures), ``dispatch_reward`` (P9's outbox to P2) and ``learn`` (``POST /ar/update``,
@@ -141,7 +144,7 @@ from autonomous_ar.storage.models import (
     ar_posterior_update_log,
     ar_reward_observation,
 )
-from market_intelligence.cli import run_daily, run_daily_step
+from market_intelligence.cli import run_daily
 from market_intelligence.storage.models import queries as market_queries
 from plm_platform.config import SERVICE_TOKEN_HEADER, Settings
 from plm_platform.db import database_url
@@ -405,15 +408,20 @@ async def _drive(settings: Settings, factory: sessionmaker[Session], token: str,
                 if all(s.state == PipelineState.ANALYZING.value for s in states):
                     break
                 await asyncio.sleep(5.0)
-            # 4. P1's daily scoring on day 28 (the market moved on while the runs waited).
+            # 4. P1's daily run on day 28 (the market moved on while the runs waited): it
+            # collects again, then scores. Rescoring alone is not a refresh: a score is as
+            # old as its newest observation (review #41), so day-0 evidence is 28 days old
+            # and P2's freshness gate (168 h) rightly refuses it as MARKET_STALE.
             matures = []
             for r in runs:
                 analyzing = next(t for t in _transitions(factory, r.workflow_id)
                                  if t.to_state is PipelineState.ANALYZING)
                 matures.append(datetime.fromisoformat(analyzing.outputs["matures_at"]))
             rescored_at = min(matures)
-            await asyncio.to_thread(run_daily_step, "market.opportunity_scoring",
-                                    payload={"now": rescored_at.isoformat()})
+            with engine.begin() as connection:  # due again, whatever their cadence says
+                connection.execute(sa.update(market_queries).values(next_run_at=None))
+            refreshed = await asyncio.to_thread(run_daily, rescored_at)
+            assert refreshed["scores"]["scores"] >= 2, refreshed
             # 5. Awaiting the results lets the test server skip the 28-day timers.
             # One at a time: each result() unlocks time skipping for its wait, and the
             # test server refuses a second concurrent unlock.
