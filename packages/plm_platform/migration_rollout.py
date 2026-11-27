@@ -26,10 +26,10 @@ import re
 import secrets
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -53,6 +53,11 @@ BACKUP_ID: Final[re.Pattern[str]] = re.compile(r"local_plm_[0-9]{8}T[0-9]{6}Z_[a
 APPROVED_CONNECTION: Final[str] = "plm_approved_local_connection"
 APPROVED_STEP: Final[str] = "plm_approved_local_step"
 VERSION_TABLE: Final[str] = '"public"."alembic_version"'  # its one row is meant to change
+
+Say = Callable[[str], None]
+"""Progress output; the CLI (the edge) passes ``typer.echo``."""
+Now = Callable[[], datetime]
+"""The wall clock; the CLI (the edge) passes an aware ``datetime.now``."""
 
 
 def _run(args: list[str], *, stdin: Any = None, stdout: Any = None) -> bytes:
@@ -355,7 +360,7 @@ def _revisions(settings: Settings) -> list[str]:
 
 def _verify_clone(
     settings: Settings, archive: Path, before: dict[str, Any], identifier: str,
-    start: str, head: str,
+    start: str, head: str, say: Say,
 ) -> dict[str, Any]:
     container = "plm-rollout-restore-" + secrets.token_hex(6)
     user = database_url(settings).username
@@ -364,7 +369,7 @@ def _verify_clone(
     password = secrets.token_urlsafe(24)
     started = False
     try:
-        print("clone_stage: starting separate PostgreSQL", flush=True)
+        say("clone_stage: starting separate PostgreSQL")
         port = _new_cluster(container, user, password)
         started = True
         target = "plm_migration_disposable_" + identifier.split("_")[-1]
@@ -378,11 +383,11 @@ def _verify_clone(
                 if attempt == 19:
                     raise
                 time.sleep(1)
-        print("clone_stage: restoring archived database", flush=True)
+        say("clone_stage: restoring archived database")
         _restore(container, user, target, archive)
         if _snapshot(isolated) != before:
             raise RuntimeError("isolated restored backup differs from source baseline")
-        print("clone_restore: every table matches the source", flush=True)
+        say("clone_restore: every table matches the source")
         _clone_upgrade(isolated, start, head)
         if changed := _changed(before, isolated):
             raise RuntimeError(f"isolated upgrade changed pre-existing data: {changed}")
@@ -390,14 +395,14 @@ def _verify_clone(
         _clone_upgrade(isolated, head, head)
         if _snapshot(isolated) != after:
             raise RuntimeError("isolated re-upgrade changed data")
-        print(f"isolated_upgrade: {head}; preservation and idempotence passed", flush=True)
+        say(f"isolated_upgrade: {head}; preservation and idempotence passed")
         return after
     finally:
         if started:
             _stop(container)
 
 
-def prepare() -> dict[str, Any]:
+def prepare(now: Now, say: Say) -> dict[str, Any]:
     """Back up the local ``plm`` DB and prove restore + upgrade on an isolated clone."""
     settings = _source()
     head = _head()
@@ -408,7 +413,7 @@ def prepare() -> dict[str, Any]:
     if start == head:
         raise RuntimeError(f"source is already at {head}; nothing to migrate")
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
-    identifier = ("local_plm_" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    identifier = ("local_plm_" + now().strftime("%Y%m%dT%H%M%SZ")
                   + "_" + secrets.token_hex(6))
     folder = _destination(identifier)
     folder.mkdir(exist_ok=False)
@@ -416,15 +421,15 @@ def prepare() -> dict[str, Any]:
     size = _full_backup(settings, archive)
     if _snapshot(settings) != before:
         raise RuntimeError("source changed during backup; refuse migration")
-    print("retained_backup: complete, checksum captured", flush=True)
-    clone_after = _verify_clone(settings, archive, before, identifier, start, head)
+    say("retained_backup: complete, checksum captured")
+    clone_after = _verify_clone(settings, archive, before, identifier, start, head, say)
     if _snapshot(settings) != before:
         raise RuntimeError("source changed while verifying cloned backup")
     manifest = {
         "identifier": identifier, "database": "plm",
         "started_revision": start, "target_revision": head,
         "backup_file": BACKUP_NAME, "backup_size": size, "backup_sha256": _sha256(archive),
-        "prepared_utc": datetime.now(UTC).isoformat(),
+        "prepared_utc": now().isoformat(),
         "source_snapshot": before, "upgraded_clone_snapshot": clone_after,
         "isolated_restore_passed": True, "local_db_applied": False,
     }
@@ -438,7 +443,7 @@ def prepare() -> dict[str, Any]:
     }
 
 
-def apply(identifier: str) -> dict[str, Any]:
+def apply(identifier: str, now: Now, say: Say) -> dict[str, Any]:
     """Upgrade the local ``plm`` DB to head, only with an intact, matching backup proof."""
     folder = _destination(identifier)
     settings = _source()
@@ -469,8 +474,7 @@ def apply(identifier: str) -> dict[str, Any]:
             cfg = _config()
             cfg.attributes[APPROVED_CONNECTION] = conn
             cfg.attributes[APPROVED_STEP] = (start, head)
-            print(f"shared_dev_upgrade: executing approved transactional {start} -> {head}",
-                  flush=True)
+            say(f"shared_dev_upgrade: executing approved transactional {start} -> {head}")
             command.upgrade(cfg, head)
             rows = conn.execute(text(
                 "SELECT version_num FROM public.alembic_version")).scalars().all()
@@ -484,7 +488,7 @@ def apply(identifier: str) -> dict[str, Any]:
     _save_json_once(folder / "post_upgrade_snapshot.json", observed)
     _save_json_once(folder / "applied.json", {
         "backup_id": identifier, "target": "local:plm", "target_revision": head,
-        "completed_utc": datetime.now(UTC).isoformat(), "preservation_verified": True,
+        "completed_utc": now().isoformat(), "preservation_verified": True,
     })
     return {
         "applied": True, "target": "local_plm", "from": start, "revision": head,

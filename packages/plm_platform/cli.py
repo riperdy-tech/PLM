@@ -536,10 +536,19 @@ def _approved_rollout(prepare: bool, backup_id: str | None) -> None:
     Prepare backs up the local database and proves restore + upgrade on an isolated
     clone; apply upgrades to head only with that intact, matching proof.
     """
+    from datetime import UTC
+
     from . import migration_rollout as rollout
 
+    def now() -> datetime:
+        return datetime.now(UTC)
+
+    def say(line: str) -> None:
+        typer.echo(line)
+
     try:
-        result = rollout.prepare() if prepare else rollout.apply(str(backup_id))
+        result = (rollout.prepare(now, say) if prepare
+                  else rollout.apply(str(backup_id), now, say))
     except Exception as exc:
         typer.echo(f"migrate: approved rollout stopped - {_describe_for_cli(exc)}", err=True)
         raise typer.Exit(code=1) from exc
