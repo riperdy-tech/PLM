@@ -334,6 +334,124 @@ async def test_a_reset_run_continues_its_transitions_instead_of_failing(
     assert rows[-1].final and outcome.sequence == rows[-1].sequence
 
 
+class PreDeployPlatform(PlatformOperations):
+    """Stores records as the code before the reset continuation did: no run id."""
+
+    async def record_transition(self, record: TransitionRecord) -> TransitionAck:
+        return await super().record_transition(dataclasses.replace(record, run_id=None))
+
+
+async def test_a_run_started_before_the_continuation_also_survives_a_reset(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run started before the deploy has no ``transition-reset-continuation`` marker in
+    its history (``patched()`` is latched False for its whole execution) and rows without
+    a run id. Reset with the current worker, it still continues after the old run's
+    last transition and completes."""
+    import uuid
+
+    from plm_platform.pipeline.workflow import PATCH_RESET_CONTINUATION
+    from temporalio import workflow as temporal_workflow
+    from temporalio.api.common.v1 import WorkflowExecution
+    from temporalio.api.workflowservice.v1 import ResetWorkflowExecutionRequest
+
+    real_patched = temporal_workflow.patched
+
+    def pre_deploy(patch_id: str) -> bool:
+        return False if patch_id == PATCH_RESET_CONTINUATION else real_patched(patch_id)
+
+    steps = MockPhaseSteps(_scripts(qa=QUARANTINE))
+    directive_id, workflow_id = new_run()
+    old = PreDeployPlatform(factory, queue=platform._queue, ledger=platform._ledger)
+    monkeypatch.setattr(temporal_workflow, "patched", pre_deploy)
+    async with running(worker_for(client, steps, old)):
+        handle = await start_run(client, directive_id, workflow_id)
+        await wait_until(handle, lambda s: s.state == "HELD", "the pre-deploy quarantine")
+    monkeypatch.undo()
+    history = await handle.fetch_history()
+    assert not any(e.HasField("marker_recorded_event_attributes")
+                   and PATCH_RESET_CONTINUATION.encode()
+                   in e.marker_recorded_event_attributes.SerializeToString()
+                   for e in history.events)
+    old_rows = transitions(factory, workflow_id)
+    assert all("temporal_run_id" not in t.outputs for t in old_rows)
+
+    async with running(worker_for(client, steps, platform)):
+        description = await handle.describe()
+        reset = await client.workflow_service.reset_workflow_execution(
+            ResetWorkflowExecutionRequest(
+                namespace=client.namespace,
+                workflow_execution=WorkflowExecution(workflow_id=workflow_id,
+                                                     run_id=description.run_id),
+                reason="review test: reset a pre-deploy run",
+                workflow_task_finish_event_id=_reset_point(list(history.events), 2),
+                request_id=str(uuid.uuid4())))
+        new = client.get_workflow_handle(workflow_id, run_id=reset.run_id,
+                                         result_type=PipelineOutcome)
+        held = await wait_until(new, lambda s: s.state == "HELD", "the reset run's hold")
+        with factory() as session:
+            case = ExceptionQueue().require(session, held.open_case_ids[0])
+        await new.signal(PipelineWorkflow.resume, ResumeSignal(
+            actor="rita", role="rights_reviewer",
+            evidence={name: f"ref-{name}" for name in case.required_evidence}))
+        outcome: PipelineOutcome = await asyncio.wait_for(new.result(), RESULT_TIMEOUT)
+
+    assert outcome.completed
+    rows = transitions(factory, workflow_id)
+    assert [t.sequence for t in rows] == list(range(1, len(rows) + 1))
+    first_new = rows[len(old_rows)]
+    assert first_new.outputs["reset_from_run_id"] is None  # the old row named no run
+    assert first_new.outputs["reset_offered_sequence"] == 3
+
+
+async def test_a_short_playlist_hands_the_rejected_owner_made_songs_to_the_top_up(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """#47: when the supply runs short, the extend step is told which songs P5 rejected
+    in this run and the run's song tool, so it replaces the owner-made ones in P4 (the
+    HTTP step's own tests prove the P4 and P3 calls) before P3 adds new specs."""
+    from plm_platform.pipeline.http import PlaylistSupplyShort
+    from plm_platform.pipeline.types import StepRequest, StepResult
+
+    shortage = {"p3_package_id": "pkg-mock", "missing_seconds": 120,
+                "shortest_track_seconds": 150, "track_spec_ids": ["ts-1"],
+                "cleared_count": 1}
+
+    class ShortSteps(MockPhaseSteps):
+        def __init__(self, scripts: dict[Step, ScriptedStep]) -> None:
+            super().__init__(scripts)
+            self.extend_inputs: list[dict[str, Any]] = []
+
+        async def assemble(self, request: StepRequest) -> StepResult:
+            if request.idempotency_key.endswith(":assemble"):
+                self.calls.append((Step.ASSEMBLE.value, request.idempotency_key))
+                raise PlaylistSupplyShort([shortage], [])
+            return await super().assemble(request)
+
+        async def extend(self, request: StepRequest) -> StepResult:
+            self.extend_inputs.append(dict(request.inputs))
+            return await super().extend(request)
+
+    qa = ScriptedStep(outputs={"disposition": "PASSED", "holds": [], "evaluations": [
+        {"candidate_id": "cand-mock-1", "disposition": "PASSED"},
+        {"candidate_id": "cand-bad", "disposition": "REJECTED"}]},
+        provider_ids={"gate_decision_id": "gate-mock"})
+    steps = ShortSteps(_scripts(qa=qa))
+    directive_id, _ = new_run()
+    options = dataclasses.replace(OPTIONS, music_provider="flow_music_manual")
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(client, directive_id=directive_id,
+                                      brand_id="gate_brand", task_queue=QUEUE,
+                                      options=options)
+        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), RESULT_TIMEOUT)
+
+    assert outcome.completed
+    assert steps.extend_inputs == [{"p3_package_id": "pkg-mock", "count": 2,
+                                    "rejected_candidate_ids": ["cand-bad"],
+                                    "music_provider": "flow_music_manual"}]
+
+
 class RefusingPlatform(PlatformOperations):
     """The store or the queue refuses one operation for good (a platform bug)."""
 

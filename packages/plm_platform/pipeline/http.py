@@ -72,6 +72,13 @@ PLAYLIST_SUPPLY_SHORT_CODE: Final[str] = "playlist_supply_short"
 """P6's refusal when every cleared recording together is shorter than the range minimum."""
 THUMBNAIL_ART_STATUS: Final[str] = "awaiting_thumbnail_art"
 """P6's status for a rendered package waiting for the owner's thumbnail art."""
+MANUAL_MUSIC_PROVIDERS: Final[frozenset[str]] = frozenset({"suno_manual",
+                                                           "flow_music_manual"})
+"""The song tools whose songs the owner makes by hand: a rejected one is replaced by a new
+file, which costs nothing (P4's ``MANUAL_PROVIDERS``)."""
+MAX_REPLACEMENTS_PER_SPEC: Final[int] = 2
+"""Review 2026-11-26 #47: a track spec's song is asked for again at most twice
+(``-r2``, ``-r3``); after that a short playlist gets new specs from P3."""
 
 _MISSING_SECONDS: Final = re.compile(r"(\d+(?:\.\d+)?)\s*s(?:econds)?\s+(?:are\s+)?missing")
 
@@ -715,24 +722,88 @@ class HttpPhaseSteps(ReleaseSteps, OutcomeSteps):
         The body's key is the step's key, so a replay returns the same specs. P3's 409
         ``package_extension_limit_exceeded`` (its declared top-up bound) is a refusal the
         workflow turns into the ``PLAYLIST_SUPPLY_SHORT`` hold.
+
+        Review 2026-11-26 #47: in a run whose songs the owner makes (``music_provider``
+        one of :data:`MANUAL_MUSIC_PROVIDERS`), the rejected songs of this package are
+        replaced first (:meth:`_replace_rejected`) and their track specs come back to be
+        generated again; P3 is asked only for the songs replacement does not cover. If
+        P3's bound is reached after some replacements, the replacements still go ahead.
         """
         package_id = str(require(request.inputs, "p3_package_id", "extend inputs"))
         count = require(request.inputs, "count", "extend inputs")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1:
             raise ValidationFailure(f"extend inputs: count {count!r} must be a positive integer")
-        answer = self._client(Phase.EXPERIMENTS).post(
-            f"/experiments/v1/packages/{package_id}/extend",
-            idempotency_key=request.idempotency_key,
-            body={"count": count, "idempotency_key": request.idempotency_key})
+        replaced, replaced_specs = self._replace_rejected(request, package_id)
+        outputs: dict[str, Any] = {"p3_package_id": package_id, "count": count,
+                                   "replaced_candidate_ids": replaced,
+                                   "track_spec_ids": list(replaced_specs)}
+        missing = count - len(replaced)
+        if missing <= 0:
+            return StepResult(outputs=outputs,
+                              provider_ids={f"replaced.{n}": c for n, c in enumerate(replaced)})
+        try:
+            answer = self._client(Phase.EXPERIMENTS).post(
+                f"/experiments/v1/packages/{package_id}/extend",
+                idempotency_key=request.idempotency_key,
+                body={"count": missing, "idempotency_key": request.idempotency_key})
+        except PhaseRequestRefused as exc:
+            if not replaced or exc.code != "package_extension_limit_exceeded":
+                raise
+            return StepResult(outputs={**outputs, "extension_limit_reached": True},
+                              provider_ids={f"replaced.{n}": c for n, c in enumerate(replaced)})
         specs = require(answer, "track_specs", "P3 extend")
         spec_ids = [str(require(s, "track_spec_id", "P3 extended spec")) for s in specs]
         if not spec_ids:
             raise ValidationFailure(f"P3 extended {package_id} with no track spec")
         return StepResult(
-            outputs={"p3_package_id": package_id, "count": count,
-                     "track_spec_ids": spec_ids,
+            outputs={**outputs, "track_spec_ids": [*replaced_specs, *spec_ids],
                      "extension_id": answer.get("extension_id"),
                      "remaining_extension_track_count":
                          answer.get("remaining_extension_track_count")},
-            provider_ids={"extension_id": str(answer.get("extension_id") or package_id)},
+            provider_ids={"extension_id": str(answer.get("extension_id") or package_id),
+                          **{f"replaced.{n}": c for n, c in enumerate(replaced)}},
         )
+
+    def _replace_rejected(self, request: StepRequest,
+                          package_id: str) -> tuple[list[str], list[str]]:
+        """Replace this package's owner-made songs P5 rejected; (candidates, specs).
+
+        ``POST /music/candidates/{id}/replace`` marks a song replaced; the next execute of
+        its plan (the generate step that follows, under its own key) asks the owner for
+        ``<track>-<variant>-r2.wav`` and waits for it as ``MANUAL_AUDIO_AWAITED``. A track
+        spec gets at most :data:`MAX_REPLACEMENTS_PER_SPEC` replacements: once that many
+        of its songs were rejected after the first, P3's new specs take over. A song P4
+        already shows REJECTED was replaced earlier and is not counted again. Never for a
+        paid tool, which would buy the song again."""
+        provider = request.inputs.get("music_provider")
+        rejected = [str(c) for c in request.inputs.get("rejected_candidate_ids") or []]
+        if provider not in MANUAL_MUSIC_PROVIDERS or not rejected:
+            return [], []
+        key = request.idempotency_key
+        package = self._client(Phase.EXPERIMENTS).get(
+            f"/experiments/v1/packages/{package_id}", idempotency_key=key)
+        specs = {str(require(s, "track_spec_id", f"P3 package {package_id}"))
+                 for s in require(package, "track_specs", f"P3 package {package_id}")}
+        p4 = self._client(Phase.MUSIC)
+        by_spec: dict[str, list[tuple[str, str]]] = {}
+        for candidate_id in dict.fromkeys(rejected):
+            detail = p4.get(f"/music/candidates/{candidate_id}", idempotency_key=key)
+            candidate = require(detail, "candidate", f"P4 candidate {candidate_id}")
+            spec = str(require(candidate, "track_spec_id", f"P4 candidate {candidate_id}"))
+            if spec in specs:
+                by_spec.setdefault(spec, []).append(
+                    (candidate_id, str(candidate.get("status") or "")))
+        replaced: list[str] = []
+        replaced_specs: list[str] = []
+        for spec in sorted(by_spec):
+            songs = by_spec[spec]
+            if len(songs) > MAX_REPLACEMENTS_PER_SPEC:
+                continue  # the first song and its replacements were all rejected
+            fresh = [c for c, status in songs if status != "REJECTED"]
+            for candidate_id in fresh:
+                p4.post(f"/music/candidates/{candidate_id}/replace",
+                        idempotency_key=request_key(key, "replace", candidate_id))
+            if fresh:
+                replaced.extend(fresh)
+                replaced_specs.append(spec)
+        return replaced, replaced_specs
