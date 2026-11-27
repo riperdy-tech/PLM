@@ -624,6 +624,17 @@ function startCard(s) {
     const value = Number(lengthSelect.value);
     return Number.isInteger(value) && value >= minMinutes && value <= maxMinutes ? value : null;
   };
+  // Owner 2026-11-27: Claude advises (from P2's list only), the owner chooses.
+  const suggestion = styles.suggestion || null;
+  let advice = null;
+  if (suggestion && suggestion.state === 'ready' && (styles.available || []).includes(suggestion.subgenre)) {
+    advice = h('div', { class: 'row-actions' }, h('strong', {}, 'Claude suggests'),
+      h('button', { class: 'btn', type: 'button', title: 'Select this style',
+        onclick: () => { styleSelect.value = suggestion.subgenre; } }, styleName(styles, suggestion.subgenre)),
+      h('span', { class: 'muted' }, suggestion.reason || ''));
+  } else if (suggestion && suggestion.state === 'thinking') {
+    advice = h('p', { class: 'muted' }, 'Claude is looking at the last videos to suggest a style...');
+  }
   const recent = (styles.recent || []).map((r) => `${styleName(styles, r.subgenre)} (${(r.at || '').slice(0, 10)})`);
   // What the length asks of the owner, from P3's own plan (/api/studio/start-options).
   const preview = h('p', { class: 'muted' });
@@ -653,6 +664,7 @@ function startCard(s) {
   return h('section', { class: 'step' },
     h('h2', {}, 'Start a new video'),
     h('div', { class: 'row-actions' }, h('strong', {}, 'Style'), styleSelect, h('strong', {}, 'Length'), lengthSelect, ' minutes'),
+    advice,
     preview,
     h('p', { class: 'muted' }, recent.length ? `Last videos, newest first: ${recent.join(', ')}` : 'No earlier videos yet.'),
     styles.error ? h('p', { class: 'notice' }, `Styles unavailable (${styles.error}); P2 will pick.`) : null,
@@ -809,6 +821,19 @@ function songsSection(p) {
     h('div', { class: 'step-head' }, h('h2', {}, `1. Songs (${all.length - missing} of ${all.length} saved, ${Math.round(madeSeconds / 60)} min${target})`),
       p.songs.waiting ? h('span', { class: 'badge badge-review' }, 'waiting for you') : h('span', { class: 'badge' }, missing ? 'not asked yet' : 'done')));
   if (!sheets.length) { card.append(h('p', { class: 'muted' }, 'No song prompts yet.')); return card; }
+  // The director (owner 2026-11-27): Claude writes each song's text, the code checks it.
+  const notes = sheets.map((s) => s.director).filter(Boolean);
+  const byClaude = notes.filter((d) => d.written_by === 'claude');
+  if ((p.songs.director || {}).writing) {
+    card.append(h('p', { class: 'notice' }, 'Claude is writing the song prompts (up to 3 minutes); until then the texts below are the template.'));
+  }
+  if (byClaude.length) {
+    card.append(h('div', { class: 'notice' }, h('strong', {}, 'Prompts written by Claude'),
+      byClaude[0].model ? h('span', { class: 'muted' }, ` (${byClaude[0].model})`) : null,
+      ...[...new Set(byClaude.map((d) => d.review).filter(Boolean))].map((r) => h('p', {}, r))));
+  } else if (notes.length && notes[0].reason) {
+    card.append(h('p', { class: 'muted' }, `Template prompts kept (Claude: ${notes[0].reason}).`));
+  }
   if (p.songs.waiting && missing) card.append(batchUpload(all));
   let n = 0;
   for (const sheet of sheets) {
@@ -816,7 +841,9 @@ function songsSection(p) {
       n += 1;
       const url = `/api/studio/songs/${encodeURIComponent(song.stem)}`;
       card.append(h('details', { class: 'song', open: !song.saved, 'data-key': `song:${song.stem}` },
-        h('summary', {}, h('strong', {}, `Song ${n} `), h('span', { class: 'mono muted' }, `${song.stem}.wav (${sheet.source}) `), songLength(song)),
+        h('summary', {}, h('strong', {}, `Song ${n} `), h('span', { class: 'mono muted' }, `${song.stem}.wav (${sheet.source}) `), songLength(song),
+          byClaude.length > 0 && song.written_by === 'template' && song.director_refused
+            ? h('span', { class: 'muted' }, ` template kept: ${song.director_refused}`) : null),
         songPrompt(song),
         h('div', { class: 'row-actions' },
           p.songs.waiting ? h('span', {}, h('span', { class: 'muted' }, song.saved ? 'Replace file:' : 'Upload:'), uploadInput('.wav,.m4a,audio/wav,audio/mp4', url)) : null),
