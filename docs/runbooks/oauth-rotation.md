@@ -33,10 +33,12 @@ after 7 days; a project "In production" does not.
    - "did not return a refresh_token": remove PLM's access in the Google account
      (step 1 of "Revoke") and run it again.
 4. The script replaces `YOUTUBE_OAUTH_REFRESH_TOKEN` in `.env` in one step (it never
-   prints the token). The containers read `.env` through the bind mount; restart the two
-   services that use the token so they pick it up:
+   prints the token). Compose passes `.env` values to the containers when it creates
+   them (the containers never read `.env` themselves), so recreate the two services that
+   use the token; a plain `docker compose restart` would keep the old one. In the main
+   checkout:
 
-       docker compose restart api-youtube api-analytics
+       docker compose up -d api-youtube api-analytics
 
 5. Check: `plm doctor` passes, and the next daily report
    (`scripts/channel_daily_report.py`) reads analytics.

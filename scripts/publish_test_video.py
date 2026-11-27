@@ -10,8 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from services.youtube_publishing.client.base import YouTubeClientError
-from services.youtube_publishing.client.real import RealYouTubeClient
+from youtube_publishing.client.base import YouTubeClientError
+from youtube_publishing.client.real import RealYouTubeClient
 
 VIDEO_PATH = Path("output_media/suno_real_track_preview.mp4")
 THUMBNAIL_PATH = Path("output_media/suno_artwork.jpeg")

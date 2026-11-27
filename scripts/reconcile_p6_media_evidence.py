@@ -152,7 +152,7 @@ def _load_snapshot(root: Path, name: str) -> dict[str, Any]:
         raise ValueError("refusing symlinked audit snapshot")
     if not path.is_file() or path.stat().st_size > 262144:
         raise ValueError("snapshot missing or exceeds read budget")
-    report = json.loads(path.read_text(encoding="utf-8"))
+    report: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     if not verify_evidence(report):
         raise ValueError("snapshot failed integrity check")
     return report

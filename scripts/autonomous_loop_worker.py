@@ -27,20 +27,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from plm_contracts import ObservationWindow, QualityStatus
-from plm_contracts.money import Money
-from plm_contracts.seams.c7 import ObservationMaturity, RewardResultPayload
-
-from services.analytics.evaluation.feedback import (
+from analytics.evaluation.feedback import (
     REWARD_CONTRIBUTION_SCALE,
     REWARD_VERSION,
     compute_normalized_reward,
 )
-from services.analytics.ingestion.youtube_client import (
+from analytics.ingestion.youtube_client import (
     RealYouTubeAnalyticsClient,
     YouTubeAnalyticsError,
 )
-from services.youtube_publishing.client.real import RealYouTubeClient
+from plm_contracts import ObservationWindow, QualityStatus
+from plm_contracts.money import Money
+from plm_contracts.seams.c7 import ObservationMaturity, RewardResultPayload
+from youtube_publishing.client.real import RealYouTubeClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("autonomous_worker")

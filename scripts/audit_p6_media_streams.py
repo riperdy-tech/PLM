@@ -21,6 +21,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import sqlalchemy as sa
+from media_factory.rendering.ffmpeg import FFmpegToolchain
+from media_factory.rendering.profiles import render_profile
+from media_factory.rendering.toolchain import ProbeReport
 from plm_platform.config import Env, Settings, load_settings
 from plm_platform.db import build_engine
 from plm_platform.storage import (
@@ -32,9 +35,6 @@ from plm_platform.storage import (
 )
 
 from scripts.p6_media_evidence import build_evidence, write_local_evidence
-from services.media_factory.rendering.ffmpeg import FFmpegToolchain
-from services.media_factory.rendering.profiles import render_profile
-from services.media_factory.rendering.toolchain import ProbeReport
 
 _CHUNK_BYTES = 1024 * 1024
 _DEFAULT_MAX_BYTES = 128 * 1024 * 1024
@@ -180,7 +180,10 @@ def main() -> int:
                     key = from_uri(uri, settings=settings)
                     if not key.startswith(MEDIA_PREFIX) or digest_from_key(key) != checksum:
                         raise ValueError("invalid content-addressed key")
-                    size = int(client.stat_object(settings.minio_bucket, key).size)
+                    stat_size = client.stat_object(settings.minio_bucket, key).size
+                    if stat_size is None:
+                        raise ValueError("object size unavailable")
+                    size = int(stat_size)
                     result = "metadata_only"
                 except Exception:  # noqa: BLE001 — avoid exposing paths/auth details
                     size = 0

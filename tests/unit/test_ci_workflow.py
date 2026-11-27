@@ -85,6 +85,7 @@ def test_gate_commands_present_and_in_order(job: dict[str, Any]) -> None:
     )
     assert "ruff check ." in joined
     assert "mypy packages services" in joined
+    assert "mypy --explicit-package-bases scripts" in joined
     assert 'pytest -q -m "not integration"' in joined
     assert "docker compose up -d --wait" in joined
     assert joined.index("plm migrate") < joined.index("pytest -q -m integration"), (

@@ -98,7 +98,9 @@ def test_track_numbering_gap_detected() -> None:
     assert any("sequential from 1 without gaps" in e for e in errors)
 
 
-def test_label_defaults_name_the_brand_not_neon() -> None:
+def test_label_defaults_are_the_development_placeholders_not_a_brand() -> None:
+    """No legal label is recorded: the defaults match config/dev/pipeline.json."""
     pkg = _build_valid_package()
     assert (pkg.label_name, pkg.copyright_line, pkg.publisher_line) == (
-        "Longform Signal", "2026 Longform Signal", "2026 Longform Signal Publishing")
+        "PLM Development Label", "(C) 2026 PLM Development Label",
+        "(P) 2026 PLM Development Label")

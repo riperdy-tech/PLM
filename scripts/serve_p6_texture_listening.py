@@ -17,6 +17,7 @@ import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, urlsplit
 
 import sqlalchemy as sa
@@ -139,7 +140,7 @@ def make_handler(
             if (
                 self.client_address[0] != "127.0.0.1"
                 or self.headers.get("Host") != (
-                    f"127.0.0.1:{self.server.server_port}"
+                    f"127.0.0.1:{cast(HTTPServer, self.server).server_port}"
                 )
             ):
                 return None

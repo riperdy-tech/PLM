@@ -49,6 +49,7 @@ def isolate_platform_env(request: pytest.FixtureRequest,
     for name in PLATFORM_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("PLM_DOTENV_DISABLED", raising=False)
     yield
 
 

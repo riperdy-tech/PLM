@@ -23,6 +23,7 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -63,7 +64,7 @@ def _batches(ids: list[str], size: int = 50) -> list[list[str]]:
     return [ids[i:i + size] for i in range(0, len(ids), size)]
 
 
-def _sheet(entries: list, thumbs_dir: Path, out: Path) -> None:
+def _sheet(entries: list[Any], thumbs_dir: Path, out: Path) -> None:
     rows = (len(entries) + COLUMNS - 1) // COLUMNS
     label_h = 34
     sheet = Image.new("RGB", (COLUMNS * TILE[0], rows * (TILE[1] + label_h)), "#111111")
@@ -103,7 +104,8 @@ def main() -> None:
                 query, max_results=args.per_query,
                 published_after=now - timedelta(days=args.days)))
             video_ids += [h.video_id for h in hits if h.video_id not in video_ids]
-        videos, urls = [], {}
+        videos: list[Any] = []
+        urls: dict[str, Any] = {}
         for batch in _batches(video_ids):
             fetch = api.fetch_videos(batch)
             videos += parse_video_stats(fetch)

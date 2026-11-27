@@ -69,6 +69,16 @@ strict = true
 # `market_intelligence`), which is how the editable install exposes them.
 files = ["packages", "services"]
 mypy_path = ["$MYPY_CONFIG_FILE_DIR/packages", "$MYPY_CONFIG_FILE_DIR/services"]
+# scripts/ is checked separately (it imports `scripts.*` and `tests.*` from the repo
+# root): MYPYPATH="packages:services:." mypy --explicit-package-bases scripts (CI).
+
+[[tool.mypy.overrides]]
+# Offline audio probes written before scripts/ was type-checked: their Optional
+# arithmetic needs a careful rewrite (review 2026-11-26), not a mechanical cast.
+module = ["audit_local_album_evidence", "probe_local_album_master", "probe_local_mp4_audio",
+          "scripts.audit_local_album_evidence", "scripts.probe_local_album_master",
+          "scripts.probe_local_mp4_audio"]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "services"]

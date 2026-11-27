@@ -9,6 +9,69 @@ name: ${COMPOSE_PROJECT_NAME:-plm}
 # its credentials are development placeholders. Containers reach each other by
 # service name on the compose network, which these bindings do not affect.
 
+# Everything the PLM containers read from the environment. The containers do NOT read the
+# bind-mounted .env (PLM_DOTENV_DISABLED): compose reads .env on the host and passes each
+# key here, so `docker compose config` shows exactly what a service runs with and a value
+# changes only when the container is recreated (`docker compose up -d <service>`; a plain
+# restart keeps the old value). A key added to .env for a container belongs in this list.
+# Blank means unset: every loader then uses its safe default (mock, dry_run, no grants).
+x-plm-env: &plm-env
+  PLM_DOTENV_DISABLED: "1"
+  ENV: ${ENV:-}
+  LOG_LEVEL: ${LOG_LEVEL:-}
+  # CI accepts the .env.example change-me service token (plm_platform.config).
+  CI: ${CI:-}
+  # Compose services reach each other by service name, not the host's 127.0.0.1 values.
+  TEMPORAL_HOST: temporal:7233
+  DATABASE_URL: postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/${PLM_POSTGRES_DB:-plm}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  MINIO_BUCKET: ${MINIO_BUCKET:-plm-media}
+  PLM_SERVICE_TOKEN: ${PLM_SERVICE_TOKEN:-}
+  # Provider credentials (secrets): from the host .env by substitution only.
+  YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+  YOUTUBE_OAUTH_CLIENT_ID: ${YOUTUBE_OAUTH_CLIENT_ID:-}
+  YOUTUBE_OAUTH_CLIENT_SECRET: ${YOUTUBE_OAUTH_CLIENT_SECRET:-}
+  YOUTUBE_OAUTH_REFRESH_TOKEN: ${YOUTUBE_OAUTH_REFRESH_TOKEN:-}
+  MUSIC_PROVIDER_API_KEY: ${MUSIC_PROVIDER_API_KEY:-}
+  DISTRIBUTOR_API_KEY: ${DISTRIBUTOR_API_KEY:-}
+  SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+  SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+  # Provider modes, execution policies and the owner's grants (each service logs its
+  # effective modes and policies at boot). A new PLM_PROVIDER_MODE__* /
+  # PLM_EXECUTION_POLICY__* key belongs in this list.
+  PLM_PROVIDER_MODE__YOUTUBE: ${PLM_PROVIDER_MODE__YOUTUBE:-}
+  PLM_PROVIDER_MODE__MUSIC: ${PLM_PROVIDER_MODE__MUSIC:-}
+  PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD: ${PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD:-}
+  PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL: ${PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL:-}
+  PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST: ${PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST:-}
+  PLM_EXECUTION_POLICY__MUSIC_IMPORT: ${PLM_EXECUTION_POLICY__MUSIC_IMPORT:-}
+  PLM_WRITE_AUTHORIZATIONS_FILE: ${PLM_WRITE_AUTHORIZATIONS_FILE:-}
+  # Manual song supply (D10) and P3's one-song-per-track design.
+  PLM_FLOW_MUSIC_MANUAL_INBOX: ${PLM_FLOW_MUSIC_MANUAL_INBOX:-}
+  PLM_FLOW_MUSIC_PLAN_TIER: ${PLM_FLOW_MUSIC_PLAN_TIER:-}
+  PLM_FLOW_MUSIC_ACCOUNT_REF: ${PLM_FLOW_MUSIC_ACCOUNT_REF:-}
+  PLM_FLOW_MUSIC_MODEL_VERSION: ${PLM_FLOW_MUSIC_MODEL_VERSION:-}
+  PLM_FLOW_MUSIC_TERMS_REF: ${PLM_FLOW_MUSIC_TERMS_REF:-}
+  PLM_SUNO_MANUAL_INBOX: ${PLM_SUNO_MANUAL_INBOX:-}
+  PLM_SUNO_PLAN_TIER: ${PLM_SUNO_PLAN_TIER:-}
+  PLM_SUNO_ACCOUNT_REF: ${PLM_SUNO_ACCOUNT_REF:-}
+  PLM_SUNO_MODEL_VERSION: ${PLM_SUNO_MODEL_VERSION:-}
+  PLM_EXPERIMENTS_MANUAL_SUPPLY: ${PLM_EXPERIMENTS_MANUAL_SUPPLY:-}
+  # Files the phases read (paths inside /app, the bind-mounted repo).
+  PLM_PIPELINE_CONFIG_FILE: ${PLM_PIPELINE_CONFIG_FILE:-}
+  PLM_PIPELINE_REVIEWERS_FILE: ${PLM_PIPELINE_REVIEWERS_FILE:-}
+  PLM_YOUTUBE_SERIES_PLAYLISTS_FILE: ${PLM_YOUTUBE_SERIES_PLAYLISTS_FILE:-}
+  PLM_MOCK_OUTCOMES_FILE: ${PLM_MOCK_OUTCOMES_FILE:-}
+  PLM_MEDIA_BRANDS_FILE: ${PLM_MEDIA_BRANDS_FILE:-}
+  PLM_ANALYTICS_CHANNEL_FACTS_FILE: ${PLM_ANALYTICS_CHANNEL_FACTS_FILE:-}
+  PLM_MEDIA_RENDER_PROFILE: ${PLM_MEDIA_RENDER_PROFILE:-}
+  PLM_THUMBNAIL_ART_INBOX: ${PLM_THUMBNAIL_ART_INBOX:-}
+  PLM_ARCHIVE_DIR: ${PLM_ARCHIVE_DIR:-}
+  PLM_BUDGET_LEDGER_CURRENCY: ${PLM_BUDGET_LEDGER_CURRENCY:-}
+
 x-plm-app: &plm-app
   build:
     context: .
@@ -17,63 +80,30 @@ x-plm-app: &plm-app
   restart: unless-stopped
   stop_grace_period: 120s
   environment:
-    # Compose services reach each other by service name; these win over .env.
-    - TEMPORAL_HOST=temporal:7233
-    - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/${PLM_POSTGRES_DB:-plm}
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    - MINIO_ENDPOINT=minio:9000
-    - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-    - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
-    - PLM_SERVICE_TOKEN=${PLM_SERVICE_TOKEN:-}
+    <<: *plm-env
     # P2 asks P1 for opportunities; inside the network that is the compose service.
-    - PLM_SERVICE_URL__MARKET=http://api-market:8081
+    PLM_SERVICE_URL__MARKET: http://api-market:8081
     # R5 development configuration (files in the bind-mounted repo; override on the host).
     # The ledger currency lets the pipeline read the run's write costs and the phases'
     # guards fund live writes; mock providers are simulated and never reserve.
-    - PLM_BUDGET_LEDGER_CURRENCY=${PLM_BUDGET_LEDGER_CURRENCY:-USD}
+    PLM_BUDGET_LEDGER_CURRENCY: ${PLM_BUDGET_LEDGER_CURRENCY:-USD}
     # Channel, release metadata, FX rates and the learning cycle for the pipeline worker.
-    - PLM_PIPELINE_CONFIG_FILE=${PLM_PIPELINE_CONFIG_FILE:-/app/config/dev/pipeline.json}
-    # Who may clear a pipeline hold ({"actor": ["role", ...]}); unset, nobody can.
-    - PLM_PIPELINE_REVIEWERS_FILE=${PLM_PIPELINE_REVIEWERS_FILE:-}
-    # Series -> YouTube playlist ({"series": {"playlist_id", "title"}}, ADR-0045); unset,
-    # P7 attaches no playlist.
-    - PLM_YOUTUBE_SERIES_PLAYLISTS_FILE=${PLM_YOUTUBE_SERIES_PLAYLISTS_FILE:-}
+    PLM_PIPELINE_CONFIG_FILE: ${PLM_PIPELINE_CONFIG_FILE:-/app/config/dev/pipeline.json}
+    # Who may clear a pipeline hold ({"actor": ["role", ...]}) is
+    # PLM_PIPELINE_REVIEWERS_FILE; unset, nobody can. Series -> YouTube playlist
+    # ({"series": {"playlist_id", "title"}}, ADR-0045) is PLM_YOUTUBE_SERIES_PLAYLISTS_FILE;
+    # unset, P7 attaches no playlist.
     # The deterministic mock outcome model behind P7's mock YouTube Analytics source and
     # P8's mock distributor statements (labelled mock; never a real audience).
-    - PLM_MOCK_OUTCOMES_FILE=${PLM_MOCK_OUTCOMES_FILE:-/app/config/dev/mock_outcomes.json}
+    PLM_MOCK_OUTCOMES_FILE: ${PLM_MOCK_OUTCOMES_FILE:-/app/config/dev/mock_outcomes.json}
     # P6's render profile for an assemble request that names none (the pipeline names
     # none). The local stack renders previews (640x360, 15 fps): a 45-75 min playlist at
     # 1080p takes about 20 min per video on a dev machine. Production sets
     # yt_longform_1080p_v1 (P6's default when unset).
-    - PLM_MEDIA_RENDER_PROFILE=${PLM_MEDIA_RENDER_PROFILE:-preview_360p_v1}
-    # P6 waits for the owner's thumbnail art in this folder (relative to /app, the repo);
-    # unset, P6 offers its own drawn thumbnails (services/media_factory/thumbnail_art).
-    - PLM_THUMBNAIL_ART_INBOX=${PLM_THUMBNAIL_ART_INBOX:-}
-    # P6 copies a published video's renders here and frees them locally (the api-media
-    # /archive mount below); unset, nothing is archived.
-    - PLM_ARCHIVE_DIR=${PLM_ARCHIVE_DIR:-}
-    # Provider modes, execution policies, the owner's grants and the manual-song inboxes,
-    # passed explicitly so `docker compose config` shows what the containers run with
-    # (each service also logs its effective modes and policies at boot). Unset here, the
-    # code still reads the bind-mounted .env, then its safe default (mock, dry_run, none).
-    # A new PLM_PROVIDER_MODE__* / PLM_EXECUTION_POLICY__* key belongs in this list.
-    - PLM_PROVIDER_MODE__YOUTUBE=${PLM_PROVIDER_MODE__YOUTUBE:-}
-    - PLM_PROVIDER_MODE__MUSIC=${PLM_PROVIDER_MODE__MUSIC:-}
-    - PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD=${PLM_EXECUTION_POLICY__YOUTUBE_UPLOAD:-}
-    - PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL=${PLM_EXECUTION_POLICY__YOUTUBE_THUMBNAIL:-}
-    - PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST=${PLM_EXECUTION_POLICY__YOUTUBE_PLAYLIST:-}
-    - PLM_EXECUTION_POLICY__MUSIC_IMPORT=${PLM_EXECUTION_POLICY__MUSIC_IMPORT:-}
-    - PLM_WRITE_AUTHORIZATIONS_FILE=${PLM_WRITE_AUTHORIZATIONS_FILE:-}
-    - PLM_FLOW_MUSIC_MANUAL_INBOX=${PLM_FLOW_MUSIC_MANUAL_INBOX:-}
-    - PLM_FLOW_MUSIC_PLAN_TIER=${PLM_FLOW_MUSIC_PLAN_TIER:-}
-    - PLM_FLOW_MUSIC_ACCOUNT_REF=${PLM_FLOW_MUSIC_ACCOUNT_REF:-}
-    - PLM_FLOW_MUSIC_MODEL_VERSION=${PLM_FLOW_MUSIC_MODEL_VERSION:-}
-    - PLM_SUNO_MANUAL_INBOX=${PLM_SUNO_MANUAL_INBOX:-}
-    - PLM_SUNO_PLAN_TIER=${PLM_SUNO_PLAN_TIER:-}
-    - PLM_SUNO_ACCOUNT_REF=${PLM_SUNO_ACCOUNT_REF:-}
-    - PLM_SUNO_MODEL_VERSION=${PLM_SUNO_MODEL_VERSION:-}
-    - PLM_EXPERIMENTS_MANUAL_SUPPLY=${PLM_EXPERIMENTS_MANUAL_SUPPLY:-}
+    PLM_MEDIA_RENDER_PROFILE: ${PLM_MEDIA_RENDER_PROFILE:-preview_360p_v1}
+    # PLM_THUMBNAIL_ART_INBOX: P6 waits for the owner's thumbnail art in this folder
+    # (relative to /app); unset, P6 offers its own drawn thumbnails. PLM_ARCHIVE_DIR: P6
+    # copies a published video's renders there (the api-media /archive mount below).
   volumes:
     - .:/app
   depends_on:
@@ -202,16 +232,8 @@ services:
               "--load", "market_intelligence.jobs:REGISTRATIONS"]
     restart: unless-stopped
     stop_grace_period: 120s
-    environment:
-      # Compose services reach each other by service name; the localhost values in
-      # .env are for tools on the host, and these explicit values win over .env.
-      - TEMPORAL_HOST=temporal:7233
-      - DATABASE_URL=postgresql://plm:${POSTGRES_PASSWORD}@postgres:5432/${PLM_POSTGRES_DB:-plm}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - MINIO_BUCKET=${MINIO_BUCKET:-plm-media}
+    # The same environment as the phase containers, without their R5 defaults.
+    environment: *plm-env
     volumes:
       - .:/app
     depends_on:

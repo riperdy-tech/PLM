@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.youtube_publishing.client.real import RealYouTubeClient
-from services.youtube_publishing.diagnostics import inspect_uploaded_video
+from youtube_publishing.client.real import RealYouTubeClient
+from youtube_publishing.diagnostics import inspect_uploaded_video
 
 
 def main(argv: list[str] | None = None) -> int:
