@@ -76,6 +76,10 @@ MUSIC_PROVIDERS: Final[dict[str, str]] = {"suno": "suno_manual",
 _STEM: Final = re.compile(r"\A[A-Za-z0-9_-]{1,120}\Z")
 _PACKAGE: Final = re.compile(r"\Ampkg_[0-9a-f]{8,64}\Z")
 _SAVE_AS: Final = re.compile(r"^Save as: ([A-Za-z0-9_-]+)\.wav$", re.MULTILINE)
+_PLAN: Final = re.compile(r"^Plan: (\S+)$", re.MULTILINE)
+_ARCHIVES: Final = ("imported", "cancelled")
+"""Where P4 and the Studio move a finished run's songs (``<inbox>/<folder>/<plan>/``)."""
+_IMPORTED_STATES: Final = frozenset({"PUBLISHED", "ANALYZING", "LEARNING"})
 _ART_SUFFIXES: Final = (".png", ".jpg", ".jpeg", ".webp")
 _STUDIO_GRANT: Final = "Studio approval "
 """The reference prefix of the grants an approval writes (and later revokes)."""
@@ -483,26 +487,59 @@ class Studio:
         if not inboxes:
             return {"configured": False, "sheets": []}
         sheets = []
-        # Only running runs' sheets: a cancelled or finished run's sheet stays in the
-        # inbox, but nothing waits for it (no project store: every sheet).
-        tracks = None if self.store is None else {
-            track for run in self.store.runs()
-            if str(run.get("state")) not in _FINISHED_STATES and run.get("experiment_id")
-            for track in self.store.track_ids(str(run["experiment_id"]))}
+        # Only running runs' sheets; a finished run's songs leave the inbox
+        # (no project store: every sheet).
+        tracks = None if self.store is None else self._archive_finished(inboxes)
         for source, inbox in inboxes:
             sheets += self._sheets(source, inbox, tracks=tracks)
         return {"configured": True, "inbox": str(inboxes[0][1]),
                 "inboxes": {source: str(inbox) for source, inbox in inboxes},
                 "sheets": sheets}
 
+    def _archive_finished(self, inboxes: list[tuple[str, Path]]) -> set[str]:
+        """Move the songs of runs that are finished (published) or ended (cancelled,
+        failed, rejected) to ``imported/<plan>/`` or ``cancelled/<plan>/`` with P4's own
+        move (idempotent, never deletes), and return the running runs' tracks."""
+        running: set[str] = set()
+        finished: dict[str, str] = {}
+        for run in self.store.runs():
+            experiment, state = run.get("experiment_id"), str(run.get("state"))
+            if not experiment:
+                continue
+            for track in self.store.track_ids(str(experiment)):
+                if state not in _FINISHED_STATES:
+                    running.add(track)
+                else:
+                    finished[track] = ("imported" if state in _IMPORTED_STATES
+                                       else "cancelled")
+        try:
+            from music_factory.providers.suno_manual import archive_track
+        except ImportError:
+            return running
+        for _, inbox in inboxes:
+            for sheet in sorted(inbox.glob("*.prompts.txt")):
+                track = sheet.name.split(".")[0]
+                if track in running or track not in finished:
+                    continue
+                try:
+                    plan = _PLAN.search(sheet.read_text(encoding="utf-8"))
+                    archive_track(inbox, track, plan.group(1) if plan else None,
+                                  finished[track])
+                except OSError:
+                    continue  # left in place; the next listing tries again
+        return running
+
     @staticmethod
     def _sheets(source: str, inbox: Path, *, tracks: set[str] | None = None,
                 include_done: bool = False) -> list[dict[str, Any]]:
         """The inbox's prompt sheets with a song still missing; ``include_done`` keeps the
         finished ones too and ``tracks`` limits them to those tracks' sheets (a project
-        page shows its own songs, made or not)."""
+        page shows its own songs, made or not, moved out of the inbox too)."""
         sheets = []
-        for sheet in sorted(inbox.glob("*.prompts.txt")):
+        found = sorted(inbox.glob("*.prompts.txt"))
+        if include_done:
+            found += sorted(s for kind in _ARCHIVES for s in inbox.glob(f"{kind}/*/*.prompts.txt"))
+        for sheet in found:
             if tracks is not None and sheet.name.split(".")[0] not in tracks:
                 continue
             text = sheet.read_text(encoding="utf-8")
@@ -513,7 +550,7 @@ class Studio:
                 if match is None:
                     continue
                 stem = match.group(1)
-                wav = inbox / f"{stem}.wav"
+                wav = sheet.parent / f"{stem}.wav"
                 expected = _EXPECTED.search(block)
                 info, fields = song_fields(block.split("\n", 1)[1] if "\n" in block else "")
                 songs.append({"stem": stem, "text": f"--- Song {block}".strip(),
@@ -522,7 +559,7 @@ class Studio:
                               "seconds": wav_seconds(wav) if wav.is_file() else None,
                               "expected_seconds": int(expected.group(1)) if expected else None,
                               "lyrics_needed": "Instrumental: no" in block,
-                              "lyrics_saved": (inbox / f"{stem}.lyrics.txt").is_file()})
+                              "lyrics_saved": (sheet.parent / f"{stem}.lyrics.txt").is_file()})
             if songs and (include_done or not all(s["saved"] for s in songs)):
                 sheets.append({"sheet": sheet.name, "source": source, "inbox": str(inbox),
                                "header": header, "songs": songs})
@@ -562,6 +599,10 @@ class Studio:
             path = inbox / f"{stem}.wav"
             if path.is_file():
                 return path
+            for kind in _ARCHIVES:  # a finished run's song, moved out of the inbox
+                moved = sorted(inbox.glob(f"{kind}/*/{stem}.wav"))
+                if moved:
+                    return moved[0]
         raise _refuse(404, "song_not_saved", f"{stem}.wav is not saved")
 
     async def songs_done(self, case_id: str) -> list[dict[str, Any]]:

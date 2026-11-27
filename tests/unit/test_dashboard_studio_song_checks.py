@@ -61,5 +61,37 @@ def test_only_sheets_of_running_runs_are_listed(tmp_path: Path) -> None:
     assert [s["sheet"] for s in studio.songs()["sheets"]] == ["trk_1.prompts.txt"]
     with pytest.raises(ActionRefused, match="song_not_awaited"):
         studio.save_song("trk_old-v1", _wav(3))
-    studio.store = None  # no project store: every sheet with a song missing
+    assert (tmp_path / "music" / "cancelled" / "trk_old" / "trk_old.prompts.txt").is_file()
+    studio.store = None  # no project store: every sheet in the inbox with a song missing
+    (tmp_path / "music" / "trk_two.prompts.txt").write_text(
+        "--- Song 1 ---\nSave as: trk_two-v1.wav\nInstrumental: yes\n", encoding="utf-8")
     assert len(studio.songs()["sheets"]) == 2
+
+
+def test_a_finished_runs_songs_move_and_are_still_shown_and_played(tmp_path: Path) -> None:
+    studio, _ = _studio(tmp_path, [])
+    music = tmp_path / "music"
+    sheet = music / "trk_1.prompts.txt"
+    sheet.write_text("Plan: gen_plan_1\n" + sheet.read_text(encoding="utf-8"), encoding="utf-8")
+    (music / "trk_1-aaaa1111.wav").write_bytes(_wav(3))
+    (music / "trk_old.prompts.txt").write_text(
+        "--- Song 1 ---\nSave as: trk_old-v1.wav\nInstrumental: yes\n", encoding="utf-8")
+    (music / "trk_old-v1.wav").write_bytes(_wav(2))
+    studio.store = _Store([{"state": "CANCELLED", "experiment_id": "exp_1"},
+                           {"state": "PUBLISHED", "experiment_id": "exp_old"}],
+                          {"exp_1": ["trk_1"], "exp_old": ["trk_old"]})
+    assert studio.songs()["sheets"] == []
+    cancelled, imported = music / "cancelled" / "gen_plan_1", music / "imported" / "trk_old"
+    assert sorted(p.name for p in cancelled.iterdir()) == [
+        "trk_1-aaaa1111.wav", "trk_1.prompts.txt"]
+    assert sorted(p.name for p in imported.iterdir()) == ["trk_old-v1.wav",
+                                                          "trk_old.prompts.txt"]
+    assert sorted(p.name for p in music.iterdir()) == ["cancelled", "imported"]
+    assert studio.song_file("trk_1-aaaa1111") == cancelled / "trk_1-aaaa1111.wav"
+    assert studio.song_file("trk_old-v1") == imported / "trk_old-v1.wav"
+    (shown,) = studio._sheets("Flow Music", music, tracks={"trk_1"}, include_done=True)
+    assert [(s["stem"], s["saved"]) for s in shown["songs"]] == [
+        ("trk_1-aaaa1111", True), ("trk_1-bbbb2222", False)]
+    studio.songs()  # nothing left to move: idempotent
+    assert sorted(p.name for p in cancelled.iterdir()) == [
+        "trk_1-aaaa1111.wav", "trk_1.prompts.txt"]
