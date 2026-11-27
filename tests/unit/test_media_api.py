@@ -155,6 +155,24 @@ def test_assemble_by_candidate_id_then_query_and_replay(cleared: Any) -> None:
     assert toolchain.calls == rendered
 
 
+def test_the_response_names_the_songs_the_sequence_left_out(cleared: Any) -> None:
+    """Paid hand-made songs the sequence did not use were only in the render report;
+    the response names them, so the caller can keep them for another video (#30)."""
+    store, manifests = cleared
+    spare = stored_manifest(store, "song_api_spare", measured_duration_seconds=60.0,
+                            synth={"bpm": 121.0, "tonic": 2, "minor": False})
+    client = _client(backend_for(store, [*manifests, spare], toolchain=StandInToolchain()))
+    ids = [m.candidate_id for m in [*manifests, spare]]
+    resp = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    pkg = resp.json()
+    left_out = pkg["render_report"]["sequencing"]["not_selected"]
+    assert len(left_out) == 1 and left_out[0] in ids
+    assert pkg["not_selected"] == left_out
+    again = client.get(f"/media/packages/{pkg['media_package_id']}", headers=HEADERS)
+    assert again.json()["not_selected"] == left_out
+
+
 def test_new_album_with_reused_music_is_rejected_by_stored_catalog(cleared: Any) -> None:
     store, first_album = cleared
     repeat_album = [

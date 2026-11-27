@@ -77,6 +77,8 @@ def _package_response(pkg: MediaPackage) -> MediaPackageResponse:
         status=pkg.status.value,
         package_version=pkg.package_version,
         blocking_reason_codes=blocking,
+        not_selected=[str(i) for i in
+                      (pkg.render_report.get("sequencing") or {}).get("not_selected") or []],
     )
 
 

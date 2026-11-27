@@ -99,6 +99,9 @@ class MediaPackageResponse(BaseModel):
     package_version: str
     blocking_reason_codes: list[str] = Field(default_factory=list)
     """Post-render QA codes that block a ``failed`` package; empty when ready."""
+    not_selected: list[str] = Field(default_factory=list)
+    """Candidate ids offered but left out by the sequence (unused songs, kept for another
+    video); empty when every offered song is in the package."""
 
 
 class PlaylistSessionResponse(BaseModel):
