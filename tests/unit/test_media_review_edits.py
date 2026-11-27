@@ -162,3 +162,39 @@ def test_new_art_reopens_the_package_and_a_second_import_replaces_the_first(
         assert second.video_checksum != first.video_checksum  # re-rendered from new A
     finally:
         world.engine.dispose()
+
+
+def test_an_edited_title_reaches_the_variation_history(world: World) -> None:
+    """The next package's title check compares against the title that is published,
+    not the one P6 first wrote (review 2026-11-26)."""
+    before = world.get()
+    after = world.call(edit_presentation, title="Late Night Focus")
+    variation = after.render_report["variation"]
+    assert variation["titles"][0] == "Late Night Focus"
+    assert variation["titles"][1:] == before.render_report["variation"]["titles"][1:]
+    assert variation["concept"] == "Late Night Focus"
+    assert world.get().render_report["variation"] == variation
+
+
+def test_an_owner_art_package_refuses_a_thumbnail_reorder(tmp_path: Path) -> None:
+    """The first owner-art thumbnail is the video's picture: putting another first would
+    publish a thumbnail that differs from the video (#28). Re-picking goes through
+    reopen + pick + import, which renders the video again."""
+    world = World(tmp_path)
+    try:
+        folder = tmp_path / world.pkg.media_package_id
+        for n, letter in enumerate("ABC"):
+            (folder / f"{letter}.png").write_bytes(_png(n))
+        with world.factory() as session:
+            released = import_owner_art(session, world.store, world.toolchain,
+                                        world.pkg.media_package_id, folder, now=NOW)
+            session.commit()
+        ids = [t["id"] for t in released.thumbnails]
+        with pytest.raises(MediaAssemblyError, match="thumbnail_is_the_video_picture"):
+            world.call(edit_presentation, thumbnail_id=ids[1])
+        assert [t["id"] for t in world.get().thumbnails] == ids
+        # Naming the thumbnail that is already first changes nothing and is allowed.
+        assert [t["id"] for t in world.call(edit_presentation,
+                                            thumbnail_id=ids[0]).thumbnails] == ids
+    finally:
+        world.engine.dispose()

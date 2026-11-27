@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,10 +19,11 @@ from .artifacts import MinioArtifactStore
 from .backend import deployed_backend
 from .config import load_media_factory_settings
 from .domain.enums import PackageStatus, RenderJobStatus
+from .domain.models import MediaPackage
 from .errors import MediaAssemblyError, MediaInfrastructureError
 from .render_reconciliation import inspect_render_claim, record_claim_inventory
 from .rendering.ffmpeg import FFmpegToolchain
-from .service import assemble_and_persist
+from .service import assemble_and_persist, retry_render
 from .storage.render_claims import (
     RecoveryEvidenceKind,
     list_render_job_summaries,
@@ -58,19 +60,49 @@ def cli_assemble(
     The same path as ``POST /media/packages/assemble``: manifests are fetched from P5 by
     candidate id, audio from the artifact store, and the render runs on FFmpeg.
     """
+    _run_assembly(_read_request(request_path))
+
+
+def _read_request(request_path: str) -> AssemblePackageRequest:
     path = Path(request_path)
     if not path.is_file():
         typer.echo(f"Error: request file {request_path} does not exist.", err=True)
         raise typer.Exit(code=1)
     try:
-        req = AssemblePackageRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return AssemblePackageRequest.model_validate(
+            json.loads(path.read_text(encoding="utf-8")))
     except ValueError as exc:
         typer.echo(f"Error: invalid request: {exc}", err=True)
         raise typer.Exit(code=2) from exc
-    _run_assembly(req)
 
 
-def _run_assembly(req: AssemblePackageRequest) -> None:
+@media_cli.command(name="retry-render")
+def cli_retry_render(
+    package_id: str = typer.Argument(..., help="Package whose claimed render failed"),
+    request_path: str = typer.Option(
+        ..., "--request", "-r", help="The package's own assembly request JSON (as `assemble`)"),
+    recorded_by: str = typer.Option(..., "--recorded-by", help="Operator identity"),
+    orphan_evidence_ref: str | None = typer.Option(
+        None, "--orphan-evidence-ref",
+        help="Where you recorded checking the failed render's output prefix; needed only "
+        "when nothing could be listed there"),
+) -> None:
+    """Render a package again after its claimed render failed (ADR-0043).
+
+    Lists and records the failed claim's output as evidence, stages the next attempt
+    (at most 3) and runs it. A claim still RUNNING needs ``render-attest-termination``.
+    """
+    req = _read_request(request_path)
+    _run_assembly(req, lambda session, backend, settings, factory: retry_render(
+        session, backend, req, package_id=package_id, clock=SystemClock(),
+        default_render_profile=settings.default_render_profile,
+        render_session_factory=factory, worker_id_factory=lambda: uuid4().hex,
+        recorded_by=recorded_by, orphan_evidence_ref=orphan_evidence_ref,
+        thumbnail_art_inbox=settings.thumbnail_art_inbox))
+
+
+def _run_assembly(req: AssemblePackageRequest,
+                  render: Callable[..., MediaPackage] | None = None) -> None:
     platform = load_settings()
     factory = platform_session_factory()
     backend = deployed_backend(platform, factory)
@@ -80,12 +112,15 @@ def _run_assembly(req: AssemblePackageRequest) -> None:
     settings = load_media_factory_settings(platform=platform)
     with factory() as session:
         try:
-            pkg = assemble_and_persist(
-                session, backend, req, clock=SystemClock(),
-                default_render_profile=settings.default_render_profile,
-                render_session_factory=factory,
-                worker_id_factory=lambda: uuid4().hex,
-                thumbnail_art_inbox=settings.thumbnail_art_inbox)
+            if render is not None:
+                pkg = render(session, backend, settings, factory)
+            else:
+                pkg = assemble_and_persist(
+                    session, backend, req, clock=SystemClock(),
+                    default_render_profile=settings.default_render_profile,
+                    render_session_factory=factory,
+                    worker_id_factory=lambda: uuid4().hex,
+                    thumbnail_art_inbox=settings.thumbnail_art_inbox)
         except MediaAssemblyError as exc:
             typer.echo(f"Error: assembly refused: {exc}", err=True)
             raise typer.Exit(code=2) from exc

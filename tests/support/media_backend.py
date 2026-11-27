@@ -26,7 +26,10 @@ from media_factory.artifacts import (
     SOURCE_ARTIFACT_MISSING,
     SOURCE_CHECKSUM_MISMATCH,
     SOURCE_URI_INVALID,
+    ClaimObjectEvidence,
+    ClaimObjectPage,
     StoredArtifact,
+    scoped_artifact_root,
 )
 from media_factory.backend import MediaBackend
 from media_factory.brands.registry import BrandRegistry
@@ -38,7 +41,6 @@ from media_factory.rendering.toolchain import (
     LoudnessMeasurement,
     ProbeReport,
     StreamInfo,
-    VisualizerSpec,
 )
 from media_factory.visuals.planner import BrandProfile
 from plm_contracts.seams.c5 import ReleaseManifestPayload
@@ -78,7 +80,16 @@ class InMemoryArtifactStore:
         """Store a track source as P4 would (under ``music/``)."""
         return self._put("music/", resource_path, data)
 
+    def put_file(self, resource_path: str, path: Path, *, content_type: str) -> StoredArtifact:
+        return self._put("media/", resource_path, path.read_bytes())
+
+    def fetch_verified_to(self, uri: str, sha256: str, dest: Path) -> None:
+        dest.write_bytes(self._verified(uri, sha256))
+
     def fetch_verified(self, uri: str, sha256: str) -> bytes:
+        return self._verified(uri, sha256)
+
+    def _verified(self, uri: str, sha256: str) -> bytes:
         if not uri.startswith(_SCHEME):
             raise MediaAssemblyError(SOURCE_URI_INVALID, f"not an in-memory URI: {uri!r}")
         key = uri[len(_SCHEME):]
@@ -90,6 +101,20 @@ class InMemoryArtifactStore:
         if hashlib.sha256(data).hexdigest() != sha256:
             raise MediaAssemblyError(SOURCE_CHECKSUM_MISMATCH, f"{key} does not hash to {sha256}")
         return data
+
+    def list_claim_objects(self, *, brand_id: str, media_package_id: str,
+                           claim_namespace: str, limit: int = 20) -> ClaimObjectPage:
+        """The claimed render's objects, as :class:`MinioArtifactStore` lists them."""
+        prefixes = tuple(
+            f"media/{scoped_artifact_root(f'{tree}/{brand_id}/{media_package_id}', claim_namespace)}/"
+            for tree in ("renders", "thumbnails"))
+        keys = sorted(k for k in self.objects if k.startswith(prefixes))
+        return ClaimObjectPage(
+            objects=tuple(ClaimObjectEvidence(uri=f"{_SCHEME}{k}",
+                                              pinned_sha256=k.rsplit("/", 1)[-1],
+                                              size_bytes=len(self.objects[k]))
+                          for k in keys[:limit]),
+            truncated=len(keys) > limit)
 
     def get(self, uri: str) -> bytes:
         return self.objects[uri[len(_SCHEME):]]
@@ -126,15 +151,10 @@ class StandInToolchain:
         self._profile = profile
         return {"filter": "stand-in"}
 
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        self.calls.append("video")
-        out.write_bytes(b"STAND-IN VIDEO MASTER " + hashlib.sha256(
-            audio_master.read_bytes() + visual.background_png.read_bytes()).hexdigest().encode())
-
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:
         self.calls.append("still")
+        self._profile = profile  # the owner's-art still may render at another profile
         out.write_bytes(b"STAND-IN STILL VIDEO " + hashlib.sha256(
             audio_master.read_bytes() + image.read_bytes()).hexdigest().encode())
 

@@ -424,7 +424,8 @@ def update_render_job_status(
 def list_catalog_albums(
     session: Session, brand_id: str, *, max_packages: int = 100,
 ) -> tuple[CatalogAlbum, ...]:
-    """Load prior ready/published album fingerprint evidence, or hold on truncation.
+    """Load prior ready/published/awaiting-art album fingerprint evidence, or hold on
+    truncation.
 
     Includes all releases for a brand (caller ignores same-release render
     profiles). The limit is a safety ceiling, not an incomplete silent sample.
@@ -443,8 +444,11 @@ def list_catalog_albums(
             media_packages_table.c.tracklist_json,
         )
         .where(media_packages_table.c.brand_id == brand_id)
+        # A package waiting for the owner's art is already rendered and spoken for:
+        # another run rendered before that import must still see its recordings and titles.
         .where(media_packages_table.c.status.in_((
             PackageStatus.READY_FOR_PUBLISH.value, PackageStatus.PUBLISHED.value,
+            PackageStatus.AWAITING_THUMBNAIL_ART.value,
         )))
         .order_by(media_packages_table.c.created_at.desc(), media_packages_table.c.id.desc())
         .limit(max_packages + 1)
@@ -650,10 +654,13 @@ def replace_media_package_art(
     expected_status: PackageStatus,
     status: PackageStatus,
     now: datetime,
+    render_profile: str | None = None,
 ) -> bool:
-    """Swap the package's offered thumbnails and its video (with the report and manifest
-    hash that describe it) and status, only from ``expected_status``; ``False`` when
-    another writer moved the package first."""
+    """Swap the package's offered thumbnails and its video (with the report, manifest
+    hash and, when given, render profile that describe it) and status, only from
+    ``expected_status``; ``False`` when another writer moved the package first."""
+    extra: dict[str, Any] = {} if render_profile is None else {
+        "render_profile": render_profile}
     result = session.execute(
         media_packages_table.update()
         .where(media_packages_table.c.media_package_id == package_id,
@@ -661,7 +668,7 @@ def replace_media_package_art(
         .values(thumbnails_json=json.dumps(thumbnails), video_master_uri=video_master_uri,
                 video_checksum=video_checksum, video_duration_seconds=video_duration_seconds,
                 render_report_json=json.dumps(render_report), manifest_hash=manifest_hash,
-                status=status.value, updated_at=now)
+                status=status.value, updated_at=now, **extra)
     )
     return bool(cast(CursorResult[Any], result).rowcount)
 
@@ -696,16 +703,21 @@ def update_media_package_presentation(
     thumbnails: list[dict[str, Any]],
     expected_status: PackageStatus,
     now: datetime,
+    render_report: dict[str, Any] | None = None,
 ) -> bool:
     """Replace the package's metadata candidates and the order of its thumbnails (the
-    owner's review edits), only while it is ``expected_status``; ``False`` when another
+    owner's review edits), and its render report when given (the edited title's
+    variation record), only while it is ``expected_status``; ``False`` when another
     writer moved it first. The video, its checksum and the manifest hash are untouched."""
+    values: dict[str, Any] = {"metadata_candidates_json": json.dumps(metadata_candidates),
+                              "thumbnails_json": json.dumps(thumbnails), "updated_at": now}
+    if render_report is not None:
+        values["render_report_json"] = json.dumps(render_report)
     result = session.execute(
         media_packages_table.update()
         .where(media_packages_table.c.media_package_id == package_id,
                media_packages_table.c.status == expected_status.value)
-        .values(metadata_candidates_json=json.dumps(metadata_candidates),
-                thumbnails_json=json.dumps(thumbnails), updated_at=now)
+        .values(**values)
     )
     return bool(getattr(result, "rowcount", 0))
 

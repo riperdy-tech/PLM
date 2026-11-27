@@ -60,19 +60,25 @@ def write_job(inbox: Path, *, package_id: str, title: str, guide_version: str,
 
     ``rewrite`` (the owner's choice, e.g. after a new style guide) replaces the prompts of
     a job whose art is not imported yet; images already saved for the old prompts are
-    moved to ``previous-<old guide version>/``, never deleted, so a stale image cannot
-    be imported against the new prompts."""
+    moved with the owner's ``pick.txt`` to ``previous-<old guide version>/`` (``-2``,
+    ``-3``... when that exists), never deleted or overwritten, so a stale image or pick
+    cannot be imported against the new prompts."""
     folder = inbox / package_id
     job_path = folder / JOB_FILE
     if job_path.is_file():
         if not rewrite:
             return folder
         old_version = str(read_job(folder).get("guide_version") or "unknown")
+        # The pick chose among the images moved aside, so it goes with them.
         saved = [p for p in folder.iterdir()
-                 if p.is_file() and p.suffix.lower() in _SUFFIXES]
+                 if p.is_file() and (p.suffix.lower() in _SUFFIXES or p.name == PICK_FILE)]
         if saved:
             keep = folder / f"previous-{old_version}"
-            keep.mkdir(exist_ok=True)
+            n = 1
+            while keep.exists():  # an earlier rewrite of this version: never overwrite it
+                n += 1
+                keep = folder / f"previous-{old_version}-{n}"
+            keep.mkdir()
             for path in saved:
                 path.replace(keep / path.name)
     folder.mkdir(parents=True, exist_ok=True)
@@ -125,10 +131,12 @@ class ArtCheck:
     1280x720 image to upload and ``content_type`` its type."""
 
     def __init__(self, problem: str | None, data: bytes = b"",
-                 content_type: str = "") -> None:
+                 content_type: str = "", source_width: int = 0) -> None:
         self.problem = problem
         self.data = data
         self.content_type = content_type
+        self.source_width = source_width
+        """The owner's original width (the still video is rendered from the original)."""
 
 
 def check_image(raw: bytes) -> ArtCheck:
@@ -139,6 +147,8 @@ def check_image(raw: bytes) -> ArtCheck:
         opened.load()
     except (UnidentifiedImageError, OSError):
         return ArtCheck("not a readable PNG, JPEG or WebP image")
+    except Image.DecompressionBombError:
+        return ArtCheck("too large to decode safely (over Pillow's pixel limit)")
     width, height = opened.size
     if abs(width / height - 16 / 9) > _ASPECT_TOLERANCE * 16 / 9:
         return ArtCheck(f"{width}x{height} is not 16:9")
@@ -152,10 +162,10 @@ def check_image(raw: bytes) -> ArtCheck:
     out = io.BytesIO()
     image.save(out, format="PNG", optimize=True)
     if out.tell() <= MAX_BYTES:
-        return ArtCheck(None, out.getvalue(), "image/png")
+        return ArtCheck(None, out.getvalue(), "image/png", width)
     for quality in (92, 85, 75):
         out = io.BytesIO()
         image.save(out, format="JPEG", quality=quality)
         if out.tell() <= MAX_BYTES:
-            return ArtCheck(None, out.getvalue(), "image/jpeg")
+            return ArtCheck(None, out.getvalue(), "image/jpeg", width)
     return ArtCheck("over 2 MB even as JPEG")

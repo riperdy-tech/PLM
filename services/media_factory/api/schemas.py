@@ -18,6 +18,7 @@ __all__ = [
     "MediaPackageResponse",
     "PlaylistSessionResponse",
     "RenderJobResponse",
+    "RetryRenderRequest",
 ]
 
 
@@ -55,6 +56,21 @@ class AssemblePackageRequest(BaseModel):
     experiments, under its own lineage that credits no P2 arm (ADR-0044 revision)."""
 
 
+class RetryRenderRequest(BaseModel):
+    """Render a package again after its claimed render failed (``retry-render``).
+
+    ``assembly`` is the package's own assembly request (the one that failed);
+    ``recorded_by`` names who asks; ``orphan_evidence_ref`` is where the operator recorded
+    that the failed render's output prefix was checked, needed only when nothing could be
+    listed there (a render that failed before writing anything)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assembly: AssemblePackageRequest
+    recorded_by: str = Field(min_length=1)
+    orphan_evidence_ref: str | None = Field(default=None, min_length=1)
+
+
 class MediaPackageResponse(BaseModel):
     """Response representing an assembled MediaPackage."""
 
@@ -83,6 +99,9 @@ class MediaPackageResponse(BaseModel):
     package_version: str
     blocking_reason_codes: list[str] = Field(default_factory=list)
     """Post-render QA codes that block a ``failed`` package; empty when ready."""
+    not_selected: list[str] = Field(default_factory=list)
+    """Candidate ids offered but left out by the sequence (unused songs, kept for another
+    video); empty when every offered song is in the package."""
 
 
 class PlaylistSessionResponse(BaseModel):

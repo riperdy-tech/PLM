@@ -100,6 +100,19 @@ class FakeMinio:
             raise self._missing(bucket, key)
         return _Response(self.objects[(bucket, key)])
 
+    def fput_object(self, bucket: str, key: str, file_path: str,
+                    content_type: str = "application/octet-stream") -> None:
+        self._reach()
+        with open(file_path, "rb") as source:
+            self.objects[(bucket, key)] = source.read()
+
+    def fget_object(self, bucket: str, key: str, file_path: str) -> None:
+        self._reach()
+        if (bucket, key) not in self.objects:
+            raise self._missing(bucket, key)
+        with open(file_path, "wb") as target:
+            target.write(self.objects[(bucket, key)])
+
     def tamper(self, bucket: str, key: str, data: bytes) -> None:
         """Replace stored bytes under an existing key (the key keeps its digest)."""
         assert (bucket, key) in self.objects, key

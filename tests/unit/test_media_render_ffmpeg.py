@@ -3,8 +3,8 @@
 Runs in the dev image (``PLM_REQUIRE_MEDIA_TOOLS=1`` there, so it cannot pass by
 skipping). Three synthetic tracks of 12-13 s (known keys and tempi) go through the full
 P6 path with a tiny render profile: verified fetch, measured features, beam-search
-sequencing, chapters, the FFmpeg render (crossfades, two-pass loudnorm, showwaves over
-the brand background, H.264/AAC MP4), ffprobe + ebur128 post-render QA, Pillow
+sequencing, chapters, the FFmpeg render (crossfades, two-pass loudnorm, the brand background
+held still, H.264/AAC MP4), ffprobe + ebur128 post-render QA, Pillow
 thumbnails.
 
 Proves: the produced MP4 has the profile's codecs, resolution, frame rate and an audio
@@ -33,7 +33,6 @@ from media_factory.rendering.assembler import AssemblyPipelineResult, assemble_m
 from media_factory.rendering.ffmpeg import FFmpegToolchain
 from media_factory.rendering.profiles import RENDER_PROFILES, RenderProfile
 from media_factory.rendering.qa import post_render_qa
-from media_factory.rendering.toolchain import VisualizerSpec
 from media_factory.visuals.planner import BrandProfile
 from plm_contracts.seams.c3 import DurationRangeSeconds
 from plm_platform.clock import FixedClock
@@ -232,9 +231,9 @@ class _ShortAudioFFmpeg(FFmpegToolchain):
     whose AAC stream ends two seconds early. Used only with in-memory storage.
     """
 
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        super().render_video_master(audio_master, visual, profile, out)
+    def render_still_video(self, audio_master: Path, image: Path,
+                           profile: RenderProfile, out: Path) -> None:
+        super().render_still_video(audio_master, image, profile, out)
         length = self.probe(out).duration_seconds
         assert length is not None and length > 3
         damaged = out.with_name("short_audio.mp4")
@@ -310,10 +309,10 @@ def test_real_ffmpeg_failed_render_is_persisted_by_p6_http_and_refused_by_p7() -
             super().__init__()
             self.video_calls = 0
 
-        def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                                profile: RenderProfile, out: Path) -> None:
+        def render_still_video(self, audio_master: Path, image: Path,
+                               profile: RenderProfile, out: Path) -> None:
             self.video_calls += 1
-            super().render_video_master(audio_master, visual, profile, out)
+            super().render_still_video(audio_master, image, profile, out)
 
     store = InMemoryArtifactStore()
     manifests = [

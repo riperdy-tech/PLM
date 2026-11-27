@@ -155,6 +155,24 @@ def test_assemble_by_candidate_id_then_query_and_replay(cleared: Any) -> None:
     assert toolchain.calls == rendered
 
 
+def test_the_response_names_the_songs_the_sequence_left_out(cleared: Any) -> None:
+    """Paid hand-made songs the sequence did not use were only in the render report;
+    the response names them, so the caller can keep them for another video (#30)."""
+    store, manifests = cleared
+    spare = stored_manifest(store, "song_api_spare", measured_duration_seconds=60.0,
+                            synth={"bpm": 121.0, "tonic": 2, "minor": False})
+    client = _client(backend_for(store, [*manifests, spare], toolchain=StandInToolchain()))
+    ids = [m.candidate_id for m in [*manifests, spare]]
+    resp = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    pkg = resp.json()
+    left_out = pkg["render_report"]["sequencing"]["not_selected"]
+    assert len(left_out) == 1 and left_out[0] in ids
+    assert pkg["not_selected"] == left_out
+    again = client.get(f"/media/packages/{pkg['media_package_id']}", headers=HEADERS)
+    assert again.json()["not_selected"] == left_out
+
+
 def test_new_album_with_reused_music_is_rejected_by_stored_catalog(cleared: Any) -> None:
     store, first_album = cleared
     repeat_album = [
@@ -307,7 +325,7 @@ def test_stream_duration_failure_survives_authenticated_p6_http_and_replay(
     retry = client.post("/media/packages/assemble", json=_request(*ids), headers=HEADERS)
     assert retry.status_code == 200
     assert retry.json()["blocking_reason_codes"] == pkg["blocking_reason_codes"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
     # Feed P7 the real persisted C6 hop-1 payload, not a hand-built failed
     # package. A blocked P6 render must never reach the publishing adapter.
@@ -394,7 +412,7 @@ def test_invalid_measurements_persist_as_p6_http_failure_and_block_p7(
     replay = client.post("/media/packages/assemble", json=request, headers=HEADERS)
     assert replay.status_code == 200
     assert strict_json(replay.text)["media_package_id"] == package["media_package_id"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
     c6 = client.get(f"/media/packages/{package['media_package_id']}/c6", headers=HEADERS)
     assert c6.status_code == 200
@@ -553,9 +571,9 @@ def test_a_retry_while_the_render_runs_waits_and_replays_instead_of_rendering_ag
     import time
 
     class SlowToolchain(StandInToolchain):
-        def render_video_master(self, *args: Any, **kwargs: Any) -> None:
+        def render_still_video(self, *args: Any, **kwargs: Any) -> None:
             time.sleep(0.5)
-            super().render_video_master(*args, **kwargs)
+            super().render_still_video(*args, **kwargs)
 
     store, manifests = cleared
     toolchain = SlowToolchain()
@@ -575,7 +593,7 @@ def test_a_retry_while_the_render_runs_waits_and_replays_instead_of_rendering_ag
         thread.join(timeout=30)
     assert [a.status_code for a in answers] == [200, 200], [a.text for a in answers]
     assert answers[0].json()["media_package_id"] == answers[1].json()["media_package_id"]
-    assert toolchain.calls.count("video") == 1
+    assert toolchain.calls.count("still") == 1
 
 
 def test_recordings_are_measured_one_at_a_time_and_only_the_selected_are_rendered(

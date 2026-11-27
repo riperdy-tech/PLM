@@ -18,10 +18,12 @@ P6 reads the cleared track audio and writes what it renders through one protocol
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from itertools import islice
-from typing import Final, Protocol
+from pathlib import Path
+from typing import Final, Protocol, runtime_checkable
 
 import urllib3
 from minio import Minio
@@ -54,10 +56,12 @@ __all__ = [
     "SOURCE_URI_INVALID",
     "STORE_UNAVAILABLE",
     "ArtifactStore",
+    "ClaimListingStore",
     "ClaimObjectEvidence",
     "ClaimObjectPage",
     "MinioArtifactStore",
     "StoredArtifact",
+    "file_sha256",
     "scoped_artifact_root",
 ]
 
@@ -65,6 +69,7 @@ SOURCE_ARTIFACT_MISSING: Final[str] = "source_artifact_missing"
 SOURCE_CHECKSUM_MISMATCH: Final[str] = "source_checksum_mismatch"
 SOURCE_URI_INVALID: Final[str] = "source_uri_invalid"
 STORE_UNAVAILABLE: Final[str] = "artifact_store_unavailable"
+_MISSING_CODES: Final = frozenset({"NoSuchKey", "NoSuchObject"})
 
 
 def scoped_artifact_root(base: str, claim_namespace: str | None) -> str:
@@ -113,6 +118,35 @@ class ArtifactStore(Protocol):
 
     def put(self, resource_path: str, data: bytes, *, content_type: str) -> StoredArtifact:
         """Store ``data`` under ``media/<resource_path>/<sha256>``; idempotent per content."""
+        ...
+
+    def put_file(self, resource_path: str, path: Path, *, content_type: str) -> StoredArtifact:
+        """:meth:`put` for a file, streamed: a master (2 GB for two hours) never sits
+        whole in memory."""
+        ...
+
+    def fetch_verified_to(self, uri: str, sha256: str, dest: Path) -> None:
+        """:meth:`fetch_verified` into the file ``dest``, streamed; on any refusal
+        ``dest`` is removed."""
+        ...
+
+
+def file_sha256(path: Path) -> str:
+    """The sha256 of a file, read in 1 MiB blocks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+@runtime_checkable
+class ClaimListingStore(Protocol):
+    def list_claim_objects(
+        self, *, brand_id: str, media_package_id: str,
+        claim_namespace: str, limit: int = 20,
+    ) -> ClaimObjectPage:
+        """Metadata-only listing of one claimed render's output prefixes."""
         ...
 
 
@@ -236,3 +270,48 @@ class MinioArtifactStore:
             ) from exc
         return StoredArtifact(uri=to_uri(key, settings=self._settings), sha256=digest,
                               size=len(data))
+
+    def put_file(self, resource_path: str, path: Path, *, content_type: str) -> StoredArtifact:
+        digest = file_sha256(path)
+        key = build_key(MEDIA_PREFIX, resource_path, digest)
+        bucket = self._settings.minio_bucket
+        try:
+            try:
+                self._client.stat_object(bucket, key)
+            except S3Error as exc:
+                if exc.code not in _MISSING_CODES:
+                    raise
+                self._client.fput_object(bucket, key, str(path), content_type=content_type)
+            # else: content-addressed, the object already holds exactly these bytes.
+        except (S3Error, StorageError, urllib3.exceptions.HTTPError, OSError) as exc:
+            raise MediaInfrastructureError(
+                STORE_UNAVAILABLE, f"{type(exc).__name__}: {exc}"
+            ) from exc
+        return StoredArtifact(uri=to_uri(key, settings=self._settings), sha256=digest,
+                              size=path.stat().st_size)
+
+    def fetch_verified_to(self, uri: str, sha256: str, dest: Path) -> None:
+        try:
+            key = from_uri(uri, settings=self._settings)
+            pinned = digest_from_key(key)
+        except (InvalidArtifactUriError, UnknownPrefixError, InvalidObjectKeyError) as exc:
+            raise MediaAssemblyError(SOURCE_URI_INVALID, str(exc)) from exc
+        if pinned != sha256:
+            raise MediaAssemblyError(
+                SOURCE_CHECKSUM_MISMATCH,
+                f"{uri} is content-addressed to {pinned}, the caller expects {sha256}",
+            )
+        try:
+            self._client.fget_object(self._settings.minio_bucket, key, str(dest))
+        except S3Error as exc:
+            dest.unlink(missing_ok=True)
+            if exc.code in _MISSING_CODES:
+                raise MediaAssemblyError(SOURCE_ARTIFACT_MISSING, f"no object at {key!r}") from exc
+            raise MediaInfrastructureError(STORE_UNAVAILABLE, f"S3Error: {exc}") from exc
+        except (urllib3.exceptions.HTTPError, OSError) as exc:
+            dest.unlink(missing_ok=True)
+            raise MediaInfrastructureError(
+                STORE_UNAVAILABLE, f"{type(exc).__name__}: {exc}") from exc
+        if file_sha256(dest) != sha256:
+            dest.unlink(missing_ok=True)
+            raise MediaAssemblyError(SOURCE_CHECKSUM_MISMATCH, f"{uri} does not hash to {sha256}")

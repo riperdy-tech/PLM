@@ -9,6 +9,7 @@ existing package returns that package without rendering.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -17,11 +18,13 @@ from plm_platform.clock import Clock
 from sqlalchemy.orm import Session
 
 from .api.schemas import AssemblePackageRequest
+from .artifacts import ClaimListingStore
 from .backend import MediaBackend
 from .domain.enums import PackageStatus, RenderJobStatus
 from .domain.models import MediaPackage, RenderJob
 from .errors import MediaAssemblyError
 from .playlist.intake import fetch_cleared_manifests
+from .render_reconciliation import inspect_render_claim, record_claim_inventory
 from .rendering.assembler import (
     AssemblyPipelineResult,
     PackageAlreadyAssembled,
@@ -33,7 +36,9 @@ from .storage.render_claims import (
     RecoveryEvidenceKind,
     claim_queued_render_job,
     finish_claimed_render_job,
+    list_render_job_summaries,
     quarantine_stale_render_job,
+    queue_reconciled_render_retry,
     queue_render_job,
     record_render_recovery_evidence,
     render_claim_namespace,
@@ -56,7 +61,9 @@ from .storage.repositories import (
 from .thumbnail_art.guide import build_prompts, load_style_guide
 from .thumbnail_art.inbox import write_job
 
-__all__ = ["assemble_and_persist"]
+__all__ = ["assemble_and_persist", "retry_render"]
+
+logger = logging.getLogger(__name__)
 
 
 def assemble_and_persist(session: Session, backend: MediaBackend,
@@ -81,8 +88,8 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
     claim: tuple[str, str, str, datetime] | None = None
     recovery_attempt = 1
     if recovery_job_id is not None:
-        # No HTTP/CLI exposes this option. Only an independently supervised
-        # caller holding a previously staged retry intent may use it.
+        # Only a caller holding a previously staged retry intent may use it
+        # (:func:`retry_render`, behind ``plm media retry-render`` and its route).
         if render_session_factory is None:
             raise ValueError("recovery requires a committed render session factory")
         with render_session_factory() as lookup_session:
@@ -113,7 +120,15 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             )
             # Commit the new job intent independently before any FFmpeg work.
             with render_session_factory() as intent_session:
-                queue_render_job(intent_session, queued)
+                try:
+                    queue_render_job(intent_session, queued)
+                except ValueError as exc:
+                    # An earlier attempt of this package was queued with other inputs
+                    # (a changed concept, a new render version): a refusal, not a 500.
+                    raise MediaAssemblyError(
+                        "render_intent_conflict",
+                        f"render job {queued.id} was queued earlier with other inputs: {exc}",
+                    ) from exc
                 intent_session.commit()
         else:
             # A retry is NOT implicitly authorized by the assembly request.
@@ -177,12 +192,19 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             render_attempt=recovery_attempt,
             session_compilation=request.session_compilation,
             subgenre=request.subgenre,
-            # With the art inbox the owner's art replaces the video at import: render a
-            # still placeholder (minutes), not the waveform (longer than the program).
-            still_placeholder=thumbnail_art_inbox is not None,
             clock=clock,
         )
     except PackageAlreadyAssembled as replay:
+        # The package id does not include the visual world: the same songs asked for in
+        # another world would otherwise replay the stored package with the old one.
+        stored_world = (replay.package.render_report.get("variation") or {}).get(
+            "visual_world")
+        if stored_world is not None and stored_world != request.visual_profile:
+            raise MediaAssemblyError(
+                "package_visual_profile_conflict",
+                f"{replay.package.media_package_id} was assembled in the visual world "
+                f"{stored_world!r}, not {request.visual_profile!r}; the same songs cannot "
+                "be packaged again in another world", ["visual_profile"]) from None
         _write_art_job(replay.package, request, thumbnail_art_inbox)
         return replay.package
     except Exception as exc:
@@ -206,8 +228,109 @@ def assemble_and_persist(session: Session, backend: MediaBackend,
             session.rollback()
             _quarantine_own_claim(render_session_factory, claim, exc, clock)
         raise
-    _write_art_job(persisted, request, thumbnail_art_inbox)
+    # Outside the fenced block and never fatal: a raise here would roll back the fenced
+    # completion with the caller's transaction and leave the claim RUNNING for good. A
+    # replay of the same request (or ``plm media thumbnail-job``) writes the job later.
+    try:
+        _write_art_job(persisted, request, thumbnail_art_inbox)
+    except Exception as exc:  # noqa: BLE001 - the package is rendered; only the job is late
+        logger.warning("art job for %s not written (%s: %s); replay the request or run "
+                       "`plm media thumbnail-job` to write it", persisted.media_package_id,
+                       type(exc).__name__, exc)
     return persisted
+
+
+def retry_render(session: Session, backend: MediaBackend, request: AssemblePackageRequest,
+                 *, package_id: str, clock: Clock, default_render_profile: str,
+                 render_session_factory: Callable[[], Session],
+                 worker_id_factory: Callable[[], str], recorded_by: str,
+                 orphan_evidence_ref: str | None = None,
+                 thumbnail_art_inbox: Path | None = None) -> MediaPackage:
+    """Render a package again after its claimed render failed (ADR-0043, review #22).
+
+    A failed render leaves its claim QUARANTINED, and assembling the same request again
+    is refused (``render_job_reconciliation_required``). This stages the next attempt and
+    runs it: the failed claim's output prefix is listed and recorded as its
+    ``orphan_artifacts`` evidence (or ``orphan_evidence_ref`` is recorded as the
+    operator's attestation when nothing was listed, for example a render that failed
+    before writing anything), :func:`queue_reconciled_render_retry` stages the attempt,
+    and :func:`assemble_and_persist` runs it with ``recovery_job_id``. ``request`` must be
+    the package's own assembly request: a request that resolves to another package or
+    other inputs is refused before rendering, and the staged attempt is kept for the
+    right one. A claim still RUNNING needs ``render-attest-termination`` first.
+    """
+    if not recorded_by.strip():
+        raise MediaAssemblyError("render_retry_not_prepared", "name who asks for the retry")
+    with render_session_factory() as lookup:
+        if get_media_package_by_id(lookup, package_id) is not None:
+            raise MediaAssemblyError(
+                "render_retry_package_exists",
+                f"{package_id} is already assembled; nothing to render again")
+        history = list_render_job_summaries(lookup, media_package_id=package_id, limit=100)
+        latest = (get_render_job(lookup, max(history, key=lambda j: j.attempt_count).job_id)
+                  if history else None)
+    if latest is None:
+        raise MediaAssemblyError("render_job_unknown",
+                                 f"{package_id} has no render job to retry")
+    if (latest.job_status is RenderJobStatus.QUEUED and latest.attempt_count > 1
+            and latest.worker_id is None and latest.started_at is None):
+        staged = latest  # staged earlier; its run never claimed it
+    elif latest.job_status is RenderJobStatus.QUARANTINED and latest.worker_id is not None \
+            and latest.started_at is not None:
+        staged = _stage_retry(render_session_factory, backend, latest,
+                              brand_id=request.brand_id, recorded_by=recorded_by.strip(),
+                              orphan_evidence_ref=orphan_evidence_ref, clock=clock)
+    else:
+        raise MediaAssemblyError(
+            "render_job_reconciliation_required",
+            f"render job {latest.id} is {latest.job_status.value}; only a quarantined "
+            "render can be retried (a RUNNING one needs render-attest-termination first)")
+    return assemble_and_persist(
+        session, backend, request, clock=clock,
+        default_render_profile=default_render_profile,
+        render_session_factory=render_session_factory,
+        worker_id_factory=worker_id_factory, recovery_job_id=staged.id,
+        thumbnail_art_inbox=thumbnail_art_inbox)
+
+
+def _stage_retry(render_session_factory: Callable[[], Session], backend: MediaBackend,
+                 failed: RenderJob, *, brand_id: str, recorded_by: str,
+                 orphan_evidence_ref: str | None, clock: Clock) -> RenderJob:
+    assert failed.worker_id is not None and failed.started_at is not None
+    now = max(clock.now(), failed.finished_at or failed.started_at)
+    with render_session_factory() as stage:
+        try:
+            if orphan_evidence_ref is not None and orphan_evidence_ref.strip():
+                record_render_recovery_evidence(
+                    stage, job_id=failed.id, kind=RecoveryEvidenceKind.ORPHAN_ARTIFACTS,
+                    method="supervisor_attestation", worker_id=failed.worker_id,
+                    started_at=failed.started_at,
+                    input_manifest_hash=failed.input_manifest_hash,
+                    recorded_by=recorded_by, recorded_at=now,
+                    evidence_ref=orphan_evidence_ref, detail={})
+            elif isinstance(backend.store, ClaimListingStore):
+                inspection = inspect_render_claim(stage, backend.store, job_id=failed.id,
+                                                  brand_id=brand_id, limit=100)
+                record_claim_inventory(stage, inspection, recorded_by=recorded_by,
+                                       recorded_at=now)
+            else:
+                raise ValueError("the artifact store cannot list the failed render's output")
+        except ValueError as exc:
+            raise MediaAssemblyError(
+                "render_retry_not_prepared",
+                f"the failed render {failed.id}'s output could not be inventoried ({exc}); "
+                "check its prefix by hand and pass the evidence reference") from exc
+        staged = queue_reconciled_render_retry(
+            stage, previous_job_id=failed.id, expected_worker_id=failed.worker_id,
+            expected_started_at=failed.started_at,
+            input_manifest_hash=failed.input_manifest_hash, now=now)
+        if staged is None:
+            raise MediaAssemblyError(
+                "render_retry_not_allowed",
+                f"no further attempt can follow {failed.id} (attempt "
+                f"{failed.attempt_count}; at most 3, and none after a stored package)")
+        stage.commit()
+    return staged
 
 
 def _write_art_job(pkg: MediaPackage, request: AssemblePackageRequest,

@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from .artifacts import ClaimObjectPage, MinioArtifactStore
+from .artifacts import ClaimListingStore, ClaimObjectPage
 from .domain.enums import RenderJobStatus
 from .storage.render_claims import (
     RecoveryEvidenceKind,
@@ -34,7 +34,7 @@ class RenderClaimInspection:
 
 
 def inspect_render_claim(
-    session: Session, store: MinioArtifactStore, *, job_id: str,
+    session: Session, store: ClaimListingStore, *, job_id: str,
     brand_id: str, limit: int = 20,
 ) -> RenderClaimInspection:
     """List object *names* under an exact persisted claim; never change state.

@@ -9,13 +9,14 @@ command string. The steps:
   hard cut, ``anullsrc`` + ``concat`` for a silence gap). The mix is normalised with
   two-pass ``loudnorm`` to the profile's integrated loudness, true peak and loudness
   range (pass 1 measures, pass 2 applies the measured values in linear mode), then
-  resampled back to the profile's rate and written as 24-bit PCM WAV.
-* **Video master.** A procedural visualiser: ``showwaves`` (``cline`` mode, square-root
-  scale) drawn from the audio master in the brand's accent colour and overlaid on the
-  brand background image, encoded with ``libx264`` (profile preset and CRF, ``yuv420p``)
-  plus ``aac`` audio into MP4 with ``+faststart``. Metadata is stripped and bit-exact
-  flags are set so the bytes do not carry encoder timestamps.
-* **Still video.** The owner's thumbnail art scaled to cover the frame (once a second, then
+  resampled back to the profile's rate and written as 24-bit PCM WAV. Each source is
+  padded to its timeline length before the trim, so a source a few ms short cannot
+  shorten the mix. When ``loudnorm`` falls back to dynamic gain (the linear gain would
+  cross the true-peak ceiling, or the range is unmeasured), a third pass applies the
+  linear gain with a peak limiter at the ceiling instead; the report's ``applied`` says
+  which (``linear`` or ``linear_gain_limiter``).
+* **Still video** (the only video master; no waveform or motion, owner 2026-11-04). The
+  brand background, later the owner's thumbnail art, scaled to cover the frame (once a second, then
   repeated to the frame rate), centre-cropped and held still (``-tune stillimage``) for exactly the audio master's length, converted to
   TV-range BT.709 (a JPEG decodes as full-range ``yuvj420p`` otherwise), same codecs.
 * **Probe.** ``ffprobe -show_format -show_streams`` as JSON.
@@ -48,7 +49,6 @@ from .toolchain import (
     MediaToolError,
     ProbeReport,
     StreamInfo,
-    VisualizerSpec,
 )
 
 __all__ = ["TOOLCHAIN_UNAVAILABLE", "FFmpegToolchain"]
@@ -56,7 +56,6 @@ __all__ = ["TOOLCHAIN_UNAVAILABLE", "FFmpegToolchain"]
 TOOLCHAIN_UNAVAILABLE: Final[str] = "render_toolchain_unavailable"
 _STDERR_TAIL: Final[int] = 2000
 _TIMEOUT_PER_PROGRAMME_SECOND: Final[float] = 2.5
-_HEX_COLOUR: Final = re.compile(r"\A#[0-9A-Fa-f]{6}\Z")
 _INTEGRATED: Final = re.compile(r"Integrated loudness:\s*\n\s*I:\s*(\S+)\s*LUFS")
 _TRUE_PEAK: Final = re.compile(r"True peak:\s*\n\s*Peak:\s*(\S+)\s*dBFS")
 
@@ -140,6 +139,9 @@ class FFmpegToolchain:
             parts.append(
                 f"[{i}:a]aresample={profile.sample_rate},"
                 f"aformat=sample_fmts=fltp:channel_layouts={layout},"
+                # Padded, then trimmed, to exactly its timeline length: a source a few ms
+                # shorter than its manifest must not shorten the mix (QA would fail it).
+                f"apad=whole_dur={segment.duration_seconds:.6f},"
                 f"atrim=end={segment.duration_seconds:.6f},asetpts=PTS-STARTPTS[s{i}]")
         current = "s0"
         d = spec.transition_seconds
@@ -174,6 +176,9 @@ class FFmpegToolchain:
         if any(_number(str(v)) is None for v in values.values()):
             raise MediaToolError("loudness_unmeasurable",
                                  f"loudnorm could not measure the mix: {values}")
+        output = ["-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(profile.sample_rate),
+                  "-ac", str(profile.channels), "-map_metadata", "-1", "-fflags", "+bitexact",
+                  "-flags:a", "+bitexact", str(out)]
         second = self._run(self._ffmpeg, [
             "-hide_banner", "-nostats", "-nostdin", "-y", *inputs,
             "-filter_complex",
@@ -181,12 +186,29 @@ class FFmpegToolchain:
              f"measured_TP={values['input_tp']}:measured_LRA={values['input_lra']}:"
              f"measured_thresh={values['input_thresh']}:offset={values['target_offset']}:"
              f"linear=true:print_format=json,aresample={profile.sample_rate}[out]"),
-            "-map", "[out]", "-c:a", "pcm_s24le", "-ar", str(profile.sample_rate),
-            "-ac", str(profile.channels), "-map_metadata", "-1", "-fflags", "+bitexact",
-            "-flags:a", "+bitexact", str(out),
+            *output,
         ], step="loudnorm pass 2", programme_seconds=programme)
         applied = self._loudnorm_json(second.stderr)
-        return {"filter": "loudnorm", "target": target, "pass1": measured, "pass2": applied}
+        if applied.get("normalization_type") == "linear":
+            return {"filter": "loudnorm", "target": target, "pass1": measured,
+                    "pass2": applied, "applied": "linear"}
+        # loudnorm silently switches to dynamic (pumping) gain when the linear gain would
+        # cross the true-peak ceiling. Apply that linear gain anyway and let a peak
+        # limiter hold the ceiling (the encoder's overshoot is covered by the profile's
+        # true-peak tolerance), so the music keeps its own dynamics.
+        gain_db = profile.loudness_target_lufs - float(str(values["input_i"]))
+        ceiling = 10 ** (profile.true_peak_dbtp / 20)
+        self._run(self._ffmpeg, [
+            "-hide_banner", "-nostats", "-nostdin", "-y", *inputs,
+            "-filter_complex",
+            (f"{graph};[mix]volume={gain_db:.3f}dB,"
+             f"aresample=192000,alimiter=limit={ceiling:.6f}:attack=1:release=20:level=false,"
+             f"aresample={profile.sample_rate}[out]"),
+            *output,
+        ], step="linear gain and limiter", programme_seconds=programme)
+        return {"filter": "loudnorm", "target": target, "pass1": measured, "pass2": applied,
+                "applied": "linear_gain_limiter", "gain_db": round(gain_db, 3),
+                "limiter_ceiling_dbtp": profile.true_peak_dbtp}
 
     @staticmethod
     def _loudnorm_json(stderr: str) -> dict[str, Any]:
@@ -203,35 +225,6 @@ class FFmpegToolchain:
         return parsed
 
     # -- video master ----------------------------------------------------------------------
-
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        if _HEX_COLOUR.match(visual.wave_color) is None:
-            raise MediaToolError("render_failed", f"not a #RRGGBB colour: {visual.wave_color!r}")
-        wave_height = max(2, int(profile.height * profile.waveform_height_ratio) // 2 * 2)
-        colour = "0x" + visual.wave_color[1:]
-        programme = self.probe(audio_master).duration_seconds
-        graph = (
-            f"[1:a]showwaves=s={profile.width}x{wave_height}:mode=cline:rate={profile.fps}:"
-            f"colors={colour}:scale=sqrt,format=rgba[w];"
-            f"[0:v]scale={profile.width}:{profile.height},setsar=1[bg];"
-            f"[bg][w]overlay=0:(H-h)/2:shortest=1,format={profile.pixel_format}[v]"
-        )
-        self._run(self._ffmpeg, [
-            "-hide_banner", "-nostats", "-nostdin", "-y",
-            "-loop", "1", "-framerate", str(profile.fps), "-i", str(visual.background_png),
-            "-i", str(audio_master),
-            "-filter_complex", graph, "-map", "[v]", "-map", "1:a",
-            "-c:v", "libx264", "-preset", profile.x264_preset, "-crf", str(profile.x264_crf),
-            "-pix_fmt", profile.pixel_format, "-r", str(profile.fps),
-            "-c:a", "aac", "-b:a", profile.audio_bitrate, "-ar", str(profile.sample_rate),
-            "-ac", str(profile.channels), "-shortest", "-movflags", "+faststart",
-            # No ``-flags:a +bitexact``: it makes FFmpeg's native AAC encoder overshoot
-            # the limited master by about 2 dB true peak (measured 2026-11-04: -1.9 dBTP
-            # WAV -> +0.1 encoded, -1.1 without it). The encode stays deterministic.
-            "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact",
-            "-f", profile.container, str(out),
-        ], step="video encode", programme_seconds=programme)
 
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:

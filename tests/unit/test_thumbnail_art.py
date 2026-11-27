@@ -9,6 +9,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from media_factory.api.schemas import AssemblePackageRequest
@@ -109,6 +110,14 @@ def test_bad_images_are_refused_with_the_reason(size: tuple[int, int], flat: boo
     assert result.problem is not None and problem in result.problem
 
 
+def test_an_image_too_large_to_decode_safely_is_refused(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pillow's decompression-bomb guard raised out of the import as a 500."""
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
+    result = check_image(_png((1920, 1080)))
+    assert result.problem is not None and "too large" in result.problem
+
+
 def test_a_good_image_is_resized_to_1280x720_and_kept_under_2_mb() -> None:
     assert check_image(b"not an image").problem is not None
     result = check_image(_png((1920, 1080)))
@@ -140,6 +149,26 @@ def test_a_rewrite_replaces_the_prompts_and_moves_saved_images_aside(tmp_path: P
     assert json.loads((folder / "job.json").read_text(encoding="utf-8"))["guide_version"] == "g2"
     assert not (folder / "A.jpg").exists()
     assert (folder / "previous-g1" / "A.jpg").read_bytes() == b"old art"
+
+
+def test_a_second_rewrite_keeps_every_archived_image_and_the_old_pick(tmp_path: Path) -> None:
+    """``--rewrite`` kept a stale ``pick.txt`` (it chose among images that were moved
+    away) and a second rewrite of the same guide version overwrote the archive (#29)."""
+    prompts = build_prompts(GUIDE, package_id="mpkg_5", thumbnail_family=None,
+                            visual_world="blueprint_hall")
+    folder = write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+                       prompts=prompts)
+    (folder / "A.png").write_bytes(b"first art")
+    (folder / "pick.txt").write_text("B", encoding="utf-8")
+    write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+              prompts=prompts, rewrite=True)
+    assert not (folder / "pick.txt").exists()
+    assert (folder / "previous-g1" / "pick.txt").read_text(encoding="utf-8") == "B"
+    (folder / "A.png").write_bytes(b"second art")
+    write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+              prompts=prompts, rewrite=True)
+    assert (folder / "previous-g1" / "A.png").read_bytes() == b"first art"
+    assert (folder / "previous-g1-2" / "A.png").read_bytes() == b"second art"
 
 
 def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> None:
@@ -323,5 +352,60 @@ def test_the_owners_pick_is_the_video_picture_and_first_thumbnail(tmp_path: Path
         assert [t["id"] for t in released.thumbnails] == ["art_b", "art_a", "art_c"]
         still = released.render_report["video_pipeline"]["still_image"]
         assert still["variant_key"] == "art_b" and still["source"] == "B.png"
+    finally:
+        engine.dispose()
+
+
+def test_a_1440p_still_needs_a_picked_image_at_least_2560_px_wide(tmp_path: Path) -> None:
+    """The longform package's still renders at 1440p: a smaller picked image would be
+    upscaled (soft), so it is refused before rendering; the package then records the
+    profile and size it was really rendered at, and nothing holds a DB transaction open
+    through the render (review 2026-11-26, P6 notes)."""
+    engine = create_media_engine(static_pool=True)
+    store = InMemoryArtifactStore()
+    manifests = [stored_manifest(store, f"hq_track_{n}", measured_duration_seconds=60,
+                                 synth=spec) for n, spec in enumerate(synth_specs())]
+    sessions: list[Any] = []
+
+    class Watching(StandInToolchain):
+        def render_still_video(self, audio_master: Path, image: Path, profile: Any,
+                               out: Path) -> None:
+            if sessions:
+                assert not sessions[0].in_transaction(), "a DB transaction spans the render"
+            super().render_still_video(audio_master, image, profile, out)
+
+    toolchain = Watching()
+    backend = backend_for(store, manifests, toolchain=toolchain)
+    request = AssemblePackageRequest.model_validate({
+        "candidate_ids": [m.candidate_id for m in manifests], "brand_id": "brand_neon",
+        "duration_range_seconds": {"min_seconds": 170, "max_seconds": 180},
+        "visual_profile": "observatory_workspace", "playlist_concept": "Deep Focus",
+        "render_profile": "yt_longform_1080p_v1",
+    })
+    factory = lambda: media_session(engine)
+    try:
+        with factory() as session:
+            pkg = assemble_and_persist(
+                session, backend, request, clock=FixedClock(NOW),
+                default_render_profile="preview_360p_v1", render_session_factory=factory,
+                worker_id_factory=lambda: "w1", thumbnail_art_inbox=tmp_path)
+            session.commit()
+        folder = tmp_path / pkg.media_package_id
+        for name in ("A.png", "B.png", "C.png"):
+            (folder / name).write_bytes(_png((1920, 1080)))
+        with factory() as session:
+            with pytest.raises(MediaAssemblyError, match="thumbnail_art_too_small"):
+                import_owner_art(session, store, toolchain, pkg.media_package_id, folder,
+                                 now=NOW)
+            session.rollback()
+        (folder / "A.png").write_bytes(_png((2752, 1536)))
+        with factory() as session:
+            sessions.append(session)
+            released = import_owner_art(session, store, toolchain, pkg.media_package_id,
+                                        folder, now=NOW)
+            session.commit()
+        assert released.render_profile == "yt_still_1440p_v1"
+        assert released.render_report["render_profile"]["width"] == 2560
+        assert released.to_c6_payload()["video"]["render_profile"] == "yt_still_1440p_v1"
     finally:
         engine.dispose()

@@ -11,6 +11,7 @@ the owner's art (the picked one first, else A, the style P2 chose), carries the 
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,7 @@ from ..artifacts import ArtifactStore
 from ..domain.enums import PackageStatus
 from ..domain.models import MediaPackage, ThumbnailVariant
 from ..errors import MediaAssemblyError
-from ..rendering.profiles import STILL_VIDEO_PROFILES, render_profile
+from ..rendering.profiles import STILL_VIDEO_PROFILES, RenderProfile, render_profile
 from ..rendering.qa import post_render_qa
 from ..rendering.toolchain import MediaToolchain, MediaToolError
 from ..storage.repositories import (
@@ -74,8 +75,20 @@ def import_owner_art(session: Session, store: ArtifactStore, toolchain: MediaToo
                                      f"picked {pick!r}, the images are {', '.join(letters)}")
         # The pick is the video's picture and the first (default) thumbnail.
         checked.sort(key=lambda c: c[0]["variant_key"].removeprefix("art_").upper() != pick)
+    profile = render_profile(STILL_VIDEO_PROFILES.get(pkg.render_profile, pkg.render_profile))
+    if checked[0][1].source_width < profile.width:
+        # The picked image is the video's picture: below the profile's width it would be
+        # upscaled into a soft video.
+        raise MediaAssemblyError(
+            "thumbnail_art_too_small",
+            f"{checked[0][2].name} is {checked[0][1].source_width} px wide; the video "
+            f"picture needs at least {profile.width} px ({profile.name})")
+    # The render takes minutes (20 for a long programme): end the read transaction first
+    # so no DB transaction is held open through it. The writes below are guarded by the
+    # package's status, so another writer in between is refused, not overwritten.
+    session.commit()
     video = _render_still_video(store, toolchain, pkg, checked[0][0]["variant_key"],
-                                checked[0][2])
+                                checked[0][2], profile)
 
     existing = {t.variant_key: t for t in list_thumbnail_variants(session, package_id)}
     offered = []
@@ -108,6 +121,7 @@ def import_owner_art(session: Session, store: ArtifactStore, toolchain: MediaToo
             session, package_id, offered, video_master_uri=video["uri"],
             video_checksum=video["checksum"], video_duration_seconds=video["duration"],
             render_report=video["report"], manifest_hash=manifest_hash,
+            render_profile=video["report"]["render_profile"]["name"],
             expected_status=PackageStatus.AWAITING_THUMBNAIL_ART,
             status=PackageStatus.READY_FOR_PUBLISH, now=now):
         raise MediaAssemblyError("thumbnail_art_not_awaited",
@@ -118,19 +132,19 @@ def import_owner_art(session: Session, store: ArtifactStore, toolchain: MediaToo
 
 
 def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: MediaPackage,
-                        variant_key: str, art: Path) -> dict[str, Any]:
+                        variant_key: str, art: Path, profile: RenderProfile) -> dict[str, Any]:
     """``art`` (the owner's original file, not the 1280 px thumbnail) held still over the
     package's audio master, QA'd, then stored; refused, with nothing stored, unless QA holds."""
-    profile = render_profile(STILL_VIDEO_PROFILES.get(pkg.render_profile, pkg.render_profile))
     report = dict(pkg.render_report)
     timeline = float(report["timeline_seconds"])
     low, high = report["sequencing"]["window_seconds"]
     with tempfile.TemporaryDirectory(prefix="plm-still-") as workdir:
         work = Path(workdir)
         audio = work / "audio_master.wav"
-        audio.write_bytes(store.fetch_verified(pkg.audio_master_uri, pkg.audio_checksum))
+        # Streamed to the file: the master of a two-hour programme is about 2 GB.
+        store.fetch_verified_to(pkg.audio_master_uri, pkg.audio_checksum, audio)
         image = work / f"art{art.suffix.lower()}"
-        image.write_bytes(art.read_bytes())
+        shutil.copyfile(art, image)
         out = work / f"video_master.{profile.container}"
         try:
             toolchain.render_still_video(audio, image, profile, out)
@@ -144,9 +158,9 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
                             size_bytes=out.stat().st_size)
         if not qa.passed:
             raise MediaAssemblyError("thumbnail_art_video_failed", "; ".join(qa.reasons))
-        stored = store.put(
+        stored = store.put_file(
             f"renders/{pkg.brand_id}/{pkg.media_package_id}/owner_art/"
-            f"video_master.{profile.container}", out.read_bytes(), content_type="video/mp4")
+            f"video_master.{profile.container}", out, content_type="video/mp4")
     duration = probe.duration_seconds if probe.duration_seconds is not None else timeline
     report["video_pipeline"] = {
         "still_image": {"variant_key": variant_key, "source": art.name,
@@ -155,6 +169,8 @@ def _render_still_video(store: ArtifactStore, toolchain: MediaToolchain, pkg: Me
                      "video_master": pkg.render_report.get("video_master")},
     }
     report["toolchain"] = toolchain.version
+    # The package now carries this video: record the profile (and size) it was rendered at.
+    report["render_profile"] = profile.to_dict()
     report["video_master"] = {"uri": stored.uri, "checksum": stored.sha256, "bytes": stored.size}
     report["duration_seconds"] = round(duration, 3)
     report["qa"] = {"passed": True, "reason_codes": [], "reasons": [], "metrics": qa.metrics}

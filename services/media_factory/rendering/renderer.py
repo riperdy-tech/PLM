@@ -11,8 +11,9 @@ stored masters:
 3. **Audio master.** The toolchain joins the tracks with the declared transition and
    normalises loudness to the profile's target (two-pass ``loudnorm``); the WAV is
    stored.
-4. **Video master.** The procedural visualiser over the background with the audio
-   master, encoded to the profile; the MP4 is stored.
+4. **Video master.** The background held still over the audio master (the owner's
+   rule, 2026-11-04: the picture is a still, no waveform or motion; the owner's art
+   replaces it at import), encoded to the profile; the MP4 is stored.
 5. **Post-render QA** (:mod:`.qa`) on the produced MP4 via ffprobe and an independent
    loudness meter. A failed check marks the job ``failed`` with the reason codes, and
    the package built from it is blocked.
@@ -51,7 +52,6 @@ from .toolchain import (
     MediaToolchain,
     MediaToolError,
     ProbeReport,
-    VisualizerSpec,
 )
 
 __all__ = [
@@ -98,14 +98,10 @@ class MediaRenderer:
     """Renders through a :class:`~.toolchain.MediaToolchain` into an artifact store."""
 
     def __init__(self, *, toolchain: MediaToolchain, store: ArtifactStore,
-                 profile: RenderProfile, still_placeholder: bool = False) -> None:
-        """``still_placeholder``: the video is the background held still instead of the
-        waveform visualiser, for a package whose video the owner's art replaces anyway
-        (the art inbox); the waveform took longer than the program it drew."""
+                 profile: RenderProfile) -> None:
         self.toolchain = toolchain
         self.store = store
         self.profile = profile
-        self.still_placeholder = still_placeholder
 
     def run_preflight(self, playlist: PlaylistSession, visual_session: VisualSession,
                       sources: Mapping[str, bytes], *,
@@ -215,27 +211,18 @@ class MediaRenderer:
                     AudioMasterSpec(segments=tuple(segments), transition=transition,
                                     transition_seconds=transition_seconds),
                     profile, work / "audio_master.wav")
-                # Not kept past the upload: an hour of 24-bit stereo is over a gigabyte.
-                audio = self._store(f"{root}/audio_master.wav",
-                                    (work / "audio_master.wav").read_bytes(), "audio/wav")
-                if self.still_placeholder:
-                    self.toolchain.render_still_video(
-                        work / "audio_master.wav", work / "background.png", profile,
-                        work / "video_master.mp4")
-                else:
-                    self.toolchain.render_video_master(
-                        work / "audio_master.wav",
-                        VisualizerSpec(background_png=work / "background.png",
-                                       wave_color=str(visual_session.visual_plan_json
-                                                      ["visualizer"]["color"])),
-                        profile, work / "video_master.mp4")
+                # Streamed from the file: an hour of 24-bit stereo is over a gigabyte.
+                audio = self.store.put_file(f"{root}/audio_master.wav",
+                                            work / "audio_master.wav", content_type="audio/wav")
+                self.toolchain.render_still_video(
+                    work / "audio_master.wav", work / "background.png", profile,
+                    work / "video_master.mp4")
             except MediaToolError as exc:
                 if exc.code == "render_timeout":
                     raise MediaInfrastructureError(exc.code, str(exc)) from exc
                 raise MediaAssemblyError(exc.code, str(exc)) from exc
-            video_bytes = (work / "video_master.mp4").read_bytes()
-            video = self._store(f"{root}/video_master.{profile.container}", video_bytes,
-                                "video/mp4")
+            video = self.store.put_file(f"{root}/video_master.{profile.container}",
+                                        work / "video_master.mp4", content_type="video/mp4")
 
             probe: ProbeReport | None
             try:

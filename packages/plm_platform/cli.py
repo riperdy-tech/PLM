@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from collections.abc import Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -163,8 +164,29 @@ def run_doctor(
         checks.append(_temporal_check(settings, temporal_timeout))
         checks.append(_worker_pollers_check(settings, temporal_timeout))
     checks.append(_task_queues_check())
+    checks.append(_disk_check(REPO_ROOT))
     checks.extend(_readyz_checks())
     return checks
+
+
+_MIN_FREE_GIB: Final[float] = 20.0
+"""Below this the disk FAILs: a two-hour render needs its ~2 GB WAV master, the video and
+the temporary copies, and Docker keeps Postgres, MinIO and the renders on this disk."""
+
+
+def _disk_check(path: Path, min_free_gib: float = _MIN_FREE_GIB) -> Check:
+    """Free space on the disk holding the checkout (and, by the ops rule, Docker's data:
+    renders and WAV masters grow there until archived after upload)."""
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError as exc:
+        return Check("disk", False, f"cannot read free space of {path.anchor or path} - {exc}")
+    free = usage.free / 1024 ** 3
+    where = f"{path.anchor or path}: {free:.1f} GiB free of {usage.total / 1024 ** 3:.0f} GiB"
+    if free < min_free_gib:
+        return Check("disk", False, f"{where}, below {min_free_gib:g} GiB - archive "
+                     "published renders or free space before the next render")
+    return Check("disk", True, where)
 
 
 def _postgres_check(settings: Settings, connect_timeout: float) -> Check:
@@ -959,6 +981,24 @@ def media_render_attest_termination(
 
     cli_render_attest_termination(job_id=job_id, evidence_ref=evidence_ref,
                                   recorded_by=recorded_by)
+
+
+@media_app.command(name="retry-render")
+def media_retry_render(
+    package_id: str = typer.Argument(..., help="Package whose claimed render failed"),
+    request_path: str = typer.Option(
+        ..., "--request", "-r", help="The package's own assembly request JSON"),
+    recorded_by: str = typer.Option(..., "--recorded-by", help="Operator identity"),
+    orphan_evidence_ref: str | None = typer.Option(
+        None, "--orphan-evidence-ref",
+        help="Where you recorded checking the failed render's output (only when nothing "
+        "could be listed)"),
+) -> None:
+    """Render a package again after its claimed render failed (inventory, stage, run)."""
+    from media_factory.cli import cli_retry_render
+
+    cli_retry_render(package_id=package_id, request_path=request_path,
+                     recorded_by=recorded_by, orphan_evidence_ref=orphan_evidence_ref)
 
 
 @media_app.command(name="package")

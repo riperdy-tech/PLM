@@ -23,7 +23,6 @@ __all__ = [
     "MediaToolchain",
     "ProbeReport",
     "StreamInfo",
-    "VisualizerSpec",
 ]
 
 
@@ -47,13 +46,6 @@ class AudioMasterSpec:
     segments: tuple[AudioSegment, ...]
     transition: TransitionType
     transition_seconds: float
-
-
-@dataclass(frozen=True, slots=True)
-class VisualizerSpec:
-    background_png: Path
-    wave_color: str
-    """``#RRGGBB``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,15 +100,10 @@ class MediaToolchain(Protocol):
         target, write a WAV master to ``out``; return the normaliser's measurements."""
         ...
 
-    def render_video_master(self, audio_master: Path, visual: VisualizerSpec,
-                            profile: RenderProfile, out: Path) -> None:
-        """Encode the visualiser over the background with the audio into ``out``."""
-        ...
-
     def render_still_video(self, audio_master: Path, image: Path, profile: RenderProfile,
                            out: Path) -> None:
         """Encode ``image``, cropped to fill the frame and held still for the whole audio
-        master, with the audio into ``out`` (the owner's art as the picture)."""
+        master, with the audio into ``out`` (the background, then the owner's art)."""
         ...
 
     def probe(self, path: Path) -> ProbeReport:
