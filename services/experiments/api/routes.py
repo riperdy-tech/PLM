@@ -46,6 +46,7 @@ from ..materialization.builder import (
     extend_package,
     materialize_package,
 )
+from ..materialization.supply import manual_supply_policy
 from ..storage import repositories
 from ..storage.ids import deterministic_id
 from ..storage.models import idempotency_records_table
@@ -344,6 +345,8 @@ def build_router(
                     brand_id=req.brand_id,
                     budget_envelope=req.budget_envelope,
                     candidate_target=1 if settings.manual_supply else 2,
+                    supply_policy=(manual_supply_policy() if settings.manual_supply
+                                   else None),
                     track_duration_range=(DurationRangeSeconds(
                         min_seconds=MANUAL_TRACK_SECONDS[0], max_seconds=MANUAL_TRACK_SECONDS[1])
                         if settings.manual_supply else None),

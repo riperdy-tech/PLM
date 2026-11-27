@@ -33,15 +33,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..domain.genome import DurationRange
 
 __all__ = [
+    "MANUAL_SUPPLY_POLICY_PATH",
     "SUPPLY_POLICY_PATH",
     "SupplyPlan",
     "SupplyPolicy",
     "default_supply_policy",
+    "manual_supply_policy",
     "plan_supply",
     "playlist_midpoint_seconds",
 ]
 
 SUPPLY_POLICY_PATH: Final[Path] = Path(__file__).resolve().parent / "supply_policy.json"
+MANUAL_SUPPLY_POLICY_PATH: Final[Path] = (Path(__file__).resolve().parent
+                                          / "manual_supply_policy.json")
 
 
 class SupplyPolicy(BaseModel):
@@ -54,6 +58,9 @@ class SupplyPolicy(BaseModel):
     """Spare specs per base spec, to absorb P5 rejections."""
     max_extension_ratio: Decimal = Field(ge=0, le=2)
     """The most top-up specs per planned spec that ``extend`` may add."""
+    spare_track_cap: int | None = Field(default=None, ge=0)
+    """The most spares one package plans, whatever the ratio gives (none: no cap)."""
+    basis: str | None = None
 
     @classmethod
     def from_file(cls, path: Path) -> SupplyPolicy:
@@ -65,6 +72,12 @@ class SupplyPolicy(BaseModel):
 def default_supply_policy() -> SupplyPolicy:
     """The shipped supply policy, loaded and validated once per process."""
     return SupplyPolicy.from_file(SUPPLY_POLICY_PATH)
+
+
+@lru_cache(maxsize=1)
+def manual_supply_policy() -> SupplyPolicy:
+    """Manual supply's policy (the owner makes every song): a small, capped spare."""
+    return SupplyPolicy.from_file(MANUAL_SUPPLY_POLICY_PATH)
 
 
 class SupplyPlan(BaseModel):
@@ -110,6 +123,8 @@ def plan_supply(
     )
     base = max(1, math.ceil(declared.min_seconds / planned_track_seconds))
     spare = _ceil(Decimal(base) * policy.spare_ratio)
+    if policy.spare_track_cap is not None:
+        spare = min(spare, policy.spare_track_cap)
     total = base + spare
     return SupplyPlan(
         duration_range_seconds=declared,
