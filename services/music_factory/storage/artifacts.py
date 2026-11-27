@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import io
-import wave
 from datetime import datetime
 from typing import Final, Protocol, runtime_checkable
 
+import soundfile as sf  # type: ignore[import-untyped]
 import urllib3
 from minio import Minio
 from minio.error import S3Error
@@ -54,6 +54,9 @@ __all__ = [
     "probe_audio_bytes",
 ]
 
+_WAV_CODECS: Final = {"PCM_U8": "pcm_u8", "PCM_16": "pcm_s16le", "PCM_24": "pcm_s24le",
+                      "PCM_32": "pcm_s32le", "FLOAT": "pcm_f32le", "DOUBLE": "pcm_f64le"}
+
 
 def probe_audio_bytes(data: bytes, *, mime_type: str = "audio/wav") -> MeasuredAudio:
     """Probe audio byte stream for technical parameters and sha256 hash."""
@@ -66,15 +69,15 @@ def probe_audio_bytes(data: bytes, *, mime_type: str = "audio/wav") -> MeasuredA
     codec = "unknown"
 
     if data.startswith(b"RIFF") and b"WAVE" in data[:16]:
+        # libsndfile, not ``wave``: it reads float WAVs too, and counts the frames the
+        # bytes hold rather than trusting the header of a file cut short.
         try:
-            with wave.open(io.BytesIO(data), "rb") as wf:
-                channels = wf.getnchannels()
-                sample_rate = wf.getframerate()
-                n_frames = wf.getnframes()
-                samp_width = wf.getsampwidth()
-                codec = f"pcm_s{samp_width * 8}le"
-                if sample_rate > 0:
-                    duration_seconds = round(float(n_frames) / float(sample_rate), 4)
+            info = sf.info(io.BytesIO(data))
+            channels = int(info.channels)
+            sample_rate = int(info.samplerate)
+            codec = _WAV_CODECS.get(str(info.subtype), str(info.subtype).lower())
+            if sample_rate > 0:
+                duration_seconds = round(float(info.frames) / float(sample_rate), 4)
         except Exception:  # noqa: BLE001
             codec = "pcm_s16le"
     else:

@@ -72,6 +72,7 @@ from ..storage.artifacts import (
     probe_audio_bytes,
 )
 from ..storage.repositories import (
+    artifact_sha256_index,
     insert_audio_artifact,
     insert_candidate,
     insert_cost_record,
@@ -126,9 +127,14 @@ def _record_outcome(session: Session, attempt: GenerationAttempt,
 
 
 def _request(plan: GenerationPlan, spec: AdaptedTrackSpec, prompt_obj: Any,
-             adapter: MusicProviderProtocol, *, seed: int) -> GenerationRequest:
+             adapter: MusicProviderProtocol, *, seed: int,
+             variant_code: str) -> GenerationRequest:
     """The provider request for one variant's prompt."""
     return GenerationRequest(
+        plan_id=plan.plan_id,
+        variant_code=variant_code,
+        duration_min_seconds=spec.duration_range.min_seconds,
+        duration_max_seconds=spec.duration_range.max_seconds,
         experiment_id=plan.experiment_id,
         track_spec_id=plan.track_spec_id,
         prompt=prompt_obj.prompt,
@@ -416,12 +422,14 @@ class GenerationEngine:
             try:
                 requests = [
                     _request(plan, spec, build_generation_prompt(
-                        spec, variant_delta=v.prompt_delta), adapter, seed=0)
+                        spec, variant_delta=v.prompt_delta), adapter, seed=0,
+                        variant_code=v.variant_code)
                     for v in pending
                 ]
             except ProtectedArtistPromptRefused:
                 requests = []  # the loop below refuses the plan
-            missing = awaiting_audio(requests)
+            # Audio already stored (any plan) is not a new song: saved twice, it waits.
+            missing = awaiting_audio(requests, imported=artifact_sha256_index(session))
             if missing:
                 return GenerationEngineResult(
                     plan_id=plan.plan_id, status=PlanStatus.RUNNING,
@@ -486,7 +494,8 @@ class GenerationEngine:
                     submitted_at=self.clock.now(),
                 )
 
-                gen_req = _request(plan, spec, prompt_obj, adapter, seed=current_seed)
+                gen_req = _request(plan, spec, prompt_obj, adapter, seed=current_seed,
+                                   variant_code=variant.variant_code)
 
                 mode = provider_mode_of(adapter)
                 # The global ledger does not enforce this plan's own ceilings.

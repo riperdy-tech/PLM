@@ -47,7 +47,7 @@ from tests.unit.music.test_suno_manual_import import NOW, FreeBudget, _drop, _gu
 def _spec() -> dict[str, Any]:
     fields = track_spec_fields(
         track_spec_id="trk_manual_01", requested_duration=20,
-        duration_range={"min_seconds": 10, "max_seconds": 30}, candidate_target=2,
+        duration_range={"min_seconds": 1, "max_seconds": 30}, candidate_target=2,
         lineage=lineage_fields(experiment_id="exp_manual_01"),
         provider_policy={"allowed_providers": ["lyria"]},
     )

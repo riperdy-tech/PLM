@@ -81,6 +81,12 @@ class GenerationRequest(BaseModel):
     seed: int = 0
     provider_id: str = "mock"
     model_id: str = "mock-v1"
+    plan_id: str | None = None
+    variant_code: str | None = None
+    """The creative variant (``v1``...); an owner-made song's file is named after it."""
+    duration_min_seconds: int | None = None
+    duration_max_seconds: int | None = None
+    """The spec's accepted length range; ``None`` when the caller did not give one."""
 
 
 class GenerationResponse(BaseModel):

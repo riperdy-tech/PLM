@@ -76,7 +76,6 @@ class FlowMusicManualAdapter(SunoManualAdapter):
             f"Instrument: {model}. Start a new session, paste the Prompt text into the",
             "prompt box and send it. If Flow Music makes more than one song, pick the",
             "better one, download it as WAV and save it in this folder under the name given.",
-            "",
         ]
 
     def _prompt_lines(self, request: GenerationRequest) -> list[str]:
