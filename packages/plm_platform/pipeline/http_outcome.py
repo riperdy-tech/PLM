@@ -8,7 +8,10 @@
      to the lineage;
   3. the video's analytics for the horizon window from P7's source
      (``GET /youtube/videos/{id}/analytics``) into ``POST /analytics/ingest/youtube``,
-     labelled ``synthetic`` when the source is a mock;
+     labelled ``synthetic`` when the source is a mock. P7's 409 ``analytics_not_final``
+     (YouTube Analytics settles three days after the window) is
+     :class:`~.phase_client.StepNotReady`; the publication P9 is sent carries the
+     publish time P7 answered with (YouTube's own);
   4. the release's monthly statements up to ``requested_at`` from P8
      (``GET /distribution/releases/{id}/statements``), each into
      ``POST /analytics/ingest/distributor``, received at ``requested_at``;
@@ -20,6 +23,9 @@
      unknown cost is never booked as zero;
   6. ``POST /analytics/evaluation/measure``: P9 computes the outcome from what it stored
      and enqueues the reward in its outbox. The pipeline passes no amount.
+
+  With distribution disabled (a YouTube-only channel) steps 2 and 4 are skipped and the
+  measurement names no ISRC (``isrcs: []``).
 
 * ``dispatch_reward``: ``POST /analytics/rewards/dispatch`` runs one P9 outbox pass and
   reports each fact's delivery status. ``DELIVERED`` for all completes the step; pending
@@ -39,7 +45,7 @@ from typing import Any, Final
 from ..clock import stable_seed
 from ..temporal import Phase, ValidationFailure
 from .http_base import HttpStepsBase, instant
-from .phase_client import StepNotReady, request_key, require
+from .phase_client import PhaseRequestRefused, StepNotReady, request_key, require
 from .types import StepRequest, StepResult
 
 __all__ = ["COST_CATEGORY", "OutcomeSteps"]
@@ -139,6 +145,9 @@ class OutcomeSteps(HttpStepsBase):
             raise ValidationFailure("evaluate_outcome inputs: 'costs' (the ledger's view of "
                                     "the run's writes) is missing")
         by_package = {r["media_package_id"]: r for r in releases if isinstance(r, dict)}
+        # A YouTube-only channel (``distribution.enabled = false``) has no release: nothing
+        # is linked or read from P8 and P9 measures with no ISRC (review 2026-11-26 #35).
+        youtube_only = not self._config.distribution_enabled
         observed_at = request.requested_at.isoformat()
         p7, p8, p9 = (self._client(Phase.YOUTUBE), self._client(Phase.DISTRIBUTION),
                       self._client(Phase.ANALYTICS))
@@ -153,16 +162,31 @@ class OutcomeSteps(HttpStepsBase):
                                    f"{video_id} published_at")
             if published_at > request.requested_at:
                 raise ValidationFailure(f"{video_id} was published after the measurement")
-            release = by_package.get(media_package_id)
-            if release is None:
-                raise ValidationFailure(f"no release was submitted for {media_package_id}")
-            release_id = str(require(release, "release_id", "release"))
-            p9.post("/analytics/ingest/releases",
-                    idempotency_key=request_key(key, "link-release", release_id),
-                    body={"record": require(release, "distribution_record", "release")})
+            release: dict[str, Any] | None = None
+            release_id: str | None = None
+            if not youtube_only:
+                release = by_package.get(media_package_id)
+                if release is None:
+                    raise ValidationFailure(f"no release was submitted for {media_package_id}")
+                release_id = str(require(release, "release_id", "release"))
+                p9.post("/analytics/ingest/releases",
+                        idempotency_key=request_key(key, "link-release", release_id),
+                        body={"record": require(release, "distribution_record", "release")})
 
-            analytics = p7.get(f"/youtube/videos/{video_id}/analytics", idempotency_key=key,
-                               params={"window": window, "as_of": observed_at})
+            try:
+                analytics = p7.get(f"/youtube/videos/{video_id}/analytics",
+                                   idempotency_key=key,
+                                   params={"window": window, "as_of": observed_at})
+            except PhaseRequestRefused as exc:
+                if exc.code == "analytics_not_final":
+                    raise StepNotReady(f"{video_id}: {exc.message}",
+                                       code="analytics_not_final") from exc
+                raise
+            # The window starts when YouTube made the video public (P7 reads it again
+            # before measuring, review 2026-11-26 #33), not when P7 finished.
+            event = require(publication, "publication_event", "publication")
+            if analytics.get("published_at"):
+                event = {**event, "published_at": analytics["published_at"]}
             metrics = require(analytics, "metrics", f"P7 analytics of {video_id}")
             revenue = metrics.get("estimated_revenue")
             snapshot: dict[str, Any] = {
@@ -180,10 +204,14 @@ class OutcomeSteps(HttpStepsBase):
             p9.post("/analytics/ingest/youtube",
                     idempotency_key=request_key(key, "ingest-youtube", video_id), body=snapshot)
 
-            reported = p8.get(f"/distribution/releases/{release_id}/statements",
-                              idempotency_key=key, params={"as_of": observed_at})
-            provider = require(reported, "provider", "P8 statements")
-            for statement in require(reported, "statements", "P8 statements"):
+            statements: list[Any] = []
+            provider = None
+            if release_id is not None:
+                reported = p8.get(f"/distribution/releases/{release_id}/statements",
+                                  idempotency_key=key, params={"as_of": observed_at})
+                provider = require(reported, "provider", "P8 statements")
+                statements = require(reported, "statements", "P8 statements")
+            for statement in statements:
                 period = str(require(statement, "period", "P8 statement"))
                 p9.post("/analytics/ingest/distributor",
                         idempotency_key=request_key(key, "ingest-statement",
@@ -210,8 +238,9 @@ class OutcomeSteps(HttpStepsBase):
             reward = p9.post(
                 "/analytics/evaluation/measure",
                 idempotency_key=request_key(key, "measure", video_id),
-                body={"publication": require(publication, "publication_event", "publication"),
-                      "isrcs": require(release, "isrcs", "release"), "window": window,
+                body={"publication": event,
+                      "isrcs": [] if release is None else require(release, "isrcs", "release"),
+                      "window": window,
                       "observed_at": observed_at, "closed_by_source": False,
                       "quality_status": None})
             rewards.append({

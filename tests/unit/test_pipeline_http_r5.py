@@ -451,6 +451,66 @@ def test_evaluation_refuses_a_write_whose_cost_is_unknown(status: str) -> None:
     assert world.sent("POST", "/analytics/evaluation/measure") == []
 
 
+YOUTUBE_ONLY = dataclasses.replace(CONFIG, distribution_enabled=False)
+
+
+def _youtube_only_inputs() -> dict[str, Any]:
+    costs = [_cost("youtube.upload", "0", "committed", media_package_id="m1")]
+    return {**_evaluate_inputs(costs), "submit_distribution": {
+        "releases": [], "external_writes": [], "skipped": "distribution_disabled"}}
+
+
+def test_a_youtube_only_unit_is_measured_with_no_release_and_no_isrc() -> None:
+    """Distribution disabled (review 2026-11-26 #35): nothing is linked or read from P8,
+    and P9 is asked to measure with ``isrcs: []`` (it accepts that only for a configured
+    YouTube-only channel with a valid non-monetized attestation)."""
+    world = _evaluate_world()
+    world.on("GET", "/youtube/videos/yt1/analytics",
+             {**SNAPSHOT, "provider_mode": "real", "published_at": PUBLISHED})
+    result = asyncio.run(world.steps(YOUTUBE_ONLY).evaluate_outcome(
+        _request(Step.EVALUATE_OUTCOME, _youtube_only_inputs())))
+    assert world.sent("POST", "/analytics/ingest/releases") == []
+    assert world.sent("GET", "/distribution/releases/rel-1/statements") == []
+    assert world.sent("POST", "/analytics/ingest/distributor") == []
+    (snapshot,) = world.sent("POST", "/analytics/ingest/youtube")
+    assert _body(snapshot)["source"] == "youtube_analytics"
+    (measure,) = world.sent("POST", "/analytics/evaluation/measure")
+    assert _body(measure)["isrcs"] == []
+    assert result.outputs["rewards"][0]["measurement_source"] == "youtube_analytics"
+
+
+def test_an_enabled_distribution_still_needs_its_release() -> None:
+    world = _evaluate_world()
+    with pytest.raises(ValidationFailure, match="no release was submitted"):
+        asyncio.run(world.steps().evaluate_outcome(
+            _request(Step.EVALUATE_OUTCOME, _youtube_only_inputs())))
+
+
+def test_analytics_that_are_not_final_make_the_step_wait() -> None:
+    world = _evaluate_world()
+    world.on("GET", "/youtube/videos/yt1/analytics", httpx.Response(409, json={"detail": {
+        "code": "analytics_not_final", "field_paths": [],
+        "message": "final at 2026-11-15T08:00:00+00:00"}}))
+    with pytest.raises(StepNotReady) as waiting:
+        asyncio.run(world.steps(YOUTUBE_ONLY).evaluate_outcome(
+            _request(Step.EVALUATE_OUTCOME, _youtube_only_inputs())))
+    assert waiting.value.code == "analytics_not_final"
+    assert world.sent("POST", "/analytics/evaluation/measure") == []
+
+
+def test_the_measurement_starts_when_youtube_made_the_video_public() -> None:
+    """P7 answers with YouTube's own publish time (review #33); P9 derives maturity from
+    the publication it is sent, so that time replaces P7's completion time."""
+    world = _evaluate_world()
+    public_at = "2026-10-20T00:00:00+00:00"
+    world.on("GET", "/youtube/videos/yt1/analytics",
+             {**SNAPSHOT, "provider_mode": "real", "published_at": public_at})
+    asyncio.run(world.steps(YOUTUBE_ONLY).evaluate_outcome(
+        _request(Step.EVALUATE_OUTCOME, _youtube_only_inputs())))
+    (measure,) = world.sent("POST", "/analytics/evaluation/measure")
+    assert _body(measure)["publication"] == {**EVENT, "published_at": public_at}
+
+
 def test_evaluation_refuses_a_unit_with_no_reported_write() -> None:
     world = _evaluate_world()
     with pytest.raises(ValidationFailure, match="cost is unknown"):
