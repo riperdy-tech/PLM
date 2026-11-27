@@ -101,7 +101,7 @@ ALTERNATIVE_DIMENSIONS: Final[frozenset[str]] = frozenset(
 """Categorical dimensions a template may give an ontology of alternatives for."""
 
 _TEMPLATE_META_KEYS: Final[frozenset[str]] = frozenset(
-    {"parent", "alternatives", "bpm_limits", "energy_limits"})
+    {"parent", "alternatives", "bpm_limits", "energy_limits", "mood_limits"})
 
 PLAYLIST_DURATION_BUCKET_UNKNOWN: Final[str] = "playlist_duration_bucket_unknown"
 PLAYLIST_DURATION_OUTSIDE_POLICY: Final[str] = "playlist_duration_outside_policy"
@@ -169,6 +169,9 @@ class GenreTemplate(BaseModel):
     """The tempo bounds every treatment keeps (none: only the generator's own bounds)."""
     energy_limits: tuple[EnergyLevel, ...] | None = None
     """The energy levels every treatment keeps (none: the whole ladder)."""
+    mood_limits: tuple[str, ...] | None = None
+    """The moods a brief may set (review #43: P1's sensual or romantic never reaches a
+    focus genome); none: any mood."""
 
 
 class TemplateLibrary:
@@ -486,6 +489,18 @@ class TemplateLibrary:
                 raise TemplateLibraryError(
                     f"template {name!r} declares energy {genome.energy.value}, outside its "
                     f"energy_limits {[level.value for level in energy_limits]}")
+        mood_limits: tuple[str, ...] | None = None
+        if "mood_limits" in resolved:
+            mood_limits = tuple(str(v) for v in resolved["mood_limits"])
+            if not mood_limits or any(normalize_dimension_value("mood", m) != m
+                                      for m in mood_limits):
+                raise TemplateLibraryError(
+                    f"template {name!r} mood_limits must be non-empty normalized tokens")
+            outside = [m for m in genome.mood if m not in mood_limits]
+            if outside:
+                raise TemplateLibraryError(
+                    f"template {name!r} declares mood {outside}, outside its mood_limits "
+                    f"{list(mood_limits)}")
         alternatives: dict[str, tuple[str, ...]] = {}
         for dim, values in dict(resolved.get("alternatives", {})).items():
             if dim not in ALTERNATIVE_DIMENSIONS:
@@ -502,7 +517,8 @@ class TemplateLibrary:
                 raise TemplateLibraryError(f"template {name!r} repeats an alternative for {dim!r}")
             alternatives[dim] = tokens
         return GenreTemplate(template_name=name, genome=genome, alternatives=alternatives,
-                             bpm_limits=bpm_limits, energy_limits=energy_limits)
+                             bpm_limits=bpm_limits, energy_limits=energy_limits,
+                             mood_limits=mood_limits)
 
 
 @lru_cache(maxsize=1)
@@ -688,19 +704,25 @@ def build_genome_from_directive(
 
     updates: dict[str, Any] = {}
     if _present(brief.get("mood")):
-        updates["mood"] = _token_tuple("mood", brief["mood"])
+        moods = _token_tuple("mood", brief["mood"])
+        if template.mood_limits is not None:  # review #43: P1 moods stay inside identity
+            moods = tuple(mood for mood in moods if mood in template.mood_limits)
+        if moods:
+            updates["mood"] = moods
     if _present(brief.get("use_case")):
         updates["use_case"] = _token_tuple("use_case", brief["use_case"])
     if _present(brief.get("language")):
         updates["language"] = normalize_dimension_value("language", str(brief["language"]))
-    if _present(brief.get("visual_world")):
-        updates["visual_world"] = normalize_dimension_value(
-            "visual_world", str(brief["visual_world"])
-        )
+    # Review #36: a brief world (from P1 title words) is kept only when the template
+    # allows it and it is not recent; otherwise the template's own world, or a fresh one.
+    worlds = tuple(template.alternatives.get("visual_world") or (base.visual_world,))
+    named = (normalize_dimension_value("visual_world", str(brief["visual_world"]))
+             if _present(brief.get("visual_world")) else None)
+    if named is not None and named in worlds and named not in recent_visual_worlds:
+        updates["visual_world"] = named
     elif base.visual_world in recent_visual_worlds:
-        worlds = template.alternatives.get("visual_world") or (base.visual_world,)
         updates["visual_world"] = choose_fresh(
-            tuple(worlds), f"{directive.directive_id}:visual_world", recent_visual_worlds)
+            worlds, f"{directive.directive_id}:visual_world", recent_visual_worlds)
     if _present(brief.get("vocal_mode")):
         token = normalize_dimension_value("vocal_mode", str(brief["vocal_mode"]))
         try:
@@ -718,4 +740,6 @@ def build_genome_from_directive(
 
     dumped = base.model_dump()
     dumped.update(updates)
+    if "language" in updates and dumped["vocal_mode"] == VocalMode.INSTRUMENTAL:
+        dumped["language"] = "instrumental"  # review #43: a brief never sets a sung language
     return ContentGenome.model_validate(dumped)

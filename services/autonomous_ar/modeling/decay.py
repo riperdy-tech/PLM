@@ -51,11 +51,19 @@ def weighted_reward(rewards: Sequence[float], weights: Sequence[float]) -> float
 
 
 def detect_regime_shift(recent: float | None, baseline: float | None, *,
-                        relative_threshold: float) -> bool | None:
-    """§28: a material move in *either* direction; `None` when either side is unknown."""
+                        relative_threshold: float,
+                        scale: float | None = None) -> bool | None:
+    """§28: a material move in *either* direction; `None` when either side is unknown.
+
+    With `scale` (a bounded score's range, e.g. 100 for P1's percentile score) the move
+    is measured as a share of that range: on a percentile score 10 -> 14 is four points,
+    not a 40 % change (review 2026-11-26). Without it, relative to the baseline.
+    """
     if recent is None or baseline is None:
         return None
     if relative_threshold <= 0.0:
         raise ValueError("relative_threshold must be > 0")
-    denominator = max(abs(baseline), 1e-9)
+    if scale is not None and scale <= 0.0:
+        raise ValueError("scale must be > 0")
+    denominator = scale if scale is not None else max(abs(baseline), 1e-9)
     return abs(recent - baseline) / denominator >= relative_threshold

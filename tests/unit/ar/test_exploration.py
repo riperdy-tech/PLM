@@ -89,3 +89,44 @@ def test_sampling_is_seeded_and_ranking_is_a_total_order() -> None:
                               ArmSample(arm_id="a", sampled_reward=0.5,
                                         posterior_expected_reward=0.6)])
     assert [sample.arm_id for sample in ranked] == ["a", "b"], "ties break on arm_id"
+
+
+def _tied() -> list[ArmSample]:
+    return [ArmSample(arm_id=arm_id, sampled_reward=1.0, posterior_expected_reward=0.5)
+            for arm_id in ("a", "b", "c")]
+
+
+def test_a_seeded_tiebreak_shares_ties_fairly_and_replays() -> None:
+    """Clamped draws tie often (every draw above 1.0 is 1.0); `arm_id` order then always
+    gave the same arm the slot. A seeded tiebreak shares the ties and replays exactly."""
+    winners = set()
+    for seed in range(30):
+        rng = random.Random(seed)
+        tiebreak = {arm_id: rng.random() for arm_id in ("a", "b", "c")}
+        first = sampled_ranking(_tied(), tiebreak=tiebreak)
+        assert first == sampled_ranking(_tied(), tiebreak=tiebreak)
+        winners.add(first[0].arm_id)
+    assert winners == {"a", "b", "c"}
+    # a higher draw still wins whatever the tiebreak says
+    ranked = sampled_ranking([*_tied()[:2], ArmSample(arm_id="z", sampled_reward=0.2,
+                                                      posterior_expected_reward=0.5)],
+                             tiebreak={"a": 0.9, "b": 0.1, "z": 0.0})
+    assert [sample.arm_id for sample in ranked] == ["b", "a", "z"]
+
+
+def test_a_one_slot_cycle_draws_its_class_with_the_policy_weights() -> None:
+    """Review 2026-11-26: one slot always went to exploit, so exploration only came from
+    the cooldown. Below three slots each slot's class is drawn (seeded) with the weights."""
+    fractions = (0.70, 0.20, 0.10)
+    drawn = [quota_from_fractions(1, fractions, rng=random.Random(seed)) for seed in range(400)]
+    assert all(sum(quota.values()) == 1 for quota in drawn)
+    exploit = sum(quota[AllocationType.EXPLOIT] for quota in drawn) / len(drawn)
+    adjacent = sum(quota[AllocationType.ADJACENT_EXPLORE] for quota in drawn) / len(drawn)
+    assert 0.6 < exploit < 0.8 and 0.12 < adjacent < 0.28
+    assert any(quota[AllocationType.RADICAL_EXPLORE] for quota in drawn)
+    assert drawn[7] == quota_from_fractions(1, fractions, rng=random.Random(7))
+    two = quota_from_fractions(2, fractions, rng=random.Random(3))
+    assert sum(two.values()) == 2
+    # three slots and more keep the exact largest-remainder apportionment
+    assert quota_from_fractions(10, fractions, rng=random.Random(1)) == quota_from_fractions(
+        10, fractions)

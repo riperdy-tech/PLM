@@ -39,4 +39,6 @@ def test_reason_codes_are_the_spec_nine_plus_the_nine_this_build_requires() -> N
         # owner 2026-11-09: sub-style choice and memory across videos
         "OWNER_SUBGENRE_CHOICE", "OWNER_SUBGENRE_UNAVAILABLE", "SUBGENRE_RECENTLY_USED",
         "SUBGENRE_MEMORY_RELAXED",
+        # review 2026-11-26: the owner's style is kept through its arms' cooldown
+        "OWNER_SUBGENRE_COOLDOWN_RELAXED",
     }

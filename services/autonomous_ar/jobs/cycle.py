@@ -14,10 +14,29 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from plm_contracts import ChannelActivationState
 from plm_platform.temporal import DEFAULT_RETRY_POLICY
 from temporalio import activity, workflow
 
-__all__ = ["AllocationCycleWorkflow", "run_cycle_activity"]
+__all__ = ["AllocationCycleWorkflow", "cycle_request_from_payload", "run_cycle_activity"]
+
+
+def cycle_request_from_payload(payload: dict[str, Any], *, now: datetime) -> Any:
+    """The scheduled payload as a `CycleRequest`: `as_of` stamped once with `now` when
+    absent, and SHADOW unless the payload names an activation state explicitly.
+
+    Without a state the engine would fall back to the stored channel state, so a weekly
+    schedule would start AUTONOMOUS cycles nobody asked for once the channel is
+    AUTONOMOUS (review 2026-11-26). An explicit state is parsed, never guessed.
+    """
+    from ..decisioning.cycle import CycleRequest
+
+    state = payload.get("activation_state")
+    return CycleRequest(**{
+        **payload, "as_of": payload.get("as_of") or now,
+        "activation_state": (ChannelActivationState(state) if state
+                             else ChannelActivationState.SHADOW),
+    })
 
 
 @activity.defn
@@ -37,25 +56,24 @@ def _run_cycle(payload: dict[str, Any]) -> dict[str, Any]:
     from plm_platform.db import scoped_session
 
     from ..config import production_settings
-    from ..decisioning.cycle import CycleRequest, MarketSnapshot, run_allocation_cycle
+    from ..decisioning.cycle import MarketSnapshot, run_allocation_cycle
     from ..ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
 
     settings = production_settings(platform=load_settings(env=None))
     platform = settings.platform
     if platform is None:  # pragma: no cover - load_ar_settings above always sets it
         raise RuntimeError("AR settings without platform settings cannot run the job")
-    request = CycleRequest(**{**payload, "as_of": payload.get("as_of") or datetime.now(UTC)})
+    request = cycle_request_from_payload(payload, now=datetime.now(UTC))
     token = (platform.service_token.get_secret_value()
              if platform.service_token is not None else None)
     client = P1Client(settings.market_base_url, token,
                       timeout_seconds=settings.market_timeout_seconds)
     with scoped_session("ar") as session:
         try:
-            page = client.fetch_opportunities(limit=200)
+            items, as_of, score_version = client.fetch_all_opportunities()
             snapshot = MarketSnapshot(
-                arms=tuple(adapt_opportunity(item, now=request.as_of)
-                           for item in page.items),
-                as_of=page.as_of, source="live", score_version=page.score_version)
+                arms=tuple(adapt_opportunity(item, now=request.as_of) for item in items),
+                as_of=as_of, source="live", score_version=score_version)
         except MarketUnavailable as exc:
             stored = _stored_snapshot(session, brand_id=request.brand_id,
                                       as_of=request.as_of)

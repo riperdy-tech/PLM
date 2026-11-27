@@ -1,5 +1,5 @@
 {
-  "templates_version": "p3-genome-templates-v8",
+  "templates_version": "p3-genome-templates-v9",
   "playlist_duration_policy": {
     "default_bucket": "20_30m",
     "allowed_range": {"min_seconds": 1200, "max_seconds": 7200, "target_seconds": 1500},
@@ -291,6 +291,7 @@
       "bpm": {"min_bpm": 80, "max_bpm": 100, "target_bpm": 90},
       "bpm_limits": {"min_bpm": 70, "max_bpm": 110},
       "energy_limits": ["low", "medium"],
+      "mood_limits": ["focused", "calm", "dreamy", "hopeful", "uplifting"],
       "key_profile": "D_minor",
       "lyric_density": "instrumental",
       "song_structure": "loop_progression",

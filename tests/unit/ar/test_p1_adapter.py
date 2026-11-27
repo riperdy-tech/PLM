@@ -63,12 +63,47 @@ def test_payload_schema_refuses_unknown_fields() -> None:
         OpportunityPayload.model_validate(_payload(freshness="fresh"))
 
 
+def _paged_transport(pages: dict[str | None, tuple[list[str], str | None]],
+                     seen: list[str | None]) -> httpx.MockTransport:
+    def handle(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        seen.append(cursor)
+        arm_ids, following = pages[cursor]
+        return httpx.Response(200, json={
+            "schema_version": "1.0", "next_cursor": following, "as_of": AS_OF.isoformat(),
+            "score_version": "p1-v1", "items": [_payload(arm_id=arm_id) for arm_id in arm_ids],
+        })
+
+    return httpx.MockTransport(handle)
+
+
+def test_every_page_of_p1_is_read_not_only_the_first() -> None:
+    """Review 2026-11-26: P2 read only P1's first 200 opportunities, so an owner's style
+    whose arms sat on a later page was 'unavailable'."""
+    seen: list[str | None] = []
+    pages = {None: (["a", "b"], "c1"), "c1": (["c"], "c2"), "c2": (["d"], None)}
+    client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
+                      transport=_paged_transport(pages, seen))
+    items, as_of, version = client.fetch_all_opportunities(page_size=2)
+    assert [item.arm_id for item in items] == ["a", "b", "c", "d"]
+    assert seen == [None, "c1", "c2"]
+    assert as_of == AS_OF and version == "p1-v1"
+
+
+def test_a_cursor_that_loops_is_market_unavailable() -> None:
+    pages = {None: (["a"], "c1"), "c1": (["b"], "c1")}
+    client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
+                      transport=_paged_transport(pages, []))
+    with pytest.raises(MarketUnavailable, match="cursor"):
+        client.fetch_all_opportunities(page_size=1)
+
+
 def test_client_reads_the_flat_c1_envelope_over_the_real_app() -> None:
     with open_c1_client() as api:
         client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
                           transport=SyncASGITransport(api.app))
         page = client.fetch_opportunities(limit=5)
-        assert page.score_version == "p1-v1"
+        assert page.score_version == "p1-v2"
         assert page.as_of.tzinfo is not None
         assert [item.arm_id for item in page.items] == [
             "rnb_late_night_drive_english_vocal_45_75m"

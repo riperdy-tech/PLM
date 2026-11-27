@@ -95,6 +95,8 @@ class ReasonCode(StrEnum):
     OWNER_SUBGENRE_UNAVAILABLE = "OWNER_SUBGENRE_UNAVAILABLE"  # no eligible arm of it
     SUBGENRE_RECENTLY_USED = "SUBGENRE_RECENTLY_USED"  # skipped: used by the last picks
     SUBGENRE_MEMORY_RELAXED = "SUBGENRE_MEMORY_RELAXED"  # only recent sub-styles were left
+    # Review 2026-11-26: only cooling arms had the owner's sub-style; they were kept.
+    OWNER_SUBGENRE_COOLDOWN_RELAXED = "OWNER_SUBGENRE_COOLDOWN_RELAXED"
 
 
 class OverrideAction(StrEnum):

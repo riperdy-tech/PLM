@@ -113,6 +113,38 @@ def test_spare_ratio_is_versioned_data_not_a_constant() -> None:
     assert plan_supply(playlist, 180, half).track_count == 15 + 8
 
 
+def test_manual_supply_plans_a_small_fixed_spare() -> None:
+    """Review 2026-11-26: the owner makes every song by hand, and the 25 % spare asked for
+    33 songs for a 2-hour video (26 needed). The manual policy keeps 10 % capped at 2:
+    a hand-made song is already heard by the owner, P5 rejects few, and P6's top-up
+    (``extend``) still covers a shortfall."""
+    from services.experiments.materialization.supply import manual_supply_policy
+
+    manual = manual_supply_policy()
+    two_hours = DurationRange(min_seconds=5400, max_seconds=7200)
+    assert plan_supply(two_hours, 210, default_supply_policy()).track_count == 33
+    plan = plan_supply(two_hours, 210, manual)
+    assert (plan.base_track_count, plan.spare_track_count, plan.track_count) == (26, 2, 28)
+    assert plan.supply_policy_version == manual.supply_policy_version != (
+        default_supply_policy().supply_policy_version)
+    short = plan_supply(DurationRange(min_seconds=1200, max_seconds=1800), 210, manual)
+    assert (short.base_track_count, short.spare_track_count) == (6, 1)
+    assert plan.max_extension_track_count > 0
+
+
+def test_a_manual_supply_package_uses_the_manual_spare() -> None:
+    settings = load_experiments_settings(platform=load_settings(env=dict(ENV_WITH_TOKEN)),
+                                         manual_supply=True)
+    factory = sessionmaker(bind=create_experiments_engine(static_pool=True))
+    package = _validated_package(TestClient(create_app(session_factory=factory,
+                                                       settings=settings)))
+    from services.experiments.materialization.supply import manual_supply_policy
+
+    playlist = package["playlist_spec"]
+    assert playlist["supply_policy_version"] == manual_supply_policy().supply_policy_version
+    assert playlist["spare_track_count"] <= 2
+
+
 # -- the range comes from the genome or the directive bucket -----------------------------
 
 

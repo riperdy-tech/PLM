@@ -31,7 +31,7 @@ class CadenceHours:
 @dataclass(frozen=True, slots=True)
 class MarketSettings:
     platform: Settings | None
-    score_version: str = "p1-v1"
+    score_version: str = "p1-v2"
     taxonomy_version: str = "p1-taxonomy-v3"
     feature_version: str = "p1-features-v1"
     normalization_version: str = "p1-norm-v1"

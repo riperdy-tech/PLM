@@ -28,7 +28,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .collection.collectors import CollectionRunSummary, collect_query
-from .collection.rate_limit import QuotaBudget, QuotaExceededError, RateLimiter, RequestBudget
+from .collection.rate_limit import (
+    QuotaBudget,
+    QuotaExceededError,
+    RateLimiter,
+    RequestBudget,
+    RequestBudgetExceededError,
+)
 from .collection.scheduler import (
     daily_quota_state,
     due_queries,
@@ -290,26 +296,27 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
                 session, connector=active, source_id=source_id, query_id=state.query_id,
                 query_text=state.query_text, run_id=run_id, settings=settings, now=now,
             ))
-    except QuotaExceededError:
-        # The connector refused an attempt that would have crossed the run's budget
-        # (per-run or the day's remainder): stop low-priority work, reschedule (§27).
+    except (QuotaExceededError, RequestBudgetExceededError) as exc:
+        # The run's budget (per-run, the day's remainder, the request cap) or YouTube's
+        # own quota refused an attempt: stop low-priority work, reschedule (§27). Catching
+        # the request cap too keeps the finished queries' rows: before (review #41) it
+        # rolled the session back and Temporal's retry repeated the paid searches.
         # The queries collected before the refusal ran: they take their normal cadence.
         # Rescheduling them too (as before 2026-11-10) put the same first queries at
         # the head of every run, so a pool larger than one run's budget never reached
         # its tail (the focus sub-style seeds had never run).
+        reason = ("QUOTA_EXCEEDED" if isinstance(exc, QuotaExceededError)
+                  else "REQUEST_BUDGET_EXCEEDED")
         repositories.add_run_cost(session, run_id, api_calls=active.request_count,
                                   api_quota_units=active.quota_units_used)
-        done, left = due[:len(summaries)], due[len(summaries):]
-        mark_scheduled(session, done, now=now, settings=settings)
-        for state in done:
-            mark_run(session, state.query_id, at=now)
+        left = due[len(summaries):]
+        _settle_queries(session, due[:len(summaries)], summaries, now=now, settings=settings)
         for state in left:
-            reset_schedule(session, state.query_id, now=now, settings=settings,
-                           reason="QUOTA_EXCEEDED")
+            reset_schedule(session, state.query_id, now=now, settings=settings, reason=reason)
         repositories.finish_collection_run(
             session, run_id, status=CollectionRunStatus.PARTIAL,
             counters=_counters_from_db(session, run_id, requests=active.request_count),
-            error_summary={"QUOTA_EXCEEDED": len(left)}, finished_at=datetime.now(UTC),
+            error_summary={reason: len(left)}, finished_at=datetime.now(UTC),
         )
         return {"job": trigger, "queries": len(due), "run_id": run_id, "quota_exhausted": True,
                 "status": CollectionRunStatus.PARTIAL.value}
@@ -323,10 +330,22 @@ def _run_due_collection(session: Session, *, now: datetime, settings: MarketSett
         counters=_merge(summaries, requests=active.request_count),
         finished_at=datetime.now(UTC),
     )
-    mark_scheduled(session, due, now=now, settings=settings)
-    for state in due:
-        mark_run(session, state.query_id, at=now)
+    _settle_queries(session, due, summaries, now=now, settings=settings)
     return {"job": trigger, "queries": len(due), "run_id": run_id, "status": status.value}
+
+
+def _settle_queries(session: Session, states: list[Any], summaries: list[CollectionRunSummary],
+                    *, now: datetime, settings: MarketSettings) -> None:
+    """A query whose search ran takes its normal cadence and is marked run; one whose
+    search failed is rescheduled and keeps its last successful run (review #41)."""
+    ran = [state for state, summary in zip(states, summaries, strict=True) if summary.searched]
+    mark_scheduled(session, ran, now=now, settings=settings)
+    for state in ran:
+        mark_run(session, state.query_id, at=now)
+    for state, summary in zip(states, summaries, strict=True):
+        if not summary.searched:
+            reset_schedule(session, state.query_id, now=now, settings=settings,
+                           reason=",".join(summary.error_classes) or "SEARCH_FAILED")
 
 
 def _build_connector(settings: MarketSettings, *, units: int,
@@ -597,6 +616,10 @@ def _recompute(session: Session, *, now: datetime, settings: MarketSettings) -> 
         taxonomy_confidence={fp: confidence.get(fp, 0.0) for fp in grouped},
     )
     scores = score_all_arms(features, as_of=now, settings=settings)
+    # Review #41: a score is as old as its newest observation, not its recompute instant,
+    # so P2's freshness gate sees how old the evidence really is.
+    scores = {fingerprint: replace(score, as_of=max(o.observed_at for o in grouped[fingerprint]))
+              for fingerprint, score in scores.items()}
     written = persist_scores(session, scores, computed_at=now)
     return {"job": "market.opportunity_scoring", "arms": len(arms), "scores": written}
 

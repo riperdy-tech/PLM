@@ -786,6 +786,22 @@ def load_applied_evidence(session: Session, arm_id: str, *,
     ).mappings()]
 
 
+def load_channel_applied_evidence(session: Session, *, brand_id: str,
+                                  as_of: datetime) -> list[dict[str, Any]]:
+    """Every applied outcome of the brand's videos at or before `as_of`, in a fixed order:
+    the channel's own videos, which a reward is ranked against (review 2026-11-26)."""
+    return [dict(row) for row in session.execute(
+        sa.select(ar_reward_observation.c.id, ar_reward_observation.c.arm_id,
+                  ar_reward_observation.c.normalized_reward)
+        .join(ar_posterior_update_log,
+              ar_posterior_update_log.c.reward_observation_id == ar_reward_observation.c.id)
+        .where(ar_reward_observation.c.brand_id == brand_id,
+               ar_reward_observation.c.observed_at <= as_of,
+               ar_posterior_update_log.c.update_status == "applied")
+        .order_by(ar_reward_observation.c.observed_at, ar_reward_observation.c.id)
+    ).mappings()]
+
+
 def increment_result_counts(session: Session, *, arm_id: str,
                             maturity: ObservationMaturity, now: datetime) -> None:
     """§38 evidence counter: an applied update increments the arm's result tally."""

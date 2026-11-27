@@ -1,0 +1,7 @@
+{
+  "supply_policy_version": "p3-supply-manual-v1",
+  "spare_ratio": "0.10",
+  "spare_track_cap": 2,
+  "max_extension_ratio": "0.5",
+  "basis": "Review 2026-11-26: under manual supply the owner makes every song by hand and hears it before import, so P5 rejects few songs; 25 % spares asked for 33 songs for a 2-hour video. 10 % capped at 2 spares, and extend still tops up a shortfall."
+}

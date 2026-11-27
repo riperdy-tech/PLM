@@ -308,11 +308,40 @@ def test_retirement_needs_mature_evidence_and_reopens_on_a_market_rise() -> None
     recovered, stable = _arm("rnb-1", score=75.0), _arm("rnb-1", score=45.0)
     retired = ArmLifecycleStatus.RETIRED
     assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=retired) == "market_score_recovered"
+                         state=retired, retirement_reason="WEAK_POSTERIOR"
+                         ) == "market_score_recovered"
     assert reopen_reason(stable, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=retired) is None
+                         state=retired, retirement_reason="WEAK_POSTERIOR") is None
     assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY,
-                         state=ArmLifecycleStatus.ACTIVE) is None
+                         state=ArmLifecycleStatus.ACTIVE,
+                         retirement_reason="WEAK_POSTERIOR") is None
+
+
+def test_only_candidate_or_active_arms_retire_and_only_weak_ones_reopen() -> None:
+    """Review 2026-11-26: retirement overwrote BLOCKED (out-of-identity) arms, and a
+    reopen then made an old blocked arm eligible again."""
+    from services.autonomous_ar.policy.lifecycle import evaluate_retirements, reopen_reason
+
+    weak = PosteriorState(
+        arm_id="a", model_type="normal-normal", model_version="p2-nn-v1",
+        prior_mean=0.5, prior_variance=0.05, posterior_mean=0.10, posterior_variance=0.01,
+        observation_count=6, effective_observation_count=6.0, update_version=6,
+        last_update_at=NOW,
+    )
+    posteriors = {arm_id: replace(weak, arm_id=arm_id) for arm_id in ("a", "b", "c", "d")}
+    states = {"a": ArmLifecycleStatus.ACTIVE, "b": ArmLifecycleStatus.CANDIDATE,
+              "c": ArmLifecycleStatus.BLOCKED, "d": ArmLifecycleStatus.RETIRED}
+    decided = evaluate_retirements(posteriors, mature_counts=dict.fromkeys(posteriors, 5),
+                                   policy=DEFAULT_POLICY, now=NOW, states=states)
+    assert [decision.arm_id for decision in decided] == ["a", "b"]
+    recovered = _arm("a", score=75.0)
+    retired = ArmLifecycleStatus.RETIRED
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason="WEAK_POSTERIOR") == "market_score_recovered"
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason="out_of_identity:brand-identity-v2") is None
+    assert reopen_reason(recovered, stored_score=40.0, policy=DEFAULT_POLICY, state=retired,
+                         retirement_reason=None) is None
 
 
 def test_every_directive_is_recorded_in_the_decision_log() -> None:
@@ -360,6 +389,23 @@ def test_an_actionable_pick_cools_its_arm_for_the_policy_cooldown() -> None:
         assert until is not None  # it used to be recorded as None
         second = pick(NOW + timedelta(hours=1))
         assert second and second[0] != first[0], "a cooling arm is not picked again"
+
+
+def test_a_shadow_pick_records_no_exposure_and_no_selection() -> None:
+    """A SHADOW cycle has no production effect, so it must not tire its picks either:
+    exposure, selection count and status stay as they were (review 2026-11-26)."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        result = run_allocation_cycle(session, _request(slot_count=1), settings=SETTINGS,
+                                      market=_snapshot(_arm("rnb-1", score=80.0)), now=NOW)
+        assert [d.arm_id for d in result.directives] == ["rnb-1"]
+        state = repositories.load_arm_state(session, "rnb-1")
+        assert state is not None
+        assert state["selection_count"] == 0
+        assert state["recent_exposure_score"] == 0.0
+        assert state["last_selected_at"] is None
+        assert state["status"] == ArmLifecycleStatus.CANDIDATE.value
 
 
 def test_exposure_decays_from_the_last_selection() -> None:
@@ -415,6 +461,28 @@ def test_the_owner_chosen_sub_style_is_the_only_one_eligible() -> None:
             settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW + timedelta(days=1))
         assert missing.directives == ()
         assert ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value in missing.warnings
+
+
+def test_the_owners_sub_style_survives_its_arms_cooldown_with_a_warning() -> None:
+    """Review 2026-11-26: the cooldown filtered before the owner's sub-style, so choosing
+    the same style twice within 72 h found nothing. The cooled arms of the chosen style
+    are kept as the fallback, and the cycle says so."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        first = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="deep_work_chillstep",
+                              activation_state=AUTONOMOUS),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW)
+        assert _picked_subgenre(first) == "deep_work_chillstep"
+        later = NOW + timedelta(hours=1)
+        again = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="deep_work_chillstep",
+                              activation_state=AUTONOMOUS, as_of=later),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=later)
+        assert _picked_subgenre(again) == "deep_work_chillstep"
+        assert ReasonCode.OWNER_SUBGENRE_COOLDOWN_RELAXED.value in again.warnings
+        assert ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value not in again.warnings
 
 
 def test_autonomous_picks_rotate_sub_styles_even_when_one_has_many_arms() -> None:

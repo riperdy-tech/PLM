@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from plm_contracts import AllocationType, ChannelActivationState
+from plm_platform.clock import stable_seed
 from plm_platform.decision_log import DecisionRecord, allocation_decision_key, record_decision
 
 from ..config import ARSettings
@@ -30,7 +31,7 @@ from ..domain.enums import (
 )
 from ..domain.posterior import PosteriorState
 from ..modeling.decay import detect_regime_shift
-from ..modeling.evidence import posterior_as_of
+from ..modeling.evidence import channel_reward_scale, posterior_as_of
 from ..modeling.fatigue import decayed_exposure
 from ..modeling.prior import cold_start_prior
 from ..modeling.reward_model import NormalNormalRewardModel, RewardModel
@@ -45,8 +46,8 @@ from ..storage.ids import deterministic_id
 from .planner import prepare_cycle
 from .portfolio import build_directives, build_portfolio
 
-__all__ = ["CycleRequest", "CycleResult", "MarketSnapshot", "PolicyNotConfigured",
-           "run_allocation_cycle", "seed_for_cycle"]
+__all__ = ["CycleRequest", "CycleResult", "IdempotencyKeyReused", "MarketSnapshot",
+           "PolicyNotConfigured", "cycle_id_for", "run_allocation_cycle", "seed_for_cycle"]
 
 
 class PolicyNotConfigured(RuntimeError):
@@ -72,6 +73,36 @@ class CycleRequest:
     """The owner's video length (Studio Start, 2026-11-10). It is the only length a brief
     carries: an arm's own bucket (from P1 titles) never sets it, so a brief without the
     owner's choice gets P3's default length."""
+    idempotency_key: str | None = None
+    """The caller's `Idempotency-Key` (review #14): it names the cycle instead of
+    (as_of, policy), so a retry stamped with a new instant replays the first cycle."""
+
+
+class IdempotencyKeyReused(RuntimeError):
+    """The key already names a cycle of a different request (review #14)."""
+
+
+def cycle_id_for(request: CycleRequest) -> str:
+    """The cycle's id: from the caller's key when given, else (brand, as_of, policy)."""
+    if request.idempotency_key is not None:
+        return deterministic_id("cycle-key", request.brand_id, request.idempotency_key)
+    return deterministic_id("cycle", request.brand_id, request.as_of.isoformat(),
+                            request.policy_version)
+
+
+def _same_request(cycle: Any, request: CycleRequest, *, policy_id: str,
+                  activation: ChannelActivationState, now: datetime) -> bool:
+    """Whether the stored cycle a key names was made by this request, on what the cycle
+    row keeps: slots, budget, instant, policy, activation state and an explicit seed. (A
+    sub-style or length choice is not stored on the row and is not compared.)"""
+    started = cycle["started_at"]
+    started = started if started.tzinfo else started.replace(tzinfo=UTC)
+    return (int(cycle["slot_count"]) == request.slot_count
+            and float(cycle["budget"]) == request.budget and started == now
+            and str(cycle["policy_id"]) == str(policy_id)
+            and cycle["activation_state"] == activation.value
+            and (request.random_seed is None
+                 or int(cycle["random_seed"]) == request.random_seed))
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +142,10 @@ def _row_to_directive(row: Any) -> ProductionDirective:
     )
 
 
+P1_SCORE_SCALE: float = 100.0
+"""P1's opportunity score is a 0-100 weighted percentile; a regime shift is a move of a
+share of that range (§28), never a ratio of two percentiles."""
+
 SUBGENRE_MEMORY: int = 2
 """How many of the brand's latest autonomous picks name sub-styles the next pick avoids
 (owner 2026-11-09: videos must not sound alike from one to the next). Arm cooldowns alone
@@ -125,16 +160,24 @@ def _subgenre_of(arm: ContentArm | None) -> str | None:
 
 def _apply_subgenre_rules(session: Any, request: CycleRequest, arms: dict[str, ContentArm],
                           eligible_ids: set[str], activation: ChannelActivationState,
-                          warnings: list[str], *, now: datetime) -> None:
+                          warnings: list[str], *, now: datetime,
+                          cooling: frozenset[str] = frozenset()) -> None:
     """Narrow ``eligible_ids`` in place: to the owner's chosen sub-style, or else away
     from the sub-styles of the brand's last :data:`SUBGENRE_MEMORY` autonomous picks
-    (kept when nothing else is eligible). Every narrowing is a cycle warning."""
+    (kept when nothing else is eligible). Every narrowing is a cycle warning.
+
+    ``cooling`` are arms only the cooldown kept out: when no other arm has the owner's
+    sub-style they come back, with a warning, so the owner's choice never fails just
+    because the same style was chosen within the cooldown (review 2026-11-26)."""
     if request.subgenre is not None:
         warnings.append(ReasonCode.OWNER_SUBGENRE_CHOICE.value)
         chosen = {a for a in eligible_ids if _subgenre_of(arms.get(a)) == request.subgenre}
         if not chosen:
-            warnings.append(ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value)
+            chosen = {a for a in cooling if _subgenre_of(arms.get(a)) == request.subgenre}
+            warnings.append(ReasonCode.OWNER_SUBGENRE_COOLDOWN_RELAXED.value if chosen
+                            else ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value)
         eligible_ids.intersection_update(chosen)
+        eligible_ids.update(chosen)
         return
     if activation is not ChannelActivationState.AUTONOMOUS:
         return
@@ -150,6 +193,15 @@ def _apply_subgenre_rules(session: Any, request: CycleRequest, arms: dict[str, C
         eligible_ids.intersection_update(fresh)
     elif eligible_ids:
         warnings.append(ReasonCode.SUBGENRE_MEMORY_RELAXED.value)
+
+
+def _prior_is_refreshable(session: Any, posterior: PosteriorState, settings: ARSettings, *,
+                          now: datetime) -> bool:
+    """A stored prior is re-derived from today's P1 evidence while the arm has no applied
+    outcome, or when it was made by another prior transform version."""
+    if posterior.context_state_json.get("prior_version") != settings.prior_version:
+        return True
+    return not repositories.load_applied_evidence(session, posterior.arm_id, as_of=now)
 
 
 def run_allocation_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
@@ -173,8 +225,12 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                now: datetime) -> CycleResult:
     """The body of `run_allocation_cycle` (split out so the failure counter can wrap it)."""
     started = time.perf_counter()
+    # #39: rewards are ranked against the channel's own videos and the observation
+    # variance is estimated from them (the configured value while the channel is young).
+    scale = channel_reward_scale(session, brand_id=request.brand_id, as_of=now,
+                                 default_variance=settings.observation_variance)
     resolved_model = model or NormalNormalRewardModel(
-        observation_variance=settings.observation_variance,
+        observation_variance=scale.observation_variance,
         variance_floor=settings.posterior_variance_floor,
     )
     # 0 — the policy must exist (§102); no silent default
@@ -184,8 +240,7 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
             f"no policy row for version {request.policy_version!r}: insert and validate a "
             "policy before running a cycle (§49/§92/§102)"
         )
-    cycle_id = deterministic_id("cycle", request.brand_id, request.as_of.isoformat(),
-                                request.policy_version)
+    cycle_id = cycle_id_for(request)
     seed = request.random_seed if request.random_seed is not None else seed_for_cycle(cycle_id)
     activation = request.activation_state or ChannelActivationState(
         repositories.get_channel_state(session, brand_id=request.brand_id,
@@ -201,6 +256,11 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         cycle = repositories.load_cycle(session, cycle_id)
         if cycle is None:  # pragma: no cover - insert_cycle said the row exists
             raise RuntimeError(f"cycle {cycle_id!r} vanished between insert and load")
+        if request.idempotency_key is not None and not _same_request(
+                cycle, request, policy_id=policy_id, activation=activation, now=now):
+            raise IdempotencyKeyReused(
+                f"Idempotency-Key {request.idempotency_key!r} already names cycle "
+                f"{cycle_id} of a different request; a key names exactly one request")
         rows = repositories.load_directives_for_cycle(session, cycle_id)
         return CycleResult(cycle_id=cycle_id,
                            status=AllocationCycleStatus(cycle["status"]),
@@ -224,9 +284,9 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     posteriors: dict[str, PosteriorState] = {}
     for arm in market.arms:
         existing = repositories.load_posterior(session, arm.arm_id)
-        if existing is None:
+        if existing is None or _prior_is_refreshable(session, existing, settings, now=now):
             prior = cold_start_prior(arm, settings=settings, policy=policy)
-            existing = replace(
+            fresh = replace(
                 resolved_model.initialize_prior(arm, prior),
                 # Version binding: the prior transform's version and the cycle's value
                 # model ride on the state they produced, so the posterior row alone
@@ -234,12 +294,25 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                 context_state_json={"prior_version": prior.prior_version,
                                     "value_model": policy.value_model},
             )
-            repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
-                                          expected_version=0)
+            if existing is None:
+                existing = fresh
+                repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
+                                              expected_version=0)
+            elif (fresh.prior_mean, fresh.prior_variance, fresh.context_state_json) != (
+                    existing.prior_mean, existing.prior_variance, existing.context_state_json):
+                # Review 2026-11-26: a cold-start prior used to be frozen at the arm's
+                # first sighting. It follows P1 until first-party evidence exists (and is
+                # re-derived once when the prior transform's version changes).
+                existing = replace(fresh, update_version=existing.update_version,
+                                   observation_count=existing.observation_count,
+                                   effective_observation_count=(
+                                       existing.effective_observation_count))
+                repositories.upsert_posterior(session, existing, brand_id=request.brand_id,
+                                              expected_version=existing.update_version)
         # ADR-0031: draw from the posterior as of this cycle, recomputed from the stored
         # effective outcomes, so evidence decays from the draw's own instant.
         posteriors[arm.arm_id] = posterior_as_of(session, existing, model=resolved_model,
-                                                 policy=policy, as_of=now)
+                                                 policy=policy, as_of=now, scale=scale)
     # 5 — freshness gate; 6 — blocked/policy constraints; 7 — cooldown/fatigue
     # 6a — ADR-0044: an arm outside the brand's identity is blocked before eligibility
     identity = settings.brand_identities.get(request.brand_id)
@@ -255,12 +328,15 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     mature_counts = {arm_id: int(row["mature_result_count"])
                      for arm_id, row in state_rows.items()}
     retirement_decisions = evaluate_retirements(posteriors, mature_counts=mature_counts,
-                                                policy=policy, now=now)
+                                                policy=policy, now=now, states=states)
+    retired_reasons = {arm_id: row.get("retirement_reason")
+                       for arm_id, row in state_rows.items()}
     for decision in retirement_decisions:
         repositories.set_arm_status(session, arm_id=decision.arm_id,
                                     status=ArmLifecycleStatus.RETIRED, now=now,
                                     reason=decision.reason)
         states[decision.arm_id] = ArmLifecycleStatus.RETIRED
+        retired_reasons[decision.arm_id] = decision.reason
         warnings.append(ReasonCode.WEAK_POSTERIOR.value)  # §38 evidence, never silent
     retirements = len(retirement_decisions)
     reactivations = 0
@@ -271,7 +347,8 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         if previous is None or previous["p1_score"] is None:
             continue  # §39 needs a stored score to compare against; none means no reopen
         reason = reopen_reason(arm, stored_score=float(previous["p1_score"]),
-                               policy=policy, state=states[arm.arm_id])
+                               policy=policy, state=states[arm.arm_id],
+                               retirement_reason=retired_reasons.get(arm.arm_id))
         if reason is not None:
             repositories.set_arm_status(session, arm_id=arm.arm_id,
                                         status=ArmLifecycleStatus.ACTIVE, now=now,
@@ -281,15 +358,19 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     eligible_ids = {arm_id for arm_id, status in states.items()
                     if status in (ArmLifecycleStatus.CANDIDATE, ArmLifecycleStatus.ACTIVE)}
     selection_recency: dict[str, float] = {}
+    cooling: set[str] = set()
     for arm_id in states:
         last = state_rows[arm_id].get("last_selected_at")
         last = None if last is None else (last if last.tzinfo else last.replace(tzinfo=UTC))
         if repositories.is_in_cooldown_state(session, arm_id=arm_id, now=now):
+            if arm_id in eligible_ids:
+                cooling.add(arm_id)
             eligible_ids.discard(arm_id)
         selection_recency[arm_id] = decayed_exposure(
             repositories.load_exposure_score(session, arm_id), last, now=now,
             half_life_days=policy.fatigue.decay_half_life_days)
-    _apply_subgenre_rules(session, request, arms, eligible_ids, activation, warnings, now=now)
+    _apply_subgenre_rules(session, request, arms, eligible_ids, activation, warnings, now=now,
+                          cooling=frozenset(cooling & set(arms)))
     snapshot_arms = tuple(arm for arm in market.arms if arm.arm_id in eligible_ids)
     regime_shift = False
     for arm in snapshot_arms:
@@ -297,14 +378,17 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         if previous is not None:
             regime_shift = regime_shift or bool(detect_regime_shift(
                 arm.p1_score, float(previous["p1_score"]),
-                relative_threshold=policy.nonstationarity.regime_relative_threshold))
+                relative_threshold=policy.nonstationarity.regime_relative_threshold,
+                scale=P1_SCORE_SCALE))
     low_confidence = all(posteriors[arm.arm_id].observation_count == 0
                          for arm in snapshot_arms)
     if regime_shift:
         warnings.append(ReasonCode.MARKET_REGIME_CHANGE_SUSPECTED.value)
     fractions = effective_fractions(policy, low_confidence=low_confidence,
                                     regime_shift=regime_shift)
-    quota = quota_from_fractions(request.slot_count, fractions)
+    # A separate stream from the cycle seed: the Thompson draws below stay as they were.
+    quota = quota_from_fractions(request.slot_count, fractions,
+                                 rng=random.Random(stable_seed("p2-class-draw", seed)))
     # 8 — contextual features snapshotted before any decision is written (no leakage)
     snapshot_ids = {arm.arm_id: repositories.insert_feature_snapshot(
         session, brand_id=request.brand_id, arm=arm, captured_at=market.as_of,
@@ -361,9 +445,12 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         )
     samples = {sample.arm_id: sample for sample in prepared.ranked}
     # §26: an actionable selection starts the policy's cooldown (it used to record None,
-    # so the declared 72 h never applied). SHADOW/DRY_RUN picks have no production effect.
+    # so the declared 72 h never applied). SHADOW/DRY_RUN picks have no production effect,
+    # so they record no selection, exposure or cooldown either (review 2026-11-26: a
+    # shadow pick used to tire its arm as if a video had been made).
+    actionable = activation is ChannelActivationState.AUTONOMOUS
     cooldown_until = (now + timedelta(hours=policy.fatigue.cooldown_hours)
-                      if activation is ChannelActivationState.AUTONOMOUS
+                      if actionable
                       and policy.fatigue.enabled and policy.fatigue.cooldown_hours > 0
                       else None)
     for directive in directives:
@@ -374,6 +461,8 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                         sampled_reward=samples[directive.arm_id].sampled_reward,
                         snapshot_id=snapshot_ids[directive.arm_id], arm=arms[directive.arm_id],
                         settings=settings, now=now)
+        if not actionable:
+            continue
         repositories.record_selection(
             session, arm_id=directive.arm_id, now=now, cooldown_until=cooldown_until,
             recent_exposure_score=selection_recency.get(directive.arm_id, 0.0) + 1.0,

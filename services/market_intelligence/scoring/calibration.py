@@ -10,7 +10,7 @@ from typing import Final, Self
 
 __all__ = ["SCORE_VERSION", "WEIGHT_SUM_TOLERANCE", "ScoreWeights", "default_weights"]
 
-SCORE_VERSION: Final[str] = "p1-v1"
+SCORE_VERSION: Final[str] = "p1-v2"
 
 WEIGHT_SUM_TOLERANCE: Final[float] = 1e-9
 

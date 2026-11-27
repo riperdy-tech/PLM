@@ -77,15 +77,16 @@ def _demand_value(features: ArmFeatures) -> float | None:
     """§17.3/§35: demand measures *pull*, not bigness (review fix 6).
 
     The input is the median per-subscriber view rate — size-independent by
-    construction — plus the arm's recent activity count (cadence). Raw cumulative
-    views and the summed subscriber base are deliberately absent: compositing them
-    made demand a raw-popularity rank (slow_mega scored 100 on nothing but size),
-    exactly what the architecture rules out and §35's fixture exists to catch.
+    construction. Raw cumulative views and the summed subscriber base are deliberately
+    absent: compositing them made demand a raw-popularity rank (slow_mega scored 100 on
+    nothing but size), exactly what the architecture rules out and §35's fixture exists
+    to catch. `p1-v2` (review #42) also drops the recent sighting count: added to a rate
+    of about 1e-4 to 1 it decided the rank alone, so demand measured how often the seed
+    queries happened to sight the arm.
     """
     if not features.demand.median_pull_per_day.is_known:
         return None
-    return (float(features.demand.median_pull_per_day.unwrap())
-            + features.demand.recent_activity_count)
+    return float(features.demand.median_pull_per_day.unwrap())
 
 
 def _growth_value(features: ArmFeatures) -> float | None:

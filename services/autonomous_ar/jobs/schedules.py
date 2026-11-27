@@ -4,13 +4,22 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any
 
+from plm_contracts import ChannelActivationState
 from plm_platform.temporal import TaskQueue
 from temporalio.client import Client, Schedule, ScheduleActionStartWorkflow, ScheduleSpec
 
-__all__ = ["JOB_NAMES", "ensure_schedules"]
+__all__ = ["JOB_NAMES", "WEEKLY_ALLOCATION_PAYLOAD", "ensure_schedules"]
 
 JOB_NAMES = ("ar_weekly_allocation",)
+
+WEEKLY_ALLOCATION_PAYLOAD: dict[str, Any] = {
+    "brand_id": "longform_signal", "slot_count": 10, "budget": 10.0,
+    "policy_version": "p2-v2", "activation_state": ChannelActivationState.SHADOW.value,
+}
+"""The weekly cycle is SHADOW: auditable, never actionable. A production run is started
+from the Studio, never by a timer (review 2026-11-26)."""
 
 
 async def ensure_schedules(client: Client) -> list[str]:
@@ -27,9 +36,7 @@ async def ensure_schedules(client: Client) -> list[str]:
             job_name,
             Schedule(
                 action=ScheduleActionStartWorkflow(
-                    AllocationCycleWorkflow.run,
-                    {"brand_id": "longform_signal", "slot_count": 10, "budget": 10.0,
-                     "policy_version": "p2-v2"},
+                    AllocationCycleWorkflow.run, dict(WEEKLY_ALLOCATION_PAYLOAD),
                     id=job_name, task_queue=TaskQueue.AR.value),
                 spec=ScheduleSpec(cron_expressions=["0 6 * * 1"]),
             ),
