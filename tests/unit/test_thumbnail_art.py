@@ -142,6 +142,26 @@ def test_a_rewrite_replaces_the_prompts_and_moves_saved_images_aside(tmp_path: P
     assert (folder / "previous-g1" / "A.jpg").read_bytes() == b"old art"
 
 
+def test_a_second_rewrite_keeps_every_archived_image_and_the_old_pick(tmp_path: Path) -> None:
+    """``--rewrite`` kept a stale ``pick.txt`` (it chose among images that were moved
+    away) and a second rewrite of the same guide version overwrote the archive (#29)."""
+    prompts = build_prompts(GUIDE, package_id="mpkg_5", thumbnail_family=None,
+                            visual_world="blueprint_hall")
+    folder = write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+                       prompts=prompts)
+    (folder / "A.png").write_bytes(b"first art")
+    (folder / "pick.txt").write_text("B", encoding="utf-8")
+    write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+              prompts=prompts, rewrite=True)
+    assert not (folder / "pick.txt").exists()
+    assert (folder / "previous-g1" / "pick.txt").read_text(encoding="utf-8") == "B"
+    (folder / "A.png").write_bytes(b"second art")
+    write_job(tmp_path, package_id="mpkg_5", title="T", guide_version="g1",
+              prompts=prompts, rewrite=True)
+    assert (folder / "previous-g1" / "A.png").read_bytes() == b"first art"
+    assert (folder / "previous-g1-2" / "A.png").read_bytes() == b"second art"
+
+
 def test_a_package_waits_for_art_and_the_import_releases_it(tmp_path: Path) -> None:
     from youtube_publishing.manifests import PackageNotReadyError, build_publish_manifest
 
