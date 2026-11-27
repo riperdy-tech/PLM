@@ -531,18 +531,12 @@ def _migration_preflight(config: Config) -> None:
 
 
 def _approved_rollout(prepare: bool, backup_id: str | None) -> None:
-    """The owner-approved local ``plm`` rollout (tests/support/migration_local_rollout.py).
+    """The owner-approved local ``plm`` rollout (:mod:`plm_platform.migration_rollout`).
 
     Prepare backs up the local database and proves restore + upgrade on an isolated
     clone; apply upgrades to head only with that intact, matching proof.
     """
-    import importlib
-    import sys
-
-    # The rollout machinery lives with the migration rehearsals in the checkout's tests.
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-    rollout = importlib.import_module("tests.support.migration_local_rollout")
+    from . import migration_rollout as rollout
 
     try:
         result = rollout.prepare() if prepare else rollout.apply(str(backup_id))

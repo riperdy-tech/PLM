@@ -72,7 +72,7 @@ def run_migrations_online() -> None:
         for revision in ScriptDirectory.from_config(config).walk_revisions()
     )
 
-    # `plm migrate --approved-backup` (tests/support/migration_local_rollout.py) lends an
+    # `plm migrate --approved-backup` (plm_platform/migration_rollout.py) lends an
     # already inspected Connection plus the (start, head) step its retained backup and
     # upgraded clone proved. Normal CLI and raw Alembic never set these attributes.
     # This does NOT enable a general shared/production database bypass.
