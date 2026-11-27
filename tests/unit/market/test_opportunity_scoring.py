@@ -95,6 +95,27 @@ def test_component_scores_are_bounded_and_rank_the_population(market_session) ->
     assert float(components["a"].demand.unwrap()) == pytest.approx(0.0)
 
 
+def test_demand_is_pull_not_how_often_the_seeds_sighted_the_arm(market_session) -> None:
+    """Review #42: demand added views/day/subscriber (about 1e-4 to 1) to a raw count of
+    sightings, so it ranked how much the seed queries covered an arm. Sighting an arm's
+    videos more often must not move its demand rank."""
+    pulling = _features(market_session, views=45_000, subscribers=20_000, fingerprint="p")
+    observations = [
+        NormalizedObservation(
+            entity_id=f"seen-e{index}", source_id="s1", raw_observation_id=f"seen-r{index}",
+            observed_at=AS_OF - timedelta(days=1 + index), published_at=AS_OF - timedelta(days=60),
+            channel_id="seen-channel", views=Tri.known(3_000),
+            subscriber_count=Tri.known(20_000))
+        for index in range(12)
+    ]
+    often = compute_arm_features({"o": observations}, as_of=AS_OF, settings=SETTINGS)
+    assert often["o"].demand.recent_activity_count > pulling["p"].demand.recent_activity_count
+    components = compute_component_scores({**pulling, **often}, settings=SETTINGS)
+    assert float(components["p"].demand.unwrap()) == pytest.approx(100.0)
+    assert float(components["o"].demand.unwrap()) == pytest.approx(0.0)
+    assert SETTINGS.score_version == "p1-v2", "a formula change is a score-version change"
+
+
 def test_scoring_is_deterministic_and_confidence_is_independent(market_session) -> None:
     features = _features(market_session, views=45_000, subscribers=20_000, fingerprint="b")
     components = compute_component_scores(features, settings=SETTINGS)
@@ -105,7 +126,7 @@ def test_scoring_is_deterministic_and_confidence_is_independent(market_session) 
     assert 0.0 <= score.market_opportunity_score <= 100.0
     assert 0.0 <= score.confidence <= 1.0
     assert score.components == components["b"]
-    assert score.score_version == "p1-v1"
+    assert score.score_version == "p1-v2"
 
 
 def test_confidence_does_not_imply_a_high_score(market_session) -> None:
@@ -149,7 +170,7 @@ def test_scores_persist_with_their_versions_and_read_back(market_session) -> Non
     assert written == 1
     latest = repositories.latest_scores(market_session, limit=10)
     assert latest[0]["arm_id"] == "rnb_late_night_drive"
-    assert latest[0]["score_version"] == "p1-v1"
+    assert latest[0]["score_version"] == "p1-v2"
     assert latest[0]["market_opportunity_score"] == pytest.approx(
         scores["b"].market_opportunity_score
     )
@@ -438,8 +459,8 @@ def test_replaying_the_same_stored_inputs_produces_identical_scores(market_sessi
     second = _scores_from_stored(market_session)
     assert set(first) == {"slow_mega", "fast_small"}
     assert _canonical(first) == _canonical(second)
-    assert first["fast_small"].score_version == "p1-v1"
-    assert '"score_version": "p1-v1"' in _canonical(first)  # the version travels with the run
+    assert first["fast_small"].score_version == "p1-v2"
+    assert '"score_version": "p1-v2"' in _canonical(first)  # the version travels with the run
 
 def test_bounds_hold_for_a_grid_of_component_inputs(market_session) -> None:
     """Property (§34): score ∈ [0,100] for any component grid.

@@ -103,7 +103,7 @@ def test_client_reads_the_flat_c1_envelope_over_the_real_app() -> None:
         client = P1Client(base_url="http://p1.test", token=SEAM_TOKEN,
                           transport=SyncASGITransport(api.app))
         page = client.fetch_opportunities(limit=5)
-        assert page.score_version == "p1-v1"
+        assert page.score_version == "p1-v2"
         assert page.as_of.tzinfo is not None
         assert [item.arm_id for item in page.items] == [
             "rnb_late_night_drive_english_vocal_45_75m"

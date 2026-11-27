@@ -62,10 +62,10 @@ def test_a_new_score_version_label_changes_the_version_not_the_arithmetic() -> N
     scenario = build_scenario()
     from services.market_intelligence.config import load_market_settings as load
 
-    bumped = load(score_version="p1-v2")
+    bumped = load(score_version="p1-v3")
     bumped_scores = _scores(scenario.observations_by_arm, scenario.now, settings=bumped)
     assert bumped_scores, "the scenario must produce scores"
-    assert all(score["score_version"] == "p1-v2" for score in bumped_scores.values())
+    assert all(score["score_version"] == "p1-v3" for score in bumped_scores.values())
     baseline = _scores(scenario.observations_by_arm, scenario.now)
     assert _dumped(bumped_scores) != _dumped(baseline), "the version is part of the replay key"
     for arm, score in bumped_scores.items():

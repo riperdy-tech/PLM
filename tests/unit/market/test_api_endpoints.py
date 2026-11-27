@@ -88,7 +88,7 @@ def test_under_covered_arms_are_returned_after_the_ranked_ones() -> None:
 
 def test_list_supports_filters_and_cursors(c1_api_client) -> None:
     first = c1_api_client.get("/market/v1/opportunities", params={"limit": 1}).json()
-    assert first["score_version"] == "p1-v1"
+    assert first["score_version"] == "p1-v2"
     assert first["next_cursor"] is None or isinstance(first["next_cursor"], str)
     filtered = c1_api_client.get("/market/v1/opportunities",
                                  params={"genre": "rnb", "use_case": "late_night_drive"}).json()
