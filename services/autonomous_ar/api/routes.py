@@ -35,7 +35,7 @@ from ..decisioning.cycle import (
     run_allocation_cycle,
 )
 from ..domain.directive import ProductionDirective
-from ..domain.enums import ObservationMaturity
+from ..domain.enums import ArmLifecycleStatus, ObservationMaturity
 from ..domain.posterior import PosteriorState
 from ..domain.reward import observation_key
 from ..ingestion.p1_adapter import MarketUnavailable, P1Client, adapt_opportunity
@@ -53,6 +53,7 @@ from .schemas import (
     DecisionOut,
     ResultAccepted,
     ResultLookupOut,
+    SubgenreAvailabilityOut,
     UpdateSummaryOut,
 )
 from .service_token import require_service_token
@@ -129,6 +130,38 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
         if row is None:
             raise _not_found("arm", arm_id)
         return _arm_state(row, repositories.load_posterior(session, arm_id))
+
+    @router.get("/ar/subgenres", response_model=list[SubgenreAvailabilityOut])
+    def list_subgenres(_: Annotated[None, Depends(auth)],
+                       session: Annotated[Session, Depends(dependency)],
+                       as_of: datetime,
+                       brand_id: str = Query(min_length=1)) -> list[SubgenreAvailabilityOut]:
+        """The Start menu's data (review 2026-11-26): every sub-style with a candidate or
+        active arm, from each arm's newest snapshot, and whether its arms are cooling down
+        at `as_of`. Blocked, retired and paused arms are not counted."""
+        moment = _instant(as_of)
+        states = {row["arm_id"]: row for row in repositories.load_arm_states(session)}
+        found: dict[str, dict[str, Any]] = {}
+        for snapshot in repositories.load_all_latest_feature_snapshots(session,
+                                                                       brand_id=brand_id):
+            subgenre = (snapshot["feature_json"].get("dimensions") or {}).get("subgenre")
+            state = states.get(snapshot["arm_id"])
+            if not subgenre or subgenre == "none" or state is None or state["status"] not in (
+                    ArmLifecycleStatus.CANDIDATE.value, ArmLifecycleStatus.ACTIVE.value):
+                continue
+            entry = found.setdefault(subgenre, {"selectable": 0, "cooling": 0, "until": None})
+            until = state["cooldown_until"]
+            if until is not None and _instant(until) > moment:
+                entry["cooling"] += 1
+                entry["until"] = (_instant(until) if entry["until"] is None
+                                  else min(entry["until"], _instant(until)))
+            else:
+                entry["selectable"] += 1
+        return [SubgenreAvailabilityOut(
+            subgenre=subgenre, selectable_arms=entry["selectable"],
+            cooling_arms=entry["cooling"], cooling=entry["selectable"] == 0,
+            cooling_until=entry["until"] if entry["selectable"] == 0 else None)
+            for subgenre, entry in sorted(found.items())]
 
     @router.post("/ar/results", response_model=ResultAccepted)
     def post_result(payload: dict[str, Any], _: Annotated[None, Depends(auth)],
@@ -250,12 +283,12 @@ def _resolve_snapshot(request: CycleRequest, *, settings: ARSettings,
     client = P1Client(settings.market_base_url, token,
                       timeout_seconds=settings.market_timeout_seconds)
     try:
-        page = client.fetch_opportunities(limit=200)
+        items, as_of, score_version = client.fetch_all_opportunities()
     except MarketUnavailable as exc:
         raise _unavailable(str(exc)) from exc
     return MarketSnapshot(
-        arms=tuple(adapt_opportunity(item, now=request.as_of) for item in page.items),
-        as_of=page.as_of, source="live", score_version=page.score_version,
+        arms=tuple(adapt_opportunity(item, now=request.as_of) for item in items),
+        as_of=as_of, source="live", score_version=score_version,
     )
 
 

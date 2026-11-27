@@ -463,6 +463,28 @@ def test_the_owner_chosen_sub_style_is_the_only_one_eligible() -> None:
         assert ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value in missing.warnings
 
 
+def test_the_owners_sub_style_survives_its_arms_cooldown_with_a_warning() -> None:
+    """Review 2026-11-26: the cooldown filtered before the owner's sub-style, so choosing
+    the same style twice within 72 h found nothing. The cooled arms of the chosen style
+    are kept as the fallback, and the cycle says so."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        first = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="deep_work_chillstep",
+                              activation_state=AUTONOMOUS),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=NOW)
+        assert _picked_subgenre(first) == "deep_work_chillstep"
+        later = NOW + timedelta(hours=1)
+        again = run_allocation_cycle(
+            session, _request(slot_count=1, subgenre="deep_work_chillstep",
+                              activation_state=AUTONOMOUS, as_of=later),
+            settings=SETTINGS, market=_snapshot(*FOCUS_ARMS), now=later)
+        assert _picked_subgenre(again) == "deep_work_chillstep"
+        assert ReasonCode.OWNER_SUBGENRE_COOLDOWN_RELAXED.value in again.warnings
+        assert ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value not in again.warnings
+
+
 def test_autonomous_picks_rotate_sub_styles_even_when_one_has_many_arms() -> None:
     """Owner 2026-11-09: future garage has three strong arms, so arm cooldowns alone let
     P2 pick it again and again. The last two picks' sub-styles are skipped instead."""

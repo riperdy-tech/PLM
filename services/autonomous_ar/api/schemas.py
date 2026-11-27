@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ArmStateOut", "CycleCreateRequest", "CycleSummaryOut", "DecisionOut", "ResultAccepted",
-    "ResultLookupOut", "UpdateSummaryOut",
+    "ResultLookupOut", "SubgenreAvailabilityOut", "UpdateSummaryOut",
 ]
 
 
@@ -113,6 +113,20 @@ class ArmStateOut(_Frozen):
     posterior_variance: float | None
     observation_count: int | None
     update_version: int | None
+
+
+class SubgenreAvailabilityOut(_Frozen):
+    """One sub-style's arms at `as_of`: how many P2 may pick, how many are cooling down.
+
+    `cooling` is true when every candidate/active arm of the style is in its cooldown; a
+    Start with that style still runs on a cooled arm (OWNER_SUBGENRE_COOLDOWN_RELAXED).
+    `cooling_until` is when the first of those arms becomes selectable again."""
+
+    subgenre: str
+    selectable_arms: Annotated[int, Field(ge=0)]
+    cooling_arms: Annotated[int, Field(ge=0)]
+    cooling: bool
+    cooling_until: datetime | None
 
 
 class ResultAccepted(_Frozen):

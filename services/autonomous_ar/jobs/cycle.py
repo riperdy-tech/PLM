@@ -70,11 +70,10 @@ def _run_cycle(payload: dict[str, Any]) -> dict[str, Any]:
                       timeout_seconds=settings.market_timeout_seconds)
     with scoped_session("ar") as session:
         try:
-            page = client.fetch_opportunities(limit=200)
+            items, as_of, score_version = client.fetch_all_opportunities()
             snapshot = MarketSnapshot(
-                arms=tuple(adapt_opportunity(item, now=request.as_of)
-                           for item in page.items),
-                as_of=page.as_of, source="live", score_version=page.score_version)
+                arms=tuple(adapt_opportunity(item, now=request.as_of) for item in items),
+                as_of=as_of, source="live", score_version=score_version)
         except MarketUnavailable as exc:
             stored = _stored_snapshot(session, brand_id=request.brand_id,
                                       as_of=request.as_of)

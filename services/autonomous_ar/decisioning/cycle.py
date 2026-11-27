@@ -130,16 +130,24 @@ def _subgenre_of(arm: ContentArm | None) -> str | None:
 
 def _apply_subgenre_rules(session: Any, request: CycleRequest, arms: dict[str, ContentArm],
                           eligible_ids: set[str], activation: ChannelActivationState,
-                          warnings: list[str], *, now: datetime) -> None:
+                          warnings: list[str], *, now: datetime,
+                          cooling: frozenset[str] = frozenset()) -> None:
     """Narrow ``eligible_ids`` in place: to the owner's chosen sub-style, or else away
     from the sub-styles of the brand's last :data:`SUBGENRE_MEMORY` autonomous picks
-    (kept when nothing else is eligible). Every narrowing is a cycle warning."""
+    (kept when nothing else is eligible). Every narrowing is a cycle warning.
+
+    ``cooling`` are arms only the cooldown kept out: when no other arm has the owner's
+    sub-style they come back, with a warning, so the owner's choice never fails just
+    because the same style was chosen within the cooldown (review 2026-11-26)."""
     if request.subgenre is not None:
         warnings.append(ReasonCode.OWNER_SUBGENRE_CHOICE.value)
         chosen = {a for a in eligible_ids if _subgenre_of(arms.get(a)) == request.subgenre}
         if not chosen:
-            warnings.append(ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value)
+            chosen = {a for a in cooling if _subgenre_of(arms.get(a)) == request.subgenre}
+            warnings.append(ReasonCode.OWNER_SUBGENRE_COOLDOWN_RELAXED.value if chosen
+                            else ReasonCode.OWNER_SUBGENRE_UNAVAILABLE.value)
         eligible_ids.intersection_update(chosen)
+        eligible_ids.update(chosen)
         return
     if activation is not ChannelActivationState.AUTONOMOUS:
         return
@@ -290,15 +298,19 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
     eligible_ids = {arm_id for arm_id, status in states.items()
                     if status in (ArmLifecycleStatus.CANDIDATE, ArmLifecycleStatus.ACTIVE)}
     selection_recency: dict[str, float] = {}
+    cooling: set[str] = set()
     for arm_id in states:
         last = state_rows[arm_id].get("last_selected_at")
         last = None if last is None else (last if last.tzinfo else last.replace(tzinfo=UTC))
         if repositories.is_in_cooldown_state(session, arm_id=arm_id, now=now):
+            if arm_id in eligible_ids:
+                cooling.add(arm_id)
             eligible_ids.discard(arm_id)
         selection_recency[arm_id] = decayed_exposure(
             repositories.load_exposure_score(session, arm_id), last, now=now,
             half_life_days=policy.fatigue.decay_half_life_days)
-    _apply_subgenre_rules(session, request, arms, eligible_ids, activation, warnings, now=now)
+    _apply_subgenre_rules(session, request, arms, eligible_ids, activation, warnings, now=now,
+                          cooling=frozenset(cooling & set(arms)))
     snapshot_arms = tuple(arm for arm in market.arms if arm.arm_id in eligible_ids)
     regime_shift = False
     for arm in snapshot_arms:

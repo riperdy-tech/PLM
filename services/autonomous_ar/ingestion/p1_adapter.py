@@ -96,6 +96,36 @@ class P1Client:
                 f"C1 page refused ({exc.error.code}): {exc.field_paths}"
             ) from exc
 
+    def fetch_all_opportunities(self, *, page_size: int = 200, max_pages: int = 100,
+                                ) -> tuple[tuple[OpportunityPayload, ...], datetime, str]:
+        """Every page of C1, following ``next_cursor``: ``(items, as_of, score_version)``.
+
+        Reading only the first page hid arms on later pages (review 2026-11-26). ``as_of``
+        is the oldest page's, so freshness is never overstated; pages of different score
+        versions, a cursor seen twice or more than ``max_pages`` pages are refused.
+        """
+        items: list[OpportunityPayload] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        as_of: datetime | None = None
+        version: str | None = None
+        for _ in range(max_pages):
+            page = self.fetch_opportunities(limit=page_size, cursor=cursor)
+            if version is not None and page.score_version != version:
+                raise MarketUnavailable(
+                    f"C1 pages disagree on score_version: {version!r} then "
+                    f"{page.score_version!r}")
+            version = page.score_version
+            as_of = page.as_of if as_of is None else min(as_of, page.as_of)
+            items.extend(page.items)
+            cursor = page.next_cursor
+            if cursor is None:
+                return tuple(items), as_of, version
+            if cursor in seen:
+                raise MarketUnavailable(f"C1 cursor {cursor!r} repeated: refusing to loop")
+            seen.add(cursor)
+        raise MarketUnavailable(f"C1 has more than {max_pages} pages: refusing to read on")
+
 
 def adapt_opportunity(payload: OpportunityPayload, *, now: datetime) -> ContentArm:
     """C1 payload → `ContentArm`; `market_opportunity_score → p1_score` per registry C1."""
