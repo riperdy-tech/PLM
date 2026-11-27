@@ -523,12 +523,18 @@ class Studio:
                 return path
         raise _refuse(404, "song_not_saved", f"{stem}.wav is not saved")
 
-    async def songs_done(self) -> list[dict[str, Any]]:
-        """Resume every run waiting for songs; P4 then checks every file again."""
-        inbox = ", ".join(str(path) for _, path in self._music_inboxes())
-        cases = self._cases(SONGS_REASON)
+    async def songs_done(self, case_id: str) -> list[dict[str, Any]]:
+        """Resume the one run whose songs hold is ``case_id``; P4 then checks every file
+        again. Only that project: another one waiting for songs is not touched (review
+        2026-11-26 #17)."""
+        def waiting() -> tuple[str, list[dict[str, Any]]]:
+            inbox = ", ".join(str(path) for _, path in self._music_inboxes())
+            return inbox, [c for c in self._cases(SONGS_REASON) if c["case_id"] == case_id]
+
+        inbox, cases = await asyncio.to_thread(waiting)
         if not cases:
-            raise _refuse(409, "no_run_waiting_for_songs", "no run is waiting for songs")
+            raise _refuse(409, "no_run_waiting_for_songs",
+                          f"{case_id} is not a run waiting for songs")
         return [await self._resume(c["case_id"], "production_owner",
                                    {"manual_audio_inbox_ref": f"{inbox} (uploaded in the Studio)"},
                                    "songs uploaded in the Studio") for c in cases]
@@ -1146,12 +1152,18 @@ class Studio:
         """Continue past a stop the owner has read (a refused step, short supply, the
         spending guard): the evidence the hold names is the Studio's record that the owner
         saw the reason and chose to try again. The exception queue still decides."""
-        case = next((c for c in self._live_holds() if c.get("case_id") == case_id), None)
+        def read() -> tuple[dict[str, Any] | None, set[str]]:
+            found = next((c for c in self._live_holds() if c.get("case_id") == case_id), None)
+            return found, self._owner_roles()
+
+        case, roles = await asyncio.to_thread(read)
         if case is None:
             raise _refuse(404, "hold_not_open", f"{case_id} is not an open stop")
-        explained = explain_hold(case, owner_roles=self._owner_roles())
+        explained = explain_hold(case, owner_roles=roles)
         if explained["action"] != "retry":
-            raise _refuse(409, "not_retryable", f"{case_id} is answered on its own step")
+            raise _refuse(409, "not_retryable",
+                          f"{case_id} is answered on its own step, or the Studio cannot "
+                          "continue it (ask Claude)")
         if not explained["owner_may_act"]:
             raise _refuse(403, "owner_lacks_role", str(explained["blocked_because"]))
         said = (f"Studio: the owner read the stop ({explained['detail'][:300]}) and chose to "

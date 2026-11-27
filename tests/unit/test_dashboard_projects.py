@@ -182,6 +182,23 @@ def test_a_stop_is_retried_only_by_a_role_the_owner_holds(tmp_path: Path) -> Non
         asyncio.run(studio.retry_hold("nope"))
 
 
+@pytest.mark.parametrize("reason", ["SIMULATED_PUBLICATION", "EXTERNAL_WRITE_NOT_AUTHORIZED"])
+def test_an_unknown_stop_is_never_retried_with_boilerplate_evidence(
+        tmp_path: Path, reason: str) -> None:
+    """Review 2026-11-26 #19: Try again filled the evidence of any reviewable hold, so one
+    click resumed a simulated publication or an unauthorized write. Only known retryable
+    stops get the button; any other says to ask Claude."""
+    hold = {"case_id": "c-x", "reason_code": reason, "hold_class": "REVIEWABLE",
+            "reviewer_role": "production_owner", "required_evidence": ["publication_ref"],
+            "pipeline": {"run_state": "HELD", "workflow_id": "pipeline.now"}}
+    told = explain_hold(hold, owner_roles={"production_owner"})
+    assert told["action"] is None and "Claude" in told["what"]
+    studio, actions = _project_studio(tmp_path, [hold])
+    with pytest.raises(ActionRefused, match="not_retryable"):
+        asyncio.run(studio.retry_hold("c-x"))
+    assert actions.calls == []
+
+
 def test_cancel_stops_an_unfinished_project_only(tmp_path: Path) -> None:
     studio, _ = _project_studio(tmp_path, [ART_HOLD])
     sent: list[tuple[str, str]] = []

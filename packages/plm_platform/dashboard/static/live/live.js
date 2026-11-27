@@ -810,7 +810,7 @@ function songsSection(p) {
   if (p.songs.waiting) {
     card.append(h('div', { class: 'row-actions' },
       actionButton(missing ? `Continue (${missing} still missing)` : 'Continue: send the songs', 'btn-ok big',
-        () => authedSend('/api/studio/songs/done', 'POST'), { busy: 'Sending the songs to the run... P4 checks every file.' })));
+        () => postJson('/api/studio/songs/done', { case_id: p.hold && p.hold.case_id }), { busy: 'Sending the songs to the run... P4 checks every file.' })));
   }
   return card;
 }

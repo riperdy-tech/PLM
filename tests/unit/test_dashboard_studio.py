@@ -109,7 +109,7 @@ def test_songs_show_the_waiting_sheet_and_take_only_its_wavs(tmp_path: Path) -> 
     studio.save_song("trk_1-bbbb2222", WAV)
     assert studio.songs()["sheets"] == []  # every song saved: the sheet is done
 
-    (answer,) = asyncio.run(studio.songs_done())
+    (answer,) = asyncio.run(studio.songs_done("c1"))
     assert answer["case"]["case_id"] == "c1"
     (call,) = actions.calls
     assert call[2]["role"] == "production_owner" and "manual_audio_inbox_ref" in call[2]
@@ -120,7 +120,19 @@ def test_songs_done_refuses_when_no_run_waits(tmp_path: Path) -> None:
                                     "pipeline": {"run_state": "CANCELLED"}}])
     assert studio.overview()["waiting"]["MANUAL_AUDIO_AWAITED"] == []
     with pytest.raises(ActionRefused, match="no_run_waiting_for_songs"):
-        asyncio.run(studio.songs_done())
+        asyncio.run(studio.songs_done("old"))
+
+
+def test_continue_on_one_projects_songs_resumes_only_that_project(tmp_path: Path) -> None:
+    """Review 2026-11-26 #17: Continue resumed every project waiting for songs."""
+    studio, actions = _studio(tmp_path, [
+        {"case_id": "mine", "reason_code": "MANUAL_AUDIO_AWAITED"},
+        {"case_id": "other", "reason_code": "MANUAL_AUDIO_AWAITED"}])
+    (answer,) = asyncio.run(studio.songs_done("mine"))
+    assert [c[1] for c in actions.calls] == ["mine"]
+    with pytest.raises(ActionRefused, match="no_run_waiting_for_songs"):
+        asyncio.run(studio.songs_done("c-unknown"))
+    assert len(actions.calls) == 1
 
 
 def test_art_upload_keeps_one_file_per_letter_and_import_resumes_the_run(

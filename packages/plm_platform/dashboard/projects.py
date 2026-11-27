@@ -110,13 +110,16 @@ def explain_hold(case: Mapping[str, Any], *, owner_roles: Iterable[str] = ()) ->
     detail = (details.get("error") if isinstance(details, Mapping) else None) or ""
     role = case.get("reviewer_role")
     allowed = role in set(owner_roles)
+    # Only the stops HOLD_HELP names are retried from the Studio: any other hold (a
+    # simulated publication, an unauthorized write) would be resumed with boilerplate
+    # evidence, so it gets no button (review 2026-11-26 #19).
     action = None if known is None else known["action"]
-    if known is None:
-        action = "retry" if case.get("hold_class") != "HARD_STOP" else None
     return {
         "case_id": case.get("case_id"), "reason_code": reason,
         "title": known["title"] if known else f"Stopped: {reason.replace('_', ' ').lower()}",
-        "what": known["what"] if known else "The run stopped. The reason is below.",
+        "what": known["what"] if known else ("The run stopped. The reason is below. The "
+                                             "Studio cannot continue this stop: ask Claude "
+                                             "to look at it."),
         "detail": str(detail), "since": case.get("raised_at"),
         "action": action, "role": role, "owner_may_act": allowed,
         "blocked_because": None if allowed else (

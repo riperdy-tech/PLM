@@ -370,6 +370,10 @@ class CancelBody(BaseModel):
     reason: str = ""
 
 
+class SongsDoneBody(BaseModel):
+    case_id: str = Field(description="the songs hold of the one project to continue")
+
+
 def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
     """The Studio (``dashboard.studio``): reads are open like the views, every write
     needs the service token."""
@@ -445,8 +449,8 @@ def _studio_routes(app: FastAPI, studio: Studio, require_token: Any) -> None:
         return saved
 
     @app.post("/api/studio/songs/done", dependencies=[Depends(require_token)])
-    async def studio_songs_done() -> dict[str, Any]:
-        return {"resumed": await guarded_async(studio.songs_done)}
+    async def studio_songs_done(body: SongsDoneBody) -> dict[str, Any]:
+        return {"resumed": await guarded_async(lambda: studio.songs_done(body.case_id))}
 
     @app.get("/api/studio/thumbnails/{package_id}/{letter}")
     def studio_art(package_id: str, letter: str) -> Response:
