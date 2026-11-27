@@ -21,17 +21,25 @@ from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from plm_contracts import ChannelActivationState, ErrorShape, ObservationWindow
 from plm_contracts.seams.c2 import ProductionDirectivePayload
+from plm_platform.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    IDEMPOTENCY_KEY_INVALID,
+    IDEMPOTENCY_KEY_REUSED,
+    MAX_IDEMPOTENCY_KEY_LENGTH,
+)
 from sqlalchemy.orm import Session
 
 from ..config import ARSettings
 from ..decisioning.cycle import (
     CycleRequest,
     CycleResult,
+    IdempotencyKeyReused,
     MarketSnapshot,
     PolicyNotConfigured,
+    cycle_id_for,
     run_allocation_cycle,
 )
 from ..domain.directive import ProductionDirective
@@ -77,7 +85,20 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
 
     @router.post("/ar/cycles", response_model=CycleSummaryOut)
     def create_cycle(payload: CycleCreateRequest, _: Annotated[None, Depends(auth)],
-                     session: Annotated[Session, Depends(dependency)]) -> CycleSummaryOut:
+                     session: Annotated[Session, Depends(dependency)],
+                     idempotency_key: Annotated[str | None, Header(
+                         alias=IDEMPOTENCY_KEY_HEADER)] = None) -> CycleSummaryOut:
+        """A repeat with the same `Idempotency-Key` returns the first cycle and writes
+        nothing; the same key on another body is 409 (review #14). The key names the
+        cycle (`CycleRequest.idempotency_key`), so no extra table is needed. Without a
+        key the cycle id (brand, as_of, policy) still makes a re-post a replay."""
+        key = None if idempotency_key is None else idempotency_key.strip()
+        if key is not None and not 0 < len(key) <= MAX_IDEMPOTENCY_KEY_LENGTH:
+            raise HTTPException(status_code=422, detail=ErrorShape(
+                code=IDEMPOTENCY_KEY_INVALID, field_paths=[IDEMPOTENCY_KEY_HEADER],
+                message=(f"{IDEMPOTENCY_KEY_HEADER} must be 1..{MAX_IDEMPOTENCY_KEY_LENGTH} "
+                         "non-blank characters"),
+            ).model_dump())
         request = CycleRequest(
             brand_id=payload.brand_id, as_of=payload.as_of, slot_count=payload.slot_count,
             budget=payload.budget, policy_version=payload.policy_version,
@@ -85,9 +106,15 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
             unavailable_capabilities=tuple(payload.unavailable_capabilities),
             subgenre=payload.subgenre,
             avoid_subgenres=tuple(payload.avoid_subgenres),
-            duration_bucket=payload.duration_bucket,
+            duration_bucket=payload.duration_bucket, idempotency_key=key,
         )
-        snapshot = _resolve_snapshot(request, settings=settings, market_source=market_source)
+        if key is not None and repositories.load_cycle(session, cycle_id_for(request)):
+            # a repeat: no P1 read; the engine replays or refuses a different body
+            snapshot = MarketSnapshot(arms=(), as_of=payload.as_of, source="stored",
+                                      score_version="")
+        else:
+            snapshot = _resolve_snapshot(request, settings=settings,
+                                         market_source=market_source)
         try:
             # `now` is the request's own instant: the cycle is deterministic from stored
             # inputs, and a re-post of the same body replays the stored cycle (§67).
@@ -95,6 +122,9 @@ def build_router(*, session_factory: SessionFactory | None, settings: ARSettings
                                           now=payload.as_of)
         except PolicyNotConfigured as exc:
             raise _conflict("policy_not_configured", str(exc)) from exc
+        except IdempotencyKeyReused as exc:
+            session.rollback()
+            raise _conflict(IDEMPOTENCY_KEY_REUSED, str(exc)) from exc
         session.commit()
         return _summary(session, result)
 

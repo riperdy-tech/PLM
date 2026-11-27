@@ -46,8 +46,8 @@ from ..storage.ids import deterministic_id
 from .planner import prepare_cycle
 from .portfolio import build_directives, build_portfolio
 
-__all__ = ["CycleRequest", "CycleResult", "MarketSnapshot", "PolicyNotConfigured",
-           "run_allocation_cycle", "seed_for_cycle"]
+__all__ = ["CycleRequest", "CycleResult", "IdempotencyKeyReused", "MarketSnapshot",
+           "PolicyNotConfigured", "cycle_id_for", "run_allocation_cycle", "seed_for_cycle"]
 
 
 class PolicyNotConfigured(RuntimeError):
@@ -73,6 +73,38 @@ class CycleRequest:
     """The owner's video length (Studio Start, 2026-11-10). It is the only length a brief
     carries: an arm's own bucket (from P1 titles) never sets it, so a brief without the
     owner's choice gets P3's default length."""
+    idempotency_key: str | None = None
+    """The caller's `Idempotency-Key` (review #14): it names the cycle instead of
+    (as_of, policy), so a retry stamped with a new instant replays the first cycle."""
+
+
+class IdempotencyKeyReused(RuntimeError):
+    """The key already names a cycle of a different request (review #14)."""
+
+
+def cycle_id_for(request: CycleRequest) -> str:
+    """The cycle's id: from the caller's key when given, else (brand, as_of, policy)."""
+    if request.idempotency_key is not None:
+        return deterministic_id("cycle-key", request.brand_id, request.idempotency_key)
+    return deterministic_id("cycle", request.brand_id, request.as_of.isoformat(),
+                            request.policy_version)
+
+
+def _same_request(cycle: Any, request: CycleRequest, *, policy_id: str,
+                  activation: ChannelActivationState, now: datetime) -> bool:
+    """Whether the stored cycle a key names was made by this request, on what the cycle
+    row keeps: slots, budget, instant, policy, activation state and an explicit seed. (A
+    sub-style or length choice is not stored on the row and is not compared.)"""
+    started = cycle["started_at"]
+    started = started if started.tzinfo else started.replace(tzinfo=UTC)
+    if (int(cycle["slot_count"]) != request.slot_count
+            or float(cycle["budget"]) != request.budget or started != now
+            or str(cycle["policy_id"]) != str(policy_id)
+            or cycle["activation_state"] != activation.value
+            or (request.random_seed is not None
+                and int(cycle["random_seed"]) != request.random_seed)):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,8 +242,7 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
             f"no policy row for version {request.policy_version!r}: insert and validate a "
             "policy before running a cycle (§49/§92/§102)"
         )
-    cycle_id = deterministic_id("cycle", request.brand_id, request.as_of.isoformat(),
-                                request.policy_version)
+    cycle_id = cycle_id_for(request)
     seed = request.random_seed if request.random_seed is not None else seed_for_cycle(cycle_id)
     activation = request.activation_state or ChannelActivationState(
         repositories.get_channel_state(session, brand_id=request.brand_id,
@@ -227,6 +258,11 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         cycle = repositories.load_cycle(session, cycle_id)
         if cycle is None:  # pragma: no cover - insert_cycle said the row exists
             raise RuntimeError(f"cycle {cycle_id!r} vanished between insert and load")
+        if request.idempotency_key is not None and not _same_request(
+                cycle, request, policy_id=policy_id, activation=activation, now=now):
+            raise IdempotencyKeyReused(
+                f"Idempotency-Key {request.idempotency_key!r} already names cycle "
+                f"{cycle_id} of a different request; a key names exactly one request")
         rows = repositories.load_directives_for_cycle(session, cycle_id)
         return CycleResult(cycle_id=cycle_id,
                            status=AllocationCycleStatus(cycle["status"]),
