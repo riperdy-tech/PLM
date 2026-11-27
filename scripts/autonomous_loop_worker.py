@@ -51,6 +51,9 @@ DEFAULT_CADENCE_HOURS = 72  # ~2.3 releases per week
 CHANNEL_NAME = "Rhodes & Rain Records"
 DEFAULT_BRAND_ID = "longform_signal"
 DEFAULT_ARM_ID = "lofi_study_focus"
+CYCLE_ACTIVATION_STATE = "SHADOW"
+"""This prototype never opens an actionable P2 cycle (review 2026-11-26): its cycle is
+SHADOW, auditable only. A production run starts from the Studio."""
 
 
 def query_market_intelligence() -> dict[str, float]:
@@ -81,7 +84,7 @@ def draw_ar_directive(arm_scores: dict[str, float]) -> dict[str, str]:
         "budget": 10.0,
         "as_of": now.isoformat(),
         "policy_version": "p2-v1",
-        "activation_state": "AUTONOMOUS",
+        "activation_state": CYCLE_ACTIVATION_STATE,
     }
     try:
         with httpx.Client(base_url=P2_BASE_URL, headers=headers, timeout=15.0) as client:

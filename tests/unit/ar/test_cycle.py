@@ -362,6 +362,23 @@ def test_an_actionable_pick_cools_its_arm_for_the_policy_cooldown() -> None:
         assert second and second[0] != first[0], "a cooling arm is not picked again"
 
 
+def test_a_shadow_pick_records_no_exposure_and_no_selection() -> None:
+    """A SHADOW cycle has no production effect, so it must not tire its picks either:
+    exposure, selection count and status stay as they were (review 2026-11-26)."""
+    engine = create_ar_engine()
+    with ar_session(engine) as session:
+        _seed_policy(session)
+        result = run_allocation_cycle(session, _request(slot_count=1), settings=SETTINGS,
+                                      market=_snapshot(_arm("rnb-1", score=80.0)), now=NOW)
+        assert [d.arm_id for d in result.directives] == ["rnb-1"]
+        state = repositories.load_arm_state(session, "rnb-1")
+        assert state is not None
+        assert state["selection_count"] == 0
+        assert state["recent_exposure_score"] == 0.0
+        assert state["last_selected_at"] is None
+        assert state["status"] == ArmLifecycleStatus.CANDIDATE.value
+
+
 def test_exposure_decays_from_the_last_selection() -> None:
     from services.autonomous_ar.modeling.fatigue import decayed_exposure
 

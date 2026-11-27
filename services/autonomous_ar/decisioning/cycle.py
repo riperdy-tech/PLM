@@ -361,9 +361,12 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
         )
     samples = {sample.arm_id: sample for sample in prepared.ranked}
     # §26: an actionable selection starts the policy's cooldown (it used to record None,
-    # so the declared 72 h never applied). SHADOW/DRY_RUN picks have no production effect.
+    # so the declared 72 h never applied). SHADOW/DRY_RUN picks have no production effect,
+    # so they record no selection, exposure or cooldown either (review 2026-11-26: a
+    # shadow pick used to tire its arm as if a video had been made).
+    actionable = activation is ChannelActivationState.AUTONOMOUS
     cooldown_until = (now + timedelta(hours=policy.fatigue.cooldown_hours)
-                      if activation is ChannelActivationState.AUTONOMOUS
+                      if actionable
                       and policy.fatigue.enabled and policy.fatigue.cooldown_hours > 0
                       else None)
     for directive in directives:
@@ -374,6 +377,8 @@ def _run_cycle(session: Any, request: CycleRequest, *, settings: ARSettings,
                         sampled_reward=samples[directive.arm_id].sampled_reward,
                         snapshot_id=snapshot_ids[directive.arm_id], arm=arms[directive.arm_id],
                         settings=settings, now=now)
+        if not actionable:
+            continue
         repositories.record_selection(
             session, arm_id=directive.arm_id, now=now, cooldown_until=cooldown_until,
             recent_exposure_score=selection_recency.get(directive.arm_id, 0.0) + 1.0,
