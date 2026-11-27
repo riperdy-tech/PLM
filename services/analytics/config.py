@@ -17,12 +17,17 @@ from plm_platform.config import Settings
 
 __all__ = [
     "AnalyticsSettings",
+    "ChannelFactsError",
     "NonMonetizedAttestation",
     "load_analytics_settings",
     "parse_channel_facts",
 ]
 
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
+
+
+class ChannelFactsError(ValueError):
+    """The operator's channel-facts document is malformed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,9 +77,9 @@ def _instant(entry: Mapping[str, Any], key: str, where: str) -> datetime:
     try:
         moment = datetime.fromisoformat(str(entry[key]))
     except (KeyError, ValueError):
-        raise ValueError(f"{where}.{key} must be an ISO 8601 instant") from None
+        raise ChannelFactsError(f"{where}.{key} must be an ISO 8601 instant") from None
     if moment.tzinfo is None:
-        raise ValueError(f"{where}.{key} must carry a timezone")
+        raise ChannelFactsError(f"{where}.{key} must carry a timezone")
     return moment
 
 
@@ -91,31 +96,31 @@ def parse_channel_facts(raw: Mapping[str, Any]) -> dict[str, object]:
     """
     unknown = set(raw) - {"youtube_only_channels", "non_monetized_attestations"}
     if unknown:
-        raise ValueError(f"unknown channel facts: {sorted(unknown)}")
+        raise ChannelFactsError(f"unknown channel facts: {sorted(unknown)}")
     channels = raw.get("youtube_only_channels", [])
     if not isinstance(channels, list) or not all(
             isinstance(c, str) and c.strip() for c in channels):
-        raise ValueError("youtube_only_channels must be a list of channel ids")
+        raise ChannelFactsError("youtube_only_channels must be a list of channel ids")
     attestations: list[NonMonetizedAttestation] = []
     entries = raw.get("non_monetized_attestations", [])
     if not isinstance(entries, list):
-        raise ValueError("non_monetized_attestations must be a list")
+        raise ChannelFactsError("non_monetized_attestations must be a list")
     for index, entry in enumerate(entries):
         where = f"non_monetized_attestations[{index}]"
         if not isinstance(entry, dict):
-            raise ValueError(f"{where} must be an object")
+            raise ChannelFactsError(f"{where} must be an object")
         extra = set(entry) - {"channel_id", "attested_by", "attested_at", "valid_until",
                               "reference"}
         if extra:
-            raise ValueError(f"{where}: unknown fields {sorted(extra)}")
+            raise ChannelFactsError(f"{where}: unknown fields {sorted(extra)}")
         channel_id, attested_by = entry.get("channel_id"), entry.get("attested_by")
         if not isinstance(channel_id, str) or not channel_id.strip() or not isinstance(
                 attested_by, str) or not attested_by.strip():
-            raise ValueError(f"{where}: channel_id and attested_by must be non-empty")
+            raise ChannelFactsError(f"{where}: channel_id and attested_by must be non-empty")
         attested_at = _instant(entry, "attested_at", where)
         valid_until = _instant(entry, "valid_until", where)
         if valid_until <= attested_at:
-            raise ValueError(f"{where}: valid_until must be after attested_at")
+            raise ChannelFactsError(f"{where}: valid_until must be after attested_at")
         reference = entry.get("reference")
         attestations.append(NonMonetizedAttestation(
             channel_id=channel_id.strip(), attested_by=attested_by.strip(),

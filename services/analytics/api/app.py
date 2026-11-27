@@ -17,12 +17,16 @@ from plm_platform.health import health_router
 from plm_platform.service_urls import service_url
 from plm_platform.temporal import Phase
 
-from ..config import AnalyticsSettings, load_analytics_settings, parse_channel_facts
+from ..config import (
+    AnalyticsSettings,
+    ChannelFactsError,
+    load_analytics_settings,
+    parse_channel_facts,
+)
 from ..ingestion.youtube_client import RealYouTubeAnalyticsClient
 from ..ingestion.youtube_reporting import AuthenticatedReachDownloader
 from .routes import build_analytics_router
 from .service_token import require_service_token
-
 
 CHANNEL_FACTS_FILE_VAR: Final[str] = "PLM_ANALYTICS_CHANNEL_FACTS_FILE"
 """JSON file of the operator's channel facts (:func:`analytics.config.parse_channel_facts`):
@@ -42,7 +46,7 @@ def load_channel_facts(env: Mapping[str, str] | None = None,
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise ValueError("expected a JSON object")
+            raise ChannelFactsError("expected a JSON object")
         return parse_channel_facts(raw)
     except (OSError, ValueError) as exc:
         raise SettingsError(f"{CHANNEL_FACTS_FILE_VAR}={path!r}: {exc}") from exc

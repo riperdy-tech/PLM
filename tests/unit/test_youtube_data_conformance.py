@@ -177,7 +177,7 @@ def test_a_4xx_answer_marks_the_write_as_refused(mock_http: MockHTTP, error: str
 def test_one_connection_pool_serves_every_chunk(mock_http: MockHTTP,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
     """A new ``httpx.Client`` per chunk cost ~800 TLS handshakes per video (review P2)."""
-    import youtube_publishing.client.real as real
+    from youtube_publishing.client import real
 
     built: list[object] = []
     original = httpx.Client
