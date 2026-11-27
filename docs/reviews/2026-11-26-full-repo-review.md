@@ -177,8 +177,8 @@ live providers. Limits are stated where a fix is narrower than the suggested rep
 | 35 | Fixed (owner setting needed) | Real Analytics source, final-data wait (up to 5 days), YouTube-only evaluation with a dated non-monetized attestation; zero-row final windows measured as zero. Needs `PLM_ANALYTICS_CHANNEL_FACTS_FILE`. |
 | 36–43 | Fixed | See P1–P3 commits (versions moved: P1 `p1-v2`, prior `p2-prior-v2`, identity v3, templates v9). |
 | 44–46, 48–51 | Fixed | Stable song names, sheet problems + Studio check on save, accepted length, quarantine closing/sweep, inbox-wide duplicate index, tempo half-time rule, vocal hold + stuck-loop warning (synthetic calibration only). |
-| 47 | Fixed (limit) | Blocking codes returned; unmeasurable songs re-evaluated then held (`MEASUREMENT_UNAVAILABLE`), never rejected; P4 `/replace` asks for `-r2`. A run does not call `/replace` itself: a rejected song is covered by the top-up's new songs. |
-| 52 | Fixed (limit) | Plan id on sheets; Studio lists only running runs' sheets. Files are not moved (project pages play them from the inbox). |
+| 47 | Fixed | Blocking codes returned; unmeasurable songs re-evaluated then held (`MEASUREMENT_UNAVAILABLE`), never rejected; when the playlist runs short, the run asks P4 to replace each rejected owner-made song (`-r2`, `-r3`; at most 2 per song) through the normal song hold, and only then tops up with new songs (`topup-replaces-rejected-songs`). |
+| 52 | Fixed | Plan id on sheets; a fully imported plan's files move to `<inbox>/imported/<plan>/`, an ended run's to `imported/` or `cancelled/`; the Studio, playback and P4's duplicate index read the moved files. |
 | 53 | Fixed | Compose project from `COMPOSE_PROJECT_NAME`, worktree guard in make/launcher, required secrets. |
 | 54 | Fixed | Containers no longer read `/app/.env` (`PLM_DOTENV_DISABLED`); every key passed by compose; boot logs effective policy; atomic `.env` writes. |
 | 55 | Fixed | Archive frees published renders; `plm doctor` and launcher disk checks. |
@@ -187,7 +187,7 @@ live providers. Limits are stated where a fix is narrower than the suggested rep
 
 P2/P3 list: done. mypy now type-checks `packages/`, `services/`, `scripts/` (three offline audio probes
 excluded) and `tests/` (447 files, 0 errors; tests import services by their top-level names) in CI.
-Temporal reset continuation covers runs started after the deploy only.
+A Temporal reset continues the run (runs started before the deploy included).
 
 Owner actions: replace the `change-me` service token (refused now); set `PLM_FLOW_MUSIC_TERMS_REF`
 (Flow Music songs hold as `COMMERCIAL_LICENSE_UNCERTAIN` until then); create the P9 channel-facts file
