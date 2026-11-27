@@ -144,3 +144,51 @@ C6 seam versioning; manifest hash after the video swap; title variation never de
 3. Findings 15–19, 22–24, 44–47 (the stuck states the owner hits in the Studio).
 4. The learning loop (35) — the program cannot learn until this lands.
 5. Everything else.
+
+---
+
+## Fix status, 2026-11-27
+
+Every finding was worked on `review/r6-live-adapters` (commits after `6696193`). "Fixed" means
+changed and covered by a test that fails on the old code; nothing here was proven against
+live providers. Limits are stated where a fix is narrower than the suggested repair.
+
+| # | Status | Notes |
+|---|---|---|
+| 1 | Fixed | `make test` excludes integration; integration refused unless `PLM_INTEGRATION_ISOLATED_STACK=1` + disposable DB. |
+| 2 | Fixed | `scripts/backup_plm.ps1` (full) and P6 archive after every live upload (renders + DB dump to `E:\PLM-backups`); runbook. |
+| 3 | Fixed | Loopback hosts only, same-origin writes, per-launch page secret, no CORS. |
+| 4 | Fixed | Video cache keyed by checksum; stale approval refused (`video_changed`). |
+| 5 | Fixed | Rewind only at the approval hold (`rewind-only-at-approval`). |
+| 6 | Fixed | Held reservations resume (`resuming=True`); done thumbnail/playlist skipped. |
+| 7 | Fixed | Transport errors transient; upload status query resumes from YouTube's offset. |
+| 8 | Fixed | Automated Suno client removed; real music mode needs an owner inbox. |
+| 9 | Fixed | Unlimited platform retries; `write_costs` refusal holds; a permanent `record_transition`/`raise_hold` refusal ends the run with a clear failure record (a hold is impossible without them). |
+| 10 | Fixed | Waiting steps poll with a long, time-bounded policy. |
+| 11 | Fixed | Clearing a quarantine hold resolves the P5 case (`qa_resolve`). |
+| 12 | Fixed | Cancel cancels the running step; the step's client stops before its next request. A single P7 call already in flight is not interrupted. |
+| 13 | Fixed | Signals kept while a hold forms. |
+| 14 | Fixed | One request id per Start form → P2 Idempotency-Key; a repeat replays the first cycle. |
+| 15–21 | Fixed | Studio: import resume, step-2 controls, per-project Continue, grants decided→granted→signalled and revoked after publish (capability-scoped, 2 h, named run), retryable codes only, no blocking I/O on the loop, video served from a verified temp file. |
+| 22 | Fixed | `retry-render` (API/CLI); the assemble step retries a failed render automatically on its retry/resume. |
+| 23–29 | Fixed | See commits (art job non-fatal, catalog includes awaiting art, streamed masters, apad, linear loudnorm, owner-art reorder refused, rewrite moves `pick.txt`). |
+| 30 | Fixed | `not_selected` in P6 response and the pipeline's assemble result. |
+| 31–34 | Fixed | Refused writes released; private_only/staged enforced; window from YouTube's publish time; stored manifest resumed. |
+| 35 | Fixed (owner setting needed) | Real Analytics source, final-data wait (up to 5 days), YouTube-only evaluation with a dated non-monetized attestation; zero-row final windows measured as zero. Needs `PLM_ANALYTICS_CHANNEL_FACTS_FILE`. |
+| 36–43 | Fixed | See P1–P3 commits (versions moved: P1 `p1-v2`, prior `p2-prior-v2`, identity v3, templates v9). |
+| 44–46, 48–51 | Fixed | Stable song names, sheet problems + Studio check on save, accepted length, quarantine closing/sweep, inbox-wide duplicate index, tempo half-time rule, vocal hold + stuck-loop warning (synthetic calibration only). |
+| 47 | Fixed (limit) | Blocking codes returned; unmeasurable songs re-evaluated then held (`MEASUREMENT_UNAVAILABLE`), never rejected; P4 `/replace` asks for `-r2`. A run does not call `/replace` itself: a rejected song is covered by the top-up's new songs. |
+| 52 | Fixed (limit) | Plan id on sheets; Studio lists only running runs' sheets. Files are not moved (project pages play them from the inbox). |
+| 53 | Fixed | Compose project from `COMPOSE_PROJECT_NAME`, worktree guard in make/launcher, required secrets. |
+| 54 | Fixed | Containers no longer read `/app/.env` (`PLM_DOTENV_DISABLED`); every key passed by compose; boot logs effective policy; atomic `.env` writes. |
+| 55 | Fixed | Archive frees published renders; `plm doctor` and launcher disk checks. |
+| 56 | Fixed | `-c constraints.txt`; base images pinned by digest. |
+| 57 | Fixed | `restart: unless-stopped`, `mem_limit` on api-media, grace period; launcher skips `up` when healthy. |
+
+P2/P3 list: done, except **mypy on `tests/`** (885 `services.x` imports need a rewrite; `scripts/` is now
+type-checked, three offline probes excluded). Temporal reset continuation covers runs started after the
+deploy only.
+
+Owner actions: replace the `change-me` service token (refused now); set `PLM_FLOW_MUSIC_TERMS_REF`
+(Flow Music songs hold as `COMMERCIAL_LICENSE_UNCERTAIN` until then); create the P9 channel-facts file
+for the learning loop.
