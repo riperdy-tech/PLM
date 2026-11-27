@@ -160,13 +160,14 @@ def test_explicit_candidate_assignment_replays_without_switching(client: TestCli
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "candidate_selection_conflict"
 
+    # A call naming no candidate selects nothing: it resumes the stored assignment (#34).
     no_selection = client.post(
         "/youtube/publish",
         json={k: v for k, v in request.items()
               if k not in ("metadata_variant_id", "thumbnail_id")}, headers=headers,
     )
-    assert no_selection.status_code == 409
-    assert no_selection.json()["detail"]["code"] == "candidate_selection_conflict"
+    assert no_selection.status_code == 200, no_selection.text
+    assert no_selection.json()["candidate_selection"] == selection
 
     status = client.get(
         f"/youtube/attempts/{data['attempt_id']}", headers=headers,
@@ -208,6 +209,24 @@ def test_default_candidate_selection_records_first_declared(client: TestClient) 
     assert selection["method"] == "first_declared"
     assert selection["metadata_variant_id"] == "meta_a"
     assert selection["thumbnail_id"] == "thumb_a"
+
+
+def test_a_profile_edit_after_storing_resumes_the_stored_manifest(client: TestClient) -> None:
+    """An edit while the video processes must not orphan the upload (review #34)."""
+    headers = {SERVICE_TOKEN_HEADER: "test-secret-token"}
+    request = {"channel_id": "UC_neon_api_test", "media_package": _multi_candidate_package()}
+    first = client.post("/youtube/publish", json=request, headers=headers)
+    assert first.status_code == 200, first.text
+    edited = client.put("/youtube/channels/UC_neon_api_test", headers=headers, json={
+        "channel_name": "Neon API Test", "brand_id": "brand_neon",
+        "oauth_credential_ref": "sec_oauth_test", "default_made_for_kids": False,
+        "default_privacy_mode": "public"})
+    assert edited.status_code == 200, edited.text
+
+    again = client.post("/youtube/publish", json=request, headers=headers)
+    assert again.status_code == 200, again.text
+    assert again.json()["manifest_id"] == first.json()["manifest_id"]
+    assert again.json()["candidate_selection"] == first.json()["candidate_selection"]
 
 
 def test_publish_refuses_an_unconfigured_channel(client: TestClient) -> None:

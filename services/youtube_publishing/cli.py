@@ -30,8 +30,8 @@ from .manifests import (
     CandidateSelectionError,
     PackageNotReadyError,
     build_publish_manifest,
+    conflicts_with_stored_choice,
     preflight_metadata,
-    same_publish_choice,
 )
 from .media import artifact_bytes
 from .preflight.gates import evaluate_preflight_all
@@ -100,10 +100,8 @@ def cli_publish(
 
         stored = get_publish_manifest_by_id(session, manifest.manifest_id)
         if stored is not None:
-            if not same_publish_choice(
-                stored, manifest,
-                explicit_requested=metadata_variant_id is not None or thumbnail_id is not None,
-            ):
+            if conflicts_with_stored_choice(stored, metadata_variant_id=metadata_variant_id,
+                                            thumbnail_id=thumbnail_id):
                 typer.echo("candidate_selection_conflict: frozen publication differs", err=True)
                 raise typer.Exit(code=2)
             manifest = stored

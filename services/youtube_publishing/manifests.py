@@ -25,7 +25,7 @@ from .domain.models import CandidateSelection, ChannelProfile, ManifestTrack, Pu
 from .series import DEFAULT_PLAYLIST_KEY, SeriesPlaylist
 
 __all__ = ["CandidateSelectionError", "PackageNotReadyError", "build_publish_manifest",
-           "preflight_metadata", "same_publish_choice"]
+           "conflicts_with_stored_choice", "preflight_metadata"]
 
 
 class PackageNotReadyError(ValueError):
@@ -67,22 +67,26 @@ def select_candidates(
     return meta, thumb, selection
 
 
-def same_publish_choice(
-    existing: PublishManifest, proposed: PublishManifest, *, explicit_requested: bool,
+def conflicts_with_stored_choice(
+    stored: PublishManifest, *,
+    metadata_variant_id: str | None, thumbnail_id: str | None,
 ) -> bool:
-    """Never reassign a stored publication under its existing idempotency key.
+    """Whether a request's explicit selection contradicts a stored publication.
 
-    Legacy rows have no recorded assignment. They may replay unchanged with
-    the default choice, but cannot retrospectively claim an explicit exposure.
+    Once stored, a publication resumes its own manifest whatever the configuration says
+    now (series playlists, channel profile): an edit made while the video is processing
+    must not orphan it (review 2026-11-26 #34). Only an explicit candidate id that is not
+    the stored one conflicts; a legacy row without a recorded assignment cannot take an
+    explicit one retrospectively.
     """
-    if existing.selection is None:
-        if explicit_requested:
-            return False
-    elif existing.selection != proposed.selection:
+    if metadata_variant_id is None and thumbnail_id is None:
         return False
-    return existing.model_dump(exclude={"created_at", "selection"}) == (
-        proposed.model_dump(exclude={"created_at", "selection"})
-    )
+    selection = stored.selection
+    if selection is None:
+        return True
+    return ((metadata_variant_id is not None
+             and metadata_variant_id != selection.metadata_variant_id)
+            or (thumbnail_id is not None and thumbnail_id != selection.thumbnail_id))
 
 
 def preflight_metadata(pkg: MediaPackagePayload, *,

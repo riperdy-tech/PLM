@@ -24,6 +24,7 @@ from pydantic import AwareDatetime
 from ..analytics import YouTubeAnalyticsSource
 from ..client.mock import MockYouTubeClient
 from ..domain.enums import FailureReasonCode, OperatingMode
+from ..domain.ids import build_manifest_id
 from ..domain.models import (
     ChannelProfile,
     PublishManifest,
@@ -35,8 +36,8 @@ from ..manifests import (
     CandidateSelectionError,
     PackageNotReadyError,
     build_publish_manifest,
+    conflicts_with_stored_choice,
     preflight_metadata,
-    same_publish_choice,
 )
 from ..preflight.gates import evaluate_preflight_all
 from ..series import load_series_playlists
@@ -199,65 +200,64 @@ def create_youtube_router(
                     ).model_dump(),
                 )
 
-            # 2. Manifest from the package's facts, then preflight
-            try:
-                manifest = build_publish_manifest(
-                    pkg, profile, publish_at=req.publish_at, now=now,
-                    metadata_variant_id=req.metadata_variant_id, thumbnail_id=req.thumbnail_id,
-                    series_playlists=load_series_playlists(),
-                )
-            except PackageNotReadyError as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail=ErrorShape(
-                        code="package_not_ready",
-                        field_paths=["media_package.status"],
-                        message=str(exc),
-                    ).model_dump(),
-                ) from exc
-            except CandidateSelectionError as exc:
-                raise _refused(
-                    422, "candidate_selection_invalid", str(exc),
-                    ["metadata_variant_id", "thumbnail_id"],
-                ) from exc
-            passed, results, reason = evaluate_preflight_all(
-                profile, pkg.to_wire(),
-                preflight_metadata(pkg, metadata_variant_id=manifest.metadata_version),
-                req.publish_at, now=now,
-                selected_thumbnail_id=manifest.selection.thumbnail_id if manifest.selection else None,
-            )
-            if not passed:
-                diags = [d for r in results for d in r.diagnostics]
-                raise HTTPException(
-                    status_code=422,
-                    detail=ErrorShape(
-                        code=reason.value if reason else "preflight_failed",
-                        message="; ".join(diags),
-                    ).model_dump(),
-                )
-
-            # The manifest id is derived from the channel, the package and its video
-            # checksum, so a repeated publish (a caller's retry after a lost answer)
-            # resumes the stored manifest and attempt instead of failing on the key.
-            stored = get_publish_manifest_by_id(session, manifest.manifest_id)
-            if stored is None:
-                insert_publish_manifest(session, manifest)
-                session.commit()
-            else:
-                # One package/channel/video identity is one immutable publication.
-                # Never silently switch its thumbnail, title, or experiment arm
-                # under the same idempotency key on a later call.
-                if not same_publish_choice(
-                    stored, manifest,
-                    explicit_requested=req.metadata_variant_id is not None
-                    or req.thumbnail_id is not None,
-                ):
+            # 2. The manifest id is derived from the channel, the package and its video
+            # checksum, so a repeated publish (a caller's retry, a processing poll)
+            # resumes the stored manifest and attempt. One identity is one immutable
+            # publication: a configuration edit since then changes nothing, and an
+            # explicit selection naming other candidates is refused.
+            stored = get_publish_manifest_by_id(session, build_manifest_id(
+                profile.channel_id, pkg.media_package_id, pkg.video.checksum))
+            if stored is not None:
+                if conflicts_with_stored_choice(
+                        stored, metadata_variant_id=req.metadata_variant_id,
+                        thumbnail_id=req.thumbnail_id):
                     raise _refused(
                         409, "candidate_selection_conflict",
                         "this publication identity already has a different frozen assignment",
                         ["metadata_variant_id", "thumbnail_id"],
                     )
                 manifest = stored
+            else:
+                # A new publication: manifest from the package's facts, then preflight.
+                try:
+                    manifest = build_publish_manifest(
+                        pkg, profile, publish_at=req.publish_at, now=now,
+                        metadata_variant_id=req.metadata_variant_id,
+                        thumbnail_id=req.thumbnail_id,
+                        series_playlists=load_series_playlists(),
+                    )
+                except PackageNotReadyError as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=ErrorShape(
+                            code="package_not_ready",
+                            field_paths=["media_package.status"],
+                            message=str(exc),
+                        ).model_dump(),
+                    ) from exc
+                except CandidateSelectionError as exc:
+                    raise _refused(
+                        422, "candidate_selection_invalid", str(exc),
+                        ["metadata_variant_id", "thumbnail_id"],
+                    ) from exc
+                passed, results, reason = evaluate_preflight_all(
+                    profile, pkg.to_wire(),
+                    preflight_metadata(pkg, metadata_variant_id=manifest.metadata_version),
+                    req.publish_at, now=now,
+                    selected_thumbnail_id=(manifest.selection.thumbnail_id
+                                           if manifest.selection else None),
+                )
+                if not passed:
+                    diags = [d for r in results for d in r.diagnostics]
+                    raise HTTPException(
+                        status_code=422,
+                        detail=ErrorShape(
+                            code=reason.value if reason else "preflight_failed",
+                            message="; ".join(diags),
+                        ).model_dump(),
+                    )
+                insert_publish_manifest(session, manifest)
+                session.commit()
 
             # 4. Execute Publishing Engine. A real upload sends the package's own bytes,
             # fetched by their pinned digests; a mock client uses its placeholders.
