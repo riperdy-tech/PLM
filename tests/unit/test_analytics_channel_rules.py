@@ -1,7 +1,7 @@
 """The growth spec's daily decision rules (spec section 7.3) on per-video reach facts."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -125,6 +125,34 @@ def test_report_escapes_pipes_in_titles() -> None:
     facts = [VideoFacts("v", "Retro Synth | 104 Minutes", 6, None, None, None, None)]
     text = render(facts, evaluate_channel(facts), today=date(2026, 11, 23), reach_days=0)
     assert r"Retro Synth \| 104 Minutes (v)" in text
+
+
+def test_the_daily_report_counts_youtube_analytics_days_in_pacific_time() -> None:
+    """Analytics days are Pacific: at 05:00 UTC it is still yesterday in California, so
+    the latest complete day is two UTC days back, and a video published 03:00 UTC on the
+    20th belongs to the 19th (review 2026-11-26, P2 P7)."""
+    from scripts.channel_daily_report import analytics_today, collect_facts
+
+    today = analytics_today(datetime(2026, 11, 21, 5, 0, tzinfo=UTC))
+    assert today == date(2026, 11, 20)
+
+    asked: list[tuple[str, str]] = []
+
+    class Data:
+        def list_recent_uploads(self, **_: object) -> list[dict[str, str]]:
+            return [{"video_id": "v", "title": "t", "published_at": "2026-11-20T03:00:00Z"}]
+
+        def get_video(self, video_id: str) -> dict[str, object]:
+            return {"status": {"privacyStatus": "public"}}
+
+    class Analytics:
+        def fetch_video_metrics(self, *, video_id: str, start_date: str, end_date: str) -> object:
+            asked.append((start_date, end_date))
+            return type("M", (), {"average_view_duration_seconds": None})()
+
+    (fact,) = collect_facts(Data(), Analytics(), None, channel_id="UC", today=today,  # type: ignore[arg-type]
+                            limit=1)
+    assert asked == [("2026-11-19", "2026-11-19")] and fact.age_days == 1
 
 
 def test_downloaded_reports_are_cached_by_report_id(tmp_path) -> None:  # type: ignore[no-untyped-def]

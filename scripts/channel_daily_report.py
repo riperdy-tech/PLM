@@ -36,6 +36,7 @@ from analytics.ingestion.youtube_reporting import (
     AuthenticatedReachDownloader,
     ReportingDownloadError,
 )
+from analytics.projection.candidate_performance import REPORTING_PACIFIC
 from youtube_publishing.client.base import YouTubeClientError
 from youtube_publishing.client.real import RealYouTubeClient
 
@@ -85,9 +86,15 @@ def download_reach_rows(downloader: AuthenticatedReachDownloader, *, job_id: str
     return tuple(rows.values())
 
 
+def analytics_today(now: datetime) -> date:
+    """Today as YouTube Analytics counts days: Pacific time, not UTC."""
+    return now.astimezone(REPORTING_PACIFIC).date()
+
+
 def collect_facts(data_client: RealYouTubeClient, analytics: RealYouTubeAnalyticsClient,
                   rows: tuple[ReachRow, ...] | None, *, channel_id: str, today: date,
                   limit: int) -> list[VideoFacts]:
+    """``today`` is a Pacific day (:func:`analytics_today`)."""
     end = today - timedelta(days=1)  # the latest complete Analytics day
     facts = []
     for item in data_client.list_recent_uploads(max_results=limit, channel_id=channel_id):
@@ -96,7 +103,7 @@ def collect_facts(data_client: RealYouTubeClient, analytics: RealYouTubeAnalytic
         resource = data_client.get_video(item["video_id"]) or {}
         if (resource.get("status") or {}).get("privacyStatus") != "public":
             continue
-        published = datetime.fromisoformat(item["published_at"]).astimezone(UTC).date()
+        published = analytics_today(datetime.fromisoformat(item["published_at"]))
         impressions = ctr = week = None
         if rows is not None and published <= end:
             reach = summarize_reach(rows, video_id=item["video_id"], channel_id=channel_id,
@@ -175,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not rows:
         logger.warning("The reach job has no reports yet; impressions and CTR stay unknown")
-    today = datetime.now(UTC).date()
+    today = analytics_today(datetime.now(UTC))
     try:
         facts = collect_facts(data_client, analytics, rows or None,
                               channel_id=options.channel_id, today=today, limit=options.limit)
