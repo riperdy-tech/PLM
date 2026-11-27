@@ -138,6 +138,9 @@ PATCH_PLATFORM_FAULTS: Final[str] = "platform-faults-hold"
 """#9: platform activities retry without an attempt limit; a business refusal of
 write_costs holds the run, and one of a resume check is a recorded refusal."""
 PATCH_WAITING_RETRY: Final[str] = "waiting-step-retry"
+PATCH_EVALUATE_WAITS: Final[str] = "evaluate-waits-for-final-analytics"
+"""#35: YouTube Analytics is final ~3 days after a window's last (Pacific) day; P7 answers
+``analytics_not_final`` (StepNotReady) until then, so evaluate_outcome polls that long."""
 PATCH_QA_RESOLVE: Final[str] = "qa-hold-resolves-p5"
 PATCH_CANCEL_STEP: Final[str] = "cancel-running-step"
 PATCH_SIGNALS_FORMING: Final[str] = "signals-while-hold-forms"
@@ -679,6 +682,16 @@ class PipelineWorkflow:
             )
             schedule_to_close = timedelta(
                 seconds=options.waiting_step_schedule_to_close_seconds)
+        elif step is Step.EVALUATE_OUTCOME and workflow.patched(PATCH_EVALUATE_WAITS):
+            retry = RetryPolicy(
+                initial_interval=timedelta(
+                    seconds=options.waiting_step_maximum_interval_seconds),
+                backoff_coefficient=2.0,
+                maximum_interval=timedelta(seconds=options.evaluate_poll_maximum_seconds),
+                maximum_attempts=0,
+                non_retryable_error_types=list(NON_RETRYABLE_ERROR_TYPES),
+            )
+            schedule_to_close = timedelta(seconds=options.evaluate_wait_seconds)
         request = self._request(step, inputs, key_name)
         if not workflow.patched(PATCH_CANCEL_STEP):
             try:

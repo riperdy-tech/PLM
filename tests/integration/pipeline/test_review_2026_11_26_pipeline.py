@@ -129,6 +129,31 @@ async def test_slow_processing_is_polled_past_the_step_attempt_limit(
                 if t.to_state is PipelineState.HELD]
 
 
+async def test_evaluation_waits_for_final_analytics_past_the_step_attempt_limit(
+    client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
+) -> None:
+    """#35: evaluate_outcome not ready (P7's ``analytics_not_final``) for more attempts
+    than ``step_maximum_attempts`` keeps polling instead of holding."""
+    not_ready = OPTIONS.step_maximum_attempts + 1
+    scripts = _scripts()
+    scripts[Step.EVALUATE_OUTCOME] = dataclasses.replace(
+        scripts[Step.EVALUATE_OUTCOME], transient_failures=not_ready)
+    steps = MockPhaseSteps(scripts)
+    directive_id, workflow_id = new_run()
+    options = dataclasses.replace(OPTIONS, waiting_step_maximum_interval_seconds=0.1,
+                                  evaluate_poll_maximum_seconds=0.5)
+    async with running(worker_for(client, steps, platform)):
+        handle = await start_pipeline(client, directive_id=directive_id,
+                                      brand_id="gate_brand", task_queue=QUEUE,
+                                      options=options)
+        outcome: PipelineOutcome = await asyncio.wait_for(handle.result(), RESULT_TIMEOUT)
+
+    assert outcome.completed
+    assert len(steps.calls_for(Step.EVALUATE_OUTCOME)) == not_ready + 1
+    assert not [t for t in transitions(factory, workflow_id)
+                if t.to_state is PipelineState.HELD]
+
+
 async def test_a_cleared_quarantine_hold_resolves_the_p5_case_with_the_evidence(
     client: Client, factory: sessionmaker[Session], platform: PlatformOperations,
 ) -> None:

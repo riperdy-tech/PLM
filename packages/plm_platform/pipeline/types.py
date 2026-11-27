@@ -75,6 +75,11 @@ class PipelineOptions:
     waiting_step_initial_interval_seconds: float = 30.0
     waiting_step_maximum_interval_seconds: float = 600.0
     waiting_step_schedule_to_close_seconds: float = 86400.0
+    evaluate_poll_maximum_seconds: float = 3600.0
+    """#35: evaluate_outcome re-asks at most hourly while the analytics are not final."""
+    evaluate_wait_seconds: float = 5 * 86400.0
+    """#35: how long evaluate_outcome waits for final analytics (3 days after the
+    window's last Pacific day, plus that day and slack) before it holds."""
     """The steps that wait on another system (``await_processing``: YouTube processing;
     ``dispatch_reward``: P2's acknowledgement) poll with this backoff, without an attempt
     limit, until this long has passed; only then do their retries run out (review
